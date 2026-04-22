@@ -2,10 +2,28 @@
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 import tailwindcss from '@tailwindcss/vite';
+import rehypeExternalLinks from 'rehype-external-links';
 
 // https://astro.build/config
 export default defineConfig({
 	site: 'https://clawdemy.org',
+	markdown: {
+		// Every external link in MDX content gets target=_blank + secure rel attrs.
+		// Required for security per Doc/lesson-framework.md done-criteria; protects
+		// against tabnabbing and unwanted referrer leakage.
+		// Starlight's social/header links use rel="me" (microformats) and are
+		// emitted by component code, not markdown — they bypass this plugin
+		// correctly.
+		rehypePlugins: [
+			[
+				rehypeExternalLinks,
+				{
+					target: '_blank',
+					rel: ['noopener', 'noreferrer'],
+				},
+			],
+		],
+	},
 	vite: {
 		plugins: [tailwindcss()],
 		ssr: {
@@ -25,23 +43,42 @@ export default defineConfig({
 					href: 'https://github.com/clawless-io/clawdemy',
 				},
 			],
-			// Sidebar is intentionally minimal for Phase 1 — expanded as lessons land.
+			// Sidebar grows as lessons land. Each lesson is a directory under
+			// src/content/docs/lessons/<track>/<slug>/ with six artifact files.
+			// Sidebar entries are explicit per-lesson for now; Phase 2 (Authoring DX)
+			// may switch to autogenerate.
 			sidebar: [
 				{
 					label: 'Start here',
 					items: [
 						{ label: 'Welcome', slug: 'index' },
 						{ label: 'Our mission', slug: 'mission' },
+						{ label: 'All tracks', slug: 'tracks' },
 					],
 				},
 				{
-					label: 'Tracks',
+					label: 'Track 1: Getting Started with Clawless',
 					items: [
-						{ label: 'All tracks', slug: 'tracks' },
-						// Lesson entries added as content lands under src/content/docs/lessons/
+						{
+							label: "AI won't replace you",
+							collapsed: true,
+							items: [
+								{ label: 'Brief', slug: 'lessons/getting-started/ai-wont-replace-you/brief' },
+								{ label: 'Lesson', slug: 'lessons/getting-started/ai-wont-replace-you/lesson' },
+								{ label: 'Summary', slug: 'lessons/getting-started/ai-wont-replace-you/summary' },
+								{ label: 'Practice', slug: 'lessons/getting-started/ai-wont-replace-you/practice' },
+								{ label: 'Cheatsheet', slug: 'lessons/getting-started/ai-wont-replace-you/cheatsheet' },
+								{ label: 'References', slug: 'lessons/getting-started/ai-wont-replace-you/references' },
+							],
+						},
 					],
 				},
 			],
+			components: {
+				// Adds og:image and twitter:image to every page; Starlight 0.38
+				// already emits the rest of the OG / Twitter Card meta automatically.
+				Head: './src/components/Head.astro',
+			},
 			// Pagefind index built at build time via package.json build script.
 			// Starlight surfaces it as the search UI.
 			pagefind: true,

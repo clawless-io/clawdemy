@@ -77,7 +77,9 @@ const BLOOM_VERBS = [
 const BriefSchema = z.object({
 	title: z.string().min(1),
 	description: z.string().min(1),
-	slug: z.string().min(1).regex(/^[a-z0-9-]+$/),
+	// Lesson identity is derived from the directory path, not a frontmatter slug.
+	// (Astro reserves `slug:` in frontmatter for URL override; we don't want that
+	// here because the file path already encodes track/lesson identity correctly.)
 	track: z.enum([
 		'getting-started',
 		'use-case-cookbook',
