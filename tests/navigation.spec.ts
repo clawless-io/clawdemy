@@ -8,7 +8,17 @@ import { expect, test } from '@playwright/test';
 
 const LESSON_BASE = '/lessons/getting-started/ai-wont-replace-you';
 
-test('sidebar contains the Track 1 group with all six artifact entries', async ({ page }) => {
+test('sidebar contains the Track 1 group with all six artifact entries', async ({
+	page,
+}, testInfo) => {
+	// Starlight hides the desktop sidebar behind a hamburger menu on mobile
+	// viewports; visibility assertions describe a structure that doesn't apply
+	// there. The mobile viewport's nav UX is its own test target if we add one.
+	test.skip(
+		testInfo.project.name === 'mobile-chrome',
+		'desktop sidebar structure; mobile uses a collapsed hamburger menu',
+	);
+
 	await page.goto('/mission/');
 	const sidebar = page.locator('nav[aria-label="Main"]');
 
