@@ -1,0 +1,86 @@
+---
+/**
+ * Freshness signal for the Brief artifact.
+ *
+ * Reads `last_reviewed` from a lesson's Brief frontmatter and renders one of
+ * three states, computed at build time (no client JS):
+ *
+ *   - Fresh   (<=30 days):  green tip callout, "Recently updated".
+ *   - Silent  (31-180 days): nothing rendered. Lesson is evergreen.
+ *   - Stale   (>180 days):   yellow caution callout, "Verify before relying on it".
+ *
+ * Why both states:
+ *   The fresh signal tells returning readers a lesson moved since their last
+ *   visit, so they know to re-read. The stale signal is the policy from
+ *   Doc/lesson-framework.md §5 ("renderer shows a banner if last_reviewed is
+ *   >6 months old"); previously that policy was unimplemented.
+ *
+ * Why date format, not relative time:
+ *   CDN-cached HTML can outlive its build. "Updated 2 days ago" lies if the
+ *   page is served a week later. The actual date does not.
+ *
+ * Future date handling:
+ *   Clamped to "today". If an editor sets a future date by mistake, the lesson
+ *   reads as freshly updated rather than crashing the build.
+ */
+
+import { Aside } from '@astrojs/starlight/components';
+
+interface Props {
+	lastReviewed?: Date | string;
+}
+
+const { lastReviewed } = Astro.props;
+
+const FRESH_DAYS = 30;
+const STALE_DAYS = 180;
+
+function toDate(input: Date | string | undefined): Date | null {
+	if (!input) return null;
+	const d = input instanceof Date ? input : new Date(input);
+	return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function dayDiff(a: Date, b: Date): number {
+	const ms = a.getTime() - b.getTime();
+	return Math.floor(ms / (1000 * 60 * 60 * 24));
+}
+
+function formatDate(d: Date): string {
+	// Format in UTC. ISO-only frontmatter dates (e.g. "2026-04-24") parse as UTC
+	// midnight, and localizing them to the build server's TZ would show the
+	// prior day in any zone west of UTC.
+	return d.toLocaleDateString('en-US', {
+		year: 'numeric',
+		month: 'long',
+		day: 'numeric',
+		timeZone: 'UTC',
+	});
+}
+
+const now = new Date();
+const reviewed = toDate(lastReviewed);
+const ageDays = reviewed ? Math.max(0, dayDiff(now, reviewed)) : null;
+const formatted = reviewed ? formatDate(reviewed) : null;
+
+const showFresh = ageDays !== null && ageDays <= FRESH_DAYS;
+const showStale = ageDays !== null && ageDays > STALE_DAYS;
+---
+
+{
+	showFresh && (
+		<Aside type="tip" title="Recently updated">
+			This lesson was last updated on {formatted}. If you've read it before, the
+			body has changed since your last visit.
+		</Aside>
+	)
+}
+
+{
+	showStale && (
+		<Aside type="caution" title="Last reviewed a while ago">
+			This lesson was last reviewed on {formatted}. AI moves quickly. Verify
+			anything load-bearing before you rely on it.
+		</Aside>
+	)
+}
