@@ -1,0 +1,164 @@
+---
+title: "Practice: Inside the transformer: how attention decides which word goes with which"
+description: Self-check on the mechanism, a by-hand attention computation on a fresh sentence, and flashcards built for retrieval.
+artifact: practice
+sidebar:
+  order: 4
+  label: Practice
+---
+
+## Self-check
+
+Seven short questions. Try to answer each one in your head (or on paper) before opening the collapsible. Active retrieval is where the learning sticks; rereading is comfortable but does much less.
+
+**1. In one sentence, what question is self-attention answering?**
+
+<details>
+<summary>Show answer</summary>
+
+For each token, how much should it pay attention to every other token in the sentence (including itself) when building its updated representation. The answer is a set of weights that sum to 1.0.
+
+</details>
+
+**2. Name the three vectors every token gets, and what each one is for.**
+
+<details>
+<summary>Show answer</summary>
+
+Query (`Q`): what this token is asking about. Key (`K`): what this token offers as a label other tokens can match against. Value (`V`): what this token contributes once it has been judged relevant. Q and K together produce the attention weight; V is what gets blended.
+
+</details>
+
+**3. The full formula is `Attention(Q, K, V) = softmax( (Q · K^T) / √d_k ) · V`. Match each piece to the step it does.**
+
+- (a) `Q · K^T`
+- (b) `/ √d_k`
+- (c) `softmax(...)`
+- (d) `... · V`
+
+<details>
+<summary>Show answer</summary>
+
+(a) similarity (dot product of the query against every key). (b) scale (numerical-stability fix that keeps softmax from saturating). (c) turn the scaled scores into weights that sum to 1.0 and emphasize the largest values. (d) take the weighted sum of the value vectors using those weights.
+
+</details>
+
+**4. Why divide by `√d_k` before the softmax?**
+
+<details>
+<summary>Show answer</summary>
+
+In high-dimensional spaces, dot products grow large. Without the scaling, the softmax saturates: one weight goes to nearly 1.0 and the rest to nearly 0.0. That destroys the gradient signal during training. Dividing by `√d_k` keeps the scores in a range where softmax actually does its job. It is a numerical-stability hack, not a conceptual move.
+
+</details>
+
+**5. Self-attention vs cross-attention. What is the only difference?**
+
+<details>
+<summary>Show answer</summary>
+
+Where `Q`, `K`, `V` come from. Self-attention: all three from the same sequence (every token looks at every other token in its own sentence). Cross-attention: `Q` comes from one sequence, `K` and `V` come from another (classic example: a translation decoder querying the encoded source language). The mechanic is identical.
+
+</details>
+
+**6. Fill in the blank.** *"Self-attention replaced the recurrent neural network because RNNs had two structural problems: long-range connections \_\_\_\_\_\_ across many sequential steps, and the sequential nature could not be \_\_\_\_\_\_ on modern GPU hardware."*
+
+<details>
+<summary>Show answer</summary>
+
+**Decayed** and **parallelized**. The transformer fixes both with the same move: every token looks directly at every other token, all at once.
+
+</details>
+
+**7. Someone says, "I read that GPT-4 has 96 attention layers, so it remembers everything from our last conversation." What is wrong with that sentence?**
+
+<details>
+<summary>Show answer</summary>
+
+Two things. First, attention layers do not store memory across calls; the transformer is stateless across calls. Second, attention happens *inside* a single forward pass, on whatever tokens are in the current context window. "Remembering our last conversation" requires the conversation history to be re-included in the next prompt as input tokens (which is what chat UIs do for you behind the scenes). The number of attention layers is unrelated to that.
+
+</details>
+
+## Try it yourself: compute attention by hand on a fresh sentence
+
+This is the mechanism in motion. Different sentence, different (smaller) vectors, same three steps. About 15 minutes with a pen.
+
+**Side effects:** none. This is paper arithmetic. No API calls, no tooling, no costs.
+
+**Setup:** the sentence is *"The dog chased the ball because it was thrown."* The pronoun `it` should resolve to `ball`. We will compute attention for the token `it` against three relevant tokens (`dog`, `ball`, `it`) using 2-dimensional vectors, so `d_k = 2` and `√d_k ≈ 1.414`.
+
+```
+q_it    = [1, 1]
+
+k_dog   = [1, 0]
+k_ball  = [2, 1]
+k_it    = [1, 1]
+
+v_dog   = [1, 0]
+v_ball  = [0, 2]
+v_it    = [1, 1]
+```
+
+**Steps:**
+
+1. **Compute the three dot products** `q_it · k_token` for each of `dog`, `ball`, `it`. Write down the three raw similarity scores.
+
+2. **Scale each score** by dividing by `√2 ≈ 1.414`. Write down the three scaled scores, rounded to three decimals.
+
+3. **Apply softmax to the scaled scores.** Exponentiate each one, sum them, then divide each exponential by the sum. Write down the three weights, rounded to three decimals. Verify they sum to 1.0.
+
+4. **Compute the output vector** as the weighted sum of the value vectors: `weight_dog · v_dog + weight_ball · v_ball + weight_it · v_it`.
+
+5. **Sanity-check the result.** Which token got the largest weight? Does it match what a human reader would resolve `it` to? Which value vector did the output get pulled toward, and does the output's coordinates reflect that pull?
+
+**Expected outcome:**
+
+- Step 1: scores of **1, 3, 2** (for `dog`, `ball`, `it`).
+- Step 2: scaled scores of approximately **0.707, 2.121, 1.414**.
+- Step 3: softmax weights of approximately **0.140, 0.576, 0.284**. Sum: 1.000.
+- Step 4: output vector of approximately **[0.424, 1.436]**.
+- Step 5: `ball` got the largest weight (about 58%), which matches the human reading of the pronoun. The output is pulled hard toward `v_ball = [0, 2]`, which is why the second coordinate is large.
+
+If your numbers match, you have just done the same computation a transformer does billions of times per inference, by hand, on the same mechanism. The only thing that scales up in a real model is the dimension of the vectors and the number of tokens, layers, and heads. The arithmetic is exactly this.
+
+If the numbers do not match: most by-hand errors come from forgetting to scale before softmax, or from arithmetic slips in the exponentials. Redo step 2 first, then step 3.
+
+## Flashcards
+
+Twelve cards in a format you can paste into Anki (or any other spaced-repetition tool). One concept per card; questions written for retrieval, not recognition.
+
+**Q: What is self-attention, in one sentence?**
+A: A mechanism that, for every token in a sequence, computes a weighted blend of every other token's information, where the weights are learned from how well each pair of tokens "matches" via their query and key vectors.
+
+**Q: What three vectors does every token get in self-attention, and where do they come from?**
+A: Query (`Q`), Key (`K`), Value (`V`). Each comes from multiplying the token's embedding by a trained weight matrix (`W_Q`, `W_K`, `W_V`).
+
+**Q: What does the dot product `Q · K^T` measure?**
+A: Similarity. It is a scalar that grows when two vectors point in the same direction, so a high score means "this token's key matches what the query is asking about."
+
+**Q: Why is the dot product divided by `√d_k`?**
+A: Numerical stability. Without scaling, dot products in high-dimensional spaces grow large enough that softmax saturates (one weight near 1.0, the rest near 0.0), which destroys the training gradient.
+
+**Q: What does softmax do, in plain terms?**
+A: It turns a list of arbitrary real numbers into a list of weights that sum to 1.0 and emphasize the largest values.
+
+**Q: What is the output of a self-attention computation for one token?**
+A: A new vector, the same shape as the value vectors, formed by taking a softmax-weighted sum of every token's value vector. It replaces the token's representation with a context-aware blend.
+
+**Q: What is the only difference between self-attention and cross-attention?**
+A: The source of `Q`, `K`, `V`. Self: all three from the same sequence. Cross: `Q` from one sequence, `K` and `V` from another.
+
+**Q: What were the two structural problems with RNNs that transformers fixed?**
+A: Long-range connections decayed across many sequential steps, and the sequential processing could not be parallelized on GPUs. Self-attention fixes both: every token looks directly at every other token, all at once.
+
+**Q: In the library analogy, what do `Q`, `K`, `V` map to?**
+A: Query is your search index card. Key is the catalog card on the spine of every book (designed to be matched against). Value is the content card (what you actually read once you have decided this book is relevant).
+
+**Q: What does the full attention formula look like?**
+A: `Attention(Q, K, V) = softmax( (Q · K^T) / √d_k ) · V`
+
+**Q: Are attention weights a faithful explanation of why a model produced a given output?**
+A: No. They are part of the computation, not a guaranteed explanation of it. The model's behavior also depends on residual connections, feed-forward layers, normalization, and many other attention heads. Attention weights are a useful diagnostic, not a verdict.
+
+**Q: Does a transformer "remember" your previous conversation across separate calls?**
+A: No. The model is stateless across calls. Conversation history persists only because the chat UI re-sends the prior turns as input tokens on every new request.
