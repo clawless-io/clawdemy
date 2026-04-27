@@ -1,0 +1,160 @@
+---
+title: "Lesson: Inside the transformer: how attention decides which word goes with which"
+description: A focused walk-through of self-attention. We start with what attention does (the canonical animal-street-it example), peel back what RNNs couldn't handle, build the query-key-value intuition, and end with one full attention computation worked by hand on three tokens.
+sidebar:
+  order: 2
+  label: Lesson
+artifact: lesson
+---
+
+You read this sentence without effort:
+
+*"The animal didn't cross the street because it was too tired."*
+
+The word **it** could refer to two things. You didn't hesitate. Your mind connected **it** back to **animal**, not to **street**, and you did not consciously search the sentence for the antecedent or run through the grammar rules of English pronoun reference. You just knew. The sentence works because your reading brain quietly draws connections across the sentence, weighting every other word by how relevant it is to the word you are currently looking at.
+
+This lesson is about how a transformer does the same thing. It does not happen by accident, and it does not happen the way the older AI architectures tried to do it. There is a specific mechanism, with three named pieces, doing exactly the work of "for the word I am on, how much should I pay attention to every other word." That mechanism is called self-attention, and it is the heart of every transformer-based AI you have heard of.
+
+By the end, you will have built that mechanism in your head step by step, and you will have computed one attention score by hand on a tiny three-token example so the formula stops being a black box.
+
+## What was missing before transformers
+
+For about a decade before transformers, the dominant approach to language was the **recurrent neural network**, or RNN, and its more capable cousin the LSTM. Both of them processed sentences the way you might read out loud: one word, then the next, then the next, carrying forward a summary of what came before in a hidden internal state.
+
+That sequential approach has two real problems.
+
+The first is that the further apart two words are in the sentence, the harder it is for the model to remember the connection. By the time the model reaches **it** in our example, the signal from **animal** ten words back has been compressed and re-compressed through ten intermediate steps. A lot of it has been lost. RNNs and LSTMs could partly compensate with cleverer memory cells, but the structural limitation was real: long-range dependencies decay.
+
+The second problem is that the sequential approach cannot be parallelized. To process the tenth word, the model needs the result of processing word nine, which needs word eight, and so on. On modern hardware that can multiply huge matrices in parallel, sequential processing is a waste. Training a large RNN on a large corpus is glacially slow.
+
+The transformer solves both problems with the same idea: instead of processing tokens one after another while carrying a running summary, process every token in parallel and let each token directly look at every other token. Replace the sequential bottleneck with a lookup. The lookup is what we call attention.
+
+## The library analogy: Q, K, V
+
+The mechanics of attention live in three vectors per **token**, named query (`Q`), key (`K`), and value (`V`). (Token is the model's name for a word, or sometimes a piece of a word; for now you can treat them as words.) Most people find these names abstract on first read, so we are going to anchor them with an analogy you can return to whenever the math gets dense.
+
+Imagine a library where every book on the shelf has two cards taped to its spine. The first card is the **catalog card**: it summarizes what the book is about, in a form designed for matching against searches. The second card is the **content card**: it contains a tightly-summarized version of the actual material in the book. The cards are different on purpose. The catalog card is for being found; the content card is for being read.
+
+Now imagine you walk into the library with a research question scribbled on an index card. You want to find the books most relevant to your question and pull useful content from each one, weighted by how relevant they are.
+
+That index card is your **query**. The catalog cards on the shelves are the **keys**. The content cards are the **values**. The librarian's job is to compare your query to every catalog card, score the matches, and hand you back a single combined summary built from the content cards of the books, weighted by the catalog-card match scores.
+
+In the transformer, this entire process happens numerically, but the roles are identical. Every token gets all three vectors. When we compute self-attention for a particular token, that token's query is compared against every other token's key (including its own), the matches are turned into weights, and the weighted sum of every token's value vector becomes the output for our token. The output is a refreshed version of the original token, now informed by all the surrounding context that turned out to be relevant.
+
+The query, key, and value vectors are not built into the model from the beginning. They are produced by multiplying the token's embedding by three trained weight matrices, called `W_Q`, `W_K`, and `W_V`. The model learns those matrices during training. The shape of attention in any given trained transformer is essentially the shape of those three matrices.
+
+## The attention formula in three steps
+
+The formula every transformer paper writes down is this:
+
+```
+Attention(Q, K, V) = softmax( (Q · K^T) / √d_k ) · V
+```
+
+You do not need to memorize this formula. You only need to understand what each step is doing. It looks dense, but it is doing exactly three things in sequence. Once you see them, it stops being scary.
+
+**Step 1: similarity.** For the query `Q` of the token we are working on, take the dot product with every key `K`. The dot product is a scalar that gets larger when two vectors point in the same direction. So this step produces one number per token in the sentence: how similar the current query is to each token's key. High number means "this token's catalog card matches my search."
+
+**Step 2: scale.** Divide every similarity score by the square root of the key dimension, written `√d_k`. This step is a numerical-stability hack, not a conceptual move. Without it, the dot products in high-dimensional spaces grow so large that the softmax in step 3 saturates: one weight goes to nearly 1.0 and all the others to nearly 0.0, which destroys the gradient signal during training. Dividing by `√d_k` keeps the scores in a range where softmax does its job.
+
+**Step 3: softmax-weighted sum.** Run the scaled scores through softmax, which converts them into weights that sum to 1.0 and emphasize the largest values. Then take the weighted sum of the value vectors, using those softmax weights. The result is one new vector for our token, blended from the value vectors of every token in the sentence, with the blend skewed toward whichever tokens had the highest query-key match.
+
+Three steps. Similarity, scale, weighted sum. That is the entire formula. If this still feels abstract, the next sections will make it concrete.
+
+## Self-attention versus cross-attention
+
+The word **self** in self-attention is doing real work. It tells you that the queries, keys, and values all come from the same sequence: the sentence itself. Every token is looking at every other token in the same sentence, including itself.
+
+Cross-attention is the variant where the queries come from one sequence and the keys and values come from another. The classic example is a translation transformer in encoder-decoder shape: the decoder is generating the French translation, so the queries come from the partially-generated French; the keys and values come from the encoded English source. The decoder is asking "for the French word I am about to produce, which English words should I be paying attention to?"
+
+The mechanic is identical. The only difference is where the three vectors come from.
+
+For the rest of this lesson we will stay in self-attention, since it is the one inside the transformer's encoder and decoder layers. Cross-attention is just the same idea with one sequence on each side.
+
+Let's move from description to computation. This is where most people finally see it.
+
+## A worked example, by hand
+
+This is the part where the formula becomes real. We will compute self-attention for one token, by hand, on a tiny three-token sentence, with vectors small enough to fit in your head.
+
+The sentence is the one from the opening: we will look at just three tokens from it, `animal`, `street`, and `it`. We are computing the self-attention output for `it`, which means `it` is the token whose query we will use, and we will compute its output as a weighted sum of the values from all three tokens.
+
+Let `d_k = 4`, so every vector is four-dimensional. Here are the made-up query, key, and value vectors. In a real transformer, these would be produced by multiplying each token's embedding by the trained weight matrices `W_Q`, `W_K`, `W_V`. We are skipping that step and writing the resulting vectors directly so the arithmetic stays clean.
+
+```
+q_it     = [1, 0, 1, 0]
+
+k_animal = [1, 1, 2, 0]
+k_street = [0, 1, 1, 0]
+k_it     = [1, 0, 1, 1]
+
+v_animal = [2, 1, 0, 0]
+v_street = [0, 0, 1, 1]
+v_it     = [1, 1, 1, 1]
+```
+
+**Step 1: similarity.** Compute `q_it · k_token` for each of the three tokens.
+
+```
+q_it · k_animal = 1·1 + 0·1 + 1·2 + 0·0 = 3
+q_it · k_street = 1·0 + 0·1 + 1·1 + 0·0 = 1
+q_it · k_it     = 1·1 + 0·0 + 1·1 + 0·1 = 2
+```
+
+So far, the query for `it` is most similar to the key for `animal` (score 3), then to its own key (score 2), then to the key for `street` (score 1). That ranking already mirrors the human reading: `it` connects most strongly to `animal`.
+
+**Step 2: scale.** Divide each score by `√d_k = √4 = 2`.
+
+```
+3 / 2 = 1.5
+1 / 2 = 0.5
+2 / 2 = 1.0
+```
+
+**Step 3a: softmax.** Exponentiate each scaled score, sum them, and divide each by the total. The arithmetic gives:
+
+```
+weight_animal ≈ 0.51
+weight_street ≈ 0.19
+weight_it     ≈ 0.31
+```
+
+Those three weights sum to 1.0 (with rounding). Read them as percentages of attention: `it` is paying about 51% of its attention to `animal`, 31% to itself, and 19% to `street`. This is the moment the model "decides" which words go with which. It is not magic; it is dot products plus softmax.
+
+**Step 3b: weighted sum of values.** Multiply each value vector by its weight and add the three vectors together.
+
+```
+0.51 · v_animal = 0.51 · [2, 1, 0, 0] = [1.02, 0.51, 0,    0   ]
+0.19 · v_street = 0.19 · [0, 0, 1, 1] = [0,    0,    0.19, 0.19]
+0.31 · v_it     = 0.31 · [1, 1, 1, 1] = [0.31, 0.31, 0.31, 0.31]
+
+output_it       = [1.33, 0.82, 0.50, 0.50]
+```
+
+That output vector, `[1.33, 0.82, 0.50, 0.50]`, is the new representation of `it` after one self-attention pass. Notice that the largest contribution came from `v_animal` because `animal` had the highest attention weight. The output has been pulled in the direction of the information from `animal`, with a smaller pull from `it` itself, and a small contribution from `street`. The token `it` no longer means just `it`; it now carries a context-aware mixture, weighted by attention.
+
+That is one head of self-attention, on one token, in one layer of one transformer. Real transformers stack many such layers, run several attention heads in parallel inside each layer, and process all tokens at once rather than just one. The mechanic does not change. Only the scale does.
+
+## Common pitfalls
+
+A few mistakes are common enough to be worth naming.
+
+**Confusing self-attention with cross-attention.** When you read transformer papers and start to see attention everywhere, it is easy to lose track of which sequences are providing the queries, keys, and values. The discipline is simple: ask yourself where each of `Q`, `K`, `V` comes from. If all three come from the same sequence, it is self-attention. If `Q` comes from one sequence and `K` and `V` come from another, it is cross-attention.
+
+**Reading attention weights as explanations.** It is tempting, given how interpretable the weights look in toy examples like ours, to treat attention weights as the model's explanation for its prediction. ("It paid 51% of its attention to `animal`, so the model thinks `it` refers to `animal`.") A growing literature is skeptical of this. Attention weights inside large trained models often do not correspond cleanly to the input features that actually drove the output. Attention weights are part of the computation, not a guaranteed explanation of it. Treat them as a useful diagnostic, not as a courtroom-quality explanation.
+
+**Assuming higher attention always means "more important."** Within a single attention head, yes, a higher weight means that token's value contributed more to this token's output. Across an entire transformer with many heads and many layers, that simple reading breaks. Different heads attend to different patterns (syntax, position, topic), and the meaningful information for any given prediction is distributed across the whole stack. "Most attention" inside one head is not "most important" inside the model.
+
+**Thinking attention is the entire transformer.** Attention is the headline mechanism, but it is not the whole architecture. Each layer also has a feed-forward network applied to every token independently, residual connections that let information bypass the attention block, layer normalization that keeps the activations well-behaved, and (in the original architecture) positional encodings that tell the model where each token sits in the sequence. Without those supporting pieces, attention alone does not produce a working model. We will cover them in later lessons.
+
+**Believing the model is "remembering" past tokens.** Self-attention does not give the model a memory across conversations or across sessions. Within one forward pass on one sequence, the model attends to every token in that sequence in parallel. Between calls, nothing carries forward unless you explicitly include the prior conversation in the next prompt. The transformer is statelessly attentive, not stateful across calls.
+
+## What you should remember
+
+- **Self-attention answers one question per token: for me, how much does every other token in this sequence matter?** The answer is a set of weights that sum to 1.0, used to blend the other tokens' values into a refreshed representation of me.
+- **Three vectors per token: query, key, value.** Query is what I am looking for. Key is how I advertise myself for matching. Value is what I contribute when I am attended to. All three are produced by multiplying the token's embedding by trained weight matrices.
+- **Three steps in the formula: similarity (dot product), scale (divide by `√d_k`), softmax-weighted sum.** The scaling is a numerical-stability hack; the conceptual work is in steps 1 and 3.
+- **Self-attention and cross-attention share the same mechanic.** The only difference is where `Q`, `K`, `V` come from: same sequence (self) or different sequences (cross).
+- **Attention weights are part of the computation, not a courtroom-quality explanation of the model's behavior.** Useful for diagnostics, dangerous as a sole basis for trusting why a model said what it said.
+
+You are now ready for the practice section, which has a short self-check, one hands-on exercise to compute another attention pass on different numbers, and a deck of flashcards for the things worth remembering long term.

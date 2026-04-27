@@ -73,6 +73,23 @@ export default defineConfig({
 						},
 					],
 				},
+				{
+					label: 'Track 5: AI Foundations',
+					items: [
+						{
+							label: 'Inside the transformer: attention',
+							collapsed: true,
+							items: [
+								{ label: 'Brief', slug: 'lessons/ai-foundations/how-attention-works/brief' },
+								{ label: 'Lesson', slug: 'lessons/ai-foundations/how-attention-works/lesson' },
+								{ label: 'Summary', slug: 'lessons/ai-foundations/how-attention-works/summary' },
+								{ label: 'Practice', slug: 'lessons/ai-foundations/how-attention-works/practice' },
+								{ label: 'Cheatsheet', slug: 'lessons/ai-foundations/how-attention-works/cheatsheet' },
+								{ label: 'References', slug: 'lessons/ai-foundations/how-attention-works/references' },
+							],
+						},
+					],
+				},
 			],
 			components: {
 				// Adds og:image and twitter:image to every page; Starlight 0.38

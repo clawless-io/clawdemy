@@ -1,0 +1,90 @@
+---
+title: "Cheatsheet: Inside the transformer: how attention decides which word goes with which"
+description: One-page reference. The formula, the three steps, Q/K/V mapping, library analogy, self vs cross, the worked numbers, and pitfalls to dodge.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## The formula (memorize the shape, not the symbols)
+
+```
+Attention(Q, K, V) = softmax( (Q · K^T) / √d_k ) · V
+```
+
+Three things in sequence: similarity, scale, softmax-weighted sum.
+
+## The three steps
+
+| Step | Operation | What it does |
+| --- | --- | --- |
+| 1. Similarity | `Q · K^T` | Dot-product the current token's query against every token's key. High score = "this token's key matches my search." |
+| 2. Scale | `÷ √d_k` | Divide by the square root of the key dimension. Numerical-stability fix. Without it, softmax saturates and training breaks. |
+| 3. Softmax-weighted sum | `softmax(...) · V` | Convert scaled scores into weights summing to 1.0, then take the weighted blend of every token's value vector. |
+
+## The three vectors per token
+
+| Vector | Symbol | Comes from | Job |
+| --- | --- | --- | --- |
+| Query | `Q` | embedding × `W_Q` | What this token is asking about |
+| Key | `K` | embedding × `W_K` | The label other tokens match against |
+| Value | `V` | embedding × `W_V` | The information that gets blended in once judged relevant |
+
+`W_Q`, `W_K`, `W_V` are learned during training. Each token gets its own `Q`, `K`, `V` by passing its embedding through them.
+
+## The library analogy
+
+| Concept | Library object |
+| --- | --- |
+| Query | Your search index card |
+| Key | The catalog card on the spine of every book (built to be matched) |
+| Value | The content card you read once you have decided this book is relevant |
+| The librarian | The attention computation itself: scores every catalog card against your query, hands back a weighted blend of content cards |
+
+## Self vs cross attention
+
+| | Where Q comes from | Where K, V come from |
+| --- | --- | --- |
+| Self-attention | Same sequence | Same sequence |
+| Cross-attention | One sequence | A different sequence |
+
+The mechanic is identical. Only the source differs. (Classic cross-attention example: a translation decoder querying the encoded source language.)
+
+## The worked numbers (sentence: *"The animal didn't cross the street because it was too tired"*)
+
+For the token `it` against tokens `animal`, `street`, `it`, with 4-D vectors:
+
+| Token | Raw score | Scaled (÷ √4 = 2) | Softmax weight |
+| --- | --- | --- | --- |
+| animal | 3 | 1.5 | 0.51 |
+| street | 1 | 0.5 | 0.19 |
+| it | 2 | 1.0 | 0.31 |
+
+Output vector for `it`: `[1.33, 0.82, 0.50, 0.50]`. The model "decided" that `it` refers most strongly to `animal`, just as a human reader would.
+
+## What "stacked" means in a real transformer
+
+Same mechanism, more of it.
+
+- **Many layers** stacked vertically (the output of one attention layer becomes the input to the next).
+- **Multiple heads** running in parallel inside each layer (each head learns its own `W_Q`, `W_K`, `W_V` and so attends to a different pattern).
+- **Every token at once**, not one at a time. This is the parallelism that killed RNNs.
+
+The arithmetic does not change. Only the scale does.
+
+## Pitfalls to dodge
+
+- Confusing self-attention with cross-attention. Just check where `Q`, `K`, `V` come from.
+- Reading attention weights as faithful explanations of model behavior. They are part of the computation, not a guaranteed explanation of it.
+- Thinking "more attention weight = more important." It means "more contribution to *this* output vector at *this* layer," nothing more.
+- Thinking attention is the entire transformer. It is not. Layers also have feed-forward networks, residual connections, layer normalization, and positional encodings.
+- Thinking the model is "remembering" past tokens across calls. It is not. The transformer is stateless across calls; conversation history is re-sent as input tokens by the chat UI on every request.
+
+## Words to use precisely
+
+- **Token**: the unit the model actually processes. Often a whole word, sometimes a fragment.
+- **Embedding**: the numeric vector that represents a token. Comes from a lookup table at the start of the model.
+- **Attention weight**: a scalar in [0, 1] that tells the model how much one token's value should contribute to another token's updated representation.
+- **Stateless across calls**: each API call starts fresh; no "memory" persists unless the chat UI re-sends prior turns as input tokens.
