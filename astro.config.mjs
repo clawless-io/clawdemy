@@ -88,6 +88,14 @@ export default defineConfig({
 								{ label: 'References', slug: 'lessons/ai-foundations/how-attention-works/references' },
 							],
 						},
+						{
+							label: 'How AI reads: tokens',
+							collapsed: true,
+							items: [
+								{ label: 'Brief', slug: 'lessons/ai-foundations/how-ai-reads-tokens/brief' },
+									{ label: 'Lesson', slug: 'lessons/ai-foundations/how-ai-reads-tokens/lesson' },
+							],
+						},
 					],
 				},
 			],

@@ -1,0 +1,151 @@
+---
+title: "Lesson: How AI reads: turning text into tokens"
+description: A focused walk-through of tokenization. We open with a famous AI failure (the model cannot count the Rs in "strawberry"), build the intuition for why text has to become numbers and why neither characters nor whole words work as units, walk one byte-pair encoding merge by hand, and pay off the strawberry mystery at the end.
+sidebar:
+  order: 2
+  label: Lesson
+artifact: lesson
+---
+
+AI can write a poem about strawberries. But ask it how many Rs are in the word, and it might fail.
+
+For most of the GPT-4 era, asking an AI "how many Rs are in strawberry?" was a famous and reliable failure. The model would say two. The word has three. You can count them in less than a second.
+
+Recent models often get this specific question right now, because the makers trained the failure mode away after it became a meme. But the underlying reason for the failure is still there. Ask a slightly weirder version, like "count the Ms in mellifluous", and the same hole opens back up. The reason is not that the model is bad at counting, and not that it has not been trained on enough examples. The reason is that the model never sees the letters in "strawberry" at all. It sees one or two units, and it cannot look inside a unit to see what is in there. Those units are called tokens, and how text gets turned into them is the subject of this lesson.
+
+By the end you will know why tokens exist, what byte-pair encoding does, and exactly why a model that can write a poem about strawberries cannot reliably count the Rs in one.
+
+## Why text has to become numbers
+
+A neural network is a machine that transforms numbers into other numbers. If you give it words, nothing happens. If you give it numbers, everything happens.
+
+The reason, under the hood, is that a neural network is a stack of matrix multiplications. Matrices multiply numbers. They do not multiply words. Before any of the rest of the machinery (embeddings, attention, the whole transformer) can do anything, somebody has to convert every piece of text the model sees into numbers.
+
+The conversion has to be reversible enough that the model can also produce text on the way out (so the same vocabulary is used for inputs and for the model's outputs), and it has to be fixed before training begins (so every input the model ever sees is in the same units as every input it was trained on).
+
+That conversion is tokenization, and the table that defines it is the **vocabulary**. The vocabulary is a fixed list of every unit the model can read or write. Every unit gets an integer ID. Every piece of text the model encounters is sliced into these units and the IDs are passed in. The model never sees text. It only ever sees IDs.
+
+The interesting question is what the units should be. Two obvious answers come to mind, and both of them are wrong.
+
+## Two ideas that don't work
+
+**Idea one: one token per word.** Treat each word as the unit. "Strawberry" is one token, "running" is one token, "the" is one token. Plain and intuitive.
+
+The problem is that the vocabulary explodes. English has about 600,000 words in active use, plus proper names, plus typos, plus all the variants ("run", "runs", "running", "ran"), plus loanwords, plus made-up words people invent every day. To cover any reasonable percentage of real text you would need a vocabulary of millions of entries. Each entry needs its own dedicated row in a giant matrix the model has to learn during training. Bigger vocabulary means slower training, larger model, more memory, and worse generalization to anything the vocabulary did not happen to include. The first time a user types a word the vocabulary does not know (let's say "Clawdemy"), the model has to hand back an "unknown" placeholder, and everything downstream sees the same uninformative placeholder regardless of what the actual word was.
+
+**Idea two: one token per character.** Treat each letter as the unit. The vocabulary is tiny: 26 letters plus digits plus punctuation, maybe 200 entries to cover most of Latin script. No more "unknown" tokens, ever, because every word is just a sequence of letters the vocabulary already covers.
+
+The problem is that the sequences become enormous. The word "strawberry" goes from one token to ten. A normal sentence goes from twelve tokens to fifty. Every layer of the transformer has to do work proportional to the number of tokens, so a character-level model is roughly five to ten times more expensive to run than a word-level one for the same input text. The model also has to spend its capacity learning that "c-a-t" means cat at every layer, which is real work that is now happening inside the model instead of being baked into the vocabulary.
+
+Tokenization is the engineering compromise between these two extremes.
+
+## The middle path: subword tokens
+
+The pragmatic answer is to build a vocabulary of around 30,000 to 100,000 units, where each unit is a fragment that recurs often in real text. Some are whole common words ("the", "and", "running"). Some are common syllables or affixes ("ing", "tion", "un"). Some are partial words that turn out to compose well ("straw", "berry"). Rare words get spelled out across multiple tokens.
+
+This gives you the best of both ideas:
+
+- The vocabulary is small enough that the model is tractable to train.
+- Out-of-vocabulary words almost never happen, because any unrecognized word can be reassembled from smaller pieces. Even a brand-new word like "Clawdemy" gets broken into something like "Cl" + "aw" + "demy", units the tokenizer has seen before.
+- Common words stay short (one token each), so sequences are not bloated.
+- The model does not waste capacity relearning that "c-a-t" means cat, because "cat" is a single token.
+
+The dominant algorithm for building this kind of vocabulary is **byte-pair encoding**, abbreviated BPE. GPT-2, GPT-3, GPT-4, GPT-5, and most other modern LLMs use a variant of it. The next section walks through what BPE does, and works one merge step by hand, so the mechanism stops being a black box.
+
+## BPE in one worked merge
+
+Here is the one-line intuition for BPE: it is a compression strategy. Common patterns get short codes (one token); rare patterns get spelled out across many tokens. The vocabulary is the codebook.
+
+Byte-pair encoding starts from the simplest possible vocabulary (every character is its own token) and grows the vocabulary by repeatedly merging the most frequent adjacent pair of tokens it sees in the training corpus. Each merge adds one new token to the vocabulary. Run it for, say, 50,000 merges and you have a 50,000-token vocabulary built around what actually shows up in your text.
+
+Here is one merge step worked on a tiny corpus. Suppose the corpus, after splitting into characters, looks like this:
+
+```
+l o w </w>           (5 occurrences)
+l o w e r </w>       (2 occurrences)
+n e w e r </w>       (6 occurrences)
+w i d e r </w>       (3 occurrences)
+n e w </w>           (1 occurrence)
+```
+
+The `</w>` is an end-of-word marker that BPE tracks so it knows where words end. The number in parentheses is how often each word appears.
+
+**Step one: count every adjacent pair.** The pair `(e, r)` appears in `lower`, `newer`, and `wider`, weighted by their frequencies: 2 + 6 + 3 = 11 occurrences. The pair `(l, o)` appears in `low` and `lower`: 5 + 2 = 7 occurrences. Other pairs are smaller. The most frequent pair is `(e, r)` with 11.
+
+**Step two: merge it.** Add a new token `er` to the vocabulary. Rewrite the corpus by replacing every `(e, r)` with the new token:
+
+```
+l o w </w>           (5 occurrences)
+l o w er </w>        (2 occurrences)
+n e w er </w>        (6 occurrences)
+w i d er </w>        (3 occurrences)
+n e w </w>           (1 occurrence)
+```
+
+That is one BPE merge. The vocabulary just grew by one entry (`er`). Run the same procedure again and the next most frequent pair might be `(er, </w>)` with 11 occurrences, so you would add `er</w>` as a new token, meaning "the suffix -er at the end of a word." Run it 50,000 times and you have your full BPE vocabulary.
+
+The vocabulary you end up with is a snapshot of how text was actually structured in the training corpus. Common syllables get their own tokens. Common whole words get their own tokens. Names and rare words get spelled out across several tokens. Every input text the model ever encounters is broken into these pieces, in a deterministic way that exactly matches how the vocabulary was built.
+
+## The strawberry, paid off
+
+We can now answer the question we opened with.
+
+If you paste "strawberry" into a real tokenizer (we will do exactly this in the practice section), it breaks into one or two tokens depending on which model's tokenizer you are looking at. GPT-4's tokenizer treats it as a single token. The numeric ID is some specific integer. The model never sees `s`, `t`, `r`, `a`, `w`, `b`, `e`, `r`, `r`, `y`. It sees that one integer.
+
+When you ask the model "how many Rs are in strawberry?", the model is being asked to count the R's inside the word. But the word, from the model's perspective, is not a sequence of letters. It is a single integer.
+
+**A token is atomic. To the model, it is indivisible. There is no inside, no letters, no structure, just an ID.**
+
+The model has learned a lot of associations for that integer (it is a fruit, it is red, it has seeds on the outside) but the spelling of the word is not, in general, one of those associations. Spelling questions are about the inside of a token, and tokens are atomic to the model.
+
+The model can sometimes get spelling questions right if the training data happened to include enough explicit spellings ("strawberry is spelled s-t-r-a-w-b-e-r-r-y"), or if the model has been retrained specifically to handle the trick. But it is fundamentally retrieving an answer rather than counting. That is why spelling, letter-counting, and reverse-spelling are a known weak spot. Not bad reasoning. Just a wall imposed by tokenization.
+
+This is also why the same model does fine on numerical reasoning that does not require it to look inside its own tokens. "What is 17 + 28?" is a problem whose ingredients (the numbers, the plus operator, the result) are all standard tokens. The model has the right pieces and the right operations. "How many Rs in strawberry?" requires looking at the *characters inside* a token. Different problem entirely.
+
+## Special tokens
+
+A real vocabulary contains a few entries that are not subword fragments. They are the housekeeping tokens the model uses to mark structural events:
+
+- **`<|begin_of_text|>` and `<|end_of_text|>`** (often written `BOS` and `EOS`). These mark the start and end of a piece of text. The model has been trained to expect them at certain places.
+- **Chat-role markers** like `<|im_start|>` and `<|im_end|>`, or `system` / `user` / `assistant`. In chat-tuned models these mark whose turn is whose. Without them, the model would not be able to tell where your message ends and its previous message begins.
+- **`<pad>`**, **`<unk>`**, **`<mask>`**. Padding to make batches uniform; an unknown-token fallback (rarely needed in subword tokenizers); a mask token used during training for fill-in-the-blank objectives.
+
+The boring detail is that special tokens look different from text in the tokenizer's output: they have their own integer IDs, separate from the BPE merges.
+
+One thing worth flagging, though we will not go deep here: special tokens are also where prompt-injection attacks live. If a malicious input contains the literal string `<|im_start|>user` and the tokenizer parses it as the special token instead of as plain text, the attacker has just inserted a fake conversation turn into the model's input. This is the structural reason API providers strip or escape these markers in user input. The full story belongs in its own future lesson; for now, file it as "tokenization has a security surface that becomes important later."
+
+## Why this matters when you use AI
+
+Three direct consequences worth holding in your head before you start using AI in real work.
+
+- **Long prompts cost more than you might expect.** AI providers price by token, not by character or word. A 5,000-character prompt of dense code can be several thousand tokens; the same length of prose might be much fewer. Token count is the only number that drives the bill.
+- **Small wording changes can shift token count.** Reformatting a prompt, swapping synonyms, or adjusting whitespace can move the total up or down by 10 to 20 percent with no semantic change. If you are watching costs at scale, the wording is part of the spend.
+- **Code consumes more tokens than English.** A token in English typically covers a syllable or a short word. A token in code often covers only a fragment of an identifier or a single operator. The same idea expressed in code can cost roughly twice as many tokens as it does in prose, sometimes more. If your AI workflow moves back and forth with code, expect token usage to climb faster than you would estimate from character count.
+
+## Common pitfalls
+
+A few mistakes are common enough to be worth naming.
+
+**Assuming one token equals one word.** The closer you read English text, the more this looks true ("the", "cat", "ran" all happen to be single tokens). It breaks the moment you hit unfamiliar names, technical terms, agglutinative languages, or even mildly unusual English ("antidisestablishmentarianism" is many tokens). A token is a vocabulary entry, full stop. Sometimes that is a word. Often it is not.
+
+**Assuming one character equals one token.** This is usually wrong in the other direction. Most characters do not have their own dedicated tokens at the level a tokenizer normally operates; they only get used to assemble rare words from scratch. "ab" is probably one token, not two.
+
+**Assuming whitespace is included or excluded predictably.** Modern tokenizers usually attach the leading space to the next word, so the token for " cat" (with a leading space) is different from "cat" (without one). This trips up everyone the first time they look closely at tokenizer output.
+
+**Assuming character count predicts token count.** A 1,000-character input can be 200 tokens or 800 tokens depending on what is in it. Common English words tokenize densely (a 50-character sentence can be 12 tokens). Code with lots of special characters, non-Latin scripts, repeated whitespace, or unusual names tokenize sparsely. Pricing for AI APIs is per token, not per character, and this matters more than it sounds.
+
+**Believing the model "knows the letters" in any given word.** It does not, in general. It knows associations for the token. Spelling, letter-counting, and reverse-spelling questions live on the wrong side of the token boundary and will always be a weak spot until tokenization changes (and there is real research aimed at exactly that).
+
+## What you should remember
+
+- **Tokenization is the bridge from text to integers.** The model never sees text. Every input is converted into a sequence of integer IDs from a fixed vocabulary, and every output is converted back into text from the same vocabulary.
+- **The vocabulary is a compromise.** Whole-word vocabularies blow up in size; character vocabularies blow up in sequence length. Subword vocabularies (typically 30,000 to 100,000 entries) hit the sweet spot.
+- **Byte-pair encoding (BPE) is the standard algorithm for building that vocabulary.** Start from characters, repeatedly merge the most frequent adjacent pair into a new token, continue until the vocabulary reaches the target size.
+- **A token is atomic to the model.** It cannot look inside a token to count letters or examine spelling. This is why letter-counting questions like "how many Rs in strawberry" are a known weak spot.
+- **Special tokens (BOS, EOS, chat-role markers) are the structural scaffolding** of any chat or instruction-following model, and are also a primary surface for prompt-injection attacks.
+
+You are now ready for the practice section, where you will use a real tokenizer (`tiktokenizer.vercel.app`) on five test strings, predict the token count before clicking, and compare your prediction to what the tokenizer actually shows.
+
+## If you remember one thing
+
+**AI does not read text. It reads tokens.**
