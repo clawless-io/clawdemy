@@ -131,6 +131,7 @@ export default defineConfig({
 								{ label: 'Brief', slug: 'lessons/ai-foundations/transformer-block/brief' },
 								{ label: 'Lesson', slug: 'lessons/ai-foundations/transformer-block/lesson' },
 								{ label: 'Practice', slug: 'lessons/ai-foundations/transformer-block/practice' },
+								{ label: 'Summary', slug: 'lessons/ai-foundations/transformer-block/summary' },
 							],
 						},
 					],
