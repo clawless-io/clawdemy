@@ -124,6 +124,14 @@ export default defineConfig({
 								{ label: 'References', slug: 'lessons/ai-foundations/multi-head-attention/references' },
 							],
 						},
+						{
+							label: 'Transformer block',
+							collapsed: true,
+							items: [
+								{ label: 'Brief', slug: 'lessons/ai-foundations/transformer-block/brief' },
+								{ label: 'Lesson', slug: 'lessons/ai-foundations/transformer-block/lesson' },
+							],
+						},
 					],
 				},
 			],
