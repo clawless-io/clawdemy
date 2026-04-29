@@ -109,6 +109,7 @@ export default defineConfig({
 								{ label: 'Practice', slug: 'lessons/ai-foundations/how-words-become-vectors/practice' },
 								{ label: 'Summary', slug: 'lessons/ai-foundations/how-words-become-vectors/summary' },
 								{ label: 'Cheatsheet', slug: 'lessons/ai-foundations/how-words-become-vectors/cheatsheet' },
+								{ label: 'References', slug: 'lessons/ai-foundations/how-words-become-vectors/references' },
 							],
 						},
 					],
