@@ -118,6 +118,7 @@ export default defineConfig({
 							items: [
 								{ label: 'Brief', slug: 'lessons/ai-foundations/multi-head-attention/brief' },
 								{ label: 'Lesson', slug: 'lessons/ai-foundations/multi-head-attention/lesson' },
+								{ label: 'Practice', slug: 'lessons/ai-foundations/multi-head-attention/practice' },
 							],
 						},
 					],
