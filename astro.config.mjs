@@ -133,6 +133,7 @@ export default defineConfig({
 								{ label: 'Practice', slug: 'lessons/ai-foundations/transformer-block/practice' },
 								{ label: 'Summary', slug: 'lessons/ai-foundations/transformer-block/summary' },
 								{ label: 'Cheatsheet', slug: 'lessons/ai-foundations/transformer-block/cheatsheet' },
+								{ label: 'References', slug: 'lessons/ai-foundations/transformer-block/references' },
 							],
 						},
 					],
