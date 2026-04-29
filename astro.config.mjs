@@ -112,6 +112,14 @@ export default defineConfig({
 								{ label: 'References', slug: 'lessons/ai-foundations/how-words-become-vectors/references' },
 							],
 						},
+						{
+							label: 'Multi-head attention',
+							collapsed: true,
+							items: [
+								{ label: 'Brief', slug: 'lessons/ai-foundations/multi-head-attention/brief' },
+								{ label: 'Lesson', slug: 'lessons/ai-foundations/multi-head-attention/lesson' },
+							],
+						},
 					],
 				},
 			],

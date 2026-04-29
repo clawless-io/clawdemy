@@ -1,0 +1,98 @@
+---
+title: "Lesson: Multi-head attention: many lenses on the same sentence"
+description: A focused walk-through of multi-head attention. We open with the structural limitation of single attention, build the split-run-concatenate pattern that fixes it, walk the dimension flow on a 12-head 768-dim example, and end with what real model specifications mean when they say "12 heads."
+sidebar:
+  order: 2
+  label: Lesson
+artifact: lesson
+---
+
+import MultiHeadFlow from '../../../../../components/illustrations/MultiHeadFlow.astro';
+
+"The animal didn't cross the street because it was too tired."
+
+When a single attention head reads this sentence, it asks one question per token: who matters to me? For the token "it," it might decide that "animal" matters most. That is the answer lesson 1 walked through.
+
+It is also a problem.
+
+A real sentence has many structures running through it at once. Pronouns connect to nouns. Verbs connect to subjects. Adjectives modify the right things. Tense markers anchor the timeline. A single attention head can only weight every other token one way per token, so it has to choose: which structure does it track? In real life, you do not choose. You track all of them at the same time.
+
+Multi-head attention is how a transformer does the same thing. Instead of one attention head per layer, real transformers run many heads in parallel, each one looking at the same sentence through its own query, key, and value projection. Often eight to thirty-two heads per layer, depending on model size. As many different questions about who matters, asked simultaneously, then combined into a single output.
+
+By the end of this lesson you will know why one head was not enough, what the split-run-concatenate pattern actually does, and what model cards mean when they advertise a head count.
+
+## The limitation of one head
+
+Recall the attention computation from lesson 1: for the token "it," the model produces a weighted blend of every other token's value vector. The weights come from the dot product between "it"'s query vector and each other token's key vector, scaled by the square root of the key dimension and softmaxed.
+
+One observation buried in that: there is only ONE weighting per token. The model can decide that "it" should attend most heavily to "animal," but in doing so, it loses the ability to also attend to "tired" (the state that explains the sentence) or to "didn't" (the negation that fixes the meaning). The softmax-weighted sum is, by construction, a single answer.
+
+If your sentence has multiple kinds of structure happening at once, and almost every real sentence does, one attention head has to choose. It compresses many simultaneous relationships into a single weighting, and the model loses information.
+
+The fix is structural: do not run one attention computation. Run many.
+
+## The fix: split, run, concatenate
+
+Instead of one set of `W_Q`, `W_K`, `W_V` matrices, a real transformer layer has `h` sets, where `h` is typically in the 8 to 32 range. Each set defines an attention **head** with its own Q, K, V projections. All `h` heads run on the same input embeddings, in parallel.
+
+Each head produces its own output per token, just like the single-head mechanism from lesson 1 produced its single output per token. The transformer then **concatenates** the `h` outputs (stacking them back to back) and applies one final linear projection (`W_O`) to combine them into the layer's overall output.
+
+The key trick is that each head operates on a smaller dimension than a single big head would. If the model's main embedding dimension is `d_model` (often a few hundred for small models, several thousand for larger ones), each head's Q, K, V vectors are dimension `d_k = d_model / h`. So with 12 heads at `d_model = 768`, each head sees 64-dim vectors. This keeps the total compute roughly comparable to one big head, while giving the model `h` independent ways to weight context.
+
+## The dimension flow, end to end
+
+Here is what happens to a single token's representation as it flows through one multi-head attention layer. Use `d_model = 768`, `h = 12`, `d_k = 64` as the running example.
+
+<MultiHeadFlow />
+
+The output of multi-head attention has the same shape as the input. That matters because real transformers stack many such layers, and the output of one layer needs to be a valid input to the next. The next lesson covers that stacking; for now, the operation we just walked through is the load-bearing piece of every layer.
+
+## Why multiple heads work better than one big head
+
+The intuition is that each head, with its own learned `W_Q`, `W_K`, `W_V`, ends up specializing on a different kind of context.
+
+In a well-trained transformer, you can sometimes interpret what individual heads attend to:
+
+- Some heads attend mostly to the next or previous token (positional patterns).
+- Some heads attend to the syntactic head of a phrase (subject-verb relationships).
+- Some heads track coreference (linking pronouns to their antecedents).
+- Some heads track topic-level relationships (semantic similarity across distant words).
+
+The catch: most heads do not have clean human-readable roles. The literature on head interpretability is mixed. Many heads attend to patterns that do not fit our linguistic intuitions, and some heads can be safely pruned without hurting model performance much. The takeaway is structural, not interpretive: multiple heads give the model representational capacity that a single head cannot match. We cannot always say what each head is doing, and that is fine; the structural argument does not depend on it.
+
+## Why this matters when you use AI
+
+Three direct consequences worth holding in your head when you read AI tooling docs or model cards.
+
+- **Model specifications report head counts.** When you see a model description like "768 hidden dim, 12 heads," you now know what it means: 12 parallel attention computations per layer, each at 64 dim, concatenated back to 768. The head count and hidden dim together set the layer's representational capacity. Both numbers are tunable architecture choices.
+- **More heads is not always better.** Beyond a point, adding heads at the same total `d_model` gives diminishing returns: each head has fewer dimensions to work with, and at the extreme you would have heads with `d_k = 1`, which is useless. Practical models settle in the 8 to 32 head range per layer.
+- **Inference cost grows with head count.** Multi-head attention is parallelizable in training, but each head still computes its own softmax and weighted sum at inference. Optimizations like multi-query attention (MQA) and grouped-query attention (GQA) reduce this (both are recent optimizations that share key and value projections across heads to cut inference cost), which is why some recent model architectures advertise "fewer K/V heads" as a feature. If you ever see those terms in a model card, this lesson is the foundation.
+
+## Common pitfalls
+
+A few mistakes are common enough to be worth naming.
+
+**Confusing heads with layers.** Heads are inside a single attention layer, running in parallel. Layers are stacked vertically; the output of one full layer becomes the input to the next. A 12-layer model with 12 heads per layer has 144 attention computations per forward pass, not 12.
+
+**Thinking each head is human-interpretable.** Some heads do attend to recognizable patterns (positional, syntactic, coreference). Most do not have a clean role. Treat any "head X is the gender head" claim with caution; the interpretability research is genuinely mixed.
+
+**Assuming all heads matter equally.** Research consistently shows you can often prune some heads without much performance loss; some are redundant. This is part of why pruning, distillation, and head sharing (MQA, GQA) are active areas of optimization.
+
+**Mixing up multi-head with multi-layer or with mixture of experts.** Three different ideas. Multi-head: many parallel attention computations within one layer. Multi-layer: stacked attention layers, output of one feeds the next. Mixture of experts (MoE): different feed-forward networks for different tokens within a layer. Don't conflate them.
+
+**Thinking multi-head only applies to self-attention.** It works for self-attention (Q, K, V from same sequence) and cross-attention (Q from one sequence, K and V from another) equally well; both are introduced in lesson 1. The multi-head trick is orthogonal to the self-versus-cross distinction.
+
+## What you should remember
+
+- **Single attention has a one-perspective limit per token.** It produces one weighted blend of context, which loses information when a sentence has multiple kinds of structure happening at once.
+- **Multi-head attention runs `h` independent attention computations in parallel.** Each head has its own `W_Q`, `W_K`, `W_V` and its own perspective on the input.
+- **The split-run-concatenate pattern.** Project to `h` smaller dimensions, run `h` attention computations, concatenate the outputs, project once more through `W_O`.
+- **Heads can specialize, but most are not interpretable.** Treat individual heads as a structural mechanism, not as named interpretive lenses.
+- **Head count is a tunable architectural parameter.** Real models use 8 to 32 heads per layer. The number reported in model specifications directly tells you what is happening inside each attention layer.
+
+You are now ready for the practice section, where you will work through the dimension arithmetic on a different multi-head configuration and look up the head count of a published model.
+
+## If you remember one thing
+
+**One head asks one question.**\
+**Many heads ask many, all at once.**
