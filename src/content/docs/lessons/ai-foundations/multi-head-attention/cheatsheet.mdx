@@ -1,0 +1,80 @@
+---
+title: "Cheatsheet: Multi-head attention: many lenses on the same sentence"
+description: One-page reference. The split-run-concatenate pattern, the dimension flow, key formulas, real-world implications, pitfalls, and a glossary.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## The one idea that matters
+
+```
+input  →  split into h heads  →  run h attentions  →  concat  →  W_O  →  output
+                       (each head at d_k = d_model / h)
+```
+
+Real transformer attention is multi-head. `h` heads run in parallel; outputs concatenate and project. The single-head story from lesson 1 was the simplification.
+
+## One head versus many heads
+
+| | One head | Many heads (`h`) |
+| --- | --- | --- |
+| Weightings produced per token | 1 | `h` |
+| Captures simultaneous structures (syntactic, coreference, positional, semantic) | One at a time | Up to `h` at once |
+| `Q, K, V` dimension | `d_model` | `d_k = d_model / h` per head |
+| Combined output | One vector | Concat of `h` vectors, then `W_O` |
+
+## Dimension flow (running example: `d_model = 768`, `h = 12`)
+
+| Stage | Shape |
+| --- | --- |
+| Input embedding | 768 |
+| Per head Q, K, V | 64 each |
+| Per head attention output | 64 |
+| Concatenated (12 × 64) | 768 |
+| After `W_O` | 768 |
+
+Shape in equals shape out. That is what lets transformers stack many such layers.
+
+## Key formulas
+
+```
+d_k = d_model / h
+
+head_i = Attention(X · W_Q^i,  X · W_K^i,  X · W_V^i)
+
+MultiHead(X) = Concat(head_1, ..., head_h) · W_O
+```
+
+## Why this matters in production
+
+| Term in a model card | What it means | Why you care |
+| --- | --- | --- |
+| `num_attention_heads` | `h`, the number of parallel attention heads per layer | Sets representational capacity per layer |
+| `hidden_size` (or `d_model`, `n_embd`) | The main embedding dimension | Combined with `h`, gives `d_k` |
+| `num_key_value_heads` | If smaller than `num_attention_heads`, K and V are shared across heads (MQA or GQA) | Inference-cost optimization; keys and values are shared, queries are not |
+
+## Pitfalls to dodge
+
+| Pitfall | Reality |
+| --- | --- |
+| Heads equal layers | Heads run in parallel inside one layer; layers stack vertically. 12 layers × 12 heads = 144 attention computations per forward pass. |
+| Each head is human-interpretable | Some are; most are not. Treat heads as structural mechanism, not as named lenses. |
+| More heads is always better | `d_k` shrinks as `h` grows. Past a point, each head has too little to work with. |
+| Multi-head only applies to self-attention | Works equally for self-attention and cross-attention. The trick is orthogonal to the self-versus-cross distinction. |
+| Multi-head is mixture of experts | Multi-head varies the attention; MoE varies the feed-forward network. Different mechanisms, different parts of the layer. |
+
+## Glossary
+
+- **Head:** one independent attention computation, with its own `W_Q`, `W_K`, `W_V`.
+- **`h`:** the number of heads in an attention layer. Practical models typically cluster at 8 to 32.
+- **`d_model`:** the main embedding dimension carried into and out of the layer.
+- **`d_k`:** the per-head dimension; `d_k = d_model / h`.
+- **`W_O`:** the final output projection that mixes head outputs into the layer's overall output.
+- **`MultiHead(X)`:** the operation as a whole; `Concat(head_1, ..., head_h) · W_O`.
+- **MQA / GQA:** multi-query and grouped-query attention; share keys and values across heads (or groups of heads) to cut inference cost.
+
+**One head asks one question.**\
+**Many heads ask many, all at once.**
