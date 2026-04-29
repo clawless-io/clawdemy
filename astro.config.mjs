@@ -57,7 +57,7 @@ export default defineConfig({
 					],
 				},
 				{
-					label: 'Track 1: Getting Started with Clawless',
+					label: 'Track 1: Getting Started',
 					items: [
 						{
 							label: "AI won't replace you",
@@ -65,8 +65,8 @@ export default defineConfig({
 							items: [
 								{ label: 'Brief', slug: 'lessons/getting-started/ai-wont-replace-you/brief' },
 								{ label: 'Lesson', slug: 'lessons/getting-started/ai-wont-replace-you/lesson' },
-								{ label: 'Summary', slug: 'lessons/getting-started/ai-wont-replace-you/summary' },
 								{ label: 'Practice', slug: 'lessons/getting-started/ai-wont-replace-you/practice' },
+								{ label: 'Summary', slug: 'lessons/getting-started/ai-wont-replace-you/summary' },
 								{ label: 'Cheatsheet', slug: 'lessons/getting-started/ai-wont-replace-you/cheatsheet' },
 								{ label: 'References', slug: 'lessons/getting-started/ai-wont-replace-you/references' },
 							],
@@ -77,13 +77,13 @@ export default defineConfig({
 					label: 'Track 5: AI Foundations',
 					items: [
 						{
-							label: 'Inside the transformer: attention',
+							label: 'Inside the transformer',
 							collapsed: true,
 							items: [
 								{ label: 'Brief', slug: 'lessons/ai-foundations/how-attention-works/brief' },
 								{ label: 'Lesson', slug: 'lessons/ai-foundations/how-attention-works/lesson' },
-								{ label: 'Summary', slug: 'lessons/ai-foundations/how-attention-works/summary' },
 								{ label: 'Practice', slug: 'lessons/ai-foundations/how-attention-works/practice' },
+								{ label: 'Summary', slug: 'lessons/ai-foundations/how-attention-works/summary' },
 								{ label: 'Cheatsheet', slug: 'lessons/ai-foundations/how-attention-works/cheatsheet' },
 								{ label: 'References', slug: 'lessons/ai-foundations/how-attention-works/references' },
 							],
@@ -93,7 +93,22 @@ export default defineConfig({
 							collapsed: true,
 							items: [
 								{ label: 'Brief', slug: 'lessons/ai-foundations/how-ai-reads-tokens/brief' },
-									{ label: 'Lesson', slug: 'lessons/ai-foundations/how-ai-reads-tokens/lesson' },
+								{ label: 'Lesson', slug: 'lessons/ai-foundations/how-ai-reads-tokens/lesson' },
+								{ label: 'Practice', slug: 'lessons/ai-foundations/how-ai-reads-tokens/practice' },
+								{ label: 'Summary', slug: 'lessons/ai-foundations/how-ai-reads-tokens/summary' },
+								{ label: 'Cheatsheet', slug: 'lessons/ai-foundations/how-ai-reads-tokens/cheatsheet' },
+								{ label: 'References', slug: 'lessons/ai-foundations/how-ai-reads-tokens/references' },
+							],
+						},
+						{
+							label: 'Embeddings',
+							collapsed: true,
+							items: [
+								{ label: 'Brief', slug: 'lessons/ai-foundations/how-words-become-vectors/brief' },
+								{ label: 'Lesson', slug: 'lessons/ai-foundations/how-words-become-vectors/lesson' },
+								{ label: 'Practice', slug: 'lessons/ai-foundations/how-words-become-vectors/practice' },
+								{ label: 'Summary', slug: 'lessons/ai-foundations/how-words-become-vectors/summary' },
+								{ label: 'Cheatsheet', slug: 'lessons/ai-foundations/how-words-become-vectors/cheatsheet' },
 							],
 						},
 					],
