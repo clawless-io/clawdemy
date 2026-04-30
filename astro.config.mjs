@@ -53,14 +53,14 @@ export default defineConfig({
 					items: [
 						{ label: 'Welcome', slug: 'index' },
 						{ label: 'Our mission', slug: 'mission' },
-						{ label: 'All tracks', slug: 'tracks' },
+						{ label: 'Curriculum map', slug: 'tracks' },
 					],
 				},
 				{
 					label: 'Track 1: Getting Started',
 					items: [
 						{
-							label: "AI won't replace you",
+							label: "1.1  AI won't replace you",
 							collapsed: true,
 							items: [
 								{ label: 'Brief', slug: 'lessons/getting-started/ai-wont-replace-you/brief' },
@@ -77,7 +77,7 @@ export default defineConfig({
 					label: 'Track 5: AI Foundations',
 					items: [
 						{
-							label: 'Inside the transformer',
+							label: '5.1  Inside the transformer',
 							collapsed: true,
 							items: [
 								{ label: 'Brief', slug: 'lessons/ai-foundations/how-attention-works/brief' },
@@ -89,7 +89,7 @@ export default defineConfig({
 							],
 						},
 						{
-							label: 'How AI reads: tokens',
+							label: '5.2  How AI reads tokens',
 							collapsed: true,
 							items: [
 								{ label: 'Brief', slug: 'lessons/ai-foundations/how-ai-reads-tokens/brief' },
@@ -101,7 +101,7 @@ export default defineConfig({
 							],
 						},
 						{
-							label: 'Embeddings',
+							label: '5.3  Embeddings',
 							collapsed: true,
 							items: [
 								{ label: 'Brief', slug: 'lessons/ai-foundations/how-words-become-vectors/brief' },
@@ -113,7 +113,7 @@ export default defineConfig({
 							],
 						},
 						{
-							label: 'Multi-head attention',
+							label: '5.4  Multi-head attention',
 							collapsed: true,
 							items: [
 								{ label: 'Brief', slug: 'lessons/ai-foundations/multi-head-attention/brief' },
@@ -125,7 +125,7 @@ export default defineConfig({
 							],
 						},
 						{
-							label: 'Transformer block',
+							label: '5.5  Transformer block',
 							collapsed: true,
 							items: [
 								{ label: 'Brief', slug: 'lessons/ai-foundations/transformer-block/brief' },
@@ -137,7 +137,7 @@ export default defineConfig({
 							],
 						},
 						{
-							label: 'Text generation',
+							label: '5.6  Text generation',
 							collapsed: true,
 							items: [
 								{ label: 'Brief', slug: 'lessons/ai-foundations/how-text-is-generated/brief' },
@@ -149,7 +149,7 @@ export default defineConfig({
 							],
 						},
 						{
-							label: 'Fine-tuning + RLHF',
+							label: '5.7  Fine-tuning + RLHF',
 							collapsed: true,
 							items: [
 								{ label: 'Brief', slug: 'lessons/ai-foundations/how-models-learn-to-be-helpful/brief' },
