@@ -136,6 +136,14 @@ export default defineConfig({
 								{ label: 'References', slug: 'lessons/ai-foundations/transformer-block/references' },
 							],
 						},
+						{
+							label: 'Text generation',
+							collapsed: true,
+							items: [
+								{ label: 'Brief', slug: 'lessons/ai-foundations/how-text-is-generated/brief' },
+								{ label: 'Lesson', slug: 'lessons/ai-foundations/how-text-is-generated/lesson' },
+							],
+						},
 					],
 				},
 			],
