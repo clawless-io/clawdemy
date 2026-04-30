@@ -1,0 +1,129 @@
+---
+title: "Lesson: Embeddings: how words become vectors with meaning"
+description: A focused walk-through of embeddings. We open with the question of how the model knows that "king" is closer to "queen" than to "banana", build the intuition for embeddings as a map of meaning, walk through the lookup table mechanism, and pay off the king-queen demonstration as actual vector arithmetic.
+sidebar:
+  order: 2
+  label: Lesson
+artifact: lesson
+---
+
+import EmbeddingLookup from '../../../../../components/illustrations/EmbeddingLookup.astro';
+import EmbeddingArithmetic from '../../../../../components/illustrations/EmbeddingArithmetic.astro';
+import AudioPlayer from '../../../../../components/AudioPlayer.astro';
+
+<AudioPlayer src="https://audio.clawdemy.org/lessons/how-words-become-vectors-lesson.mp3" approxMinutes={22} />
+
+A token ID is just a number. The word "king" might be 10,234. The word "banana" might be 5,821. The numbers themselves have no meaning. They are arbitrary positions in the tokenizer's vocabulary table.
+
+So how does the model know that "king" is closer in meaning to "queen" than to "banana"?
+
+It does not, from the IDs alone. The IDs carry no information about meaning, similarity, or structure. If the model only ever saw the IDs, it would have to learn every relationship between every word pair from scratch, with no help from the input format.
+
+The answer is embeddings: dense vectors, trained to capture meaning, that take the place of the token IDs before the rest of the model touches them. By the end of this lesson you will know what those vectors are, where they come from, why "king minus man plus woman" lands near "queen" in well-trained embedding spaces, and why every modern vector-search and retrieval-augmented system you have heard of runs on this one idea.
+
+## Why integer IDs aren't enough
+
+A neural network is a stack of matrix multiplications, and a matrix multiplication is an operation between arrays of numbers. A single integer is not an array. Before the model can do any of its work on a token, the token's integer ID has to become a vector: a structured list of numbers.
+
+You can think of that vector as a point in space. Words with similar meanings live near each other. Words with different meanings are far apart. Hold that picture; it is what the rest of the lesson is going to build out.
+
+You could imagine two failed schemes for "ID to vector," just to feel why dense embeddings are the answer.
+
+**A one-hot vector for each token.** Take a vocabulary of size V (say, 50,000 entries). Represent each token as a vector of length V where every entry is zero except a single 1 at the position of the token's ID. The token "the" might be `[0, 0, 1, 0, 0, ...]`. The token "strawberry" has its 1 in some specific position deep in the vocabulary.
+
+This is unambiguous (every token gets a unique vector), but it has two problems. First, **size**: vectors are 50,000 numbers wide, so input matrices for thousands of tokens are mostly empty space and the model wastes compute on it. Second, **structure**: the vectors for "king", "queen", "monarch", and "ruler" are all equally far apart from each other. The vector for "king" is also exactly as far from "queen" as it is from "octopus". The geometry contains no information about meaning.
+
+Both problems point at the same fix. The vector for each token should be **shorter than the vocabulary** (to save compute) and should **carry information about meaning** (so similar words are close to each other in vector space).
+
+That fix is dense embeddings.
+
+## The intuition: words on a map
+
+Before getting into where the embedding numbers come from and how the model uses them, here is the picture to hold in your head.
+
+Imagine every word as a point on a map. Words with similar meaning sit close together. Words with unrelated meanings sit far apart. "King" and "queen" are nearby; "king" and "banana" are not. Synonyms cluster. Topics form regions ("medicine" lives in one neighborhood, "weather" in another). Verbs cluster apart from nouns. Common words sit in the middle of dense regions; rare words live on the edges.
+
+The map is not two-dimensional. It is hundreds of dimensions, sometimes thousands. You cannot draw it on paper, but the geometry behaves the same way you would expect from a real map: similarity is short distance, difference is long distance, and certain consistent kinds of difference (gender, tense, country-and-capital) point along consistent directions across the whole map.
+
+That picture is what makes the rest of this lesson land. Everything that follows is about how the model builds that map and what it does with it.
+
+## The mechanism: a lookup table
+
+The map of meaning is stored as a simple **lookup table** called the **embedding matrix**, often denoted `W_E`. Imagine a table with one row per word in the vocabulary and hundreds or thousands of columns. Each row is the embedding for that word: the dense vector that represents what the word means. The table's shape is `vocab_size × embedding_dim`, typically tens of thousands of rows by hundreds to thousands of columns.
+
+To get the embedding for token ID 73,700, you go to row 73,700 of the matrix and read it out. That is the **embedding lookup**, and it is the very first operation in every transformer, before attention, before anything.
+
+<EmbeddingLookup />
+
+The numbers in the matrix start out random when the model is created. Training (which we will not go into in detail here) gradually pushes each row toward a position on the map of meaning that is useful for predicting the words that come next in real text. By the end of training, the geometry of the matrix has structure. Words that play similar roles in similar contexts end up with similar vectors. Words with consistent contrasts end up at consistent offsets from each other.
+
+That is the whole game: training turns raw numbers into meaningful geometry.
+
+## The power: arithmetic on meaning
+
+Once tokens have dense vectors, "similar in meaning" can be measured as "close together on the map." Once you have direction, "different in some specific way" can be measured as "the vector that connects two points."
+
+Cosine similarity (the angle between two vectors) is the standard tool for the first measurement. Vector subtraction is the tool for the second. With both, you can do something startling: ask the model questions about meaning by doing arithmetic.
+
+The classical demonstration, due to Mikolov et al. on Word2Vec in 2013 (predating transformers by four years), is the **king and queen** example. Take the embedding for "king". Subtract the embedding for "man". Add the embedding for "woman". In a well-trained embedding space, the resulting vector lands near the embedding for "queen", close enough that "queen" is often the nearest word in the vocabulary by cosine similarity.
+
+<EmbeddingArithmetic />
+
+What just happened? The vector from "man" to "woman" encodes a specific kind of difference (you can call it the "gender" direction, though the model has not been told that label). The same direction also separates "king" from "queen" in a well-trained space. So if you start at "king" and move along the same vector you used to go from "man" to "woman", you often land near "queen". Not because anyone wrote a rule. Because training, by exposing the model to enough text where "king and queen" co-occur in the same kinds of patterns as "man and woman", produced an embedding matrix where those parallel relationships were geometrically real.
+
+This is the moment the embedding stops being "just numbers" and starts being a useful representation of meaning.
+
+The same trick works for many other relationships in well-trained spaces. Country and capital ("Paris" minus "France" plus "Italy" tends to land near "Rome"). Verb tense ("walked" minus "walk" plus "swim" often near "swam"). Comparative ("better" minus "good" plus "fast" sometimes near "faster"). These are not engineered features. They are emergent geometry that fell out of optimizing the model on a prediction objective.
+
+Three caveats to hold in your head, since the demos are widely shared without them:
+
+- **The famous demos are cherry-picked from many candidates.** Not every word triple produces a clean parallelogram. The point of the demo is not "AI does flawless analogy"; the point is that meaning has geometric structure.
+- **It depends on the model.** A toy embedding trained on a small corpus may show none of these relationships. A large modern embedding trained on a huge corpus shows many of them, with mileage varying per pair.
+- **The result is approximate, not exact.** "King minus man plus woman" lands *near* the queen vector, not on it. The nearest-neighbor lookup is what makes the result legible.
+
+## What changes for the model when it has embeddings
+
+Once every token in your input has an embedding, the rest of the transformer can do its work. The Q, K, and V vectors from the attention lesson are not produced from token IDs directly. They are produced from the embeddings, by multiplying each token's embedding by the trained `W_Q`, `W_K`, and `W_V` matrices respectively.
+
+That means embeddings are the first learned representation in the model. Everything downstream (attention, feed-forward layers, the next layer's attention, all the way out to the predicted next token) operates on these vectors. If the embeddings are weak, everything downstream has to work harder to compensate. If the embeddings carry rich semantic structure, every layer above gets to start from already-meaningful positions instead of from raw IDs.
+
+This is why the embedding matrix is one of the largest single objects in a modern model. For a 50,000-token vocabulary at 4,096 embedding dimensions, the matrix has 200 million parameters. Larger frontier models scale this further. The matrix earns the space because it is doing the load-bearing work of turning discrete symbols into geometric meaning.
+
+## Why this matters when you use AI
+
+This is the lesson where the "I just want to use AI for real work" reader gets the most direct payoff, because three of the most-used AI workflows in production today are essentially "do something with embeddings."
+
+- **Semantic search.** Traditional search compares the literal words in your query to the literal words in the corpus. Semantic search embeds your query and embeds every document, then returns the documents whose embeddings are closest to the query's embedding by cosine similarity. The search engine does not need to share any words with the document, just the meaning. When you search "how to fix a slow laptop," the system does not match the keywords. It finds documents in the same neighborhood on the map (some titled "speed up your computer," others "Windows performance tips," others "RAM upgrade tutorial") even when none of them use the words "slow" or "laptop". This is the engine inside vector databases like Pinecone, Weaviate, Chroma, and pgvector. Every "find the most relevant docs to this question" feature in modern AI tooling runs on this.
+- **Retrieval-augmented generation (RAG).** When you give a chatbot a corpus of your own documents and the chatbot answers questions about them, it almost certainly works by embedding both your documents and your question, retrieving the closest documents, and stuffing them into the model's prompt before generating an answer. The retrieval step is pure embedding similarity. RAG is one of the most common patterns in production AI today, and it is built on this lesson.
+- **Embedding APIs.** AI providers ship a separate "embed this text and give me back a vector" API alongside their chat completion APIs. The vectors come from a model trained for exactly this purpose. If you have ever called `embeddings.create()` in any AI SDK, you were standing in this lesson.
+
+The mental model: text becomes vectors, vectors live on a map, similarity is geometric distance. That is the entire foundation of vector search and the modern AI retrieval stack.
+
+## Common pitfalls
+
+A few mistakes are common enough to be worth naming.
+
+**Confusing token embeddings with sentence or document embeddings.** Token embeddings are one vector per token (one per row of `W_E`). Sentence and document embeddings are one vector for an entire piece of text, produced by some pooling or special-token construction over many token embeddings. They look the same on paper (both are dense vectors) but they live at different scales. When someone says "the embedding of this paragraph", they almost always mean a sentence-level embedding, not a token embedding.
+
+**Believing the embedding dimensions have human-readable meaning.** It is tempting to imagine that dimension 7 of the embedding is the "gender" axis and dimension 12 is the "formality" axis. They are not. Useful semantic directions exist, but they are spread across many dimensions in a way the model learned, not single dimensions a researcher labeled. The "gender direction" in Word2Vec is the difference vector between specific word pairs, not one component of the embedding.
+
+**Treating "the embedding is the meaning" as the whole story.** The embedding is a starting point. The meaning that matters in any specific context comes from how the model uses the embedding, layer by layer, in the surrounding context. A static token embedding for "bank" is the same in "river bank" and "savings bank"; the contextual meaning emerges from attention and the layers above.
+
+**Assuming embedding similarity equals semantic equivalence.** Embedding similarity is good at "these two pieces of text are about similar things." It is not perfect at "these two pieces of text mean the same thing in this specific context." Two news articles about the same event will have similar embeddings whether they are factually consistent or contradicting each other. Vector search retrieves topical relevance, not truth.
+
+**Forgetting that embeddings reflect their training data.** If the corpus contained biased associations between words, the embeddings will encode those associations. Word2Vec's famous failure was that "computer programmer minus man plus woman" landed near "homemaker." The geometry is faithful to the patterns it was trained on, including the ones we did not want it to learn. Real production systems mitigate this in different ways; the structural fact is that the matrix is a mirror of the corpus.
+
+## What you should remember
+
+- **Token IDs alone have no meaning.** They are arbitrary positions in the vocabulary. The model needs more structure to work with.
+- **Embeddings are dense vectors that replace the IDs before the model does its math.** The conversion is the embedding lookup: token ID `i` is replaced by row `i` of the embedding matrix `W_E`.
+- **The matrix is a lookup table.** One row per word in the vocabulary. Each row is a list of numbers. Shape: `vocab_size × embedding_dim`, typically tens of thousands of rows by hundreds to thousands of columns.
+- **Meaning is geometry.** Words are points on a high-dimensional map; similarity is short distance; certain consistent kinds of difference (gender, tense, country) point along consistent directions across the map.
+- **Vector search and RAG are embeddings doing real work in production.** Every "find similar documents" feature in modern AI tooling runs on cosine similarity over an embedding space.
+
+You are now ready for the practice section, where you will work through one vector-arithmetic example by hand and try a quick embedding-space inspection on a real text.
+
+## If you remember one thing
+
+**Words become vectors.**\
+**Meaning becomes geometry.**

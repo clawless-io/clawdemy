@@ -1,0 +1,86 @@
+---
+title: "Cheatsheet: How AI reads: turning text into tokens"
+description: One-page reference. The pipeline, the vocabulary tradeoff, BPE in four steps, the strawberry mystery, special tokens, pricing rules, and pitfalls to dodge.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## The one idea that matters
+
+```
+text  →  tokenizer  →  integer IDs  →  model
+                                        ↑
+                       the only thing the model ever sees
+```
+
+The vocabulary defines the mapping. Every input is sliced into vocab entries before the model touches it. Every output is built from the same vocab on the way out.
+
+## The vocabulary tradeoff
+
+| Scheme | Vocab size | Sequence length | OOV behavior | Verdict |
+| --- | --- | --- | --- | --- |
+| One per word | Millions of entries | Short | "Unknown" placeholder | ✗ |
+| One per character | About 200 entries | 5 to 10 times longer | Never | ✗ |
+| Subword (BPE) | 30k to 100k entries | Moderate | Reassembled from pieces | ✓ |
+
+## BPE algorithm in four steps
+
+1. **Start.** Every character is its own token.
+2. **Count.** Find the most frequent adjacent pair across the training corpus.
+3. **Merge.** Add that pair as a new token in the vocabulary; rewrite the corpus to use it.
+4. **Loop.** Repeat steps 2 and 3 until the vocabulary reaches the target size.
+
+Mental model: BPE is a compression strategy. Common patterns get short codes (one token); rare patterns spell out across many tokens. The vocabulary is the codebook.
+
+## One worked merge step
+
+Tiny corpus: `low (5x), lower (2x), newer (6x), wider (3x), new (1x)`.
+
+| | Before | After |
+| --- | --- | --- |
+| Most frequent pair | `(e, r)` with 11 occurrences | merged |
+| `lower` representation | `l o w e r </w>` | `l o w er </w>` |
+| Vocabulary | characters only | + new entry `er` |
+
+## Why "how many Rs in strawberry" fails
+
+A token is atomic. To the model, it is an integer ID with no inside; no letters, no structure. "Strawberry" is one or two tokens depending on the tokenizer. Either way, the model cannot count letters inside a token because there are no letters at that level. Spelling questions live on the wrong side of the token boundary.
+
+## Special tokens
+
+- **Boundaries:** `<|begin_of_text|>`, `<|end_of_text|>` (BOS, EOS). Mark start and end of text.
+- **Chat roles:** `<|im_start|>`, `<|im_end|>`, plus `system` / `user` / `assistant`. Mark whose turn is whose.
+- **Housekeeping:** `<pad>`, `<unk>`, `<mask>`. Padding, unknown-token fallback, fill-in-the-blank training objective.
+
+Special tokens are also the surface for prompt-injection attacks. If the tokenizer parses a malicious user-string as a special token instead of as plain text, the attacker has just inserted a fake conversation turn into the model's input.
+
+## Practical numbers (rules of thumb)
+
+- **Pricing is per token, not per character.** Two prompts with identical character counts can differ by 10 to 20 percent in token count.
+- **English prose:** roughly 4 characters per token.
+- **Code:** roughly 2 characters per token (twice as expensive per character).
+- **Non-Latin scripts** (CJK, Cyrillic, Arabic): tokenize sparsely; expect more tokens per visual character.
+- **Whitespace matters:** ` hello` (with leading space) and `hello` are different tokens with different IDs.
+
+## Pitfalls to dodge
+
+- **Token is not word.** Often a word; often a fragment; sometimes both in the same sentence.
+- **Token is not character.** Usually shorter sequences than character count suggests.
+- **Character count does not predict token count.** Code, non-Latin, and unusual names break the ratio.
+- **The model does not "know the letters" of a word.** It knows associations for the token; spelling is on the wrong side of the wall.
+- **The famous strawberry case got patched via training,** but slightly weirder spelling questions ("count the Ms in mellifluous") still fail for the same structural reason.
+
+## Words to use precisely
+
+- **Token:** a vocabulary entry; the unit the model processes.
+- **Vocabulary:** the fixed precomputed list of tokens (typically 30k to 100k entries).
+- **BPE:** byte-pair encoding; the algorithm that builds the vocabulary by repeatedly merging the most frequent adjacent pair.
+- **Atomic token:** a token the model cannot look inside; it is just an integer ID.
+- **Special token:** a vocabulary entry that is not a subword fragment (BOS, EOS, chat-role markers, etc.).
+
+---
+
+**AI does not read text. It reads tokens.**

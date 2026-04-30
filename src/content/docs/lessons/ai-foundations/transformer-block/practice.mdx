@@ -1,0 +1,219 @@
+---
+title: "Practice: The transformer block: where everything comes together"
+description: Self-check on the four wrapping pieces, a forward-pass trace through a single block, an architecture-diagram annotation exercise, and flashcards built for retrieval.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+A short retrieval pass. Try to answer each question in your head (or on paper) before opening the collapsible. Active retrieval is where the learning sticks; rereading is comfortable but does much less.
+
+**1. What are the four pieces that wrap around attention in a transformer block, and what gap does each one fix?**
+
+<details>
+<summary>Show answer</summary>
+
+- **Position encoding** fixes attention's lack of order awareness (attention is permutation-invariant by default).
+- **Feed-forward network** fixes the lack of nonlinearity per token (without it, stacking layers collapses into one linear transformation).
+- **Residual connections** fix gradient flow through deep stacks and preserve the original information through each sub-layer.
+- **Layer normalization** fixes activation scale drift across deep stacks.
+
+</details>
+
+**2. Where in a transformer is position encoding added, and why is it not added at every block?**
+
+<details>
+<summary>Show answer</summary>
+
+It is added **once**, to the embeddings, before the first block runs. After that, the position information is carried through every block via the residual stream. There is no need to re-add it at each block; doing so would be redundant work.
+
+</details>
+
+**3. Attention is fundamentally a linear operation in the values. What does the feed-forward network add that attention cannot, and why does this matter for stacking?**
+
+<details>
+<summary>Show answer</summary>
+
+The FFN adds **nonlinearity** through its activation function (ReLU, GELU, SwiGLU, etc.). Without nonlinearity between attention layers, stacking attentions would mathematically collapse into a single linear transformation, and the whole stack would be no more expressive than a single attention. The FFN's nonlinearity is what gives the transformer the power to model complex functions across stacked layers.
+
+</details>
+
+**4. Residual connections do two distinct things. Name both.**
+
+<details>
+<summary>Show answer</summary>
+
+(1) **They enable gradient flow through deep stacks.** Without residuals, gradients shrink through every sub-layer during backpropagation and eventually vanish. The residual path provides a shortcut along which gradients flow back unchanged.
+
+(2) **They preserve information.** A pure attention layer replaces its input. A residual layer adds the attention output on top of the original input, so the original signal is still in the stream and subsequent layers can still see it.
+
+</details>
+
+**5. A colleague proposes using BatchNorm instead of LayerNorm in a transformer trained on variable-length sequences. What breaks, and why?**
+
+<details>
+<summary>Show answer</summary>
+
+BatchNorm computes its statistics across the batch dimension. In a transformer where sequences in the same batch have different lengths (the common case), positions beyond the shortest sequence's length only see padding tokens in their batch slot; BatchNorm's mean and variance for those positions become unstable or batch-dependent in unhelpful ways. LayerNorm sidesteps this by computing statistics across the feature dimension of a single token, with no batch dependence to break.
+
+</details>
+
+**6. Pre-LN versus Post-LN. What's the difference, and which is more common in modern implementations?**
+
+<details>
+<summary>Show answer</summary>
+
+**Post-LN** (the original paper) applies LayerNorm **after** each sub-layer (after the residual addition). **Pre-LN** applies LayerNorm **before** each sub-layer (before the attention or FFN computation). Pre-LN trains more stably at scale and is the modern default in almost every recent open-source transformer.
+
+</details>
+
+**7. A typical transformer model card lists "12 layers, 12 heads, hidden dim 768." What is happening in one forward pass through this model? Be specific about counts.**
+
+<details>
+<summary>Show answer</summary>
+
+12 transformer blocks stacked. Each block runs **multi-head attention with 12 heads at `d_k = 64`** (since `768 / 12 = 64`), followed by **a feed-forward network** (typically expanding `d_model = 768` to `d_ff = 3072` and back). Two residual connections plus two LayerNorms per block. So in one forward pass: 12 multi-head attention computations and 12 FFN computations, plus the wrapping. Counting individual attention heads, that is 12 layers × 12 heads = 144 single-head attention computations per forward pass.
+
+</details>
+
+## Try it yourself: trace a forward pass through one block
+
+About 10 minutes with a pen. The point is to internalize the order of operations and where the residual paths come from, not to compute actual numbers.
+
+**Setup:** assume an input vector `x_0` of shape `d_model`. We will use abstract names for the intermediate vectors so the focus is on the structure.
+
+**Steps:**
+
+1. **Input enters.** Write down `x_0` (shape `d_model`).
+2. **Multi-head attention.** Apply attention to `x_0`. Call the result `a` (shape `d_model`).
+3. **First residual + LayerNorm.** Compute `LayerNorm(x_0 + a)`. Call this `x_1`. (Note that `x_0` is still part of the stream.)
+4. **Feed-forward network.** Apply FFN to `x_1`. Call the result `f` (shape `d_model`).
+5. **Second residual + LayerNorm.** Compute `LayerNorm(x_1 + f)`. Call this `x_2`. This is the block's output.
+
+**Sanity-check questions:**
+
+- Where does the first residual addition draw from? What about the second?
+- If the attention output `a` were exactly zero, what would `x_1` equal? Why does this make residuals "fail-safe" by default?
+- What is the shape of `x_2` compared to `x_0`? Why does this matter for stacking blocks?
+
+<details>
+<summary>Show answers</summary>
+
+- The first residual adds `x_0` (the block's input) to the attention output. The second residual adds `x_1` (the result after the first Add+Norm) to the FFN output. Each residual adds the input of *its own sub-layer* back, not the block's original input.
+- If `a = 0`, then `x_1 = LayerNorm(x_0 + 0) = LayerNorm(x_0)`. The block can effectively skip the attention sub-layer when attention has nothing useful to add. This is what makes residuals fail-safe: a sub-layer that learns to output near-zero becomes (approximately) a pass-through.
+- `x_2` has the same shape as `x_0` (both are `d_model`). This is exactly what allows the next block to take this output as its input. If shapes did not match, you could not stack blocks.
+
+</details>
+
+## Try it yourself: annotate the architecture
+
+Open the canonical "Attention Is All You Need" architecture diagram (Figure 1 in the [Vaswani et al. 2017 paper](https://arxiv.org/abs/1706.03762)) or refer back to the simplified block diagram in the lesson body. For each labeled box on a single block, write one sentence answering: **what does it do, and why is it there?**
+
+Boxes to label (encoder side):
+
+- Input Embedding
+- Positional Encoding
+- Multi-Head Attention
+- Add & Norm (first instance)
+- Feed Forward
+- Add & Norm (second instance)
+
+You should be able to do this without referring back to the lesson. If a box is fuzzy, that is the section to re-read.
+
+<details>
+<summary>Show reference annotations</summary>
+
+- **Input Embedding.** Looks up each token's dense vector from `W_E` (embedding lookup, lesson 3). Turns integer IDs into vectors the model can do math on.
+- **Positional Encoding.** Adds a position-dependent vector to each token's embedding so attention has a sense of order. Added once before the first block.
+- **Multi-Head Attention.** Runs `h` parallel attention computations, each through its own learned projections; concatenates and projects through `W_O`. Provides the cross-token mixing.
+- **Add & Norm (first).** Adds the original block input to the attention output (residual), then applies LayerNorm. Enables gradient flow, preserves information, stabilizes activations.
+- **Feed Forward.** A two-layer MLP applied per token. Projects up to `d_ff` (typically 4 × `d_model`), applies a nonlinearity, projects back. Adds the per-token nonlinearity that attention lacks.
+- **Add & Norm (second).** Same role as the first Add+Norm, applied around the FFN.
+
+</details>
+
+## Flashcards
+
+Twelve cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay out the full set as one card per page, ready to print or save as a PDF for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="What three structural problems does a stacked-attention-only model have?">
+
+(1) Gradients vanish through deep stacks. (2) Activations drift in scale layer by layer. (3) Without nonlinearity per token, stacked attentions collapse into a single linear transformation, so depth gives no expressiveness gain.
+
+</Flashcard>
+
+<Flashcard question="What four pieces wrap around attention to fix those problems?">
+
+Position encoding (added once before the first block), feed-forward network (per-token nonlinearity), residual connections (gradient flow + information preservation), and layer normalization (activation stability).
+
+</Flashcard>
+
+<Flashcard question="Why is position encoding necessary?">
+
+Attention is permutation-invariant: without position information, the same sentence in different word orders produces the same attention computation. Position encoding adds a position-dependent vector to each embedding so attention can use position as part of "who matters to me."
+
+</Flashcard>
+
+<Flashcard question="Where in the architecture is position encoding added?">
+
+Once, to the embeddings, before the first block runs. The position information is then carried through every block via the residual stream; it is not re-added at each block.
+
+</Flashcard>
+
+<Flashcard question="What does the feed-forward network do?">
+
+A two-layer MLP applied per token: project up to `d_ff` (typically 4 × `d_model`), apply a nonlinearity (ReLU, GELU, SwiGLU), project back to `d_model`. Adds the per-token nonlinearity that attention (a linear-in-values operation) lacks.
+
+</Flashcard>
+
+<Flashcard question="Why are residual connections necessary in a transformer?">
+
+Two reasons: (1) gradient flow through deep stacks (without residuals, gradients vanish), (2) information preservation (a residual sub-layer modifies the input rather than replacing it, so original information stays in the stream).
+
+</Flashcard>
+
+<Flashcard question="What does LayerNorm do, and why use it instead of BatchNorm?">
+
+LayerNorm rescales activations across the feature dimension of a single token to mean 0 and variance 1, then applies a learned scale and shift. Unlike BatchNorm, it does not depend on the batch dimension, which lets it work for variable-length sequences.
+
+</Flashcard>
+
+<Flashcard question="Pre-LN versus Post-LN: which is the modern default and why?">
+
+Pre-LN (LayerNorm applied before each sub-layer) is the modern default in almost every recent open-source transformer because it trains more stably at scale. Post-LN (LayerNorm after each sub-layer) was the original paper's choice; it works but is harder to train at depth.
+
+</Flashcard>
+
+<Flashcard question="What does it mean to say a transformer is 'stacked blocks'?">
+
+A real transformer is N copies of the same block, stacked vertically. The output of block 1 is the input to block 2; block 2's output is block 3's input; and so on. Layer count, head count per block, `d_model`, and `d_ff` are the four primary architecture knobs.
+
+</Flashcard>
+
+<Flashcard question="Modern transformer variants substitute on a few axes. Name them.">
+
+Position encoding (sinusoidal, learned, RoPE, ALiBi). Normalization (LayerNorm, RMSNorm, DeepNorm). FFN activation (ReLU, GELU, SwiGLU). LayerNorm placement (Pre-LN vs Post-LN). Attention head sharing (full multi-head, MQA, GQA). Once you know the four boxes, every variant is a substitution at one of them.
+
+</Flashcard>
+
+<Flashcard question="Why is the FFN bigger than attention in a typical block?">
+
+`d_ff` is usually 4 × `d_model`, so the FFN's two matrices (one going up to `d_ff`, one coming back) carry roughly two thirds of the per-block parameter count. Attention is the headline mechanism but the FFN is where most of the parameters live.
+
+</Flashcard>
+
+<Flashcard question="What is the one-sentence takeaway from this lesson?">
+
+A transformer is not stacked attention; it is stacked blocks. The block is what wraps attention with the pieces that make it actually work.
+
+</Flashcard>
+
+</FlashcardSet>

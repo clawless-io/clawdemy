@@ -1,0 +1,229 @@
+---
+title: "Practice: How AI reads: turning text into tokens"
+description: Self-check on the mechanism, a hands-on tokenizer exercise on five test strings using tiktokenizer, and flashcards built for retrieval.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Seven short questions. Try to answer each one in your head (or on paper) before opening the collapsible. Active retrieval is where the learning sticks; rereading is comfortable but does much less.
+
+**1. In one sentence, what does tokenization do?**
+
+<details>
+<summary>Show answer</summary>
+
+It converts raw text into a sequence of integer IDs drawn from a fixed precomputed vocabulary. The model never sees text; it only ever sees those integer IDs.
+
+</details>
+
+**2. The lesson rejected two obvious schemes (one token per word, one token per character) before landing on subword tokenization. What goes wrong with each of the two failed schemes?**
+
+<details>
+<summary>Show answer</summary>
+
+**One per word:** the vocabulary explodes. English alone has hundreds of thousands of words plus names, typos, variants, neologisms; covering them realistically needs millions of entries. Out-of-vocabulary words become uninformative placeholders.
+
+**One per character:** the vocabulary is tiny but every sequence becomes 5 to 10 times longer, and every transformer layer does proportional work. Character-level models are far slower for the same input text and have to spend their capacity relearning multi-character patterns at every layer.
+
+</details>
+
+**3. In one sentence, what does the BPE algorithm do?**
+
+<details>
+<summary>Show answer</summary>
+
+Start with every character as its own token. Repeatedly find the most frequent adjacent pair in the training corpus and merge it into a new token added to the vocabulary. Stop when the vocabulary reaches the target size (typically 30,000 to 100,000 entries).
+
+</details>
+
+**4. Why is "how many Rs are in strawberry" a structurally hard question for an AI model, even though it is trivial for a human?**
+
+<details>
+<summary>Show answer</summary>
+
+In some tokenizers "strawberry" is a single token; in others it splits into a couple of pieces. Either way, each token is atomic to the model: it is just an integer ID, with no inside, no letters, no structure. The model has learned associations for the token (it is a fruit, it is red, it has seeds) but the spelling of the word is not, in general, one of those associations. Counting characters requires looking inside a token, which the model structurally cannot do.
+
+</details>
+
+**5. Two prompts have the same character count. Could they have different token counts (and therefore different prices)?**
+
+<details>
+<summary>Show answer</summary>
+
+Yes, often by 10 to 20 percent or more. Code, non-Latin scripts, unusual names, and irregular whitespace tokenize sparsely (more tokens per character). Common English prose tokenizes densely (fewer tokens per character). Token count is the only number that drives the bill, not character count.
+
+</details>
+
+**6. What are special tokens, and why are they a security concern?**
+
+<details>
+<summary>Show answer</summary>
+
+Special tokens are housekeeping markers in the vocabulary that are not subword fragments: BOS and EOS to mark text boundaries, chat-role markers like `<|im_start|>` to mark whose turn it is, plus padding and mask tokens. They are a security surface because if a malicious user includes the literal special-token string in their input and the tokenizer parses it as the marker (instead of as plain text), the attacker has just inserted a fake conversation turn into the model's input. This is the structural reason API providers strip or escape these markers in user input.
+
+</details>
+
+**7. Fill in the blank.** *"AI does not read \_\_\_\_\_\_. It reads \_\_\_\_\_\_."*
+
+<details>
+<summary>Show answer</summary>
+
+**Text** and **tokens**. Every input is converted to a sequence of integer IDs from a fixed vocabulary; the model does all of its work on those IDs.
+
+</details>
+
+## Try it yourself: see real tokens in a real tokenizer
+
+This is the lesson made visible. You will paste five test strings into a real tokenizer, predict the result before clicking, then compare. About 15 minutes.
+
+**Side effects:** none. Tiktokenizer runs entirely in your browser. No API calls, no costs, no account required.
+
+**Setup:** open [tiktokenizer.vercel.app](https://tiktokenizer.vercel.app/) in a new tab. The default model on the dropdown is fine to start with (something in the GPT family). The tool shows two pieces of output for any input: a colored breakdown of the string into tokens, and the list of integer IDs below.
+
+For each string below, **predict before pasting**: how many tokens, where you think the splits will fall, and whether anything will surprise you. Then paste, and compare.
+
+**String 1: `strawberry`**
+
+Predict the token count. Predict whether it stays as one token or splits.
+
+<details>
+<summary>What you'll see</summary>
+
+In most GPT-family tokenizers, "strawberry" comes out as one or two tokens. The string is common enough that the BPE merges have collapsed it. Notice the integer ID below; that single number is what the model actually sees. The three Rs are not visible at this level. Now you can see, concretely, why letter-counting fails. There is no inside to look into.
+
+</details>
+
+**String 2: `Clawdemy`**
+
+A word the tokenizer has almost certainly never seen. Predict how it splits.
+
+<details>
+<summary>What you'll see</summary>
+
+Probably 3 or 4 tokens, something like `Cl` + `aw` + `de` + `my` (the exact split depends on the tokenizer). Each fragment is a vocabulary entry the tokenizer has seen many times in other contexts. This is the OOV-handling mechanism in action: a word the vocabulary does not know is reassembled from pieces the vocabulary does know. No "unknown token" placeholder is ever emitted.
+
+</details>
+
+**String 3: `hello` versus ` hello` (the second has a leading space)**
+
+Paste both, separately. Predict whether the leading-space version is the same token as the no-space version, a different single token, or a space token followed by the word token.
+
+<details>
+<summary>What you'll see</summary>
+
+In modern tokenizers they are different single tokens. The tokenizer attaches the leading space to the next word, so `hello` (start of input) and ` hello` (mid-sentence, with leading space) are two completely different vocabulary entries with different integer IDs. This trips up everyone the first time they look closely. It also explains why a small reformatting of a prompt (say, removing redundant whitespace) can shift token counts noticeably without changing what the prompt means.
+
+</details>
+
+**String 4: `antidisestablishmentarianism`**
+
+A long, rare English word. Predict the token count and the rough shape of the split.
+
+<details>
+<summary>What you'll see</summary>
+
+Many tokens, probably 5 to 8. The word is rare enough that BPE never merged it into anything close to whole, so it gets reassembled from common syllables and affixes (`anti`, `dis`, `establish`, `ment`, `arian`, `ism`, or similar). Compare this to `strawberry`, which is one token. Both are valid English words. The vocabulary is shaped by training-corpus frequency, not by length or grammar.
+
+</details>
+
+**String 5: a tiny piece of code.** Paste this exactly:
+
+```python
+def factorial(n): return 1 if n <= 1 else n * factorial(n-1)
+```
+
+Predict the token count. Then count the characters of the same string and compare the ratio to what English prose typically gets.
+
+<details>
+<summary>What you'll see</summary>
+
+Roughly 25 to 35 tokens, depending on the tokenizer. The character count of the string is around 60. So the ratio is roughly 2 characters per token, which is denser per token (more tokens per character) than typical English prose at around 4 characters per token. Code tokenizes sparsely because identifiers, operators, parentheses, colons, and tight whitespace each often become their own tokens. The same idea expressed in plain English ("a function that returns 1 when its input is at most 1, otherwise it multiplies the input by the result of calling itself with the input minus 1") would tokenize to fewer tokens despite being many more characters. This is why coding workflows burn API budget faster than chat workflows on identical character budgets.
+
+</details>
+
+## Flashcards
+
+Twelve cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay out the full set as one card per page, ready to print or save as a PDF for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="What is tokenization?">
+
+The conversion from raw text into a sequence of integer IDs drawn from a fixed vocabulary. The model never sees text; it only sees the IDs.
+
+</Flashcard>
+
+<Flashcard question="What is the vocabulary, in one sentence?">
+
+A fixed precomputed list of every unit the model can read or write, where each unit is mapped to an integer ID.
+
+</Flashcard>
+
+<Flashcard question="Why doesn't one-token-per-word work?">
+
+The vocabulary blows up. Real text contains hundreds of thousands of distinct words plus names, typos, variants, neologisms; covering them realistically needs millions of entries, which makes the model expensive to train and bad at unfamiliar inputs.
+
+</Flashcard>
+
+<Flashcard question="Why doesn't one-token-per-character work?">
+
+Sequences become 5 to 10 times longer, and every transformer layer does proportional work. Character-level models are far slower per input text and waste capacity relearning multi-character patterns at every layer.
+
+</Flashcard>
+
+<Flashcard question="What is BPE, in one sentence?">
+
+A vocabulary-building algorithm. Start from characters, repeatedly merge the most frequent adjacent pair into a new token, stop when the vocabulary reaches the target size.
+
+</Flashcard>
+
+<Flashcard question="What is the one-line intuition for BPE?">
+
+It is a compression strategy. Common patterns get short codes (one token); rare patterns get spelled out across many tokens. The vocabulary is the codebook.
+
+</Flashcard>
+
+<Flashcard question='What does it mean to say "a token is atomic"?'>
+
+Inside the model, a token is an integer ID with no internal structure. The model cannot look inside a token to count letters or examine spelling. Spelling questions are about the inside; tokens are walls.
+
+</Flashcard>
+
+<Flashcard question='Why does the model fail on "how many Rs in strawberry"?'>
+
+In some tokenizers "strawberry" is one token; in others it splits into a couple of pieces. Either way, each token is atomic. The model has associations for the token but not the spelling, so counting individual letters is structurally outside what the mechanism can do.
+
+</Flashcard>
+
+<Flashcard question="What are special tokens?">
+
+Vocabulary entries that are not subword fragments. BOS, EOS, chat-role markers like `<|im_start|>`, plus pad, unk, and mask. They mark structural events the model has been trained to recognize.
+
+</Flashcard>
+
+<Flashcard question="Why are special tokens a security concern?">
+
+They are the surface where prompt-injection attacks live. If a malicious user includes the literal special-token string in their input and the tokenizer parses it as the marker rather than as plain text, the attacker has just inserted a fake conversation turn into the model's input.
+
+</Flashcard>
+
+<Flashcard question="Why is API pricing per-token, not per-character?">
+
+Because the model's compute cost scales with token count, not character count. Identical character lengths can produce very different token counts depending on language, code-versus-prose, and whitespace patterns.
+
+</Flashcard>
+
+<Flashcard question="What is the one-sentence takeaway from this lesson?">
+
+AI does not read text. It reads tokens.
+
+</Flashcard>
+
+</FlashcardSet>

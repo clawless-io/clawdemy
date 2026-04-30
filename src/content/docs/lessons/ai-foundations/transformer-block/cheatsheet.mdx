@@ -1,0 +1,95 @@
+---
+title: "Cheatsheet: The transformer block: where everything comes together"
+description: One-page reference. The four wrapping pieces, the block diagram, the architecture knobs, the modern variants on each axis, pitfalls, and a glossary.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## The one idea that matters
+
+```
+A transformer block = multi-head attention
+                    + position encoding (added once before block 1)
+                    + feed-forward network
+                    + residual connections (×2)
+                    + layer normalization (×2)
+```
+
+Stacked attention alone does not work. Each wrapping piece fixes a specific structural gap.
+
+## The four wrapping pieces
+
+| Piece | What it adds | Gap it fixes |
+| --- | --- | --- |
+| **Position encoding** | Position-dependent vector added to each embedding | Attention is permutation-invariant by default |
+| **Feed-forward network** | Per-token MLP with nonlinearity | Attention is linear in values; without nonlinearity, depth gives no gain |
+| **Residual connections** | `output = input + sub-layer(input)` around each sub-layer | Vanishing gradients in deep stacks; information replacement |
+| **Layer normalization** | Rescale activations across features per token | Activation scale drift across deep stacks |
+
+## Block shape flow
+
+| Stage | Vector |
+| --- | --- |
+| Input | `x_0` (shape `d_model`) |
+| After attention sub-layer (Add+Norm) | `x_1 = LayerNorm(x_0 + Attention(x_0))` |
+| After FFN sub-layer (Add+Norm) | `x_2 = LayerNorm(x_1 + FFN(x_1))` |
+
+Shape in equals shape out. That is what lets the next block stack on top.
+
+## Architecture knobs
+
+| Knob | What it controls | Typical range |
+| --- | --- | --- |
+| Layer count (`N`) | Depth of the model | 6 to 100+ |
+| Head count per layer (`h`) | Parallel attention computations per block | 8 to 32 |
+| `d_model` | Main embedding dimension | A few hundred to several thousand |
+| `d_ff` | FFN hidden dimension | Typically 4 × `d_model` |
+
+## Modern variants substitute on these axes
+
+| Axis | Original (2017) | Modern variants |
+| --- | --- | --- |
+| Position encoding | Sinusoidal | Learned, RoPE, ALiBi |
+| Normalization | LayerNorm | RMSNorm, DeepNorm |
+| Norm placement | Post-LN (after sub-layer) | Pre-LN (before sub-layer); standard in modern open-source models |
+| FFN activation | ReLU | GELU, SwiGLU |
+| Attention head sharing | Full multi-head | MQA, GQA |
+
+## Why this matters in production (model-card decoder)
+
+| Field in a model card | What it controls | Lesson term |
+| --- | --- | --- |
+| `num_hidden_layers` | Number of stacked blocks | `N` |
+| `hidden_size` | Main embedding dimension | `d_model` |
+| `intermediate_size` | FFN hidden dimension | `d_ff` |
+| `num_attention_heads` | Heads per block | `h` |
+| `hidden_act` | FFN activation function | activation (ReLU, GELU, SwiGLU) |
+| `rms_norm_eps` / `layer_norm_eps` | Normalization epsilon | LayerNorm or RMSNorm parameter |
+
+## Pitfalls to dodge
+
+| Pitfall | Reality |
+| --- | --- |
+| Block versus layer | "Layer" is overloaded; usually means block, sometimes means sub-layer. Read carefully. |
+| Position encoding added per block | Added once, before block 1. Carried through every block via residuals. |
+| FFN does cross-token mixing | No. FFN is per-token; attention is the only cross-token operation. |
+| Residuals are decorative | Load-bearing. A transformer without residuals would not train past a few layers. |
+| LayerNorm equals BatchNorm | Different ops. LayerNorm is per-token (works for variable-length sequences); BatchNorm is per-batch (does not). |
+
+## Glossary
+
+- **Block:** the unit that wraps multi-head attention with FFN, residuals, and LayerNorm. A transformer is `N` blocks stacked.
+- **`N`:** the number of blocks (model depth).
+- **`d_model`:** the main embedding dimension carried into and out of every block.
+- **`d_ff`:** the FFN hidden dimension; typically 4 × `d_model`.
+- **`h`:** the number of attention heads per block.
+- **Position encoding:** a vector added to each embedding before block 1 to give attention a sense of order.
+- **Feed-forward network (FFN):** per-token two-layer MLP that adds nonlinearity.
+- **Residual connection:** `output = input + sub-layer(input)`. Enables gradient flow and preserves information.
+- **LayerNorm:** per-token activation normalization across the feature dimension; learned scale and shift afterward.
+
+**Attention is the engine.**\
+**The block is the machine.**
