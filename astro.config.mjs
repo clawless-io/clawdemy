@@ -144,6 +144,7 @@ export default defineConfig({
 								{ label: 'Lesson', slug: 'lessons/ai-foundations/how-text-is-generated/lesson' },
 								{ label: 'Practice', slug: 'lessons/ai-foundations/how-text-is-generated/practice' },
 								{ label: 'Summary', slug: 'lessons/ai-foundations/how-text-is-generated/summary' },
+								{ label: 'Cheatsheet', slug: 'lessons/ai-foundations/how-text-is-generated/cheatsheet' },
 							],
 						},
 					],
