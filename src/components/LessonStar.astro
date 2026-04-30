@@ -1,0 +1,147 @@
+---
+/**
+ * LessonStar — GitHub-style star button for a lesson page.
+ *
+ * Renders a star button with a live count fetched from /api/star/<slug>.
+ * One click stars the lesson; subsequent clicks are ignored. The star is
+ * persistent: closing the tab and reopening still shows "Starred"
+ * because the choice is mirrored in localStorage and a server-side
+ * cookie.
+ *
+ * Graceful degradation: if /api/star/<slug> fails (e.g. running on the
+ * Astro dev server with no Pages Function backend), the button still
+ * renders, the count just hides until the API is reachable. Clicks
+ * still attempt to POST and silently fail until the function is live.
+ *
+ * Usage in MDX:
+ *   <LessonStar slug="how-words-become-vectors" />
+ *
+ * The slug should match the lesson's directory name and what the
+ * Pages Function uses as the KV key suffix.
+ */
+
+interface Props {
+	slug: string;
+}
+
+const { slug } = Astro.props;
+---
+
+<div class="cw-star" data-slug={slug}>
+	<button type="button" class="cw-star-btn" aria-label="Star this lesson">
+		<svg
+			width="16"
+			height="16"
+			viewBox="0 0 24 24"
+			fill="none"
+			stroke="currentColor"
+			stroke-width="2"
+			stroke-linecap="round"
+			stroke-linejoin="round"
+			aria-hidden="true"
+		>
+			<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+		</svg>
+		<span class="cw-star-label">Star</span>
+		<span class="cw-star-count" aria-live="polite"></span>
+	</button>
+</div>
+
+<script>
+	document.querySelectorAll<HTMLDivElement>('.cw-star').forEach((wrap) => {
+		const slug = wrap.dataset.slug;
+		if (!slug) return;
+		const btn = wrap.querySelector<HTMLButtonElement>('.cw-star-btn');
+		const countEl = wrap.querySelector<HTMLSpanElement>('.cw-star-count');
+		const labelEl = wrap.querySelector<HTMLSpanElement>('.cw-star-label');
+		if (!btn || !countEl || !labelEl) return;
+
+		const localKey = `cw_star_${slug}`;
+		const alreadyStarredLocally = localStorage.getItem(localKey) === '1';
+
+		if (alreadyStarredLocally) {
+			btn.classList.add('cw-star-active');
+			labelEl.textContent = 'Starred';
+		}
+
+		fetch(`/api/star/${slug}`, { credentials: 'include' })
+			.then((r) => (r.ok ? r.json() : null))
+			.then((data: { count?: number } | null) => {
+				if (data && typeof data.count === 'number') {
+					countEl.textContent = String(data.count);
+				}
+			})
+			.catch(() => {
+				// API unreachable (likely local dev). Hide the count quietly.
+			});
+
+		btn.addEventListener('click', async () => {
+			if (btn.classList.contains('cw-star-active') || btn.disabled) return;
+			btn.disabled = true;
+			labelEl.textContent = 'Starring';
+			try {
+				const r = await fetch(`/api/star/${slug}`, { method: 'POST', credentials: 'include' });
+				if (!r.ok) throw new Error('non-ok');
+				const data: { count?: number; alreadyStarred?: boolean } = await r.json();
+				if (typeof data.count === 'number') countEl.textContent = String(data.count);
+				btn.classList.add('cw-star-active');
+				labelEl.textContent = 'Starred';
+				localStorage.setItem(localKey, '1');
+			} catch {
+				labelEl.textContent = 'Star';
+			} finally {
+				btn.disabled = false;
+			}
+		});
+	});
+</script>
+
+<style>
+	.cw-star {
+		display: inline-block;
+		margin: 1rem 0 0.5rem 0;
+	}
+	.cw-star-btn {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.4rem;
+		padding: 0.35rem 0.75rem;
+		border: 1px solid var(--sl-color-gray-5, rgba(127, 127, 127, 0.25));
+		border-radius: 6px;
+		background: var(--sl-color-bg-sidebar, transparent);
+		color: var(--sl-color-text);
+		font-size: 0.85rem;
+		font-family: inherit;
+		font-weight: 500;
+		cursor: pointer;
+		transition: all 0.15s ease;
+	}
+	.cw-star-btn:hover:not(:disabled) {
+		border-color: #f59e0b;
+		background: var(--sl-color-bg);
+	}
+	.cw-star-btn:hover:not(:disabled) svg {
+		stroke: #f59e0b;
+	}
+	.cw-star-btn:disabled {
+		opacity: 0.7;
+		cursor: wait;
+	}
+	.cw-star-btn.cw-star-active {
+		color: #f59e0b;
+		border-color: #f59e0b;
+	}
+	.cw-star-btn.cw-star-active svg {
+		fill: #f59e0b;
+		stroke: #f59e0b;
+	}
+	.cw-star-count {
+		padding-left: 0.5rem;
+		margin-left: 0.25rem;
+		border-left: 1px solid var(--sl-color-gray-5, rgba(127, 127, 127, 0.25));
+		font-variant-numeric: tabular-nums;
+	}
+	.cw-star-count:empty {
+		display: none;
+	}
+</style>
