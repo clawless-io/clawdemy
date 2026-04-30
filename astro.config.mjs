@@ -148,6 +148,13 @@ export default defineConfig({
 								{ label: 'References', slug: 'lessons/ai-foundations/how-text-is-generated/references' },
 							],
 						},
+						{
+							label: 'Fine-tuning + RLHF',
+							collapsed: true,
+							items: [
+								{ label: 'Brief', slug: 'lessons/ai-foundations/how-models-learn-to-be-helpful/brief' },
+							],
+						},
 					],
 				},
 			],
