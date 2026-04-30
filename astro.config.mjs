@@ -157,6 +157,7 @@ export default defineConfig({
 								{ label: 'Practice', slug: 'lessons/ai-foundations/how-models-learn-to-be-helpful/practice' },
 								{ label: 'Summary', slug: 'lessons/ai-foundations/how-models-learn-to-be-helpful/summary' },
 								{ label: 'Cheatsheet', slug: 'lessons/ai-foundations/how-models-learn-to-be-helpful/cheatsheet' },
+								{ label: 'References', slug: 'lessons/ai-foundations/how-models-learn-to-be-helpful/references' },
 							],
 						},
 					],
