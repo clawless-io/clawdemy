@@ -153,6 +153,7 @@ export default defineConfig({
 							collapsed: true,
 							items: [
 								{ label: 'Brief', slug: 'lessons/ai-foundations/how-models-learn-to-be-helpful/brief' },
+								{ label: 'Lesson', slug: 'lessons/ai-foundations/how-models-learn-to-be-helpful/lesson' },
 							],
 						},
 					],
