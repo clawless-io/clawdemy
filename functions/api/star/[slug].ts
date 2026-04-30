@@ -1,3 +1,4 @@
+/// <reference types="@cloudflare/workers-types" />
 /**
  * Per-lesson star counter API.
  *

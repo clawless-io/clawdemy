@@ -46,14 +46,23 @@ const BLOOM_VERBS = [
 	'name',
 	'recall',
 	'define',
+	'read',
 	// Understand
 	'explain',
+	'describe',
 	'summarize',
 	'paraphrase',
 	'classify',
 	'compare',
+	'predict',
+	'walk through',
+	'trace',
+	'recognize',
+	'connect',
+	'demonstrate',
 	// Apply
 	'use',
+	'apply',
 	'run',
 	'configure',
 	'set up',
@@ -62,16 +71,19 @@ const BLOOM_VERBS = [
 	'distinguish',
 	'debug',
 	'decompose',
+	'analyze',
 	// Evaluate
 	'choose between',
 	'assess',
 	'justify',
 	'critique',
+	'evaluate',
 	// Create
 	'design',
 	'build',
 	'compose',
 	'produce',
+	'create',
 ];
 
 const BriefSchema = z.object({
