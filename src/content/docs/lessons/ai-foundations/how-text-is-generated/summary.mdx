@@ -1,0 +1,37 @@
+---
+title: "Summary: Token by token: how a transformer generates text"
+description: The 5-minute scan version of the text-generation lesson. The TL;DR, the prediction loop, the decoding strategies, KV caching, and what changes for you the next time you read an AI API spec.
+sidebar:
+  order: 4
+  label: Summary
+artifact: summary
+---
+
+**A transformer does not write a response.** It produces one token at a time, in a loop: forward pass through every block, softmax over the vocabulary, sample one token, append to the input, run the whole architecture again. The illusion of coherent reasoning is what emerges when this loop runs hundreds of times on a model that was trained on coherent text.
+
+This summary is the scan-it-in-five-minutes version. The full lesson covers the prediction loop end to end, compares the four common decoding strategies side by side (greedy, pure sampling, top-k, top-p) plus temperature scaling, explains KV caching, and lands on three concrete consequences for anyone using AI APIs.
+
+Common modern defaults are top-p around 0.9 with a temperature near 0.7, though providers vary; the bullets below are where the actual mechanism lives.
+
+## Core ideas
+
+- **Generation is a loop.** Forward pass, logits, softmax, sample, append, repeat. Until a stop condition fires.
+- **Logits before probabilities.** The final linear layer produces unnormalized scores (logits) over the vocabulary. Softmax turns them into a probability distribution. Temperature, when used, divides logits before softmax, not after.
+- **Greedy decoding** always picks the highest-probability token. Deterministic, good for short structured outputs (single number, single label, short JSON field), bad for longer multi-step problems where it gets stuck in suboptimal local choices.
+- **Pure sampling** picks each token with probability equal to the model's predicted probability for it. Maximum variety, but the model can drift into nonsense because low-probability tokens get picked more often than they should. Rarely used directly; almost always paired with top-k or top-p as a filter.
+- **Top-k sampling** restricts to the top `k` highest-probability tokens, then samples. Cuts the long tail of unlikely tokens. Typical `k` is 40 or 50.
+- **Top-p (nucleus) sampling** restricts to the smallest set of tokens whose cumulative probability is at least `p` (typically 0.9 or 0.95), then samples. Adapts the candidate pool to the distribution: peaked distribution gets few candidates, flat distribution gets many. The most common modern default.
+- **Temperature** rescales the logits before softmax. `T < 1.0` sharpens (the high-probability tokens become more dominant). `T > 1.0` flattens (low-probability tokens get a fairer shot). Most APIs treat `T = 0` as a shortcut for greedy.
+- **Three things stop the generation loop.** `max_tokens` (a hard limit, always applies). The model's special **EOS token** (when the sample step picks it, generation stops cleanly). User-specified **stop sequences** (strings like `"User:"` that, when generated, halt the loop). EOS or a stop sequence ends the loop earlier if either fires before `max_tokens`.
+- **KV caching makes generation roughly constant-time per token after the first pass.** The K and V vectors for previous tokens do not change between steps, so each new step only computes K and V for the one new token. Without caching, generation would scale quadratically with output length.
+- **The first-token wait is real; the streaming is real.** Initial delay comes from the prefill phase processing your whole prompt. After that, each output token is its own forward pass, and what you see appearing one at a time is genuinely the architecture working.
+- **Output tokens cost more than input tokens.** Output is sequential compute (each token is its own forward pass; future tokens don't exist yet to parallelize). Input processes in parallel during prefill. APIs typically charge 3x to 5x more per output token to reflect that.
+- **Pitfall: the model does not "know" its full answer.** Every token is sampled fresh from the next-token distribution. There is no plan, no draft, no concept of where the response is heading. Coherence emerges from training, not planning.
+- **Pitfall: higher temperature is randomness, not intelligence.** A flatter distribution lets low-probability tokens get picked more often. If a model is bad at a task at temperature 0.7, raising to 1.5 makes it bad in a more random way, not more competent.
+
+## What changes for you
+
+Before this lesson, "temperature 0.7" and "top_p 0.95" were knobs you saw in API docs without knowing what they actually did. After it, you can reason about the exact effect: temperature shapes the probability distribution; top-p restricts the candidate pool. When you read a model card and see streaming responses appear at a consistent pace after a brief delay, you understand both halves: the prefill phase is processing your prompt; the streaming phase is one forward pass per output token. When you optimize an AI workflow's cost, you know that shortening output (better prompting, smaller `max_tokens`, sensible stop sequences) is the highest-leverage move because every output token is its own compute.
+
+**The model does not write.**\
+**It predicts one token at a time.**
