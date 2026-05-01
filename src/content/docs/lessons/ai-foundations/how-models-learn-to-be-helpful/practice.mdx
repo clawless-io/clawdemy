@@ -1,0 +1,232 @@
+---
+title: "Practice: How a model learns to be helpful: fine-tuning and RLHF"
+description: Self-check on the three-stage pipeline, a hands-on exercise classifying assistant behaviors by which training stage produced them, and flashcards built for retrieval.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+A short retrieval pass. Try to answer each question in your head (or on paper) before opening the collapsible. Active retrieval is where the learning sticks; rereading is comfortable but does much less.
+
+**1. Name the three training stages and what each one adds to the model.**
+
+<details>
+<summary>Show answer</summary>
+
+(1) **Pretraining**: trains a base model on a massive text corpus to predict the next token. Adds factual knowledge, grammar, the ability to continue text in a stylistically plausible way. (2) **Supervised fine-tuning (SFT)**: trains the base model on a small curated set of (instruction, response) examples. Adds instruction-following. The model learns the shape of producing a response to a request. (3) **RLHF (reinforcement learning from human feedback)**: trains the SFT model against a reward model that was itself trained on human preference comparisons. Adds preference-tuning: tone, polish, refusal behavior, the "feel" of a chat assistant.
+
+</details>
+
+**2. Why is it incorrect to say "SFT teaches the model new knowledge"?**
+
+<details>
+<summary>Show answer</summary>
+
+In typical SFT volumes (tens of thousands of examples), the knowledge is already in the base model from pretraining. SFT teaches the model *when to apply* knowledge it already has. If you fine-tune on a French translation example, you are not teaching it French; you are teaching it that when a user writes "translate to French," the response should be in French. The capability was there; the trigger was not. SFT teaches response shape, not new content. (At very large SFT volumes the line with continued pretraining starts to blur, which the lesson flags in its Common Pitfalls section.)
+
+</details>
+
+**3. Walk through RLHF in two parts. What does each part produce, and how do they connect?**
+
+<details>
+<summary>Show answer</summary>
+
+**Part one** trains a *reward model*. Collect a dataset of human preference comparisons (for a given prompt, two model responses, a human pick of which is better). Train a separate model whose input is `(prompt, response)` and whose output is a single number representing how good the response is. The reward model learns to score responses the way the human labelers would.
+
+**Part two** uses that reward model to *optimize the SFT model* (the policy). For each new prompt: the policy generates a response, the reward model scores it, and a reinforcement learning algorithm (commonly PPO) nudges the policy's weights to make high-scoring responses more likely. A regularization term keeps the policy from drifting too far from the SFT starting point so it does not start producing weird text to game the reward.
+
+The two parts connect at the reward signal. Part one produces a learned proxy for "what humans prefer." Part two pushes the policy up the gradient of that proxy.
+
+</details>
+
+**4. What is reward hacking, and what mechanism is in place to prevent it?**
+
+<details>
+<summary>Show answer</summary>
+
+**Reward hacking** is when the policy finds ways to produce output the reward model scores highly without actually being a good response. The reward model is a learned approximation, so it has blind spots; the policy, optimizing aggressively, can find them. Classic symptoms include fluent-looking but useless output, repetitive structures the reward model happens to overrate, or excessive hedging.
+
+The standard prevention is a **regularization term** that penalizes the policy for diverging too far from the SFT model. The intuition: the SFT model is a coherent text generator; tether the policy to it so the policy can climb the reward gradient without going off into linguistic nonsense. This is sometimes called the KL penalty (it limits how much the policy's output distribution can move from the SFT output distribution).
+
+</details>
+
+**5. Match each observed assistant behavior to the training stage that most directly produced it.**
+
+> a. The assistant tells you the boiling point of water.
+> b. When you write "summarize this paragraph," it produces a summary instead of continuing the paragraph.
+> c. It refuses to help with a clearly harmful request.
+> d. Its tone is polite and structured (numbered lists, headings).
+> e. It identifies itself by its product name when asked who it is.
+
+<details>
+<summary>Show answer</summary>
+
+a. **Pretraining**. Factual knowledge encoded in weights from reading large text corpora.
+
+b. **Supervised fine-tuning (SFT)**. The base model would have continued the paragraph; SFT taught it that "summarize this" produces a summary.
+
+c. **RLHF**. Refusal is learned. The reward model was trained with refusals labeled as preferred for certain prompt categories; the policy optimized to produce them.
+
+d. **Mostly RLHF**. SFT establishes that the model produces a response; the *style* (polite, structured, helpful tone) is shaped by RLHF, since labelers consistently preferred well-formatted, polite responses.
+
+e. **Both SFT and RLHF**. SFT often includes system-prompted persona examples; RLHF reinforces consistent self-identification across interactions.
+
+</details>
+
+**6. Direct Preference Optimization (DPO) is described as a variant of RLHF. What does it do differently from the canonical recipe?**
+
+<details>
+<summary>Show answer</summary>
+
+DPO **skips the separate reward model**. The canonical RLHF recipe trains a reward model first, then optimizes the SFT model against it (two models, two training stages). DPO uses a clever loss function that lets you optimize the SFT model directly on the preference data (which response was preferred over which) without ever explicitly training a reward model.
+
+Why this matters: simpler pipeline, fewer moving parts, often comparable quality. DPO has become a popular default for many open-source instruction-tuned models. The canonical reward-model-plus-PPO recipe is still used at frontier labs, but is one approach among several.
+
+</details>
+
+**7. "Refusal behavior is learned, not built-in." Why is this distinction useful when you read about a model release?**
+
+<details>
+<summary>Show answer</summary>
+
+It tells you that refusal is a property of *post-training data*, not a property of the architecture or pretraining. Two consequences:
+
+- A model can be retrained to refuse fewer things, more things, or different things by changing the preference data fed to RLHF (or the SFT examples). This is why "uncensored" community fine-tunes exist: they are post-training retrains that strip refusal behavior the original RLHF added.
+- When a vendor announces "we have improved the assistant's safety behavior," the change usually happened in post-training, not in the base model. Pretraining a frontier model is months of compute and tens of millions of dollars; post-training takes days. Most observable changes between releases are post-training updates.
+
+The frame helps you read release notes accurately and not assume "deeper" changes than actually happened.
+
+</details>
+
+## Try it yourself: classify the behaviors
+
+This exercise puts the behavior-to-stage decomposition into practice. About 10 minutes.
+
+**Side effects:** none. Pen and paper.
+
+**Setup:** below are eight observed behaviors of a modern chat assistant. For each one, decide which stage produced it: **pretraining**, **SFT**, **RLHF**, or **a combination** (specify which two). Many will be combinations; the point of the exercise is to distinguish *primary* contribution from *secondary* contribution.
+
+```
+1. The assistant correctly states that the Pacific Ocean is the
+   largest ocean on Earth.
+
+2. When asked "Translate 'good morning' to Japanese," it produces
+   a translation rather than continuing the prompt as text.
+
+3. It uses headings, bullet points, and clear paragraph breaks
+   when answering a complex question.
+
+4. When a user asks for help building a working ransomware payload,
+   it declines and explains why.
+
+5. It can answer questions about events from a few years ago but
+   becomes uncertain about very recent events.
+
+6. The first sentence of its replies often acknowledges the user's
+   question ("Great question, here's how to think about it...").
+
+7. When asked "Who are you?" it identifies itself by a specific
+   product name rather than as "a language model."
+
+8. Given a math problem, it can produce a multi-step explanation
+   that ends with a final answer.
+```
+
+**Expected outcomes:**
+
+1. **Pretraining.** Factual knowledge.
+2. **SFT.** Without SFT, the base model would continue the prompt as text. Supervised examples taught it that translation requests produce translations.
+3. **SFT and RLHF combined.** SFT examples often already use headings and bullets, so structured output is partly seeded there; RLHF reinforces the formats labelers consistently rated higher. Hard to attribute cleanly to either stage alone.
+4. **RLHF, almost entirely.** Refusal on harm categories is the canonical RLHF behavior.
+5. **Pretraining sets the boundary; post-training shapes the response.** The factual cutoff is a pretraining artifact (the data simply ends at some point). But the model's *willingness to express uncertainty* about recent events is largely RLHF: a base model would happily hallucinate a confident answer, and the explicit "I don't know about events after X" pattern is a learned post-training behavior. So pretraining causes the gap; post-training causes the honesty about the gap.
+6. **RLHF.** The polite acknowledgment pattern is the kind of stylistic move labelers consistently preferred.
+7. **SFT and RLHF combined.** SFT often includes persona examples ("You are [name]..."); RLHF reinforces consistent self-identification.
+8. **Mostly SFT, secondary RLHF.** SFT teaches the response *shape* (problem then steps then answer). RLHF refines the polish (clear formatting, intermediate steps explained well).
+
+**Sanity check:** the cleanest signals are the extremes. Knowing facts is pretraining. Refusing harm is RLHF. Most other behaviors are layered. If you found yourself wanting to put nearly everything in "SFT and RLHF combined," that is correct: most polished assistant behavior is the joint product of those two stages, with pretraining supplying the underlying knowledge.
+
+## Flashcards
+
+Twelve cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay out the full set as one card per page, ready to print or save as a PDF for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="What are the three training stages, in order?">
+
+(1) Pretraining: massive text corpus, next-token prediction, produces a base model. (2) Supervised fine-tuning (SFT): small curated instruction-response dataset, same next-token objective, produces an instruction-tuned model. (3) RLHF: human preference comparisons train a reward model; the SFT model is then optimized against the reward model.
+
+</Flashcard>
+
+<Flashcard question="What does SFT actually teach the model?">
+
+Response shape, not new knowledge. The base model already knows the content from pretraining; SFT teaches it when to produce a response in the shape a user expects, given an instruction. A few thousand high-quality examples can change surface behavior dramatically.
+
+</Flashcard>
+
+<Flashcard question="Walk through RLHF in two parts.">
+
+Part one trains a reward model on human preference comparisons (for a given prompt, two responses, a human pick of which is better). Part two uses that reward model to optimize the SFT model: the policy generates a response, the reward model scores it, an RL algorithm (commonly PPO) nudges the policy's weights to favor high-scoring responses.
+
+</Flashcard>
+
+<Flashcard question="What is reward hacking?">
+
+The policy finds ways to produce output the reward model scores highly without actually being a good response. The reward model is a learned proxy with blind spots; the policy can exploit them. Symptoms include fluent-looking but useless text or weirdly repetitive structures the reward model happens to overrate.
+
+</Flashcard>
+
+<Flashcard question="What prevents reward hacking in canonical RLHF?">
+
+A regularization term (often called the KL penalty) that penalizes the policy for diverging too far from the SFT model. The SFT model is a coherent text generator; tethering the policy to it lets the policy climb the reward gradient without producing degenerate output.
+
+</Flashcard>
+
+<Flashcard question="Where does factual knowledge in a chat assistant come from?">
+
+Pretraining. The model encoded facts in its weights when it read large amounts of text. SFT and RLHF do not add new facts; they shape how the model produces responses about the facts it already encoded.
+
+</Flashcard>
+
+<Flashcard question="Where does refusal behavior come from?">
+
+RLHF, almost entirely. The reward model was trained with refusals labeled as preferred responses for certain prompt categories. The policy optimized to produce them. Refusal is a learned property of the post-trained model, not of the architecture.
+
+</Flashcard>
+
+<Flashcard question="What is Direct Preference Optimization (DPO)?">
+
+A variant of RLHF that skips the separate reward model. DPO uses a loss function that lets you optimize the SFT model directly on preference data, without ever training a reward model. Simpler pipeline, often comparable quality, increasingly common in open-source instruction-tuned models.
+
+</Flashcard>
+
+<Flashcard question="What is Constitutional AI (CAI)?">
+
+A variant where some human preference comparisons are replaced by critiques generated by another AI model, working from a written set of principles. Reduces human labeling burden; introduces new failure modes since the AI critic has its own biases. The broader umbrella term for AI-generated preference data is RLAIF.
+
+</Flashcard>
+
+<Flashcard question="When a vendor says 'we retrained the assistant,' what usually happened?">
+
+Post-training. New SFT data plus new RLHF preferences. Pretraining a frontier model takes months and costs tens of millions of dollars; updating an existing model with new post-training data takes days. Most observable changes between releases are post-training, not new architecture.
+
+</Flashcard>
+
+<Flashcard question="Does RLHF give a model 'values'?">
+
+No. RLHF gives the model preferences toward responses the reward model scores highly. The reward model was trained on whatever the labelers preferred. The "values" you observe are an indirect product of training data choices, not philosophical commitments. Equating reward-model output with truth or with values is a common pitfall.
+
+</Flashcard>
+
+<Flashcard question="What is the one-sentence takeaway from this lesson?">
+
+Pretraining gives the model knowledge. Fine-tuning gives it instructions. RLHF gives it taste.
+
+</Flashcard>
+
+</FlashcardSet>

@@ -1,0 +1,103 @@
+---
+title: "Cheatsheet: Token by token: how a transformer generates text"
+description: One-page reference. The prediction loop, decoding strategies, temperature, stop conditions, KV caching, and a glossary.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## The one idea that matters
+
+```
+forward pass  →  logits  →  softmax  →  sample  →  append  →  loop
+```
+
+Generation is a loop over the architecture, one token per iteration. The architecture does not produce a response; it produces the next token, then runs again.
+
+## The prediction loop in five steps
+
+| Step | Operation | Output |
+| --- | --- | --- |
+| 1 | Forward pass through every block | A `d_model`-dim vector at every position |
+| 2 | Final linear (last position) | `vocab_size`-dim logits |
+| 3 | Softmax | Probability distribution over the vocabulary |
+| 4 | Sample one token | The next token (decoding strategy lives here) |
+| 5 | Append to input | New, longer sequence; loop back to step 1 |
+
+## Decoding strategies (the sample step)
+
+| Strategy | What it does | When to use |
+| --- | --- | --- |
+| **Greedy** | Always pick the highest-probability token | Short structured output (single label, JSON field) |
+| **Pure sampling** | Sample from the raw distribution | Rare on its own; usually paired with top-k or top-p |
+| **Top-k** | Restrict to top `k` tokens, sample from those | Reasonable middle ground; typical `k` is 40 to 50 |
+| **Top-p (nucleus)** | Smallest set with cumulative probability ≥ `p`, sample | Modern default; `p` is typically 0.9 to 0.95 |
+
+## Temperature
+
+Divide all logits by `T` before softmax.
+
+| `T` | Effect | Distribution |
+| --- | --- | --- |
+| `T < 1.0` | Sharpen | Top tokens dominate further |
+| `T = 1.0` | Identity | Original distribution |
+| `T > 1.0` | Flatten | Low-probability tokens get a fairer shot |
+| `T = 0` | API shortcut for greedy | Formula is undefined at zero; convention is "approaches argmax" |
+| Combined with top-p | Standard production setup | Temperature shapes the distribution; top-p restricts the candidate pool |
+
+## Stop conditions
+
+| Condition | Behavior |
+| --- | --- |
+| `max_tokens` | Hard token-count limit; always applies |
+| EOS token | Model has been trained to emit a special end-of-sequence token; sampling it ends the loop cleanly |
+| Custom stop sequences | User-specified strings halt the loop when generated |
+
+## KV caching
+
+The K and V vectors for previous tokens do not change between generation steps. Cache them; each new step only computes K and V for the one new token.
+
+| Without KV cache | With KV cache |
+| --- | --- |
+| Quadratic in output length | Roughly constant per new token after the first pass |
+| Naive prediction loop | Standard production setup |
+| Streaming would feel slower as the response grows | Streaming feels constant after the prefill delay |
+
+## API knobs you will actually see
+
+| Field in the API | What it controls |
+| --- | --- |
+| `temperature` | The sharpening or flattening described above |
+| `top_p` | Nucleus sampling threshold |
+| `top_k` | Top-k threshold (less common in modern APIs; some still expose it) |
+| `max_tokens` | Hard output-length limit |
+| `stop` | Custom stop sequences (string or array of strings) |
+| `stream` | Whether to stream tokens as they generate or wait for the full response |
+
+## Pitfalls to dodge
+
+| Pitfall | Reality |
+| --- | --- |
+| The model "knows" its answer when it starts typing | No. Every token is sampled fresh from the next-token distribution. No plan, no draft. |
+| Higher temperature equals more creative | No. Higher temperature equals more random. If a model is bad at a task, raising temperature makes it bad in a more random way, not more competent. |
+| Greedy is always right for "deterministic" tasks | Right for short structured output. Wrong for longer multi-step reasoning, where low-temp top-p escapes bad local choices. |
+| Streaming is a UI animation | No. Each streamed token is a real forward pass producing real output. The streaming is the work. |
+| Output and input tokens cost the same | No. Output is sequential compute; input parallelizes during prefill. APIs typically charge 3x to 5x more per output token. |
+
+## Glossary
+
+- **Logits:** unnormalized scores over the vocabulary, output of the final linear layer.
+- **Softmax:** turns logits into a probability distribution (all values 0 to 1, summing to 1.0).
+- **Greedy:** decoding strategy that always picks the highest-probability token.
+- **Top-k:** decoding strategy that restricts candidates to the top `k` tokens, then samples.
+- **Top-p (nucleus):** decoding strategy that restricts candidates to the smallest set with cumulative probability ≥ `p`, then samples.
+- **Temperature (`T`):** logit rescale before softmax; sharpens (`T<1`) or flattens (`T>1`) the distribution.
+- **EOS token:** the model's special "end of text" token; sampling it stops the generation loop.
+- **KV caching:** reusing the K and V vectors computed for previous positions so each new token only requires new K and V for itself.
+- **Prefill:** the first forward pass over the full input prompt; parallelizable.
+- **Generation step:** one iteration of the prediction loop; produces one new token.
+
+**The model does not write.**\
+**It predicts one token at a time.**

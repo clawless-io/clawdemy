@@ -1,0 +1,209 @@
+---
+title: "Practice: Token by token: how a transformer generates text"
+description: Self-check on the prediction loop, a hands-on sampling exercise on a tiny logits vector (greedy, top-k, top-p, temperature), and flashcards built for retrieval.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+A short retrieval pass. Try to answer each question in your head (or on paper) before opening the collapsible. Active retrieval is where the learning sticks; rereading is comfortable but does much less.
+
+**1. List the five steps of one iteration of the prediction loop.**
+
+<details>
+<summary>Show answer</summary>
+
+(1) Forward pass through every block. (2) The last position's output goes through the final linear projection to logits over the full vocabulary. (3) Softmax turns the logits into a probability distribution. (4) Sample one token from the distribution (decoding strategy lives here). (5) Append the new token to the input. Loop back to step 1.
+
+</details>
+
+**2. What's the difference between logits and probabilities? Why does the model produce logits first instead of going straight to probabilities?**
+
+<details>
+<summary>Show answer</summary>
+
+Logits are unnormalized scores over the vocabulary; they can be any real numbers, positive or negative. Probabilities are the same vector after softmax: all between 0 and 1, summing to 1.0. The model produces logits first because the final linear layer of the architecture outputs raw scores; softmax is then applied as a separate step. Keeping them separate also lets us insert temperature scaling (divide by T) before the softmax, which would not work cleanly on already-normalized probabilities.
+
+</details>
+
+**3. A colleague tells you "for math problems, always use greedy decoding because it's deterministic." When is this advice right? When is it wrong? And in cases where greedy is wrong, why is top-p often a better default than top-k?**
+
+<details>
+<summary>Show answer</summary>
+
+**Right** for short structured outputs where one specific token sequence is correct: a single number, a single classification label, a short JSON field. Greedy is deterministic and avoids drift.
+
+**Wrong** for longer multi-step problems (multi-paragraph reasoning, multi-line code). Pure greedy gets stuck in suboptimal local choices because the highest-probability next token at each step is not always the start of the best sequence overall. Modern best practice for these tasks is low temperature with top-p, which keeps things mostly predictable while letting the slight stochasticity escape bad local minima.
+
+**Top-p versus top-k** in those cases: top-p adapts the candidate pool to the distribution. When the model is confident (peaked distribution), top-p restricts to a small handful of tokens. When the model is uncertain (flat distribution), top-p expands the pool. Top-k uses a fixed candidate count regardless of how peaked or flat the distribution is, which can be too restrictive on some tokens and too permissive on others. Top-p tracks the model's own confidence; top-k does not.
+
+</details>
+
+**4. What does temperature do mechanically, and what is the API convention for `T = 0`?**
+
+<details>
+<summary>Show answer</summary>
+
+Temperature `T` divides the logits before softmax. `T < 1.0` sharpens the distribution (high-probability tokens become more dominant). `T > 1.0` flattens the distribution (low-probability tokens get a fairer shot). The mathematical formula is undefined at exactly zero (division by zero), but most APIs treat `T = 0` as a shortcut for greedy (the convention is "as `T` approaches zero, sampling collapses to argmax").
+
+</details>
+
+**5. Why does generation get faster after the first forward pass, even when the input keeps growing?**
+
+<details>
+<summary>Show answer</summary>
+
+KV caching. The Key and Value vectors that attention computes for each previous token do not change between generation steps. Each new step only computes K and V for the one new token; everything before is identical to last time and is read from cache. The first forward pass over the full prompt is slow; subsequent passes are roughly constant-time per new token instead of growing quadratically with sequence length.
+
+</details>
+
+**6. Three things can end the generation loop. Name them and describe how they interact.**
+
+<details>
+<summary>Show answer</summary>
+
+(1) **`max_tokens`**: a hard token-count limit. (2) **End-of-sequence (EOS) token**: when the sample step picks the model's special EOS token, generation stops cleanly. (3) **Custom stop sequences**: user-specified strings that, when generated, halt the loop.
+
+In practice, `max_tokens` always applies. EOS or a custom stop sequence ends the loop earlier if either fires before `max_tokens` is reached.
+
+</details>
+
+**7. Many APIs charge several times more per output token than per input token. Why does that pricing pattern make sense?**
+
+<details>
+<summary>Show answer</summary>
+
+Output tokens require **sequential compute**: each one is its own forward pass, which cannot be parallelized across the future tokens (they don't exist yet). Input tokens, by contrast, can be processed in parallel during the prefill stage of inference. So output tokens are genuinely more expensive to produce in wall-clock terms. The roughly 3x to 5x output-versus-input ratio you see in many API price sheets reflects that asymmetry.
+
+</details>
+
+## Try it yourself: sample from a tiny logits vector
+
+This is the sampling step in motion. Different decoding strategies on the same starting point. About 10 minutes with a pen.
+
+**Side effects:** none. Paper arithmetic. No API calls.
+
+**Setup:** imagine the model has just produced this logits vector for the next token over a 5-word vocabulary. The labels are placeholders; the math is what matters.
+
+```
+token       logit
+-----       -----
+"the"        4.0
+"a"          3.0
+"an"         2.0
+"and"        1.0
+"or"         0.5
+```
+
+**Steps:**
+
+1. **Compute the probability distribution** by applying softmax. Recall: `p_i = exp(z_i) / sum(exp(z_j))`. Round each probability to three decimals.
+
+2. **Greedy decoding.** Which token would greedy pick?
+
+3. **Top-3 sampling.** Which three tokens are the candidates? Renormalize their probabilities (divide each by the sum of the three) so they total 1.0. What is "the" 's renormalized probability?
+
+4. **Top-p sampling with `p = 0.9`.** Sort tokens by probability (already sorted in this setup). Build the cumulative probability list. Which tokens are inside the nucleus (the smallest set whose cumulative probability is at least 0.9)?
+
+5. **Temperature `T = 0.5`** (sharpening). Divide all logits by 0.5 to get new logits, then re-softmax. What is the new probability of "the"?
+
+6. **Temperature `T = 2.0`** (flattening). Divide all logits by 2.0, then re-softmax. What is the new probability of "the"?
+
+**Expected outcomes:**
+
+- Step 1: `exp(z) = [54.598, 20.086, 7.389, 2.718, 1.649]`. Sum is `86.440`. Probabilities: `[0.632, 0.232, 0.085, 0.031, 0.019]`.
+- Step 2: greedy picks **"the"** (highest probability).
+- Step 3: top-3 candidates are **"the", "a", "an"**. Their raw probabilities sum to `0.949`; renormalized, "the" becomes `0.632 / 0.949 ≈ 0.666`.
+- Step 4: cumulative probabilities are `0.632, 0.864, 0.949, 0.980, 1.000`. The cumulative crosses `0.9` at `"an"`, so the nucleus is **{"the", "a", "an"}** (same three tokens as top-3 in this example, but the criterion is different: top-k always picks 3, while top-p would shrink to {"the", "a"} for a more peaked distribution and expand to four or more tokens for a flatter one).
+- Step 5: with `T = 0.5`, new logits are `[8.0, 6.0, 4.0, 2.0, 1.0]`. New probabilities are approximately `[0.866, 0.117, 0.016, 0.002, 0.001]`. "the" is now **0.866** (sharper, more dominant).
+- Step 6: with `T = 2.0`, new logits are `[2.0, 1.5, 1.0, 0.5, 0.25]`. `exp(z)` gives `[7.389, 4.482, 2.718, 1.649, 1.284]`, sum is `17.522`, probabilities are approximately `[0.422, 0.256, 0.155, 0.094, 0.073]`. "the" is now **0.422** (flatter, low-probability tokens lifted).
+
+If your numbers match, you have just done by hand the same arithmetic that runs inside every chat AI on every output token.
+
+**Sanity check:** as temperature went from 0.5 to 1.0 (the original) to 2.0, the probability of "the" went from 0.866 to 0.632 to 0.422. Lower temperature concentrates probability on the top token; higher temperature spreads it out. That is the "creativity knob" people talk about, with the math behind it.
+
+## Flashcards
+
+Twelve cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay out the full set as one card per page, ready to print or save as a PDF for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="What are the five steps of one iteration of the prediction loop?">
+
+(1) Forward pass through every block. (2) Final linear projects the last position's vector to logits over the vocabulary. (3) Softmax turns logits into probabilities. (4) Sample one token (decoding strategy here). (5) Append the new token to the input. Loop.
+
+</Flashcard>
+
+<Flashcard question="Logits versus probabilities: what's the difference?">
+
+Logits are unnormalized scores over the vocabulary (any real numbers). Probabilities are the same vector after softmax: all between 0 and 1, summing to 1.0. Temperature scaling is applied to logits, before softmax.
+
+</Flashcard>
+
+<Flashcard question="When is greedy decoding the right choice?">
+
+Short structured outputs where one specific sequence is correct: a single number, a classification label, a short JSON field. Predictable, deterministic. Bad for longer multi-step problems where greedy gets stuck in suboptimal local choices.
+
+</Flashcard>
+
+<Flashcard question="What is top-k sampling?">
+
+Restrict to the top `k` highest-probability tokens, renormalize, then sample from those. Cuts the long tail of unlikely tokens. Typical `k` is 40 or 50. Reasonable middle ground between greedy and pure sampling.
+
+</Flashcard>
+
+<Flashcard question="What is top-p (nucleus) sampling?">
+
+Restrict to the smallest set of tokens whose cumulative probability is at least `p` (typically 0.9 or 0.95), renormalize, then sample. Adapts the candidate pool to the distribution: peaked distribution gets few candidates, flat distribution gets many. The most common modern default.
+
+</Flashcard>
+
+<Flashcard question="What does temperature do?">
+
+Divides logits before softmax. `T < 1.0` sharpens (peaked distribution); `T > 1.0` flattens (lifts low-probability tokens). Most APIs treat `T = 0` as shortcut for greedy (formula is undefined at exactly zero).
+
+</Flashcard>
+
+<Flashcard question="What is KV caching, and why does it matter?">
+
+The K and V vectors for previous tokens don't change between generation steps. Cache them; only compute K and V for the one new token each iteration. Without caching, generation scales quadratically with sequence length. With caching, it's roughly constant-time per new token after the first pass.
+
+</Flashcard>
+
+<Flashcard question="What three things can stop the generation loop?">
+
+(1) `max_tokens` (hard limit, always applies). (2) The model samples its EOS (end-of-sequence) token. (3) A user-specified stop sequence appears in the output. EOS or stop_sequence end the loop earlier if either fires before max_tokens.
+
+</Flashcard>
+
+<Flashcard question="Why are output tokens more expensive than input tokens?">
+
+Output tokens require sequential compute (each is its own forward pass; future tokens don't exist yet to parallelize). Input tokens process in parallel during prefill. Output is genuinely more expensive in wall-clock terms; APIs price accordingly (typically 3x to 5x more per output token).
+
+</Flashcard>
+
+<Flashcard question="Does the model 'know' its full answer when it starts typing?">
+
+No. At each step the model knows only the probability distribution over the next token. There is no plan, no draft, no concept of where the response is heading. Every token is sampled fresh. Coherent reasoning is an emergent effect of being well-trained on coherent text.
+
+</Flashcard>
+
+<Flashcard question="Does higher temperature make the model 'more creative' in any deep sense?">
+
+No. Higher temperature samples from a flatter distribution, so the model picks lower-probability tokens more often. If a model is bad at a task at temperature 0.7, raising to 1.5 makes it bad in a more random way, not more competent. Temperature is a randomness knob, not an intelligence knob.
+
+</Flashcard>
+
+<Flashcard question="What is the one-sentence takeaway from this lesson?">
+
+The model does not write. It predicts one token at a time.
+
+</Flashcard>
+
+</FlashcardSet>
