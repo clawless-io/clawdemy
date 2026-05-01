@@ -2,8 +2,9 @@ import { expect, test } from '@playwright/test';
 
 /**
  * Navigation tests: sidebar contains the lesson group; prev/next links flow
- * through the artifact sequence in order (brief → lesson → summary → practice
- * → cheatsheet → references).
+ * through the artifact sequence in order (brief → lesson → practice → summary
+ * → cheatsheet → references — the canonical six-artifact order from
+ * Doc/lesson-framework.md, mirrored in astro.config.mjs sidebar config).
  */
 
 const LESSON_BASE = '/lessons/getting-started/ai-wont-replace-you';
@@ -23,7 +24,7 @@ test('sidebar contains the Track 1 group with all six artifact entries', async (
 	const sidebar = page.locator('nav[aria-label="Main"]');
 
 	// Sidebar group label
-	await expect(sidebar.getByText('Track 1: Getting Started with Clawless')).toBeVisible();
+	await expect(sidebar.getByText('Track 1: Getting Started')).toBeVisible();
 
 	// Each of the six artifact links present
 	for (const path of [
@@ -41,16 +42,20 @@ test('sidebar contains the Track 1 group with all six artifact entries', async (
 test('prev/next chain through artifact sequence', async ({ page }) => {
 	const sequence = [
 		{ path: `${LESSON_BASE}/brief/`, prev: '/tracks/', next: `${LESSON_BASE}/lesson/` },
-		{ path: `${LESSON_BASE}/lesson/`, prev: `${LESSON_BASE}/brief/`, next: `${LESSON_BASE}/summary/` },
-		{ path: `${LESSON_BASE}/summary/`, prev: `${LESSON_BASE}/lesson/`, next: `${LESSON_BASE}/practice/` },
+		{ path: `${LESSON_BASE}/lesson/`, prev: `${LESSON_BASE}/brief/`, next: `${LESSON_BASE}/practice/` },
 		{
 			path: `${LESSON_BASE}/practice/`,
-			prev: `${LESSON_BASE}/summary/`,
+			prev: `${LESSON_BASE}/lesson/`,
+			next: `${LESSON_BASE}/summary/`,
+		},
+		{
+			path: `${LESSON_BASE}/summary/`,
+			prev: `${LESSON_BASE}/practice/`,
 			next: `${LESSON_BASE}/cheatsheet/`,
 		},
 		{
 			path: `${LESSON_BASE}/cheatsheet/`,
-			prev: `${LESSON_BASE}/practice/`,
+			prev: `${LESSON_BASE}/summary/`,
 			next: `${LESSON_BASE}/references/`,
 		},
 	];
