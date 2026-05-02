@@ -46,6 +46,11 @@ export default defineConfig({
 			customCss: ['./src/styles/global.css'],
 			social: [
 				{
+					icon: 'rss',
+					label: 'Podcast feed (RSS)',
+					href: '/podcast/feed.xml',
+				},
+				{
 					icon: 'github',
 					label: 'GitHub',
 					href: 'https://github.com/clawless-io/clawdemy',
