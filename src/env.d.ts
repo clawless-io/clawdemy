@@ -7,3 +7,17 @@
  */
 /// <reference types="@astrojs/starlight/virtual" />
 /// <reference path="../node_modules/@astrojs/starlight/virtual-internal.d.ts" />
+
+// text-readability ships pure JS; only the few methods we actually call need
+// types. JS port of Python textstat — same method names.
+declare module 'text-readability' {
+	const rs: {
+		fleschReadingEase(text: string): number;
+		fleschKincaidGrade(text: string): number;
+		smogIndex(text: string): number;
+		automatedReadabilityIndex(text: string): number;
+		colemanLiauIndex(text: string): number;
+		gunningFog(text: string): number;
+	};
+	export default rs;
+}
