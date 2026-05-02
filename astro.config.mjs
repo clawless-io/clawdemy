@@ -1,6 +1,7 @@
 // @ts-check
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
+import sitemap from '@astrojs/sitemap';
 import tailwindcss from '@tailwindcss/vite';
 import rehypeExternalLinks from 'rehype-external-links';
 
@@ -31,6 +32,13 @@ export default defineConfig({
 		},
 	},
 	integrations: [
+		// Sitemap with /legal/ pages excluded. Starlight registers @astrojs/sitemap
+		// internally; this explicit registration runs after Starlight's build:done
+		// hook so its filter is the one that lands on disk. Legal pages also carry
+		// noindex meta — sitemap exclusion is hygiene, noindex is enforcement.
+		sitemap({
+			filter: (page) => !page.includes('/legal/'),
+		}),
 		starlight({
 			title: 'Clawdemy',
 			description:
@@ -167,6 +175,9 @@ export default defineConfig({
 				// Adds og:image and twitter:image to every page; Starlight 0.38
 				// already emits the rest of the OG / Twitter Card meta automatically.
 				Head: './src/components/Head.astro',
+				// Adds a legal-links row + parent-company line under Starlight's
+				// default footer (edit-link / last-updated / pagination stay).
+				Footer: './src/components/Footer.astro',
 			},
 			// Pagefind index built at build time via package.json build script.
 			// Starlight surfaces it as the search UI.
