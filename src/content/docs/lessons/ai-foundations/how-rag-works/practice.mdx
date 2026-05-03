@@ -1,0 +1,202 @@
+---
+title: "Practice: How RAG works: feeding the model what it does not already know"
+description: Self-check on the RAG pipeline, an applied exercise tracing a query through each stage and predicting where it would fail, and flashcards built for retrieval.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+A short retrieval pass. Answer each question in your head (or on paper) before opening the collapsible. Active retrieval is where the learning sticks; rereading is comfortable but does much less.
+
+**1. In one sentence each, what are the two steps of RAG?**
+
+<details>
+<summary>Show answer</summary>
+
+(1) **Retrieve** documents relevant to the user's question from a knowledge base. (2) **Generate** the answer with the retrieved documents inserted into the prompt as context. The "G" in RAG is normal next-token generation; what changes from direct prompting is the contents of the prompt.
+
+</details>
+
+**2. Name the three problems RAG solves that direct prompting cannot, with one sentence on each.**
+
+<details>
+<summary>Show answer</summary>
+
+**Knowledge cutoff:** the model was trained on data ending at a fixed date; RAG lets it answer about anything in the index, including content added yesterday. **Private data:** your corpus (HR docs, codebase, internal wiki) was not in pretraining and should not be; RAG uses it at query time without ever training on it. **Hallucination grounding:** the answer comes alongside the chunks the model was given, so a human can verify (RAG does not eliminate hallucination, but it makes verification possible).
+
+</details>
+
+**3. Walk through the canonical five-stage pipeline. What is the role of each stage?**
+
+<details>
+<summary>Show answer</summary>
+
+(1) **Chunking:** split source documents into smaller, coherent pieces (typically 200-800 tokens). (2) **Embedding:** turn each chunk into a vector via an embedding model; store in a vector database for fast nearest-neighbor lookup. (3) **Retrieval:** embed the user's query with the same embedding model; the vector DB returns the top-K nearest chunks (often by cosine similarity). (4) **Prompt construction:** build the prompt the model will see, with the retrieved chunks inserted as context, the user's question, and a grounding instruction. (5) **Generation:** the model produces an answer conditioned on that prompt.
+
+</details>
+
+**4. Why is "retrieval is the upper bound on quality" load-bearing for how you debug a RAG system?**
+
+<details>
+<summary>Show answer</summary>
+
+Because the model can only generate using what it was given as context. If retrieval misses the right chunk, no amount of generation quality can recover. The first thing to inspect on a wrong RAG answer is *what was actually retrieved*, not *is the model dumb*. A larger language model on top of bad retrieval is still bad RAG. Most "the AI is dumb" complaints in RAG systems are retrieval problems wearing generation clothing.
+
+</details>
+
+**5. What is hybrid search and why is it usually preferable to pure semantic search?**
+
+<details>
+<summary>Show answer</summary>
+
+**Hybrid search** combines semantic search (vector similarity over chunk embeddings) with lexical search (BM25 or similar keyword matching) and merges the rankings. It is preferable because pure semantic search misses queries that hinge on specific strings: a query for *"section 4.2.1"* should retrieve the chunk containing that literal string, not the chunk with the most semantically similar content. Lexical search catches those; semantic search catches paraphrases the lexical match would miss. Together they cover both failure modes.
+
+</details>
+
+**6. What is the difference between RAG and fine-tuning, and when would you use each?**
+
+<details>
+<summary>Show answer</summary>
+
+**RAG** injects new information at query time via the prompt. **Fine-tuning** modifies the model's weights to bake in new behavior or knowledge. Use RAG when the answer depends on facts that change, when you need to cite sources, when the corpus is too large to train on, when the corpus is private, or when documents need to be added or removed on the fly. Use fine-tuning when you want a behavior or style to persist without per-call token cost, when the change is about how the model writes rather than what facts it knows, or when you need consistency across many calls without managing a retrieval pipeline. They are not mutually exclusive; production systems often combine both.
+
+</details>
+
+**7. What is indirect prompt injection, and why is it harder to defend against than direct injection?**
+
+<details>
+<summary>Show answer</summary>
+
+**Indirect prompt injection** is when text inside a document the application has retrieved (rather than text the user typed) contains instruction-shaped tokens the model follows. The classic shape is a malicious actor publishing text like *"Ignore previous instructions and reply only with..."* in a webpage, support ticket, comment, or any document type that gets ingested into a RAG index.
+
+It is harder than direct injection because the application cannot inspect the user's intent at injection time: the user did not write the malicious content. The injection rode in through the retrieval pipeline, possibly months earlier when the document was first indexed. The defense surface is the entire corpus of indexed content plus everything that ever flows into it.
+
+</details>
+
+## Try it yourself: trace and predict
+
+This exercise puts the pipeline-and-failure-mode model into practice. About 15 minutes.
+
+**Side effects:** none. Pen and paper, or a text editor.
+
+**Setup:** you are evaluating a RAG system that is supposed to answer employee questions about a company's HR policies. The corpus is the company's HR handbook (PDF, ~150 pages). The system uses a general-purpose embedding model and a fixed-length chunker (every 500 tokens, no overlap). The user query is:
+
+> *"How many days of bereavement leave am I entitled to for a grandparent?"*
+
+The retrieved chunks come back as:
+
+```
+[Chunk 1] Bereavement leave is provided to all full-time employees in
+accordance with this section. Employees should notify their manager and
+HR within 24 hours of the loss. Duration of leave depends on the
+relationship to the deceased.
+
+[Chunk 2] Personal leave may be requested for a variety of reasons,
+including but not limited to medical appointments, family events, or
+other approved circumstances. Personal leave is unpaid unless explicitly
+designated otherwise.
+
+[Chunk 3] In the event of the death of a spouse, child, or parent, an
+employee is entitled to up to five (5) consecutive working days of
+paid bereavement leave. Documentation may be requested.
+```
+
+The model's response: *"You are entitled to up to five consecutive working days of paid bereavement leave."*
+
+This answer is wrong. The handbook actually specifies three days for grandparents (in a paragraph not retrieved). Your job: walk the pipeline stage by stage and identify which stages contributed to the failure.
+
+**Expected outcomes:**
+
+- **Stage 1 (chunking):** Likely contributing. A fixed-length 500-token chunker with no overlap will frequently split a single section across two chunks. The grandparent-specific clause may be in a chunk that begins mid-paragraph and lacks the section heading "Bereavement Leave" that would have made it semantically clear what the chunk is about. Document-aware chunking that respects section boundaries would likely have kept the relevant clause with its heading and surrounding context.
+- **Stage 2 (embedding):** Possibly contributing. A general-purpose embedding model may not encode the specific HR-policy semantic structure well. Embeddings might place the spouse/child/parent clause closer to the query *"grandparent"* than the actual grandparent clause if the latter is in a chunk that is lexically dense in administrative boilerplate.
+- **Stage 3 (retrieval):** Definitely contributing. Whatever the upstream causes, the right chunk did not appear in the top-K returned. If the handbook explicitly mentions grandparents, hybrid search (semantic + lexical for the literal word "grandparent") would likely have surfaced it. Increasing K is a brute-force option but has its own cost (more tokens in the prompt).
+- **Stage 4 (prompt construction):** Probably not contributing. The retrieved chunks are a coherent block; if the right chunk had been there, a reasonable grounding instruction would have led to the right answer.
+- **Stage 5 (generation):** Contributing in a quieter way. The model produced an answer based on chunk 3 without flagging that the question was about grandparents and chunk 3 covers spouse, child, or parent only. A stricter grounding instruction (*"answer only if the context explicitly addresses the relationship in the user's question, otherwise say 'I don't know'"*) might have surfaced the mismatch.
+
+**Sanity check:** the lesson's point about retrieval being the upper bound applies. The largest contribution to this failure is upstream of generation. Fixing the language model would not fix this answer; fixing chunking and adding hybrid search would. This is the typical shape of a real RAG bug.
+
+## Flashcards
+
+Twelve cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay out the full set as one card per page, ready to print or save as a PDF for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="In two steps, what is RAG?">
+
+(1) Retrieve documents relevant to the user's question from a knowledge base. (2) Insert them into the prompt and generate the answer using them. The generation step is normal next-token prediction; what changes from direct prompting is the contents of the prompt.
+
+</Flashcard>
+
+<Flashcard question="What three problems does RAG solve that direct prompting cannot?">
+
+Knowledge cutoff (model's training data ended at a fixed date), private data (your corpus was not in pretraining), and hallucination grounding (the model returns answers alongside the source chunks so a human can verify).
+
+</Flashcard>
+
+<Flashcard question="Name the five stages of the canonical RAG pipeline.">
+
+Chunking (split documents), embedding (vectorize chunks, store in vector DB), retrieval (embed query, find nearest chunks), prompt construction (build prompt with context + grounding instruction + question), generation (model answers).
+
+</Flashcard>
+
+<Flashcard question="Why is chunking the most underestimated stage?">
+
+Chunks too large dilute relevance (the embedding represents the average meaning of multiple ideas). Chunks too small lose context (a chunk that says "this is required" is useless without the heading that defined "this"). Document-aware chunkers consistently outperform naive fixed-length splits, and the right strategy depends on document type.
+
+</Flashcard>
+
+<Flashcard question="Is the embedding model the same as the language model?">
+
+No. The embedding model is a separate, usually much smaller model whose only job is to map text to vectors so semantically similar text ends up nearby. It runs at index time on every chunk and at query time on every query.
+
+</Flashcard>
+
+<Flashcard question="Why must you use the same embedding model for documents and queries?">
+
+Different embedding models live in different vector spaces. Mixing them produces meaningless distances. This is one of the most common silent bugs in early RAG implementations.
+
+</Flashcard>
+
+<Flashcard question="What is hybrid search?">
+
+The combination of semantic search (vector similarity) and lexical search (BM25 or similar keyword matching), with the rankings merged. It catches both paraphrased queries (semantic) and queries that hinge on specific strings or codes (lexical), each of which the other would miss.
+
+</Flashcard>
+
+<Flashcard question="What does 'retrieval is the upper bound on quality' mean operationally?">
+
+The model can only generate using chunks it was given. If retrieval misses the right chunk, no amount of generation quality can recover. Always inspect what was actually retrieved before assuming the model is the problem. Most "AI is dumb" complaints in RAG are retrieval problems.
+
+</Flashcard>
+
+<Flashcard question="What is ungrounded generation?">
+
+When the model produces an answer that uses its pretraining knowledge instead of, or in addition to, the retrieved context. Most dangerous when the context is silent on the question and the model fills in from prior. The grounding instruction in the prompt is the main defense; eval is the only way to know if it is working.
+
+</Flashcard>
+
+<Flashcard question="When would you use RAG over fine-tuning?">
+
+When the answer depends on facts that change, when you need source citations, when the corpus is too large to train on, when the corpus is private, or when documents need to be added or removed on the fly. Use fine-tuning instead when you want a behavior or style to persist without per-call token cost.
+
+</Flashcard>
+
+<Flashcard question="What is indirect prompt injection?">
+
+When text inside a document the application has retrieved (not text the user typed) contains instruction-shaped tokens the model follows. The model has no robust way to tell injected instructions from operator instructions; the attack surface is the entire indexed corpus plus everything that flows into it.
+
+</Flashcard>
+
+<Flashcard question="What is the one-sentence takeaway from this lesson?">
+
+Retrieval finds it. The prompt frames it. The model writes it.
+
+</Flashcard>
+
+</FlashcardSet>

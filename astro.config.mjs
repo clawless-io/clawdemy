@@ -185,6 +185,18 @@ export default defineConfig({
 								{ label: 'References', slug: 'lessons/ai-foundations/how-prompting-works/references' },
 							],
 						},
+						{
+							label: '5.9  RAG',
+							collapsed: true,
+							items: [
+								{ label: 'Brief', slug: 'lessons/ai-foundations/how-rag-works/brief' },
+								{ label: 'Lesson', slug: 'lessons/ai-foundations/how-rag-works/lesson' },
+								{ label: 'Practice', slug: 'lessons/ai-foundations/how-rag-works/practice' },
+								{ label: 'Summary', slug: 'lessons/ai-foundations/how-rag-works/summary' },
+								{ label: 'Cheatsheet', slug: 'lessons/ai-foundations/how-rag-works/cheatsheet' },
+								{ label: 'References', slug: 'lessons/ai-foundations/how-rag-works/references' },
+							],
+						},
 					],
 				},
 			],

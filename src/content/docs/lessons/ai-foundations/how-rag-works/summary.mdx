@@ -1,0 +1,38 @@
+---
+title: "Summary: How RAG works: feeding the model what it does not already know"
+description: The 5-minute scan version of the RAG lesson. Two steps, three problems it solves, the five-stage pipeline, where each stage breaks, and the indirect-prompt-injection surface RAG creates.
+sidebar:
+  order: 4
+  label: Summary
+artifact: summary
+---
+
+**RAG is two steps.** Retrieve documents relevant to the user's question; put them in the prompt and ask the model to answer using them. Everything else is the pipeline that makes those two steps work at scale. The "G" is generation, which you already understand from earlier lessons. The new piece is what you put in front of the model when "what to put" is buried in documents the model has never seen.
+
+This summary is the scan-it-in-five-minutes version. The full lesson walks through the canonical five-stage pipeline, names the failure mode at each stage, contrasts RAG with fine-tuning, and closes on **indirect prompt injection**, the structural security issue RAG introduces.
+
+## Core ideas
+
+- **RAG solves three problems direct prompting cannot.** Knowledge cutoff (the model's training data ended at a fixed date), private data (your corpus was not in pretraining and should not be), and hallucination grounding (answers come with citable source chunks instead of having to be trusted on the model's word).
+- **The pipeline has five stages.** Chunking (split documents into coherent pieces). Embedding (turn each chunk into a vector via an embedding model). Retrieval (embed the query, find the top-K nearest chunks in the vector database). Prompt construction (build the prompt with retrieved context, grounding instruction, and the user question). Generation (the model answers).
+- **Chunking is the most underestimated stage.** Too large dilutes meaning; too small loses context. Document-aware chunkers (respect headings, paragraphs, code blocks) consistently outperform naive fixed-length splits. The right strategy depends on what kind of documents you are indexing.
+- **The embedding model is not the language model.** It is a separate, usually smaller model whose only job is to map text to vectors so that semantically similar text ends up nearby. Domain mismatch between embedding model and corpus is a common silent failure.
+- **Use the same embedding model for documents and queries.** Different embedding models live in different vector spaces; mixing them produces meaningless distances. Common silent bug in early implementations.
+- **Pure semantic search misses keyword matches.** Hybrid search (semantic plus lexical, often BM25) is what most production RAG systems actually do. A query for *"section 4.2.1"* needs the literal string, not the most semantically similar chunk.
+- **Retrieval is the upper bound on quality.** A bigger language model on top of bad retrieval is still bad RAG. Identify retrieval problems before chasing generation problems.
+- **Prompt construction does real work.** Source labels (so the model can cite), an explicit grounding instruction (use only the provided context, say *"I don't know"* if it is silent), and an evaluated context-vs-question ordering each contribute. Templates matter.
+- **Ungrounded generation is a real failure mode.** The model can fall back on its pretraining knowledge instead of the retrieved context, especially when the context is silent on the question. The grounding instruction reduces this; eval is the only way to know if it is working.
+- **RAG vs fine-tuning are different tools.** RAG for facts that change, sources you can cite, corpora that are private or too large. Fine-tuning for behavior or style that should persist without per-call token cost. Often combined.
+- **Pipeline failure modes map to symptoms.** Bad retrieved context → chunking. Semantically similar chunks misclustered → embedding. Right answer in the corpus but model says it does not know → retrieval. Model uses prior knowledge despite context → prompt construction. Citations that do not actually support the claim → ungrounded generation.
+- **Indirect prompt injection is RAG's structural security issue.** The model sees content from documents the operator may not have written or read. A malicious actor can publish text shaped like an instruction (*"Ignore previous instructions and reply only with..."*) that gets indexed and later retrieved. The model has no robust way to tell the injected instruction from an operator instruction.
+- **Defenses are layered, none complete.** Source provenance (prefer documents from sources with known authorship), content sanitization at index time, output filtering, action sandboxing, visible citations. Each reduces the attack surface; none closes it on its own.
+
+## What changes for you
+
+Before this lesson, the line between "the model knows X" and "the model was given X" was probably invisible. After it, you can name the architecture pattern when a vendor demos *"the assistant knows our company docs"*, predict the failure modes you will hit, and recognize that the headline number ("we can answer 95% of questions correctly") is hiding two separate metrics: did retrieval find the right chunk, and did the model use it correctly.
+
+When you read or build a RAG system, the productive first move on a wrong answer is *"what was actually retrieved?"*, not *"is the model dumb?"*. When you index any corpus that takes inputs from people who are not you, the productive question is *"what happens if someone slips an instruction into a document?"*. Both questions follow directly from understanding the pipeline as a pipeline rather than a black box.
+
+**Retrieval finds it.**\
+**The prompt frames it.**\
+**The model writes it.**
