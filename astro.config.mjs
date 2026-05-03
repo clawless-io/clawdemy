@@ -173,6 +173,18 @@ export default defineConfig({
 								{ label: 'References', slug: 'lessons/ai-foundations/how-models-learn-to-be-helpful/references' },
 							],
 						},
+						{
+							label: '5.8  Prompting',
+							collapsed: true,
+							items: [
+								{ label: 'Brief', slug: 'lessons/ai-foundations/how-prompting-works/brief' },
+								{ label: 'Lesson', slug: 'lessons/ai-foundations/how-prompting-works/lesson' },
+								{ label: 'Practice', slug: 'lessons/ai-foundations/how-prompting-works/practice' },
+								{ label: 'Summary', slug: 'lessons/ai-foundations/how-prompting-works/summary' },
+								{ label: 'Cheatsheet', slug: 'lessons/ai-foundations/how-prompting-works/cheatsheet' },
+								{ label: 'References', slug: 'lessons/ai-foundations/how-prompting-works/references' },
+							],
+						},
 					],
 				},
 			],
