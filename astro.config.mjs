@@ -156,11 +156,22 @@ export default defineConfig({
 							],
 						},
 						{
-							label: 'Lecture 2: Transformer-based models & tricks',
-							collapsed: true,
-							badge: { text: 'Coming soon', variant: 'note' },
+							label: 'Lecture 2: Modern transformer',
+							collapsed: false,
 							items: [
-								{ label: 'Coming soon', slug: 'lessons/ai-foundations/coming-soon' },
+								{
+									label: '2.1  Position embeddings + RoPE',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/ai-foundations/position-embeddings-and-rope/brief' },
+										{ label: 'Lesson', slug: 'lessons/ai-foundations/position-embeddings-and-rope/lesson' },
+										{ label: 'Practice', slug: 'lessons/ai-foundations/position-embeddings-and-rope/practice' },
+										{ label: 'Summary', slug: 'lessons/ai-foundations/position-embeddings-and-rope/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/ai-foundations/position-embeddings-and-rope/cheatsheet' },
+										{ label: 'References', slug: 'lessons/ai-foundations/position-embeddings-and-rope/references' },
+									],
+								},
+								{ label: '2.2-2.6 coming soon', slug: 'lessons/ai-foundations/coming-soon' },
 							],
 						},
 						{
