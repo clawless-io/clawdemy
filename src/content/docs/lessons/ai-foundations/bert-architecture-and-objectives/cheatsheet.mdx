@@ -1,0 +1,148 @@
+---
+title: "Cheatsheet: BERT: architecture, MLM, and NSP"
+description: "One-page reference. Encoder-only architecture, structural tokens, three input embeddings, MLM with 80/10/10 mix, NSP, and the train-then-fine-tune workflow."
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## The one idea that matters
+
+```
+BERT = Bidirectional Encoder Representations from Transformers
+
+Drop the decoder. Keep the encoder.
+Self-attention without a causal mask is bidirectional.
+Train with MLM + NSP. Fine-tune with a small head on top.
+```
+
+## Architecture at a glance
+
+| Property | BERT | Decoder-only (e.g., GPT-style) |
+| --- | --- | --- |
+| **Stacks** | Encoder only | Decoder only |
+| **Self-attention masking** | None (bidirectional) | Causal (each token sees only past) |
+| **Naturally good at** | Classification, embeddings, span detection | Generation, completion, chat |
+| **Cannot do naturally** | Text generation | Bidirectional context integration |
+
+## Structural tokens
+
+| Token | Purpose |
+| --- | --- |
+| **`[CLS]`** | Always at position 0 of the input; its output embedding integrates information from every token; classification heads attach on top of it |
+| **`[SEP]`** | Marks sentence boundaries when the input has two sentences; enables NSP |
+| **`[MASK]`** | Used during MLM pre-training to indicate a position the model must predict; does NOT appear at inference time |
+| **`[PAD]`** | Fills out a fixed-length training batch; ignored by attention via masking |
+
+## Input embedding (three additive layers)
+
+```
+input_vector = token_embedding + position_embedding + segment_embedding
+
+token_embedding:    learned vector per WordPiece token (~30k vocab)
+position_embedding: learned vector per absolute position (BERT-specific
+                    choice; original transformer used hard-coded sinusoidal)
+segment_embedding:  Segment A or Segment B (NEW in BERT; tells the model
+                    which sentence a token belongs to in two-sentence input)
+```
+
+## Pre-training objective 1: MLM (Masked Language Model)
+
+```
+Step 1: select a fraction of tokens (BERT paper: 15%)
+Step 2: per selected token, apply the 80/10/10 mix:
+
+  80%  →  replace with [MASK]
+  10%  →  replace with a random vocabulary token
+  10%  →  leave unchanged
+
+Step 3: train the model to predict the ORIGINAL token in all three cases
+```
+
+| Why the mix? | The model needs to maintain useful representations for every token, not just `[MASK]` positions, because `[MASK]` does not appear at inference time. |
+
+## Pre-training objective 2: NSP (Next Sentence Prediction)
+
+```
+Step 1: pair two sentences from the corpus
+Step 2: 50% real consecutive pairs, 50% random pairs
+Step 3: classify via a head on the CLS token's output embedding:
+        "B truly follows A"  vs  "B is random"
+```
+
+| Why? | Teaches the model sentence-level relationships. Complements MLM's per-token focus. (Later work, e.g., RoBERTa, showed NSP is less load-bearing than the original BERT paper assumed.) |
+
+## Pre-training and fine-tuning
+
+| Stage | Data | Cost | Output |
+| --- | --- | --- | --- |
+| **Pre-training** | Large unlabeled text corpus | Expensive (one-time per release) | Pre-trained encoder weights |
+| **Fine-tuning** | Small labeled dataset for target task | Cheap | Task-specific head on top of pre-trained encoder |
+
+## Fine-tuning patterns
+
+| Task | Head placement | Examples |
+| --- | --- | --- |
+| **Sentence-level classification** | Linear classifier on CLS output embedding | Sentiment, intent, document classification |
+| **Sentence-pair classification** | Linear classifier on CLS output embedding | Entailment, paraphrase detection |
+| **Per-token classification** | Linear classifier on every token's output embedding | Named-entity recognition, part-of-speech tagging |
+| **Span detection** | Two linear heads (start, end) on every token's output embedding | Question answering |
+
+## What you see in the wild
+
+| Phrase | What it means |
+| --- | --- |
+| **BERT** | The original model. ~100M parameters at BERT-base scale. |
+| **BERT-base / BERT-large** | Two size variants from the original paper |
+| **uncased / cased** | Whether the input is lowercased before tokenization (depends on your task) |
+| **WordPiece** | The tokenizer BERT uses (~30k vocab) |
+| **MLM head** | The pre-training head that predicts the original token at masked positions |
+| **NSP head** | The pre-training head that predicts whether sentence B follows sentence A |
+| **Hugging Face** | The de facto repository of off-the-shelf encoder models, including the entire BERT family |
+
+## Walked example
+
+```
+Input:           "this teddy bear is so cute."
+
+Pre-process:     "this teddy bear is so cute."  (uncased: lowercase)
+
+WordPiece:       this | teddy | bear | is | so | cute | .
+
+Add structural:  [CLS] this teddy bear is so cute . [SEP]
+
+Per-token:       token_emb + position_emb + segment_emb (Segment A)
+
+Encoder pass:    every token's output embedding integrates the full context
+
+Sentiment head:  read CLS output → linear classifier → "positive"
+```
+
+## Pitfalls to dodge
+
+| Pitfall | Reality |
+| --- | --- |
+| BERT is interchangeable with GPT | No. Different architectures (encoder-only vs decoder-only), different attention masking, different pretraining, different uses. |
+| BERT can do text generation | Not naturally. No decoder, no autoregressive loop. |
+| `[MASK]` appears at inference time | No. `[MASK]` is a pre-training-only artifact. The 80/10/10 mix exists so the model handles real input without `[MASK]` tokens. |
+| All encoder-only models use NSP | No. RoBERTa (next lesson) drops NSP entirely without losing performance. |
+| Bidirectional means two passes | No. One forward pass through the encoder; the bidirectionality comes from the absence of causal masking, not from running attention twice. |
+
+## Glossary
+
+- **BERT (Bidirectional Encoder Representations from Transformers):** encoder-only transformer with bidirectional self-attention, pre-trained via MLM + NSP, designed to be fine-tuned for downstream classification and span-detection tasks.
+- **Bidirectional self-attention:** self-attention computed without a causal mask, so every token attends to every other token in both directions in one pass.
+- **CLS token:** special classification token at position 0 of every input; its output embedding is used by sentence-level classification heads.
+- **SEP token:** special separator token marking sentence boundaries.
+- **WordPiece:** the tokenizer used by BERT; learns merge rules to build a ~30k vocabulary from a training corpus.
+- **Segment embedding:** new in BERT; a learned vector indicating which sentence (A or B) a token belongs to.
+- **MLM (Masked Language Model):** pre-training objective. Mask a fraction of tokens (BERT paper: 15%) with the 80/10/10 mix; predict the original.
+- **NSP (Next Sentence Prediction):** pre-training objective. Pair two sentences; predict whether B genuinely follows A via a CLS-head classifier.
+- **Pre-training:** large-scale training on unlabeled data via MLM + NSP; produces the pre-trained encoder weights.
+- **Fine-tuning:** task-specific adaptation of the pre-trained encoder by adding a small head and training on labeled data.
+
+**BERT drops the decoder.**\
+**MLM and NSP train it bidirectionally.**\
+**A CLS-head does the rest.**

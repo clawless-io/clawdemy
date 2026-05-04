@@ -207,7 +207,19 @@ export default defineConfig({
 										{ label: 'References', slug: 'lessons/ai-foundations/encoder-decoder-and-t5-span-corruption/references' },
 									],
 								},
-								{ label: '2.5-2.6 coming soon', slug: 'lessons/ai-foundations/coming-soon' },
+								{
+									label: '2.5  BERT',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/ai-foundations/bert-architecture-and-objectives/brief' },
+										{ label: 'Lesson', slug: 'lessons/ai-foundations/bert-architecture-and-objectives/lesson' },
+										{ label: 'Practice', slug: 'lessons/ai-foundations/bert-architecture-and-objectives/practice' },
+										{ label: 'Summary', slug: 'lessons/ai-foundations/bert-architecture-and-objectives/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/ai-foundations/bert-architecture-and-objectives/cheatsheet' },
+										{ label: 'References', slug: 'lessons/ai-foundations/bert-architecture-and-objectives/references' },
+									],
+								},
+								{ label: '2.6 coming soon', slug: 'lessons/ai-foundations/coming-soon' },
 							],
 						},
 						{
