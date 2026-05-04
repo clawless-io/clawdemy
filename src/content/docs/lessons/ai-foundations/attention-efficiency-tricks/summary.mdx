@@ -1,0 +1,35 @@
+---
+title: "Summary: Attention efficiency tricks: sliding windows and KV-cache savings"
+description: "The 5-minute scan version. Two distinct efficiency problems. Standard self-attention is O(n^2) in compute (sliding window attention solves it); the KV cache used at decoding gets large fast (sharing K and V across heads, in the MHA, MQA, GQA progression, solves it)."
+sidebar:
+  order: 4
+  label: Summary
+artifact: summary
+---
+
+**Standard self-attention is operationally expensive in two distinct ways.** Compute is `O(n^2)` in sequence length: the interaction matrix has `n^2` entries, and doubling sequence length quadruples cost. Memory pressure shows up at inference: the KV cache that speeds up decoding grows with sequence length, head count, and layer depth. Two problems, two fixes. **Sliding window attention** restricts each token to a local neighborhood; **MHA, MQA, and GQA** are a progression of how aggressively keys and values are shared across attention heads. This lesson keeps the two cleanly separate.
+
+This summary is the scan-it-in-five-minutes version. The full lesson covers each problem and its fix, with the lecturer's own framings preserved.
+
+## Core ideas
+
+- **Self-attention is `O(n^2)` in compute.** Every token attends to every other token through `Q · K^T`. The interaction matrix is `n` by `n`. Doubling sequence length quadruples compute. At long contexts (tens or hundreds of thousands of tokens), this becomes a real bottleneck.
+- **Sliding window attention restricts each token to its local neighborhood.** Longformer (2020) introduced the pattern. Each token attends only to a window of nearby tokens (small in slide illustrations, several thousand in production). Modern implementations use tiling-based approaches that compute only the entries inside the window, never materializing the full `n` by `n` matrix.
+- **The receptive field grows with stacking, even when every layer is local.** Mistral is the lecture's example: sliding window at every layer, but a token in layer 5 can transitively attend to tokens far outside layer 5's direct window through the chain of layer-by-layer attention. Same intuition as receptive fields in convolutional neural networks.
+- **Some architectures interleave local and global attention layers.** Most layers use sliding-window attention (cheap); a few use full global attention (expensive but complete). Combinations vary by model.
+- **The second problem is unrelated to compute scaling.** During autoregressive decoding, the model attends each new token to all previous tokens. The keys and values come up repeatedly. The KV cache stores them so they do not have to be recomputed at every generation step.
+- **The KV cache speeds up decoding but grows.** With sequence length, head count, and layer depth. The lecturer flags this in passing; full coverage is in the next Stanford lecture. The relevant point for this lesson: the cache can become a memory bottleneck.
+- **MHA → MQA → GQA progression.** Standard multi-head attention (MHA): every head has its own K and V projections. Multi-query attention (MQA): all H heads share one K and one V (most aggressive savings, KV cache shrinks by factor of H). Group-query attention (GQA): G groups of H/G heads each share K and V (the modern compromise, cache shrinks by factor of H/G).
+- **Why share K and V but not Q?** The lecturer's intuition: queries ask "what am I looking for," and asking different questions across heads is valuable; keys and values are what is being looked at, so the diversity loss from sharing them is smaller. Plus the practical: the KV cache, not the Q projections, is what gets large at inference.
+- **GQA is typically what you'll see in modern LLMs**, per the lecturer's own hedged framing ("typically I would say GQA is what you would see, but it's not necessarily the case for all models"). Quality close to MHA, memory savings close to MQA.
+- **Pitfall: conflating the two problems.** Sliding window is about compute; MHA/MQA/GQA are about memory. Different problems, can be combined.
+- **Pitfall: thinking sliding window means the model can never see beyond the window.** Stacking layers expands the receptive field beyond a single window, just like in CNNs.
+- **Pitfall: forgetting these tricks affect inference more than training.** The KV cache exists at decode time. MQA and GQA primarily improve inference memory and latency. Training uses the full attention computation regardless.
+
+## What changes for you
+
+When you read a model card and see "sliding window attention" or "GQA," you now know which efficiency problem each one is targeting. When a vendor advertises a very long context window, the underlying machinery is almost always some combination of these techniques. The "post-2017 changes that stuck" arc closes here: position embeddings (Lecture 2.1), normalization (Lecture 2.2), attention efficiency (this lesson) are the three places the field genuinely moved on from the original transformer. The next lesson opens a new arc on transformer-based architectures (T5 and BERT family).
+
+**Sliding window attention is about compute.**\
+**MHA, MQA, and GQA are about memory.**\
+**Two problems, two fixes, often combined.**

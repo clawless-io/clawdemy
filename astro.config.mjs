@@ -183,7 +183,19 @@ export default defineConfig({
 										{ label: 'References', slug: 'lessons/ai-foundations/layer-norm-and-rmsnorm/references' },
 									],
 								},
-								{ label: '2.3-2.6 coming soon', slug: 'lessons/ai-foundations/coming-soon' },
+								{
+									label: '2.3  Attention efficiency tricks',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/ai-foundations/attention-efficiency-tricks/brief' },
+										{ label: 'Lesson', slug: 'lessons/ai-foundations/attention-efficiency-tricks/lesson' },
+										{ label: 'Practice', slug: 'lessons/ai-foundations/attention-efficiency-tricks/practice' },
+										{ label: 'Summary', slug: 'lessons/ai-foundations/attention-efficiency-tricks/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/ai-foundations/attention-efficiency-tricks/cheatsheet' },
+										{ label: 'References', slug: 'lessons/ai-foundations/attention-efficiency-tricks/references' },
+									],
+								},
+								{ label: '2.4-2.6 coming soon', slug: 'lessons/ai-foundations/coming-soon' },
 							],
 						},
 						{
