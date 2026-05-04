@@ -160,7 +160,7 @@ export default defineConfig({
 							collapsed: false,
 							items: [
 								{
-									label: '2.1  Position embeddings + RoPE',
+									label: '2.1  How Transformers Understand Word Order',
 									collapsed: true,
 									items: [
 										{ label: 'Brief', slug: 'lessons/ai-foundations/position-embeddings-and-rope/brief' },
@@ -172,7 +172,7 @@ export default defineConfig({
 									],
 								},
 								{
-									label: '2.2  Layer norm + RMSNorm',
+									label: '2.2  Why Transformers Need Stability to Learn',
 									collapsed: true,
 									items: [
 										{ label: 'Brief', slug: 'lessons/ai-foundations/layer-norm-and-rmsnorm/brief' },
@@ -184,7 +184,7 @@ export default defineConfig({
 									],
 								},
 								{
-									label: '2.3  Attention efficiency tricks',
+									label: '2.3  How Transformers Scale to Real-World Data',
 									collapsed: true,
 									items: [
 										{ label: 'Brief', slug: 'lessons/ai-foundations/attention-efficiency-tricks/brief' },
@@ -196,7 +196,7 @@ export default defineConfig({
 									],
 								},
 								{
-									label: '2.4  Encoder-decoder + T5',
+									label: '2.4  How Transformers Turn Input Into Output',
 									collapsed: true,
 									items: [
 										{ label: 'Brief', slug: 'lessons/ai-foundations/encoder-decoder-and-t5-span-corruption/brief' },
@@ -208,7 +208,7 @@ export default defineConfig({
 									],
 								},
 								{
-									label: '2.5  BERT',
+									label: '2.5  How Transformers Learn Language Understanding',
 									collapsed: true,
 									items: [
 										{ label: 'Brief', slug: 'lessons/ai-foundations/bert-architecture-and-objectives/brief' },
@@ -220,7 +220,7 @@ export default defineConfig({
 									],
 								},
 								{
-									label: '2.6  BERT derivatives',
+									label: '2.6  How These Models Keep Improving',
 									collapsed: true,
 									items: [
 										{ label: 'Brief', slug: 'lessons/ai-foundations/bert-derivatives-distilbert-roberta/brief' },
