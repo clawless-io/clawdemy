@@ -219,7 +219,18 @@ export default defineConfig({
 										{ label: 'References', slug: 'lessons/ai-foundations/bert-architecture-and-objectives/references' },
 									],
 								},
-								{ label: '2.6 coming soon', slug: 'lessons/ai-foundations/coming-soon' },
+								{
+									label: '2.6  BERT derivatives',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/ai-foundations/bert-derivatives-distilbert-roberta/brief' },
+										{ label: 'Lesson', slug: 'lessons/ai-foundations/bert-derivatives-distilbert-roberta/lesson' },
+										{ label: 'Practice', slug: 'lessons/ai-foundations/bert-derivatives-distilbert-roberta/practice' },
+										{ label: 'Summary', slug: 'lessons/ai-foundations/bert-derivatives-distilbert-roberta/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/ai-foundations/bert-derivatives-distilbert-roberta/cheatsheet' },
+										{ label: 'References', slug: 'lessons/ai-foundations/bert-derivatives-distilbert-roberta/references' },
+									],
+								},
 							],
 						},
 						{
