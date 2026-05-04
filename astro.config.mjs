@@ -195,7 +195,19 @@ export default defineConfig({
 										{ label: 'References', slug: 'lessons/ai-foundations/attention-efficiency-tricks/references' },
 									],
 								},
-								{ label: '2.4-2.6 coming soon', slug: 'lessons/ai-foundations/coming-soon' },
+								{
+									label: '2.4  Encoder-decoder + T5',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/ai-foundations/encoder-decoder-and-t5-span-corruption/brief' },
+										{ label: 'Lesson', slug: 'lessons/ai-foundations/encoder-decoder-and-t5-span-corruption/lesson' },
+										{ label: 'Practice', slug: 'lessons/ai-foundations/encoder-decoder-and-t5-span-corruption/practice' },
+										{ label: 'Summary', slug: 'lessons/ai-foundations/encoder-decoder-and-t5-span-corruption/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/ai-foundations/encoder-decoder-and-t5-span-corruption/cheatsheet' },
+										{ label: 'References', slug: 'lessons/ai-foundations/encoder-decoder-and-t5-span-corruption/references' },
+									],
+								},
+								{ label: '2.5-2.6 coming soon', slug: 'lessons/ai-foundations/coming-soon' },
 							],
 						},
 						{
