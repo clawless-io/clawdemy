@@ -1,0 +1,33 @@
+---
+title: "Summary: Layer normalization: from post-norm to pre-norm and RMSNorm"
+description: The 5-minute scan version. The "Add & Norm" boxes in the original transformer use LayerNorm to rescale activations into a useful range. Two changes since 2017 (where the LayerNorm sits, and what it computes) show up in every modern model card.
+sidebar:
+  order: 4
+  label: Summary
+artifact: summary
+---
+
+**The "Add & Norm" boxes in the original transformer diagram are doing real work.** Each one adds the residual back in and normalizes the result so the next sub-layer sees activations in a useful range. The mechanism the 2017 paper used is called **LayerNorm**: subtract the mean of the vector's components, divide by the standard deviation, apply learnable rescale and shift. Modern transformers do two things differently: they put the LayerNorm in a different place (pre-norm instead of post-norm), and they often use a simplification called **RMSNorm**. Both show up explicitly in modern model cards.
+
+This summary is the scan-it-in-five-minutes version. The full lesson walks the LayerNorm mechanism, the LayerNorm-vs-BatchNorm contrast, the post-norm to pre-norm placement shift, and RMSNorm as the modern simplification.
+
+## Core ideas
+
+- **Activations drift inside a deep network.** The vector flowing between sub-layers can have one component at 50, another at 0.001, a third near -200. The next layer struggles to learn from inputs that vary that wildly. The keyword in the literature is **internal covariate shift**.
+- **LayerNorm rescales each token's activation vector into a controlled range.** Per-token: subtract the mean of the vector's components, divide by their standard deviation. Then apply two learnable parameters per component: gamma (rescale) and beta (shift). The rescale and shift let the model recover any range it needs while keeping the normalization step in place.
+- **LayerNorm is preferred over BatchNorm in transformers.** The lecturer's framing: "probably because empirically it works better." Plus a structural reason: BatchNorm depends on batch composition, so the statistics at training time differ from inference time. LayerNorm operates per-token and avoids that gap entirely. CV intuition: BatchNorm normalizes "one component across many vectors"; LayerNorm normalizes "one vector across many components."
+- **The first shift is post-norm to pre-norm.** Original transformer: `LayerNorm(x + SubLayer(x))` (normalize after the residual addition). Modern transformers: `x + SubLayer(LayerNorm(x))` (normalize before the sub-layer). Same components, different placement. The lecturer is brief on why; the widely-cited explanation is that pre-norm keeps the residual stream's magnitude better controlled at depth.
+- **The second shift is LayerNorm to RMSNorm.** RMSNorm skips the mean subtraction and the learnable shift. Just divide by the root mean square of the components, apply learnable rescale (gamma) only. The lecturer's framing: "the convergence properties are basically comparable, but here you have fewer parameters to learn, so it's basically quicker."
+- **Most modern open-weight LLMs use Pre-RMSNorm.** Pre-norm placement plus RMSNorm computation. When a model card lists "Pre-RMSNorm" as an architectural feature, that is the combination.
+- **Pitfall: conflating LayerNorm with BatchNorm.** Same general idea, different axis. LayerNorm is per-token across features; BatchNorm is per-feature across the batch.
+- **Pitfall: thinking RMSNorm is fundamentally different from LayerNorm.** It is a simplification, not a different idea. Same per-token normalization, fewer steps, fewer learnable parameters.
+- **Pitfall: assuming pre-norm is universally better.** True for modern LLM-scale networks; less clearly true for shallow networks or specific architectures tuned for post-norm.
+- **Pitfall: assuming the "Add & Norm" boxes are decoration.** They improve convergence and shorten training time at every model size. The mechanism is small; the consequence of removing it is large.
+
+## What changes for you
+
+Before this lesson, "Pre-LayerNorm" and "RMSNorm" in a model card were probably opaque jargon. After it, you can decode both: pre-norm is *where* the normalization sits, RMSNorm is *what* the normalization computes. Both are clean improvements over the 2017 default. Both are part of the small set of pieces (alongside position embeddings and attention efficiency) where the field has genuinely moved on from the original transformer.
+
+**LayerNorm rescales the activations.**\
+**Pre-norm moves where it sits.**\
+**RMSNorm changes what it computes.**

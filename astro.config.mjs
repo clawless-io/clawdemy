@@ -171,7 +171,19 @@ export default defineConfig({
 										{ label: 'References', slug: 'lessons/ai-foundations/position-embeddings-and-rope/references' },
 									],
 								},
-								{ label: '2.2-2.6 coming soon', slug: 'lessons/ai-foundations/coming-soon' },
+								{
+									label: '2.2  Layer norm + RMSNorm',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/ai-foundations/layer-norm-and-rmsnorm/brief' },
+										{ label: 'Lesson', slug: 'lessons/ai-foundations/layer-norm-and-rmsnorm/lesson' },
+										{ label: 'Practice', slug: 'lessons/ai-foundations/layer-norm-and-rmsnorm/practice' },
+										{ label: 'Summary', slug: 'lessons/ai-foundations/layer-norm-and-rmsnorm/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/ai-foundations/layer-norm-and-rmsnorm/cheatsheet' },
+										{ label: 'References', slug: 'lessons/ai-foundations/layer-norm-and-rmsnorm/references' },
+									],
+								},
+								{ label: '2.3-2.6 coming soon', slug: 'lessons/ai-foundations/coming-soon' },
 							],
 						},
 						{
