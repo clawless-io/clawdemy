@@ -94,7 +94,12 @@ export default defineConfig({
 					label: 'Track 5: AI Foundations',
 					items: [
 						{
-							label: 'Phase 1: How models read text',
+							// Two-line label: "Phase N" renders small and dim (top row,
+							// styled via .large::first-line in src/styles/global.css);
+							// the descriptive title is the bottom row. The \n is honored
+							// as a line break by `white-space: pre-line` on the .large
+							// container. Pattern repeats for all seven phase entries.
+							label: 'Phase 1\nHow models read text',
 							collapsed: false,
 							items: [
 								{
@@ -136,7 +141,7 @@ export default defineConfig({
 							],
 						},
 						{
-							label: 'Phase 2: How models think',
+							label: 'Phase 2\nHow models think',
 							collapsed: false,
 							items: [
 								{
@@ -238,7 +243,7 @@ export default defineConfig({
 							],
 						},
 						{
-							label: 'Phase 3: How models are trained at scale',
+							label: 'Phase 3\nHow models are trained at scale',
 							collapsed: true,
 							badge: { text: 'Coming soon', variant: 'note' },
 							items: [
@@ -246,7 +251,7 @@ export default defineConfig({
 							],
 						},
 						{
-							label: 'Phase 4: How models learn to be helpful',
+							label: 'Phase 4\nHow models learn to be helpful',
 							collapsed: true,
 							items: [
 								{
@@ -265,7 +270,7 @@ export default defineConfig({
 							],
 						},
 						{
-							label: 'Phase 5: How we steer models at inference',
+							label: 'Phase 5\nHow we steer models at inference',
 							collapsed: true,
 							items: [
 								{
@@ -296,7 +301,7 @@ export default defineConfig({
 							],
 						},
 						{
-							label: 'Phase 6: How models reason and act',
+							label: 'Phase 6\nHow models reason and act',
 							collapsed: true,
 							items: [
 								{
@@ -315,7 +320,7 @@ export default defineConfig({
 							],
 						},
 						{
-							label: 'Phase 7: How we judge models, and what is beyond',
+							label: "Phase 7\nHow we judge models and where they're going",
 							collapsed: true,
 							badge: { text: 'Coming soon', variant: 'note' },
 							items: [
