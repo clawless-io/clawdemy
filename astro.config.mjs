@@ -87,14 +87,18 @@ export default defineConfig({
 					],
 				},
 				{
+					// Track 5 is grouped by mental-model phase, not by Stanford lecture.
+					// See Doc/curriculum/mental-model-phases.md for the seven-phase
+					// arc and Doc/curriculum/source-to-phase-mapping.md for the
+					// phase / phase_order assignment of each lesson.
 					label: 'Track 5: AI Foundations',
 					items: [
 						{
-							label: 'Lecture 1: Transformer',
+							label: 'Phase 1: How models read text',
 							collapsed: false,
 							items: [
 								{
-									label: '1.1  Tokens',
+									label: 'Tokens',
 									collapsed: true,
 									items: [
 										{ label: 'Brief', slug: 'lessons/ai-foundations/how-ai-reads-tokens/brief' },
@@ -106,7 +110,7 @@ export default defineConfig({
 									],
 								},
 								{
-									label: '1.2  Embeddings',
+									label: 'Embeddings',
 									collapsed: true,
 									items: [
 										{ label: 'Brief', slug: 'lessons/ai-foundations/how-words-become-vectors/brief' },
@@ -118,7 +122,25 @@ export default defineConfig({
 									],
 								},
 								{
-									label: '1.3  Attention',
+									label: 'Position embeddings: RoPE',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/ai-foundations/position-embeddings-and-rope/brief' },
+										{ label: 'Lesson', slug: 'lessons/ai-foundations/position-embeddings-and-rope/lesson' },
+										{ label: 'Practice', slug: 'lessons/ai-foundations/position-embeddings-and-rope/practice' },
+										{ label: 'Summary', slug: 'lessons/ai-foundations/position-embeddings-and-rope/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/ai-foundations/position-embeddings-and-rope/cheatsheet' },
+										{ label: 'References', slug: 'lessons/ai-foundations/position-embeddings-and-rope/references' },
+									],
+								},
+							],
+						},
+						{
+							label: 'Phase 2: How models think',
+							collapsed: false,
+							items: [
+								{
+									label: 'Attention',
 									collapsed: true,
 									items: [
 										{ label: 'Brief', slug: 'lessons/ai-foundations/how-attention-works/brief' },
@@ -130,7 +152,7 @@ export default defineConfig({
 									],
 								},
 								{
-									label: '1.4  Multi-head attention',
+									label: 'Multi-head attention',
 									collapsed: true,
 									items: [
 										{ label: 'Brief', slug: 'lessons/ai-foundations/multi-head-attention/brief' },
@@ -142,7 +164,7 @@ export default defineConfig({
 									],
 								},
 								{
-									label: '1.5  Transformer block',
+									label: 'The transformer block',
 									collapsed: true,
 									items: [
 										{ label: 'Brief', slug: 'lessons/ai-foundations/transformer-block/brief' },
@@ -153,26 +175,8 @@ export default defineConfig({
 										{ label: 'References', slug: 'lessons/ai-foundations/transformer-block/references' },
 									],
 								},
-							],
-						},
-						{
-							label: 'Lecture 2: Modern transformer',
-							collapsed: false,
-							items: [
 								{
-									label: '2.1  How Transformers Understand Word Order',
-									collapsed: true,
-									items: [
-										{ label: 'Brief', slug: 'lessons/ai-foundations/position-embeddings-and-rope/brief' },
-										{ label: 'Lesson', slug: 'lessons/ai-foundations/position-embeddings-and-rope/lesson' },
-										{ label: 'Practice', slug: 'lessons/ai-foundations/position-embeddings-and-rope/practice' },
-										{ label: 'Summary', slug: 'lessons/ai-foundations/position-embeddings-and-rope/summary' },
-										{ label: 'Cheatsheet', slug: 'lessons/ai-foundations/position-embeddings-and-rope/cheatsheet' },
-										{ label: 'References', slug: 'lessons/ai-foundations/position-embeddings-and-rope/references' },
-									],
-								},
-								{
-									label: '2.2  Why Transformers Need Stability to Learn',
+									label: 'Stability: LayerNorm and RMSNorm',
 									collapsed: true,
 									items: [
 										{ label: 'Brief', slug: 'lessons/ai-foundations/layer-norm-and-rmsnorm/brief' },
@@ -184,7 +188,7 @@ export default defineConfig({
 									],
 								},
 								{
-									label: '2.3  How Transformers Scale to Real-World Data',
+									label: 'Efficiency tricks',
 									collapsed: true,
 									items: [
 										{ label: 'Brief', slug: 'lessons/ai-foundations/attention-efficiency-tricks/brief' },
@@ -196,7 +200,7 @@ export default defineConfig({
 									],
 								},
 								{
-									label: '2.4  How Transformers Turn Input Into Output',
+									label: 'Encoder-decoder: T5',
 									collapsed: true,
 									items: [
 										{ label: 'Brief', slug: 'lessons/ai-foundations/encoder-decoder-and-t5-span-corruption/brief' },
@@ -208,7 +212,7 @@ export default defineConfig({
 									],
 								},
 								{
-									label: '2.5  How Transformers Learn Language Understanding',
+									label: 'BERT',
 									collapsed: true,
 									items: [
 										{ label: 'Brief', slug: 'lessons/ai-foundations/bert-architecture-and-objectives/brief' },
@@ -220,7 +224,7 @@ export default defineConfig({
 									],
 								},
 								{
-									label: '2.6  How These Models Keep Improving',
+									label: 'BERT family: DistilBERT and RoBERTa',
 									collapsed: true,
 									items: [
 										{ label: 'Brief', slug: 'lessons/ai-foundations/bert-derivatives-distilbert-roberta/brief' },
@@ -234,11 +238,38 @@ export default defineConfig({
 							],
 						},
 						{
-							label: 'Lecture 3: Large Language Models',
+							label: 'Phase 3: How models are trained at scale',
+							collapsed: true,
+							badge: { text: 'Coming soon', variant: 'note' },
+							items: [
+								{ label: 'Coming soon', slug: 'lessons/ai-foundations/coming-soon' },
+							],
+						},
+						{
+							label: 'Phase 4: How models learn to be helpful',
 							collapsed: true,
 							items: [
 								{
-									label: '3.1  Text generation (sampling)',
+									label: 'Instruction tuning, RLHF',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/ai-foundations/how-models-learn-to-be-helpful/brief' },
+										{ label: 'Lesson', slug: 'lessons/ai-foundations/how-models-learn-to-be-helpful/lesson' },
+										{ label: 'Practice', slug: 'lessons/ai-foundations/how-models-learn-to-be-helpful/practice' },
+										{ label: 'Summary', slug: 'lessons/ai-foundations/how-models-learn-to-be-helpful/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/ai-foundations/how-models-learn-to-be-helpful/cheatsheet' },
+										{ label: 'References', slug: 'lessons/ai-foundations/how-models-learn-to-be-helpful/references' },
+									],
+								},
+								{ label: 'More lessons coming soon', slug: 'lessons/ai-foundations/coming-soon' },
+							],
+						},
+						{
+							label: 'Phase 5: How we steer models at inference',
+							collapsed: true,
+							items: [
+								{
+									label: 'Decoding strategies',
 									collapsed: true,
 									items: [
 										{ label: 'Brief', slug: 'lessons/ai-foundations/how-text-is-generated/brief' },
@@ -250,7 +281,7 @@ export default defineConfig({
 									],
 								},
 								{
-									label: '3.2  Prompting',
+									label: 'Prompting',
 									collapsed: true,
 									items: [
 										{ label: 'Brief', slug: 'lessons/ai-foundations/how-prompting-works/brief' },
@@ -261,48 +292,15 @@ export default defineConfig({
 										{ label: 'References', slug: 'lessons/ai-foundations/how-prompting-works/references' },
 									],
 								},
+								{ label: 'More lessons coming soon', slug: 'lessons/ai-foundations/coming-soon' },
 							],
 						},
 						{
-							label: 'Lecture 4: LLM training',
-							collapsed: true,
-							badge: { text: 'Coming soon', variant: 'note' },
-							items: [
-								{ label: 'Coming soon', slug: 'lessons/ai-foundations/coming-soon' },
-							],
-						},
-						{
-							label: 'Lecture 5: LLM tuning',
+							label: 'Phase 6: How models reason and act',
 							collapsed: true,
 							items: [
 								{
-									label: '5.1  Fine-tuning + RLHF',
-									collapsed: true,
-									items: [
-										{ label: 'Brief', slug: 'lessons/ai-foundations/how-models-learn-to-be-helpful/brief' },
-										{ label: 'Lesson', slug: 'lessons/ai-foundations/how-models-learn-to-be-helpful/lesson' },
-										{ label: 'Practice', slug: 'lessons/ai-foundations/how-models-learn-to-be-helpful/practice' },
-										{ label: 'Summary', slug: 'lessons/ai-foundations/how-models-learn-to-be-helpful/summary' },
-										{ label: 'Cheatsheet', slug: 'lessons/ai-foundations/how-models-learn-to-be-helpful/cheatsheet' },
-										{ label: 'References', slug: 'lessons/ai-foundations/how-models-learn-to-be-helpful/references' },
-									],
-								},
-							],
-						},
-						{
-							label: 'Lecture 6: LLM reasoning',
-							collapsed: true,
-							badge: { text: 'Coming soon', variant: 'note' },
-							items: [
-								{ label: 'Coming soon', slug: 'lessons/ai-foundations/coming-soon' },
-							],
-						},
-						{
-							label: 'Lecture 7: Agentic LLMs',
-							collapsed: true,
-							items: [
-								{
-									label: '7.1  RAG',
+									label: 'RAG',
 									collapsed: true,
 									items: [
 										{ label: 'Brief', slug: 'lessons/ai-foundations/how-rag-works/brief' },
@@ -313,18 +311,11 @@ export default defineConfig({
 										{ label: 'References', slug: 'lessons/ai-foundations/how-rag-works/references' },
 									],
 								},
+								{ label: 'More lessons coming soon', slug: 'lessons/ai-foundations/coming-soon' },
 							],
 						},
 						{
-							label: 'Lecture 8: LLM evaluation',
-							collapsed: true,
-							badge: { text: 'Coming soon', variant: 'note' },
-							items: [
-								{ label: 'Coming soon', slug: 'lessons/ai-foundations/coming-soon' },
-							],
-						},
-						{
-							label: 'Lecture 9: Current trends',
+							label: 'Phase 7: How we judge models, and what is beyond',
 							collapsed: true,
 							badge: { text: 'Coming soon', variant: 'note' },
 							items: [
