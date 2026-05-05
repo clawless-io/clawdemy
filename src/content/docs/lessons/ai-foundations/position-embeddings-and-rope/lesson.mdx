@@ -1,0 +1,154 @@
+---
+title: "Lesson: How transformers understand word order: sinusoidal embeddings and RoPE"
+description: A walk through the four position-embedding schemes that show up in the transformer literature, and why the field landed on RoPE. We start with why self-attention needs an explicit position signal at all, walk the original two options (learned, sinusoidal) from the 2017 paper, identify the structural shift to attention-injected position information, name the two intermediate fixes (T5 relative bias, ALiBi), and then build the RoPE intuition in the depth it deserves.
+sidebar:
+  order: 2
+  label: Lesson
+artifact: lesson
+---
+
+import AudioPlayer from '../../../../../components/AudioPlayer.astro';
+import LessonStar from '../../../../../components/LessonStar.astro';
+
+<LessonStar slug="position-embeddings-and-rope" />
+
+<AudioPlayer src="https://audio.clawdemy.org/lessons/position-embeddings-and-rope-lesson.mp3" approxMinutes={25} />
+
+"The cat sat on the mat" and "the mat sat on the cat" use exactly the same tokens. They mean very different things.
+
+Self-attention, on its own, does not see the difference. The mechanism we built in the attention lesson computes similarities between every pair of tokens via `Q · K^T` and produces a weighted blend of values; nothing in that computation says "this token came first" or "this token came tenth." Transformers traded recurrence (the way RNNs implicitly carried position by processing tokens one at a time) for parallelism, and they lost the positional signal as a side effect of the trade.
+
+So we have to put it back somehow. The 2017 transformer paper put it back as a vector added to the input embedding before the first attention layer. Modern LLMs almost all do something different: they inject position information directly into the attention computation, by *rotating* the query and key vectors. That second scheme has a name (RoPE, rotary position embeddings), and it is one of the few places where the field has genuinely moved on from the original transformer paper. This lesson is about the path from the 2017 answer to the modern answer.
+
+This is also the first of three lessons in this lecture on the architectural changes that stuck after 2017. The next two cover normalization (LayerNorm to RMSNorm and the pre-norm shift) and attention efficiency tricks (sliding windows and the MQA/GQA progression). Most of the original transformer is intact in modern LLMs; these three are the parts that actually changed.
+
+By the end you will know why position information is needed at all, what the two original options were, why neither survived in the form they were proposed, and what RoPE actually does in plain language.
+
+## Why self-attention needs help with position
+
+Attention compares every token to every other token. For the token at position `m` with query vector `q_m`, the attention weights are computed against the key vector `k_n` of every other position `n`, all of them, in parallel. The output for position `m` is a weighted sum of value vectors across the whole sequence.
+
+There is no "first" or "second" in that computation. If you shuffle the input tokens and shuffle the corresponding embeddings the same way, the attention output for each token will follow its embedding; the relative positions of tokens to each other will be unrecoverable from the attention math alone. Self-attention is, in a precise sense, permutation-invariant to position.
+
+That property is fine for a bag-of-words classifier. It is wrong for any task where word order matters, which is essentially every task. We need to put position information back in.
+
+The job of a position embedding is exactly that: tell the model where each token sits in the sequence, in a form the attention computation can use.
+
+## The original two options: learned and sinusoidal
+
+The original transformer paper proposed two schemes and tried both.
+
+**Learned position embeddings.** Allocate one trainable embedding vector per position. Position 1 gets its own vector, position 2 gets its own vector, and so on, up to some maximum sequence length you committed to during training. At inference, look up the position's vector and add it to the token's embedding before the first attention layer.
+
+This works. It also has two real limitations. First, you are very dependent on what your training set looked like; if certain positional patterns appeared more often during training (say, sequences always had a question mark at position 17), the learned position embeddings carry that bias. Second, you can only learn embeddings for positions you saw during training. If your training cap was 512 tokens and a user feeds the model a 2,000-token input at inference, positions 513 through 2,000 have no learned embedding.
+
+**Sinusoidal position embeddings.** Skip the learning entirely. For each position `m` and each dimension `i` of the embedding, compute the value with a fixed formula:
+
+```
+PE(m, 2i)   = sin(m / 10000^(2i / d_model))
+PE(m, 2i+1) = cos(m / 10000^(2i / d_model))
+```
+
+Each position gets a vector of sines and cosines at different frequencies. Low-index dimensions oscillate quickly with position; high-index dimensions oscillate slowly. The whole vector is added to the token's embedding, just like the learned version.
+
+The clever part is what happens when you compare two such embeddings via dot product. Because of the trigonometric identity `cos(a - b) = cos a cos b + sin a sin b`, the dot product of position `m`'s embedding with position `n`'s embedding ends up being a function of the relative distance `m - n`. Positions that are close together produce a high dot product; positions that are far apart produce a low dot product. The pattern is built into the formula, not learned.
+
+That property has two payoffs. The model can extrapolate to sequence lengths it never saw during training (the formula works for any `m` you give it), and the position information is naturally relative-distance-aware without anyone training it to be.
+
+The paper reported that learned and sinusoidal performed comparably on translation. The authors went with sinusoidal, citing the extrapolation advantage.
+
+## The structural shift: from the input to the attention layer
+
+Fast-forward to 2025. Sinusoidal embeddings are still in textbooks; they are not in most modern LLMs. The reason is structural, not just empirical.
+
+What we actually care about is making closer tokens more similar than distant tokens *in the attention computation itself*. (That goal, "closer tokens should be more similar than distant ones," is the load-bearing intuition that runs through every position-embedding scheme in this lesson; it is worth holding onto explicitly.) The sinusoidal scheme achieves the property indirectly: it adds a position vector to the input, that vector flows through the network, and somewhere downstream the attention computation ends up reflecting position. There is no guarantee the property survives every layer cleanly.
+
+A cleaner approach is to put the position signal directly into the attention math, where the comparison between tokens happens. That is the move the field made, and the next two schemes are the ones that tried it.
+
+**T5 relative position bias.** The T5 paper added a learned bias term inside the softmax of the attention computation. Instead of `softmax(Q · K^T / sqrt(d))`, you compute `softmax(Q · K^T / sqrt(d) + b(m, n))`, where `b(m, n)` is a learned scalar that depends only on the relative distance `m - n`. In practice the relative distances are bucketized (so all distances between 5 and 8 share one bias, all between 9 and 16 share the next, and so on), and the model learns each bucket's value during training. The bias is just additive inside the softmax, so it does not need to satisfy any normalization constraint; the softmax handles that.
+
+This works. It still has the learned-parameter issue: the bias values reflect what your training data looked like, with all the same overfitting concerns as learned input-position embeddings.
+
+**ALiBi (Attention with Linear Bias).** Same idea, but deterministic. The bias inside the softmax is a simple linear function of the relative distance: the further apart `m` and `n` are, the more negative the bias, which pushes the softmax weight down. No learnable parameters. The slope of the linear function is set per attention head, hard-coded.
+
+ALiBi is cheap, has no overfitting risk, and was shown to extrapolate to longer sequences than the model trained on. It earned a real place in the literature but never became dominant. Most modern models use a different scheme, which is the rest of this lesson.
+
+## RoPE: rotate the query and key
+
+**RoPE** stands for Rotary Position Embeddings. It is the position-encoding scheme used by most modern LLMs you have heard of. The intuition is worth slowing down for, because the math is dense but the idea is not.
+
+The core move: instead of adding a position vector to the input, or adding a bias to the softmax, *rotate the query and key vectors* by an angle that depends on their position.
+
+### Rotation in two dimensions
+
+To get the intuition, start in 2D. A vector `v = (x, y)` sits somewhere in the 2D plane. To rotate that vector by an angle `θ` (counterclockwise from the positive x-axis), multiply it by the **rotation matrix**:
+
+```
+R(θ) = | cos θ   -sin θ |
+       | sin θ    cos θ |
+```
+
+The rotated vector `R(θ) · v` lands at the same distance from the origin (rotation preserves length) but pointing in a different direction. If you write `v` in polar form as length `r` and angle `φ` (so `v = r · (cos φ, sin φ)`), the rotated vector is `r · (cos(φ + θ), sin(φ + θ))`. The angle adds; the magnitude does not change.
+
+That is the entire mechanism RoPE leverages. Hold onto it.
+
+### Applying rotations to query and key
+
+Now consider the attention computation. We have a query vector `q` for the token at position `m` and a key vector `k` for the token at position `n`. Their similarity is the dot product `q · k`.
+
+RoPE rotates `q` by an angle that is a function of `m`. Call that angle `θ_m`. It rotates `k` by an angle that is a function of `n`. Call that angle `θ_n`. The new query is `R(θ_m) · q` and the new key is `R(θ_n) · k`.
+
+Compute the dot product of the rotated vectors. The math (which the lecture leaves as an at-home derivation; we will not repeat the algebra here) shows that `(R(θ_m) · q) · (R(θ_n) · k)` contains a factor of `R(θ_n - θ_m)`, the rotation matrix of the *relative* angle. The whole expression ends up being a function of `θ_n - θ_m`, which is itself a function of the relative position `n - m`.
+
+To see why this matters in concrete terms, picture the 2D case again. The original query `q` for the token at position 5 starts pointing in some direction. The original query for the same word at position 50 would start pointing in the same direction (it is the same word). After RoPE, those two queries have been rotated by very different angles (the position-5 rotation is small, the position-50 rotation is large). When either one then takes a dot product with a key vector that was rotated by its own position's angle, the result depends on the *gap* between the rotations, not on their absolute values. Two tokens five positions apart will produce a similar dot-product behavior whether they sit at positions 5 and 10 or at positions 500 and 505.
+
+That is the result that matters. The dot product of two RoPE-rotated vectors depends on how far apart the tokens are, not on their absolute positions. Same property the sinusoidal embeddings had, but now baked directly into the attention dot product instead of injected at the input layer.
+
+### Beyond 2D: rotating real vectors
+
+Real query and key vectors are not 2D; they are hundreds or thousands of dimensions. RoPE handles this by **applying the rotation block by block**: split the high-dimensional vector into 2D pieces (so a 768-dim vector becomes 384 separate 2D blocks) and apply a rotation to each block independently. Each block rotates by a different angle; the angles typically follow a frequency pattern related to the same `omega_i = 10000^(-2i / d_model)` formula that drove the original sinusoidal embeddings, so low-index blocks rotate quickly with position and high-index blocks rotate slowly.
+
+The implementation is cheap. It is two element-wise multiplications per token per attention layer. No learned parameters, no extra matrices to multiply.
+
+### Why this won
+
+Three reasons RoPE became the dominant choice.
+
+**The property is right.** Relative-distance-aware similarity falls out of the math, not out of learned parameters that can overfit.
+
+**The math has a long-term decay.** A formal upper bound on the attention weight as a function of `m - n` shows that the bound shrinks as the relative distance grows. The bound is not perfectly monotonic (the lecture notes some oscillations along the way), but the long-run trend is decay: closer tokens have higher maximum possible attention weight than distant tokens, by construction of the rotation scheme. This matches the intuition we wanted in the first place.
+
+**It extends to any sequence length.** Because the angles are deterministic functions of position, you can apply RoPE to positions you never saw during training. The model can technically attend to inputs longer than its training window. In practice the model's downstream components were not trained on those longer sequences and may not handle them well; the lecture stops there, and so will we for now.
+
+## Why this matters when you use AI
+
+Two consequences worth holding onto when you read AI tooling docs or model cards.
+
+- **"Uses RoPE" is not vendor jargon, it is a load-bearing architectural choice.** When a model card mentions RoPE, you now know what that means: position information is rotated into the attention computation itself, not added to the input. That is one of the few clean structural improvements the field has shipped over the original 2017 transformer.
+- **Position-embedding choice is one of the few places the field actually moved on.** Most of the original transformer architecture is intact in modern LLMs. Position embeddings, normalization, and attention efficiency are the parts that genuinely changed. If you read about "modern transformer tweaks" elsewhere, those three are usually the list (and the next two lessons in this lecture cover the other two).
+
+## Common pitfalls
+
+A few mistakes are common enough to be worth naming.
+
+**Conflating sinusoidal and RoPE.** Both use sines and cosines. They are not the same scheme. Sinusoidal embeddings are vectors added to the input before the first attention layer. RoPE is a rotation applied to the query and key vectors inside every attention layer. The math overlaps; the architectural placement is completely different.
+
+**Thinking RoPE has learnable parameters.** It does not. The rotation angles are deterministic functions of position and dimension index, set by the same frequency formula sinusoidal used. There is nothing to fit during training in the position-embedding component itself.
+
+**Assuming all modern LLMs use RoPE.** Most do; not all. Some open-source models still ship with ALiBi (or an earlier learned scheme); a few experiment with new schemes that have not yet displaced RoPE. When you read a model card, the position-embedding choice is one of the things to actually look at instead of assume.
+
+**Forgetting that all of these schemes are trying to encode the same property.** Relative-distance-aware similarity in the attention computation. Learned position embeddings, sinusoidal, T5 relative bias, ALiBi, RoPE: they all aim at the same property. The methods differ; the goal is identical.
+
+## What you should remember
+
+- **Self-attention is permutation-invariant to position by default.** Position has to be put back in explicitly, or word order would not matter to the model.
+- **The original transformer paper offered learned and sinusoidal options.** Both added a position vector to the input embedding. Sinusoidal won the original choice because it extends to any sequence length and gives relative-distance-aware similarity for free.
+- **The structural shift was from input-added to attention-injected position information.** What we care about is similarity behavior in the attention layer; injecting position info there directly is cleaner than adding to the input and hoping the property propagates.
+- **Two intermediate schemes earned a place but did not win.** T5 relative bias adds a learned bias inside the softmax; ALiBi adds a deterministic linear bias. Both worked; neither became dominant.
+- **RoPE rotates the query and key vectors.** The dot product of rotated vectors depends on relative position. Cheap to compute, no learned parameters, extends to any sequence length, has long-term decay built in. Most modern LLMs use it.
+
+## If you remember one thing
+
+**Sinusoidal embeddings *add* position to the input.**\
+**RoPE *rotates* position into the attention itself.**\
+**The second is what modern LLMs actually use.**

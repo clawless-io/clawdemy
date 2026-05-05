@@ -1,0 +1,223 @@
+---
+title: "Practice: How transformers understand word order: sinusoidal embeddings and RoPE"
+description: Self-check on the four schemes, an applied exercise running the trigonometric identity that makes sinusoidal embeddings work, a 2D rotation walk-through for RoPE, and flashcards for retrieval.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+A short retrieval pass. Answer in your head (or on paper) before opening the collapsible.
+
+**1. Why does self-attention need an explicit position signal at all?**
+
+<details>
+<summary>Show answer</summary>
+
+The attention mechanism compares every token to every other token through `Q · K^T`. Nothing in that computation knows which token came first; the math is invariant to permutations of the input (after the position info is removed). Without an explicit position signal, "the cat sat on the mat" and "the mat sat on the cat" would produce identical attention behavior. RNNs handled position implicitly through recurrence; transformers traded recurrence for parallelism and lost the positional signal as a side effect, which is why position embeddings exist.
+
+</details>
+
+**2. The original transformer paper offered two schemes. Name each and the main trade-off.**
+
+<details>
+<summary>Show answer</summary>
+
+**Learned position embeddings:** one trainable vector per position, added to the input embedding. Pro: simple, gradient descent figures it out. Con: overfits to training-set positional patterns and cannot represent positions beyond the training-set max.
+
+**Sinusoidal embeddings:** deterministic `sin/cos` formula per position and dimension, also added to the input. Pro: extends to any sequence length, and the dot product of two sinusoidal embeddings is a function of relative distance by construction (via `cos(a - b) = cos a cos b + sin a sin b`). Con: still adds to the input rather than to the attention computation, which is indirect.
+
+The paper reported comparable performance; the authors went with sinusoidal for the extrapolation advantage.
+
+</details>
+
+**3. What was the structural shift between the original schemes and the modern ones?**
+
+<details>
+<summary>Show answer</summary>
+
+The original two schemes (learned and sinusoidal) added a position vector to the input embedding before the first attention layer. The position information then had to flow through the network for the attention computation downstream to reflect it, which is indirect.
+
+Modern schemes (T5 relative bias, ALiBi, RoPE) inject the position information directly into the attention computation itself, where the relative-similarity property actually needs to show up. The shift is from input-added to attention-injected.
+
+</details>
+
+**4. T5 relative bias and ALiBi sit between sinusoidal and RoPE on the timeline. What did each do?**
+
+<details>
+<summary>Show answer</summary>
+
+**T5 relative bias** added a learned scalar bias `b(m, n)` inside the attention softmax: `softmax(QK^T/sqrt(d) + b)`. The bias was bucketized by relative distance and learned during training. Worked, but kept the learned-parameter overfitting risk.
+
+**ALiBi (Attention with Linear Bias)** did the same thing deterministically. The bias was a simple linear function of relative distance, with a hard-coded slope per attention head. No learnable parameters. Cheap; never became dominant.
+
+</details>
+
+**5. In one paragraph, what does RoPE actually do?**
+
+<details>
+<summary>Show answer</summary>
+
+RoPE rotates the query and key vectors by an angle that depends on their position. The query for the token at position `m` is rotated by angle `θ_m`; the key for the token at position `n` is rotated by angle `θ_n`. When you compute the dot product of the rotated vectors, the result contains a factor `R(θ_n - θ_m)` and depends only on the *relative* angle between the rotations, which is itself a function of the relative position `n - m`. Same property the sinusoidal embeddings had (relative-distance-aware similarity), but now baked directly into the attention dot product instead of injected at the input layer.
+
+</details>
+
+**6. Why did RoPE win over the alternatives?**
+
+<details>
+<summary>Show answer</summary>
+
+Three reasons. (1) **The property is right.** Relative-distance-aware similarity falls out of the math, not out of learned parameters that can overfit. (2) **The math has a long-term decay.** A formal upper bound on the attention weight as a function of relative distance shows it shrinks (with some oscillation) as positions get further apart, matching the intuition we wanted. (3) **It is cheap and extensible.** Two element-wise multiplications per token per attention layer, no learnable parameters, and the rotation formula works for any sequence length.
+
+</details>
+
+**7. What is the most common pitfall in distinguishing sinusoidal embeddings from RoPE?**
+
+<details>
+<summary>Show answer</summary>
+
+Conflating them because both use sines and cosines. The math overlaps; the architectural placement is completely different. **Sinusoidal embeddings** are vectors *added to the input* before the first attention layer. **RoPE** is a *rotation applied to the query and key vectors* inside every attention layer. Same trigonometric machinery, different place in the architecture.
+
+</details>
+
+## Try it yourself: 2D rotation walk-through
+
+This exercise puts the RoPE intuition into practice. About 15 minutes.
+
+**Side effects:** none. Pen and paper, or a text editor.
+
+**Setup:** you have a 2D query vector `q = (1, 0)` (a unit vector pointing along the positive x-axis). The token sits at position `m`. You want to apply RoPE with rotation angle `θ_m = m * (π / 4)` (so position 1 rotates by 45°, position 2 rotates by 90°, position 3 rotates by 135°, and so on).
+
+The rotation matrix is:
+
+```
+R(θ) = | cos θ   -sin θ |
+       | sin θ    cos θ |
+```
+
+**Part one: rotate the query at three different positions.**
+
+Compute the rotated `q` at positions `m = 1`, `m = 2`, and `m = 4`. Show the output as a 2D vector for each. (Useful values: `cos(π/4) = sin(π/4) ≈ 0.707`; `cos(π/2) = 0`, `sin(π/2) = 1`; `cos(π) = -1`, `sin(π) = 0`.)
+
+<details>
+<summary>Show answer</summary>
+
+**At `m = 1`** (rotation angle `π/4`, or 45°):
+`R(π/4) · (1, 0) = (cos(π/4), sin(π/4)) = (0.707, 0.707)`. The vector now points at 45° above the x-axis.
+
+**At `m = 2`** (rotation angle `π/2`, or 90°):
+`R(π/2) · (1, 0) = (cos(π/2), sin(π/2)) = (0, 1)`. The vector now points straight up the y-axis.
+
+**At `m = 4`** (rotation angle `π`, or 180°):
+`R(π) · (1, 0) = (cos(π), sin(π)) = (-1, 0)`. The vector now points along the negative x-axis.
+
+The rotation preserves magnitude (all three rotated vectors have length 1, same as the original) and changes only direction.
+
+</details>
+
+**Part two: dot product depends on relative position.**
+
+Now suppose you have a key vector `k = (1, 0)` (same direction as the original query). Apply RoPE to `k` at position `n`, using the same angle formula `θ_n = n * (π / 4)`.
+
+Compute the dot product of the rotated `q` (at position `m`) with the rotated `k` (at position `n`) for the following pairs: `(m=1, n=2)`, `(m=3, n=4)`, `(m=10, n=11)`, and `(m=1, n=5)`.
+
+<details>
+<summary>Show answer</summary>
+
+For two unit vectors that started in the same direction, after RoPE the dot product is `cos(θ_n - θ_m) = cos((n - m) * π / 4)`. The dot product depends only on the relative position `n - m`, not on the absolute values.
+
+- `(m=1, n=2)`: relative position 1, dot product = `cos(π/4) ≈ 0.707`
+- `(m=3, n=4)`: relative position 1, dot product = `cos(π/4) ≈ 0.707` (same as above)
+- `(m=10, n=11)`: relative position 1, dot product = `cos(π/4) ≈ 0.707` (still the same)
+- `(m=1, n=5)`: relative position 4, dot product = `cos(π) = -1` (much further apart, much lower similarity)
+
+The first three pairs are all "one position apart" and produce identical similarity, regardless of where in the sequence they sit. The fourth pair is four positions apart and produces a much lower (negative) similarity. This is the relative-distance-aware property RoPE is designed to give you, falling directly out of the trigonometric identity.
+
+</details>
+
+**Sanity check:** the goal of this exercise is to feel the rotation property in your hands. Once you have computed three rotations and the dot products at four different position pairs, the abstract "RoPE makes attention depend on relative position" claim becomes mechanical. You can always go back to this exercise when the RoPE math feels mysterious in a paper or model card.
+
+## Flashcards
+
+Twelve cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay out the full set as one card per page, ready to print or save as a PDF for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="Why does self-attention need an explicit position signal?">
+
+The attention mechanism compares every token to every other token through `Q · K^T`. Nothing in that computation knows which token came first; the math is permutation-invariant to position. Without an explicit position signal, "the cat sat on the mat" and "the mat sat on the cat" would produce identical attention weights. We have to put position back in.
+
+</Flashcard>
+
+<Flashcard question="What is the load-bearing intuition that runs through every position-embedding scheme?">
+
+Closer tokens should be more similar than distant tokens, in the attention computation. Every scheme (learned, sinusoidal, T5 relative bias, ALiBi, RoPE) aims at that property; they differ in how they achieve it.
+
+</Flashcard>
+
+<Flashcard question="What are the two original schemes from the 2017 transformer paper, and the trade-off?">
+
+Learned position embeddings (one trainable vector per position) and sinusoidal embeddings (deterministic `sin/cos` formula). Both added to the input embedding. Learned overfits to training-set patterns and cannot extrapolate; sinusoidal extrapolates and gives relative-distance-aware similarity by construction. The paper picked sinusoidal for the extrapolation advantage.
+
+</Flashcard>
+
+<Flashcard question="What trigonometric identity makes sinusoidal embeddings produce relative-distance-aware similarity?">
+
+`cos(a - b) = cos a cos b + sin a sin b`. When you take the dot product of two sinusoidal embeddings at positions `m` and `n`, the formula collapses into a sum of cosines that depends only on the relative distance `m - n`.
+
+</Flashcard>
+
+<Flashcard question="What was the structural shift between original schemes and modern ones?">
+
+The original schemes (learned, sinusoidal) added position information to the input embedding. Modern schemes (T5 relative bias, ALiBi, RoPE) inject it directly into the attention computation, where the relative-similarity property actually needs to show up. Indirect → direct.
+
+</Flashcard>
+
+<Flashcard question="What does T5 relative bias do?">
+
+Adds a learned scalar bias `b(m, n)` inside the attention softmax: `softmax(QK^T/sqrt(d) + b)`. The bias is bucketized by relative distance and learned during training. Works; carries the same overfitting risk as learned input-position embeddings.
+
+</Flashcard>
+
+<Flashcard question="What does ALiBi do?">
+
+Same as T5 but deterministic. The bias inside the softmax is a simple linear function of relative distance, with a hard-coded slope per attention head. No learnable parameters, cheap, extrapolates well. Earned a place in the literature; never became dominant.
+
+</Flashcard>
+
+<Flashcard question="In one sentence, what is RoPE?">
+
+Rotary Position Embeddings: rotate the query and key vectors by position-dependent angles inside the attention computation, so the dot product of the rotated vectors depends on the relative position between the tokens.
+
+</Flashcard>
+
+<Flashcard question="What does the rotation matrix do in 2D?">
+
+The matrix `R(θ) = [[cos θ, -sin θ], [sin θ, cos θ]]` rotates a 2D vector by angle `θ` while preserving its length. Magnitude unchanged, direction shifted. Multiplying a vector in polar form `r * (cos φ, sin φ)` by `R(θ)` gives `r * (cos(φ + θ), sin(φ + θ))`.
+
+</Flashcard>
+
+<Flashcard question="How does RoPE handle vectors with more than 2 dimensions?">
+
+It applies the rotation block by block. Split the high-dimensional vector into 2D pieces (a 768-dim vector becomes 384 separate 2D blocks); rotate each block by its own angle. The angles typically follow a frequency pattern related to the sinusoidal `omega_i` formula, so low-index blocks rotate quickly with position and high-index blocks rotate slowly.
+
+</Flashcard>
+
+<Flashcard question="Why did RoPE win over the alternatives?">
+
+The property is right (relative-distance-aware similarity, by construction). No learnable parameters that can overfit. Cheap implementation (two element-wise multiplications per token per attention layer). Extends to any sequence length. The math has a long-term decay built into the upper bound on attention weights, matching the intuition we wanted.
+
+</Flashcard>
+
+<Flashcard question="What is the most common pitfall in distinguishing sinusoidal embeddings from RoPE?">
+
+Conflating them because both use sines and cosines. The math overlaps; the architectural placement is completely different. Sinusoidal embeddings are vectors added to the input before the first attention layer. RoPE is a rotation applied to the query and key vectors inside every attention layer.
+
+</Flashcard>
+
+</FlashcardSet>

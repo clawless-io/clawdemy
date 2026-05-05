@@ -1,0 +1,110 @@
+---
+title: "Lesson: How transformers scale to real-world data: sliding windows and KV-cache savings"
+description: "A walk through two distinct efficiency problems and the two distinct fixes that show up in modern transformers. Standard self-attention is O(n^2) in sequence length, and the KV cache that speeds up decoding gets large quickly. Sliding window attention solves the first; sharing key and value projections across heads (MHA, MQA, GQA) solves the second. Two problems, two fixes, often combined in the same model."
+sidebar:
+  order: 2
+  label: Lesson
+artifact: lesson
+---
+
+import AudioPlayer from '../../../../../components/AudioPlayer.astro';
+import LessonStar from '../../../../../components/LessonStar.astro';
+
+<LessonStar slug="attention-efficiency-tricks" />
+
+<AudioPlayer src="https://audio.clawdemy.org/lessons/attention-efficiency-tricks-lesson.mp3" approxMinutes={22} />
+
+The attention math we built in Lecture 1 is conceptually beautiful and operationally expensive.
+
+Self-attention, as the original 2017 paper described it, lets every token interact with every other token through `Q · K^T`. The resulting interaction matrix is `n` by `n`, where `n` is the sequence length. At small `n` this is fine. At the long contexts modern LLMs run on, where `n` can be tens or hundreds of thousands of tokens, the cost adds up fast.
+
+That cost shows up as two distinct problems, and the field has invented two distinct fixes. The first is a **compute problem**: the attention computation itself scales as `O(n^2)`. Sliding window attention restricts each token to its local neighborhood, breaking the quadratic dependency. The second is a **memory problem**: during decoding, modern transformers cache the keys and values from previous tokens to avoid recomputing them on every generation step (the KV cache), and that cache grows with sequence length, head count, and layer depth. The fix is to share key and value projections across attention heads, in the MHA, MQA, and GQA progression we'll cover in the second half of this lesson.
+
+This is the third place the field genuinely moved on from the original 2017 transformer, after position embeddings and normalization (the previous two lessons in this lecture). With it, the three-lesson "post-2017 changes that stuck" arc closes.
+
+By the end you will know what each problem is, why they are different, what each fix does mechanically, and how to recognize both in modern model cards.
+
+## Problem 1: O(n^2) attention complexity
+
+Standard self-attention computes a similarity score between every pair of tokens. For a sequence of length `n`, that is `n^2` scores. The full attention matrix has shape `n` by `n`, and each entry requires a dot product between a query vector and a key vector.
+
+That `n^2` scaling is fine when `n` is in the hundreds. It starts to hurt when `n` is in the thousands, and it becomes a real bottleneck when `n` is in the tens or hundreds of thousands. Doubling sequence length quadruples compute. Tripling it costs nine times more. The compute and memory cost of attention grows faster than any other piece of the transformer.
+
+This is fundamentally a structural cost of the design. The model wants every token to be able to look at every other token; that wanting is what makes attention powerful. The cost is the price of that ambition.
+
+## Fix 1: Sliding window attention
+
+The first widely-cited variant that broke the `n^2` scaling was **Longformer** (2020). The idea is straightforward: instead of letting each token interact with every other token, each token only interacts with its **local neighborhood**. A window of nearby tokens (small in slide illustrations, several thousand in production) replaces the full sequence as the attention scope.
+
+The literature settled on the term **sliding window attention** for this pattern. When a model card mentions it, they mean: the attention layer restricts each token's attention computation to a window of nearby tokens rather than the whole sequence.
+
+Modern implementations do not actually compute the full `n` by `n` matrix and then mask out the parts outside the window; that would defeat the point. They use tiling-based approaches that compute only the entries inside the window, never materializing the full matrix.
+
+Two practical points worth knowing about how sliding windows show up in real architectures.
+
+**Layers can mix local and global attention.** Some architectures use sliding-window attention in some layers and full global attention in others, interleaved through the stack. This gives the model both the cheap local view (most layers) and the expensive but complete global view (a few layers).
+
+**The receptive field grows with stacking, even when every layer is local.** Mistral is the lecture's example: it uses sliding window attention at every layer. At first glance, that seems like it would cap the model's effective view at one window. But because the layers stack, a token in layer 2 can attend to a window of tokens in layer 1, each of which already attended to its own window. By the top of the stack, a single token's effective receptive field can span far more than one window. The lecturer draws an analogy to **convolutional neural networks**: the same receptive-field-grows-with-depth property holds there. If you have a CV background, the intuition transfers directly.
+
+In production, the window size is not the small illustration you see in a slide deck (a handful of tokens). Modern sliding windows are typically **several thousand tokens wide**. With layer stacking on top, the effective view ends up large enough to handle most practical inputs.
+
+## Problem 2: KV cache memory pressure during decoding
+
+The second efficiency problem is different from the first. It shows up at inference time, during autoregressive decoding (generating one token at a time).
+
+The lecturer flags this only briefly, since it gets full coverage in the next Stanford lecture. The points he makes here: every generation step needs to attend the new token to all previous tokens; the keys and values come up repeatedly; there is something called the **KV cache** that saves them so they do not have to be recomputed; and "we want that cache to not become too big."
+
+That is the framing this lesson runs on. We will not pre-empt the next-lecture KV cache deep dive; what matters for understanding the next section is that as the cache grows (with sequence length, head count, and layer depth), memory pressure becomes a real bottleneck at inference. Sharing key and value projections across heads is the structural fix that addresses that growth.
+
+## Fix 2: MHA, MQA, and GQA
+
+The fix for KV cache pressure is to **share key and value projection matrices across attention heads**, instead of giving every head its own.
+
+Recall standard multi-head attention from the Lecture 1 multi-head lesson. With `H` attention heads, each head has its own `W_Q`, `W_K`, `W_V` projection matrices (so `3H` projections per layer). The KV cache stores `H` copies of `K` and `H` copies of `V` per token per layer.
+
+The variants differ in how aggressively `K` and `V` are shared.
+
+**Standard multi-head attention (MHA).** Every head has its own `K` and `V` projections. KV cache stores `H` copies of each. This is the original transformer.
+
+**Multi-query attention (MQA).** All `H` heads share **one** `K` projection and **one** `V` projection. Queries stay independent (each head still has its own `W_Q`). KV cache stores only one `K` and one `V` per token per layer instead of `H` of each. The cache shrinks by a factor of `H`.
+
+**Group-query attention (GQA).** The in-between case. Heads are grouped into `G` groups, with `G` typically much smaller than `H`. Each group of `H/G` heads shares one `K` and one `V` projection. KV cache stores `G` copies of each instead of `H`. The cache shrinks by a factor of `H/G`.
+
+Why share `K` and `V` but not `Q`? The intuition the lecturer gives: the query is the model's way of asking "what am I looking for?" Different heads ask different questions, and that diversity is valuable. The keys and values are what the model is looking at; the diversity loss from sharing them across heads is smaller than the diversity loss from sharing queries. There is also a practical motivation: the KV cache, not the Q projections, is what gets large at inference, so sharing K and V is where the memory savings actually land.
+
+Per the lecturer's own answer to a student question: "a lot of recent models tend to share projection matrices. So typically I would say GQA is what you would see, but it's not necessarily the case for all models." GQA hits a useful midpoint between full MHA's quality and MQA's aggressive savings.
+
+The choice between MHA, MQA, and GQA comes down to a tradeoff between performance, latency, cost, and how much you care about each. The lecturer's framing: "it really depends how big is your model, how much you want to save on compute, how is your input length."
+
+## Why this matters when you use AI
+
+Two consequences worth holding onto when you read AI tooling docs or model cards.
+
+- **"Sliding window attention" and "GQA" are about different problems, often combined in the same model.** Sliding window attention saves compute by limiting how far each token looks. GQA saves memory by sharing key and value projections across heads. A modern LLM can use both, because they target different bottlenecks. Knowing which one a model card mentions tells you about the design tradeoffs the architects made.
+- **Long-context performance often hinges on these efficiency tricks.** A model that advertises a very long context window is typically using some combination of these techniques to make that window practical. The ambitious context length and the attention efficiency choices ship together; they are not independent.
+
+## Common pitfalls
+
+A few mistakes are common enough to be worth naming.
+
+**Conflating the two problems.** Sliding window attention is about the `O(n^2)` compute scaling of the attention matrix. KV cache size and the MHA/MQA/GQA progression are about the memory used during decoding. Different problems, different fixes, can be combined. Treating them as one efficiency story misses the point.
+
+**Thinking sliding window means the model can never see beyond the window.** Stacking layers expands the effective receptive field beyond a single window, the same way it does in CNNs.
+
+**Assuming MQA is always better than MHA because it is cheaper.** MQA saves a lot of memory but can cost some quality, since all heads now share the same view of the keys and values. GQA is the modern compromise that gets most of MQA's memory savings with most of MHA's quality.
+
+**Forgetting these tricks affect inference more than training.** The KV cache exists at decode time, not training time. MQA and GQA primarily improve inference memory and latency. Training uses the full attention computation regardless. When a vendor markets "faster inference" or "longer context at the same cost," the underlying mechanism is usually one of these tricks.
+
+## What you should remember
+
+- **Standard self-attention is `O(n^2)` in compute.** The interaction matrix is `n` by `n`. Doubling sequence length quadruples compute. At long contexts, this becomes a real bottleneck.
+- **Sliding window attention restricts each token's attention to a local neighborhood.** Breaks the `n^2` scaling. Window size in production is typically several thousand tokens. The receptive field grows with layer stacking, just like in convolutional neural networks. Some architectures interleave local and global attention layers.
+- **The KV cache speeds up autoregressive decoding by storing K and V vectors for previous tokens.** Memory pressure: the cache grows with sequence length, head count, and layer depth. At long contexts on large models, it can dominate the memory footprint.
+- **MHA, MQA, and GQA is a progression of how much K and V sharing across heads.** MHA: every head has its own K and V (the original). MQA: all heads share one K and one V (most aggressive savings). GQA: heads grouped into G groups, each group shares K and V (the modern compromise).
+- **GQA is typically what you will see in modern LLMs**, per the lecturer ("typically I would say GQA is what you would see, but it's not necessarily the case for all models"). Quality close to MHA, memory savings close to MQA.
+
+## If you remember one thing
+
+**Sliding window attention is about compute.**\
+**MHA, MQA, and GQA are about memory.**\
+**Two problems, two fixes, often combined.**

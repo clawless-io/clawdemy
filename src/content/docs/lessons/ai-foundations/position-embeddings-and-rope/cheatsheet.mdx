@@ -1,0 +1,111 @@
+---
+title: "Cheatsheet: How transformers understand word order: sinusoidal embeddings and RoPE"
+description: One-page reference. The four schemes the lecture covers, their architectural placement, the trade-offs, and the load-bearing math behind RoPE.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## The one idea that matters
+
+```
+Self-attention has no notion of word order.
+Position embeddings put it back in.
+
+Original: add position to the input.
+Modern:   rotate position into the attention itself.
+```
+
+## The four schemes the lecture covers
+
+| Scheme | Where it sits | Learnable? | Property | Used today? |
+| --- | --- | --- | --- | --- |
+| **Learned position embeddings** | Added to input | Yes | One vector per position | Mostly historical |
+| **Sinusoidal embeddings** | Added to input | No | Dot product is function of relative distance, by `cos(a-b)` identity | Mostly historical |
+| **T5 relative bias** | Added inside attention softmax | Yes | Learned scalar bias `b(m, n)` bucketized by relative distance | Some encoder-decoder models |
+| **ALiBi** | Added inside attention softmax | No | Deterministic linear bias by relative distance | Some open-source models |
+| **RoPE (rotary)** | Rotates query and key inside attention | No | Dot product of rotated vectors depends on relative position | **Most modern LLMs** |
+
+## The structural shift
+
+| Era | Approach | Why we moved on |
+| --- | --- | --- |
+| 2017 transformer | Add position vector to input embedding | The position info has to flow through the network for the attention computation downstream to reflect it. Indirect. |
+| Modern LLMs | Inject position into the attention computation directly (T5/ALiBi/RoPE) | What we care about is similarity behavior at the attention layer; put the signal there. Direct. |
+
+## Sinusoidal, in one formula
+
+```
+PE(m, 2i)   = sin( m / 10000^(2i / d_model) )
+PE(m, 2i+1) = cos( m / 10000^(2i / d_model) )
+```
+
+| Property | Why it matters |
+| --- | --- |
+| `cos(a - b) = cos a cos b + sin a sin b` | Dot product of two PE vectors collapses to function of `m - n` |
+| Low-index dimensions oscillate fast with position; high-index oscillate slow | Frequency spectrum encodes position richly |
+| Formula works for any `m` | Extrapolates to sequence lengths beyond training |
+
+## RoPE, in one paragraph
+
+Rotate the query for the token at position `m` by angle `θ_m`. Rotate the key for the token at position `n` by angle `θ_n`. Dot product of rotated `q` and rotated `k` contains a factor `R(θ_n - θ_m)`, the rotation matrix of the relative angle. The result depends only on `n - m`, not on absolute positions.
+
+## The 2D rotation matrix
+
+```
+R(θ) = | cos θ   -sin θ |
+       | sin θ    cos θ |
+```
+
+| Property | Why it matters |
+| --- | --- |
+| Preserves vector magnitude | RoPE does not change "how big" the query/key vectors are, only their direction |
+| Adds angles under composition: `R(α) · R(β) = R(α + β)` | The dot-product-of-rotated-vectors property falls out of this |
+| Extends to higher dimensions block-by-block | Real query/key vectors get split into 2D blocks; each rotates independently at its own frequency |
+
+## Why RoPE became dominant
+
+| Property | Detail |
+| --- | --- |
+| Right behavior | Relative-distance-aware similarity, by construction |
+| No learned parameters | Cannot overfit to training-set positional patterns |
+| Cheap | Two element-wise multiplications per token per attention layer |
+| Extends to any sequence length | Angles are deterministic functions of position |
+| Long-term decay built in | Upper bound on attention weight shrinks with relative distance (with some oscillation) |
+
+## Pitfalls to dodge
+
+| Pitfall | Reality |
+| --- | --- |
+| Sinusoidal and RoPE are the same thing because both use sin/cos | No. Sinusoidal adds vectors to the input; RoPE rotates vectors inside the attention computation. Same trig, completely different architectural placement. |
+| RoPE has learnable parameters | No. The rotation angles are deterministic functions of position and dimension index. |
+| All modern LLMs use RoPE | Most do; not all. Some still use ALiBi or older schemes. Check the model card. |
+| Position embeddings are "fixed" once chosen | The choice is one of the few places where the field has genuinely moved on from the original transformer paper. Position scheme is something to actually look at, not assume. |
+
+## Translating model-card language
+
+| Model-card phrase | What it means |
+| --- | --- |
+| "Uses RoPE" | Position info is rotated into attention via query/key rotation; relative-distance-aware similarity by construction |
+| "ALiBi position embeddings" | Deterministic linear bias added inside the attention softmax; no learned parameters |
+| "Learned absolute position embeddings" | Older scheme; one trainable vector per position added to input; bounded by training-set max sequence length |
+| "Position-encoding-free" or "no positional embeddings" | Either an experimental architecture or a model that uses an attention-injected scheme so no input-side position vector is needed |
+
+## Glossary
+
+- **Position embedding (or position encoding):** any scheme for telling the model where each token sits in the sequence.
+- **Self-attention permutation invariance:** the attention computation, on its own (without position info), produces the same output regardless of the order of input tokens. The reason position embeddings are needed at all.
+- **Sinusoidal position embeddings:** deterministic `sin/cos` formula per position and dimension; vectors added to the input embedding.
+- **Learned position embeddings:** one trainable vector per position; vectors added to the input embedding.
+- **T5 relative bias:** learned scalar bias added inside the attention softmax, bucketized by relative distance.
+- **ALiBi (Attention with Linear Bias):** deterministic linear bias added inside the attention softmax, slope hard-coded per attention head.
+- **RoPE (Rotary Position Embeddings):** rotation of the query and key vectors by position-dependent angles inside the attention computation.
+- **Rotation matrix:** the 2D matrix `[[cos θ, -sin θ], [sin θ, cos θ]]` that rotates a 2D vector by angle `θ` while preserving its magnitude.
+- **Relative position:** the gap between two tokens (`n - m`), as opposed to their absolute positions in the sequence.
+- **Long-term decay:** the property that attention weight upper bound shrinks (with some oscillation) as relative distance grows; built into RoPE by construction.
+
+**Sinusoidal embeddings *add* position to the input.**\
+**RoPE *rotates* position into the attention itself.**\
+**The second is what modern LLMs actually use.**

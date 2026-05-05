@@ -36,6 +36,25 @@ export const collections = {
 				course: z.string().optional(),
 				order: z.number().int().optional(),
 
+				// Phase grouping for Track 5 (AI Foundations) per the mental-model
+				// curriculum. Optional at the schema level; the validator
+				// (scripts/validate-content.ts) requires both fields when
+				// track === 'ai-foundations' and checks (phase, phase_order)
+				// uniqueness. Phase slugs are stable identifiers; sidebar group
+				// labels are derived in astro.config.mjs.
+				phase: z
+					.enum([
+						'read-text',
+						'architecture',
+						'training',
+						'tuning',
+						'inference',
+						'reasoning-and-agents',
+						'evaluation-and-frontier',
+					])
+					.optional(),
+				phase_order: z.number().int().positive().optional(),
+
 				// Reader orientation
 				difficulty: z.enum(['intro', 'standard', 'deep']).optional(),
 				estimated_read_minutes: z.number().int().positive().optional(),

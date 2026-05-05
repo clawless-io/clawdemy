@@ -87,7 +87,13 @@ export const onRequestPost: PagesFunction<Env> = async ({ params, env, request }
 
 	const headers = new Headers(jsonHeaders);
 	// Long-lived cookie; one star per browser per lesson is the design.
-	headers.set('Set-Cookie', `${cookieKey}=1; Path=/; Max-Age=31536000; SameSite=Lax`);
+	// Secure: production is HTTPS only on CF Pages (localhost is browser-exempt).
+	// HttpOnly: only the server reads this cookie; LessonStar uses localStorage,
+	//   not document.cookie, so HttpOnly does not break the UI.
+	headers.set(
+		'Set-Cookie',
+		`${cookieKey}=1; Path=/; Max-Age=31536000; SameSite=Lax; Secure; HttpOnly`,
+	);
 
 	return new Response(JSON.stringify({ slug, count: next, alreadyStarred: false }), { headers });
 };

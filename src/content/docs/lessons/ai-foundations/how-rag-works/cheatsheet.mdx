@@ -1,0 +1,151 @@
+---
+title: "Cheatsheet: How RAG works: feeding the model what it does not already know"
+description: One-page reference. The two steps, three problems solved, five-stage pipeline, where each stage breaks, RAG vs fine-tuning, indirect prompt injection, glossary.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## The one idea that matters
+
+```
+Retrieve → put in prompt → generate.
+
+The G is generation. The new piece is what you put in front of the model
+when "what to put" is buried in documents the model has never seen.
+```
+
+## The three problems RAG solves
+
+| Problem | Why direct prompting fails | How RAG fixes it |
+| --- | --- | --- |
+| **Knowledge cutoff** | Pretraining ended at a fixed date | Index has documents from after the cutoff; model uses them at query time |
+| **Private data** | Your corpus was not in pretraining and should not be | Index your private corpus; model never trains on it, only reads it at query time |
+| **Hallucination grounding** | A confident no-source answer is hard to verify | Model returns answer alongside the chunks it was given; verification is now possible |
+
+## The canonical pipeline
+
+| Stage | Input | Output | Runs when |
+| --- | --- | --- | --- |
+| **1. Chunking** | Raw documents | Coherent text chunks (200-800 tokens typical) | Index time |
+| **2. Embedding** | Each chunk | A vector in the embedding model's space; stored in vector DB | Index time |
+| **3. Retrieval** | User query embedded with the same model | Top-K nearest chunks (often K is 5-10) | Query time |
+| **4. Prompt construction** | Retrieved chunks + grounding instruction + user query | The prompt the model will see | Query time |
+| **5. Generation** | Constructed prompt | Model's answer (ideally with citations to chunks) | Query time |
+
+## Where each stage breaks
+
+| Stage | Symptom | Common cause |
+| --- | --- | --- |
+| Chunking | Retrieved chunks lack context, or the answer is split across chunks | Wrong boundary strategy for the document type; chunks too large or too small |
+| Embedding | Semantically similar chunks land far apart, or unrelated chunks cluster together | Domain mismatch between embedding model and corpus |
+| Retrieval | Model says *"I don't know"* but the answer is in the corpus | Pure semantic search missing keyword matches; top-K too small; query phrasing very different from document phrasing |
+| Prompt construction | Model uses prior knowledge despite having context | Missing or weak grounding instruction; context buried under boilerplate |
+| Generation | Model cites a chunk that does not actually support the claim | Confabulating a citation to satisfy the instruction; right answer was not retrieved |
+
+## Retrieval, in practice
+
+| Lever | Practical guidance |
+| --- | --- |
+| **Same embedding model on both sides** | Documents and queries must go through the same model. Different models = meaningless distances. |
+| **Hybrid search** | Combine semantic (vector) and lexical (BM25) search, merge rankings. Catches both paraphrases and literal-string queries. |
+| **K (top-K)** | Often 5 or 10. Larger K = more recall but more tokens in the prompt and more noise. |
+| **Reranking** | An optional second-stage model rescores the top-K from retrieval before passing them to generation. Often cheap, often a clear win. |
+
+## The prompt template
+
+```
+You are a helpful assistant. Answer the user's question using only the
+context below. If the context does not contain the answer, say "I don't
+know based on the provided context." Cite the chunk number for each
+claim you make.
+
+[Context]
+[1] {chunk_1_text}
+[2] {chunk_2_text}
+[3] {chunk_3_text}
+
+[User question]
+{user_query}
+```
+
+| Element | Why it is there |
+| --- | --- |
+| Source labels (`[1]`, `[2]`, ...) | Lets the model cite per-chunk and makes ungrounded answers visible |
+| Grounding instruction | Reduces (does not eliminate) the model falling back on pretraining when context is silent |
+| Refusal clause (*"say I don't know"*) | Gives the model a graceful fallback when the answer is not in context |
+| Order of context vs question | Test both; the right order varies by model |
+
+## RAG vs fine-tuning
+
+| Use RAG when... | Use fine-tuning when... |
+| --- | --- |
+| Facts change over time | You want a behavior or style baked in once |
+| You need to cite sources | You want consistency without per-call token cost |
+| Corpus is private | Change is about *how* the model writes, not *what* it knows |
+| Corpus is too large to train on | Volume of examples justifies the training run |
+| Documents added/removed on the fly | The behavior should not depend on what is in the prompt |
+
+They stack: fine-tune for style, use RAG for facts.
+
+## Indirect prompt injection
+
+```
+Direct injection:    user types attack into the input field
+                     → operator can at least see the input
+
+Indirect injection:  attacker plants attack inside a document
+                     that gets indexed → operator may not have
+                     written the document, may not control it,
+                     and may not have read it
+```
+
+| Mitigation | What it does | What it does not do |
+| --- | --- | --- |
+| Source provenance (prefer known authors; risk-flag open-submission sources) | Reduces the chance an attacker-controlled document is in the index | Eliminate the attack surface (any fresh content can be malicious) |
+| Content sanitization at index time (strip instruction-frame patterns) | Catches lazy attacks | Stop adversarial wording the sanitizer did not anticipate |
+| Output filtering (watch for sudden topic changes, unfounded refusals) | Catches some compromises after the fact | Prevent the compromise from happening |
+| Action sandboxing (gate side-effecting actions on confirmations) | Limits damage if the model is compromised | Stop the model from saying compromising things |
+| Visible citations | Makes injection visible to the user | Prevent the injection itself |
+
+**Design rule:** treat the entire retrieval index as untrusted input. Do not give a model on top of it access to anything you would not let the indexed content control directly.
+
+## Pitfalls to dodge
+
+| Pitfall | Reality |
+| --- | --- |
+| RAG is a magic upgrade | RAG works when retrieval works. Bad chunking + bad embeddings + smartest model = bad answers. |
+| Use RAG for everything | Translation, summarization of provided text, and format conversion need no retrieval. RAG adds latency and surface area without benefit on these. |
+| Skimping on chunking | Document-aware chunkers (sentence, paragraph, structure-aware) consistently beat naive fixed-length splits. |
+| Trusting retrieved content blindly | Anything in your index is, in effect, in your prompt. Treat it as untrusted. |
+| Skipping evaluation | RAG quality has two axes (did retrieval find it, did the model use it). Measure both with a labeled query set. |
+
+## Translating vendor language
+
+| Vendor claim | What it usually means |
+| --- | --- |
+| "Our assistant knows your company docs" | RAG with your docs in the index. Almost never fine-tuning. |
+| "95% accuracy on customer questions" | Some weighted combination of retrieval recall + generation correctness. Ask which. |
+| "Built-in citations" | Source labels in the prompt template + a grounding instruction. Useful; not novel. |
+| "We use [vector DB]" | Indexing infrastructure choice. Does not by itself say anything about retrieval quality. |
+
+## Glossary
+
+- **RAG (retrieval-augmented generation):** the pattern of retrieving relevant documents from a knowledge base and inserting them into the prompt so the model can answer using them.
+- **Chunk:** a coherent text segment (typically a few hundred tokens) extracted from a source document for indexing.
+- **Embedding model:** a separate, usually smaller model that maps text to vectors so semantically similar text ends up nearby.
+- **Vector database:** a database optimized for fast nearest-neighbor lookup over high-dimensional vectors. Examples: FAISS, Pinecone, Weaviate, Chroma.
+- **Top-K retrieval:** returning the K vector-DB entries closest to a query vector. K is usually 5 or 10 in production RAG.
+- **Cosine similarity:** the most common similarity metric for text embeddings; measures the angle between two vectors regardless of magnitude.
+- **Hybrid search:** combining vector similarity with lexical (keyword) search and merging the rankings.
+- **BM25:** the most common lexical-search ranking function; used as the lexical half of hybrid search.
+- **Reranking:** an optional second pass that uses a more expensive model to rescore the top-K before they reach the language model.
+- **Grounding instruction:** the part of the prompt template that tells the model to use only the provided context and refuse otherwise.
+- **Ungrounded generation:** the model producing an answer using its pretraining knowledge instead of, or in addition to, the retrieved context.
+- **Indirect prompt injection:** prompt-injection attacks delivered via documents in the retrieval index rather than via the user's direct input.
+
+**Retrieval finds it.**\
+**The prompt frames it.**\
+**The model writes it.**

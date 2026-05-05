@@ -1,0 +1,115 @@
+---
+title: "Cheatsheet: How prompting works: zero-shot, few-shot, and chain-of-thought"
+description: One-page reference. The three patterns, when to use each, the prompt-injection structural vulnerability, common pitfalls, glossary.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## The one idea that matters
+
+```
+A prompt is conditioning data for the next-token loop.
+The art is choosing the conditioning that makes the desired response a likely continuation.
+
+zero-shot   →   ask the model
+few-shot    →   show the model
+CoT         →   walk the model through it
+```
+
+## The three patterns
+
+| Pattern | What you write | Mechanism | Right default for |
+| --- | --- | --- | --- |
+| **Zero-shot** | Just the instruction | Leverages SFT-trained instruction-following bias directly | Tasks the model was instruction-tuned on (translation, summarization, common classification, simple Q&A, format conversion) |
+| **Few-shot** | A handful of input-output examples, then the new input | In-context learning: the model continues the demonstrated pattern | Custom labels, custom output shapes, format that zero-shot does not honor consistently |
+| **Chain-of-thought (CoT)** | "Let's think step by step" or input-reasoning-output examples | More tokens before the answer = more total compute the model can apply | Multi-step arithmetic, multi-hop logic, planning, problems with chained dependencies |
+
+## When each pattern earns its place
+
+| Pattern | Helps when... | Hurts when... |
+| --- | --- | --- |
+| Zero-shot | Task is in the SFT distribution; output shape is forgiving | The task has unusual labels, picky format, or the model gets it wrong consistently |
+| Few-shot | Format or labels are not standard; you have 3-5 representative examples | Task is already nailed zero-shot (you waste tokens), or examples cover one variant and the input is a different variant |
+| Chain-of-thought | Real multi-step reasoning chain; harder problems | Simple lookup, single-step classification, summarization; CoT just adds tokens and may add confident-sounding intermediate errors |
+
+## Few-shot, in practice
+
+| Lever | Practical guidance |
+| --- | --- |
+| **Number of examples** | Most benefit by example 3-4 for typical tasks. Past 5-7, returns diminish fast. |
+| **Example coverage** | Span the variants you care about. The model continues whichever pattern it sees; missing variants tend to fail. |
+| **Format consistency** | Identical structure across examples matters more than the exact wording of the instruction. |
+| **Context cost** | Examples eat tokens. Long examples crowd out room for input + response. If you want 20 long examples, the answer is fine-tuning, not heroic few-shot. |
+
+## Chain-of-thought, two forms
+
+| Form | What it looks like | When to use |
+| --- | --- | --- |
+| **Zero-shot CoT** | Add *"let's think step by step"* (or similar) to a zero-shot prompt | Quick win on multi-step problems when you do not want to write reasoning examples |
+| **Few-shot CoT** | Examples show input-reasoning-output triples, not just input-output | When you want the model to follow a specific reasoning shape (e.g., consistent units, named sub-steps) |
+
+## System and role prompts
+
+| Use them when... | Skip them when... |
+| --- | --- |
+| The conversation has a consistent role or constraint that should bias every turn | The role is decoration ("act as a senior X") and the model has no actual access to that expertise |
+| You want a stable style or refusal posture across many turns | You expect the user to override the role on a per-turn basis (the model treats system as guidance, not as law) |
+
+## Prompt injection: the structural vulnerability
+
+```
+Trained behavior: follow instruction-shaped input.
+Application input: system prompt + user-supplied data.
+Failure mode:   user-supplied data contains instruction-shaped tokens.
+Result:         the model has no robust way to tell whose instruction
+                is authoritative; it may follow the injected one.
+```
+
+| Mitigation | What it does | What it does not do |
+| --- | --- | --- |
+| Instruction-hierarchy training | Teaches the model to weight system instructions over user instructions | Eliminate the gap; raises the bar, does not turn it into a wall |
+| Channel separation (system vs user roles in the API) | Reduces the surface area where injected instructions get authority | Prevent injection in user-supplied content that is concatenated into prompts |
+| Output filtering / sandboxing | Limits the damage an injected instruction can do to downstream systems | Stop the model from following the injection in the first place |
+
+**Design rule:** treat any user-supplied or web-fetched content inside a prompt as untrusted. Do not give a model on top of that input access to anything you would not let the untrusted input control directly.
+
+## Pitfalls to dodge
+
+| Pitfall | Reality |
+| --- | --- |
+| Prompting is magic words | No. Each pattern has a mechanism. Structural choice swamps wording choice. |
+| Forced CoT on simple tasks | Adds tokens, can introduce intermediate errors, rarely improves accuracy. |
+| Cargo-culting role prompts | "Act as a senior X" often makes no measurable difference; the model performs the persona at the cost of doing the task. |
+| Trusting a confident-sounding chain | A reasoned-looking CoT can rationalize a wrong answer the model committed to early. |
+| Conflating prompting with fine-tuning | Different tools, different cost profiles. Prompting is per-call and free of training cost; fine-tuning persists across calls without paying token cost. |
+| Treating the system prompt as enforcement | It is guidance the model is biased toward following, not a sandbox. |
+
+## Translating prompt-engineering language
+
+| Phrase you will see | What it actually leverages |
+| --- | --- |
+| "Let's think step by step" | Zero-shot chain-of-thought |
+| "Here are some examples..." | Few-shot |
+| "You are a [role]..." | System / role prompt (style + persona bias) |
+| "Ignore previous instructions" | Prompt-injection attempt (in user-supplied content); a legitimate operator does not need to write this |
+| "In-context learning" | The mechanism behind few-shot prompting |
+
+## Glossary
+
+- **Prompt:** the input tokens you control. Becomes the prefix that conditions the model's next-token loop.
+- **Zero-shot:** prompting with no examples; the instruction alone is the conditioning.
+- **Few-shot:** prompting with a small number of input-output examples before the actual input. Examples teach the pattern.
+- **In-context learning:** the phenomenon underlying few-shot. The model continues a demonstrated pattern without weight updates.
+- **Chain-of-thought (CoT):** prompting style where the model produces intermediate reasoning tokens before its final answer.
+- **System prompt:** a separate, conceptually higher-trust input that sets standing instructions for the conversation.
+- **Role prompt:** an instruction that asks the model to adopt a persona ("you are a..."). May appear in the system or user channel.
+- **Prompt injection:** instruction-shaped content hidden in user-supplied or web-fetched data that the model may follow as if it were operator instructions.
+- **Instruction-hierarchy training:** post-training technique that teaches the model to weight some instruction sources (typically the system channel) over others. Reduces but does not eliminate prompt-injection vulnerability.
+- **Reward hacking:** broader RLHF term. Relevant here because some prompting "tricks" amount to micro-reward-hacks: phrasings that exploit reward-model patterns rather than improving the actual response.
+
+**Zero-shot asks the model.**\
+**Few-shot shows the model.**\
+**Chain-of-thought walks the model through it.**

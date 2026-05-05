@@ -1,0 +1,115 @@
+---
+title: "Cheatsheet: How transformers turn input into output: encoder-decoder and T5's span corruption"
+description: "One-page reference. Three architectural branches, T5 family, span corruption mechanism, why decoder-only won."
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## The one idea that matters
+
+```
+Three architectural branches, three pretraining objectives:
+
+  Encoder-decoder + span corruption       →   T5 family
+  Encoder-only + masked language model    →   BERT family (next lesson)
+  Decoder-only + next-token prediction    →   Modern LLMs
+
+Decoder-only won at scale because next-token prediction
+is the simplest training task and scales the best.
+```
+
+## The three architectural branches
+
+| | Encoder-decoder | Encoder-only | Decoder-only |
+| --- | --- | --- | --- |
+| **Stacks** | Two | One (encoder) | One (decoder) |
+| **Cross-attention?** | Yes (decoder back to encoder) | No (no decoder) | No (no encoder) |
+| **Original example** | 2017 transformer (machine translation) | BERT (next lesson) | GPT-style models |
+| **Modern examples** | T5 family | BERT, RoBERTa, DistilBERT | Most modern LLMs |
+| **Naturally good at** | Translation, span-fill tasks | Classification, embeddings | Generation, chat, completion |
+
+## T5 family
+
+| Member | What it adds |
+| --- | --- |
+| **T5** (vanilla) | Original Text-to-Text Transfer Transformer; encoder-decoder; span corruption pretraining |
+| **mT5** (multilingual T5) | Broader training data + broader vocabulary; same architecture |
+| **byT5** (byte-level T5) | No tokenizer; vocabulary fixed at 256 entries (one per byte value); every character representable in at most two bytes |
+
+## Span corruption mechanism
+
+```
+Original sentence:
+  "my teddy bear is cute and reading"
+
+Encoder input (with sentinels marking masked spans):
+  my [SENTINEL_1] is [SENTINEL_2] reading
+
+Decoder output (each span preceded by its sentinel):
+  [SENTINEL_1] teddy bear [SENTINEL_2] cute and [SENTINEL_3]
+
+The trailing [SENTINEL_3] marks end-of-sequence.
+```
+
+| Element | Purpose |
+| --- | --- |
+| **Span** | One or more consecutive tokens to be masked. Multiple spans per training example, up to a configured maximum. |
+| **Sentinel token** | Special token that marks the position of a masked span (in the encoder input) and delimits the reconstructed content (in the decoder output). |
+| **Teacher forcing** | The full correct decoder output is shown at training time; loss is computed across all positions at once, not autoregressively. |
+
+## Span corruption vs next-token prediction
+
+| | Span corruption (T5) | Next-token prediction (most modern LLMs) |
+| --- | --- | --- |
+| **Training signal** | Reconstruct masked spans | Predict next token at each position |
+| **Setup complexity** | Higher (corruption process, sentinels, special decoder behavior) | Minimal (just feed raw text) |
+| **Decoder behavior** | Outputs sentinels and masked content | Extends sequence one token at a time |
+| **Aligns naturally with** | Fill-in-the-blanks tasks | Chat assistants, generation, completion |
+| **Scales how?** | Worked at the time; less central now | Won at scale; the lecturer's framing: "next word prediction is the simplest thing you can do" |
+
+## Why decoder-only won (per the lecturer)
+
+| Reason | Detail |
+| --- | --- |
+| **Compute budget pays off in the decoder** | "Your compute budget could be best invested in the decoder only." Investment goes into the part that does generation. |
+| **Next-token prediction is simpler** | Simplest possible training task. No corruption process, no sentinels, no special decoder behavior. |
+| **Aligns with the chat-assistant task** | Modern LLMs are mostly used as chat assistants. Text in, text response out is exactly what next-token prediction trains. |
+
+## What you see in modern model cards
+
+| Phrase | What it means |
+| --- | --- |
+| **T5** | Encoder-decoder architecture, span corruption pretraining; ships especially for multilingual NLP via mT5 |
+| **mT5** | Multilingual T5; workhorse for cross-lingual tasks |
+| **byT5** | Byte-level T5; no tokenizer; rare in practice but useful when tokenizers fight you |
+| **Encoder-decoder** | Two-stack architecture with cross-attention; mostly historical for new builds |
+| **Decoder-only** | One-stack architecture, no cross-attention; what most modern LLMs are |
+
+## Pitfalls to dodge
+
+| Pitfall | Reality |
+| --- | --- |
+| Encoder-decoder = seq2seq | No. Encoder-decoder is one architecture (two transformer stacks with cross-attention). Seq2seq is a broader category that includes encoder-decoder transformers but also pre-transformer LSTM-based seq2seq models. |
+| T5 is obsolete | Less central than it was, still ships. mT5 is a workhorse for multilingual tasks. |
+| Span corruption and next-token prediction are interchangeable | Different shapes of pretraining produce different downstream behaviors. They train the model on different patterns. |
+| All encoder-decoder models use span corruption | No. The original 2017 transformer was an encoder-decoder trained on next-token prediction (machine translation as sequence completion). Span corruption is T5's distinctive choice, not an encoder-decoder requirement. |
+
+## Glossary
+
+- **Encoder-decoder transformer:** architecture with two stacks of transformer blocks; the decoder uses cross-attention to look back at the encoder's representations.
+- **Encoder-only transformer:** architecture with just the encoder stack; the BERT family. Next lesson.
+- **Decoder-only transformer:** architecture with just the decoder stack; what most modern LLMs are.
+- **Cross-attention:** in the decoder, the attention layer that lets output tokens attend back to the encoder's representations.
+- **T5 (Text-to-Text Transfer Transformer):** encoder-decoder transformer family with span corruption pretraining and a text-in / text-out framing for all tasks.
+- **mT5:** multilingual T5; broader data and vocabulary.
+- **byT5:** byte-level T5; vocabulary of 256, no tokenizer.
+- **Span corruption:** T5's pretraining objective. Mask spans of input behind sentinel tokens; the decoder reconstructs each masked span in series.
+- **Sentinel token:** special token that marks the position of a masked span in the input and delimits the reconstructed content in the output.
+- **Teacher forcing:** training mechanism where the full correct output is shown at training time and the loss is computed across all positions at once (not autoregressively).
+
+**Encoder-decoder has two stacks.**\
+**T5 added span corruption.**\
+**Decoder-only won on simplicity.**

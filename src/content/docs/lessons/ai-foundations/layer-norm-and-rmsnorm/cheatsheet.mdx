@@ -1,0 +1,110 @@
+---
+title: "Cheatsheet: Why transformers need stability to learn: LayerNorm, pre-norm, and RMSNorm"
+description: One-page reference. The mechanism, LayerNorm vs BatchNorm, post-norm vs pre-norm placement, RMSNorm as the modern simplification.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## The one idea that matters
+
+```
+The "Add & Norm" boxes rescale activations into a usable range
+between sub-layers. Modern transformers changed two things:
+
+  WHERE the LayerNorm sits   →  pre-norm (before each sub-layer)
+  WHAT the LayerNorm computes →  RMSNorm (no mean, no shift)
+```
+
+## LayerNorm, in one formula
+
+```
+mean(x)    = (x_1 + x_2 + ... + x_d) / d
+std(x)     = sqrt( sum((x_i - mean(x))^2) / d )
+
+normalized = (x - mean(x)) / std(x)
+output     = gamma * normalized + beta
+```
+
+Per-token. Two learnable parameters: gamma (rescale), beta (shift).
+
+## RMSNorm, in one formula
+
+```
+rms(x)     = sqrt( (x_1^2 + x_2^2 + ... + x_d^2) / d )
+
+normalized = x / rms(x)
+output     = gamma * normalized
+```
+
+Per-token. One learnable parameter: gamma. No mean subtraction. No shift.
+
+## LayerNorm vs BatchNorm
+
+| | LayerNorm | BatchNorm |
+| --- | --- | --- |
+| **Axis of normalization** | Across the feature dimension (one vector at a time) | Across the batch dimension (one feature across many vectors) |
+| **Depends on batch composition?** | No (per-token) | Yes |
+| **Train vs inference statistics** | Same | Differ (the batch is different at inference) |
+| **CV intuition** | "One vector across many components" | "One component across many vectors" |
+| **Used in transformers?** | Yes (default) | No |
+
+## Post-norm vs pre-norm
+
+| | Post-norm (original 2017) | Pre-norm (modern) |
+| --- | --- | --- |
+| **Formula** | `output = LayerNorm(x + SubLayer(x))` | `output = x + SubLayer(LayerNorm(x))` |
+| **LayerNorm placement** | After the residual addition | Before the sub-layer |
+| **Used in modern LLMs?** | Rare | Default |
+| **Lecture's framing** | "What the original transformer paper used" | "Nowadays we use a prenorm version" |
+
+The lecturer is brief on *why* the field moved. The widely-cited explanation in the literature is that pre-norm keeps the residual stream's magnitude better controlled as networks get deeper.
+
+## LayerNorm vs RMSNorm
+
+| | LayerNorm | RMSNorm |
+| --- | --- | --- |
+| **Mean subtraction?** | Yes | No |
+| **Divisor** | Standard deviation | Root mean square of components |
+| **Learnable rescale (gamma)?** | Yes | Yes |
+| **Learnable shift (beta)?** | Yes | No |
+| **Convergence properties** | Baseline | Comparable to LayerNorm (per the lecturer) |
+| **Parameter count** | Two learnable vectors per norm layer | One learnable vector per norm layer |
+| **Compute cost** | Higher (more arithmetic steps) | Lower |
+| **Used in modern open-weight LLMs?** | Less common | Default |
+
+## What you see in modern model cards
+
+| Phrase in a model card | What it means |
+| --- | --- |
+| **Pre-LayerNorm** | Pre-norm placement + LayerNorm computation. Older modern style; less common today. |
+| **Pre-RMSNorm** | Pre-norm placement + RMSNorm computation. The current default for most modern open-weight LLMs. |
+| **LayerNorm with learnable affine** | Standard LayerNorm with both gamma and beta. The 2017 original. |
+| **RMSNorm** | The simpler scheme; usually paired with pre-norm. |
+
+## Pitfalls to dodge
+
+| Pitfall | Reality |
+| --- | --- |
+| LayerNorm and BatchNorm are the same thing | No. Same general idea (rescale activations), different axis. LayerNorm is per-token across features; BatchNorm is per-feature across the batch. |
+| RMSNorm is fundamentally different from LayerNorm | No. It is a simplification: skip mean subtraction, skip shift. Same per-token normalization. |
+| Pre-norm is universally better | True for modern LLM-scale networks; less clearly true for shallow networks or specific architectures tuned for post-norm. |
+| The "Add & Norm" boxes are decoration | No. They improve convergence and shorten training time at every model size. The mechanism is small; removing it makes training noticeably worse. |
+| BatchNorm "works" if you tune it | It introduces train-vs-inference statistics differences that LayerNorm avoids. Cleaner to use the right tool. |
+
+## Glossary
+
+- **LayerNorm:** per-token normalization that subtracts the mean of a vector's components, divides by the standard deviation, then applies learnable rescale (gamma) and shift (beta).
+- **RMSNorm (Root Mean Square Normalization):** per-token normalization that divides a vector by the root mean square of its components, then applies learnable rescale (gamma) only. No mean subtraction, no shift.
+- **BatchNorm:** normalization across the batch dimension; each component normalized against the same component in other vectors in the batch. Common in CV; not used in transformers.
+- **Post-norm:** the original 2017 transformer's placement: `LayerNorm(x + SubLayer(x))`. LayerNorm sits after the residual addition.
+- **Pre-norm:** the modern placement: `x + SubLayer(LayerNorm(x))`. LayerNorm sits before the sub-layer.
+- **Sub-layer:** in a transformer block, either the attention layer or the feed-forward network.
+- **Internal covariate shift:** the keyword the literature uses for the underlying problem normalization addresses. The distribution of activations shifts as the network trains, making the next layer's job harder.
+- **Gamma, beta:** learnable per-component parameters in LayerNorm (rescale and shift). RMSNorm keeps gamma, drops beta.
+
+**LayerNorm rescales the activations.**\
+**Pre-norm moves where it sits.**\
+**RMSNorm changes what it computes.**

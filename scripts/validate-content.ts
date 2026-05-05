@@ -86,6 +86,16 @@ const BLOOM_VERBS = [
 	'create',
 ];
 
+const PHASE_SLUGS = [
+	'read-text',
+	'architecture',
+	'training',
+	'tuning',
+	'inference',
+	'reasoning-and-agents',
+	'evaluation-and-frontier',
+] as const;
+
 const BriefSchema = z.object({
 	title: z.string().min(1),
 	description: z.string().min(1),
@@ -111,6 +121,10 @@ const BriefSchema = z.object({
 	last_reviewed: z.coerce.date(),
 	status: z.enum(['draft', 'published', 'needs-review']),
 	artifact: z.literal('brief'),
+	// Phase context for Track 5 (AI Foundations). Optional at the schema level;
+	// enforced conditionally below based on track. See Doc/curriculum/mental-model-phases.md.
+	phase: z.enum(PHASE_SLUGS).optional(),
+	phase_order: z.number().int().positive().optional(),
 });
 
 interface ValidationError {
@@ -120,6 +134,10 @@ interface ValidationError {
 
 async function main(): Promise<number> {
 	const errors: ValidationError[] = [];
+
+	// Tracks (phase, phase_order) tuples seen across Track 5 lessons so we can
+	// report duplicates. Key: `${phase}/${phase_order}`. Value: list of brief paths.
+	const phaseSlots = new Map<string, string[]>();
 
 	if (!existsSync(LESSONS_ROOT)) {
 		console.log(
@@ -176,7 +194,42 @@ async function main(): Promise<number> {
 							});
 						}
 					}
+
+					// Track-5 phase context: required when track is ai-foundations.
+					// See Doc/curriculum/mental-model-phases.md and source-to-phase-mapping.md.
+					if (parsed.data.track === 'ai-foundations') {
+						if (parsed.data.phase === undefined) {
+							errors.push({
+								path: relative(ROOT, briefPath),
+								message: `Track 5 lesson missing required field: phase (one of ${PHASE_SLUGS.join(', ')})`,
+							});
+						}
+						if (parsed.data.phase_order === undefined) {
+							errors.push({
+								path: relative(ROOT, briefPath),
+								message: `Track 5 lesson missing required field: phase_order`,
+							});
+						}
+						if (parsed.data.phase !== undefined && parsed.data.phase_order !== undefined) {
+							const key = `${parsed.data.phase}/${parsed.data.phase_order}`;
+							const seen = phaseSlots.get(key) ?? [];
+							seen.push(relative(ROOT, briefPath));
+							phaseSlots.set(key, seen);
+						}
+					}
 				}
+			}
+		}
+	}
+
+	// Report any duplicate (phase, phase_order) tuples across Track 5.
+	for (const [key, paths] of phaseSlots) {
+		if (paths.length > 1) {
+			for (const p of paths) {
+				errors.push({
+					path: p,
+					message: `Duplicate (phase, phase_order) pair "${key}"; also used by: ${paths.filter((q) => q !== p).join(', ')}`,
+				});
 			}
 		}
 	}

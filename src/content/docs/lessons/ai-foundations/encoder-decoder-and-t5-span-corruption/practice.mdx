@@ -1,0 +1,229 @@
+---
+title: "Practice: How transformers turn input into output: encoder-decoder and T5's span corruption"
+description: "Self-check on the T5 family, an applied span corruption walk-through on a small example, a side-by-side comparison with next-token prediction, and flashcards for retrieval."
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Answer in your head (or on paper) before opening the collapsible.
+
+**1. What does "encoder-decoder" mean architecturally, and what do the two stacks do?**
+
+<details>
+<summary>Show answer</summary>
+
+Two stacks of transformer blocks. The **encoder** processes the full input sequence through self-attention and feed-forward blocks; every token can attend to every other token in the input. The **decoder** processes the partially-generated output sequence through its own stack, with two attention layers per block: **masked self-attention** (each output token attends only to previously-generated output tokens) and **cross-attention** (output tokens attend back to the encoder's representations). The architecture was designed for machine translation in the original 2017 paper.
+
+</details>
+
+**2. What does T5 stand for, and what does each member of the family add?**
+
+<details>
+<summary>Show answer</summary>
+
+**T5** = Text-to-Text Transfer Transformer. Every NLP task gets framed as text-in, text-out; the same architecture handles them all by changing the input prompt.
+
+**T5** (vanilla): the original. Encoder-decoder architecture, span corruption pretraining.
+**mT5** (multilingual T5): broader training data and broader vocabulary. The architecture is essentially the same.
+**byT5** (byte-level T5): no tokenizer; vocabulary fixed at 256 entries (one per byte value); every character representable in at most two bytes. Trade-off: the model handles any text without a tokenizer.
+
+</details>
+
+**3. Walk through the span corruption pretraining objective.**
+
+<details>
+<summary>Show answer</summary>
+
+Take a sentence. Mask out one or more spans (a span is one token or several consecutive tokens). The masked spans get replaced by special **sentinel tokens** that mark their position in the input.
+
+Example. Input sentence: *"my teddy bear is cute and reading."*
+
+Encoder input: `my [SENTINEL_1] is [SENTINEL_2] reading`
+Decoder output: `[SENTINEL_1] teddy bear [SENTINEL_2] cute and [SENTINEL_3]`
+
+The decoder reconstructs each corrupted span in series, each preceded by the sentinel that marked its position. The trailing `[SENTINEL_3]` marks end-of-sequence.
+
+Training uses teacher forcing: the full correct decoder output is shown at training time and the loss is computed across all positions at once, not autoregressively.
+
+</details>
+
+**4. How is span corruption different from next-token prediction?**
+
+<details>
+<summary>Show answer</summary>
+
+**Next-token prediction:** given a sequence of tokens, predict the next token. Extends a sequence one token at a time. Used by the original transformer (in its translation-as-sequence-completion framing) and by most modern decoder-only LLMs.
+
+**Span corruption:** given a sequence with masked spans, reconstruct each masked span. Fills in pre-specified holes rather than extending a sequence. Used by T5.
+
+Both teach the model statistical patterns of text, but they shape the model differently. Span corruption is a more bespoke task to set up (corruption process, sentinel scheme, special decoder behavior); next-token prediction needs none of that.
+
+</details>
+
+**5. Per the lecturer, why did the field eventually move from encoder-decoder to decoder-only?**
+
+<details>
+<summary>Show answer</summary>
+
+Two strands. First, "compute budget could be best invested in the decoder only." Next-token prediction is the simplest possible training task; at scale, that simplicity translates into more compute spent on learning rather than on machinery. The lecturer's framing: "next word prediction is the simplest thing you can do, and it proved to work wonders."
+
+Second, the downstream task pulls toward decoder-only. Modern LLMs are mostly used as chat assistants (text in, text response out), and that is exactly what next-token prediction trains. Span corruption was designed for fill-in-the-blanks shapes that do not match how today's users interact with models.
+
+</details>
+
+**6. Is T5 obsolete now?**
+
+<details>
+<summary>Show answer</summary>
+
+Less central than it was, but not obsolete. The T5 family still ships. mT5 in particular is a workhorse for multilingual NLP tasks where the encoder-decoder shape with span-corruption pretraining still earns its place. Encoder-decoder as an architecture is mostly historical for new builds (the field went decoder-only at scale), but specific applications still benefit from it.
+
+</details>
+
+## Try it yourself: corrupt and reconstruct
+
+This exercise puts span corruption into practice. About 12 minutes.
+
+**Side effects:** none. Pen and paper, or a text editor.
+
+### Part one: corrupt a sentence
+
+Take this sentence: *"the quick brown fox jumps over the lazy dog."*
+
+Choose two non-overlapping spans to corrupt (each span is one or more consecutive words). Replace each span with a sentinel token. Show the resulting encoder input.
+
+<details>
+<summary>Show one possible answer</summary>
+
+Many valid corruptions. One example:
+
+Spans chosen: `quick brown` (between "the" and "fox") and `lazy` (between "the" and "dog").
+
+Encoder input: `the [SENTINEL_1] fox jumps over the [SENTINEL_2] dog`
+
+Other valid choices: `brown fox jumps`, `the lazy`, `fox jumps over the`, etc. The constraint is that spans do not overlap and the result is a valid sentence-with-holes.
+
+</details>
+
+### Part two: produce the decoder output
+
+For your corrupted encoder input above, write what the decoder should output.
+
+<details>
+<summary>Show answer for the example above</summary>
+
+Decoder output for the example: `[SENTINEL_1] quick brown [SENTINEL_2] lazy [SENTINEL_3]`
+
+The decoder produces each corrupted span in series, each preceded by the sentinel that marked its position in the input. The trailing `[SENTINEL_3]` marks end-of-sequence.
+
+If you used different spans in part one, the decoder output follows the same shape: each sentinel followed by the content that was masked at that position, with one extra sentinel at the end.
+
+</details>
+
+### Part three: compare with next-token prediction
+
+For the same original sentence (*"the quick brown fox jumps over the lazy dog."*), what would a next-token-prediction setup look like?
+
+<details>
+<summary>Show answer</summary>
+
+Next-token prediction does not use sentinels or corruption. The training data is just the sentence itself. At each position, the model is asked to predict the token at the next position given everything before it.
+
+So the training signal is a series of (input, target) pairs implicit in the sequence:
+- Given `the`, predict `quick`
+- Given `the quick`, predict `brown`
+- Given `the quick brown`, predict `fox`
+- ... and so on through the sentence.
+
+Same source sentence, completely different shape of training signal. Span corruption hides parts and asks for them back; next-token prediction extends the sequence one step at a time.
+
+</details>
+
+**Sanity check:** the goal is to feel both objectives in your hands. Once you have corrupted a sentence, written out the sentinel-delimited decoder output, and contrasted it with the per-position next-token prediction signal, the difference between the two pretraining shapes is concrete. Same data; different training tasks; different downstream behaviors.
+
+## Flashcards
+
+Twelve cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay out the full set as one card per page.
+
+<FlashcardSet>
+
+<Flashcard question="What does encoder-decoder mean architecturally?">
+
+Two stacks of transformer blocks. The encoder processes the full input sequence; every token can attend to every other input token. The decoder processes the partially-generated output sequence with two attention layers per block: masked self-attention (output-to-output, with causal masking) and cross-attention (output back to encoder representations). The original 2017 transformer is an encoder-decoder.
+
+</Flashcard>
+
+<Flashcard question="What are the three architectural branches of transformer-based models?">
+
+Encoder-decoder (original transformer + T5 family), encoder-only (BERT family), decoder-only (most modern LLMs). Each shape determines what the model is naturally good at.
+
+</Flashcard>
+
+<Flashcard question="What does T5 stand for?">
+
+Text-to-Text Transfer Transformer. Every NLP task gets framed as text-in, text-out; the same architecture handles them all by changing the input prompt.
+
+</Flashcard>
+
+<Flashcard question="What are the three members of the T5 family?">
+
+Vanilla T5 (the original). mT5 (multilingual T5: broader training data and vocabulary). byT5 (byte-level T5: no tokenizer; vocabulary fixed at 256 entries since every byte value gets one; every character representable in at most two bytes).
+
+</Flashcard>
+
+<Flashcard question="What is span corruption, in one sentence?">
+
+T5's pretraining objective: mask spans of the input behind sentinel tokens, then have the decoder reconstruct each masked span in series, each preceded by the sentinel that marked its position in the input.
+
+</Flashcard>
+
+<Flashcard question="Walk through a span corruption example.">
+
+Input sentence: *"my teddy bear is cute and reading."* Encoder input after corruption: `my [SENTINEL_1] is [SENTINEL_2] reading`. Decoder output: `[SENTINEL_1] teddy bear [SENTINEL_2] cute and [SENTINEL_3]`. The trailing sentinel marks end-of-sequence.
+
+</Flashcard>
+
+<Flashcard question="How does span corruption differ from next-token prediction?">
+
+Span corruption fills in pre-specified holes in a sequence. Next-token prediction extends a sequence one token at a time. Both use the same data, but the shape of training signal is different, and the downstream behaviors that follow are different.
+
+</Flashcard>
+
+<Flashcard question="What is teacher forcing in T5 training?">
+
+The training mechanism where the full correct decoder output is shown at training time and the loss is computed across all positions at once. The model is not generating autoregressively at training time; it sees the correct answer alongside its predictions.
+
+</Flashcard>
+
+<Flashcard question="Per the lecturer, why did decoder-only architectures eventually dominate?">
+
+Two reasons. First, "compute budget could be best invested in the decoder only." Next-token prediction is the simplest possible training task and scales better at large compute. Second, the downstream chat-assistant task pulls toward decoder-only because what users do (give text, get response) is exactly what next-token prediction trains.
+
+</Flashcard>
+
+<Flashcard question="Is T5 obsolete?">
+
+No, just less central. The family still ships. mT5 in particular is a workhorse for multilingual NLP tasks where encoder-decoder with span-corruption pretraining still earns its place. Encoder-decoder as an architecture is mostly historical for new builds.
+
+</Flashcard>
+
+<Flashcard question="Common pitfall: encoder-decoder versus seq2seq.">
+
+Encoder-decoder is one architecture (two transformer stacks with cross-attention). Seq2seq is a broader category (any model mapping input sequence to output sequence) that includes encoder-decoder transformers but also pre-transformer LSTM-based architectures. Encoder-decoder is the specific transformer flavor.
+
+</Flashcard>
+
+<Flashcard question="What is the one-sentence takeaway?">
+
+Encoder-decoder has two stacks. T5 added span corruption. Decoder-only won on simplicity.
+
+</Flashcard>
+
+</FlashcardSet>

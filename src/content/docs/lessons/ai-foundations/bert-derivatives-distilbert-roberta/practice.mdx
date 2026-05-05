@@ -1,0 +1,255 @@
+---
+title: "Practice: How these models keep improving: DistilBERT and RoBERTa"
+description: "Self-check on BERT's three limitations and the two derivatives, an applied teacher/student walk-through showing why soft targets carry more information than hard labels, a comparison of the BERT and RoBERTa training recipes, and flashcards for retrieval."
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Answer in your head (or on paper) before opening the collapsible.
+
+**1. What three concrete limitations of BERT does the lecturer name?**
+
+<details>
+<summary>Show answer</summary>
+
+**Context length.** Originally 512 tokens (an early-paper limitation). Later addressed by attention efficiency tricks (covered in L2.3).
+
+**Latency and size.** BERT-base has 110 million parameters. Inference is correspondingly slow and memory-hungry. Addressed by DistilBERT.
+
+**Pretraining complexity.** BERT had two pretraining objectives (MLM + NSP) without rigorous evidence that NSP was actually load-bearing. Addressed by RoBERTa.
+
+</details>
+
+**2. What is the core insight behind knowledge distillation, in Hinton's framing?**
+
+<details>
+<summary>Show answer</summary>
+
+*"The soft targets contain almost all the knowledge."* When a trained model classifies an input, it produces a probability distribution over output classes. The hard label (single most likely class) throws away most of that information. The full distribution carries information about how the input relates to every class, not just the chosen one. Training a smaller "student" model to match the full distribution of a larger "teacher" model gives the student a much richer training signal than the original task's hard labels would.
+
+</details>
+
+**3. What loss function does distillation use, and what is its relationship to standard cross-entropy?**
+
+<details>
+<summary>Show answer</summary>
+
+**KL divergence** between the teacher's distribution and the student's distribution. The lecturer notes a clean property: when the target distribution is a hard label (one position at probability 1, rest at 0), KL divergence collapses to standard cross-entropy loss. So distillation generalizes supervised learning's loss; it is not a different paradigm so much as a richer training signal.
+
+</details>
+
+**4. What does DistilBERT specifically do, and what is the empirical result?**
+
+<details>
+<summary>Show answer</summary>
+
+**Architectural change:** halve the number of transformer layers (the lecturer says "reduce by two"; the DistilBERT paper specifies 6 layers vs BERT-base's 12). **Training change:** instead of training from scratch on the original task, train the smaller student via distillation against the original BERT's output distribution. **Empirical result:** the distilled student keeps almost all of BERT's downstream performance while being roughly half the size and correspondingly faster at inference. The DistilBERT paper is famously short (~4 pages); the mechanism is straightforward enough that the paper does not need to be long.
+
+</details>
+
+**5. What three changes does RoBERTa make to BERT, and what does each one show?**
+
+<details>
+<summary>Show answer</summary>
+
+**1. Drop NSP entirely.** The RoBERTa authors tested whether the next-sentence-prediction objective contributed to pretraining quality. Removing it led to "no decrease in performance almost," in the lecturer's framing. The original BERT authors had assumed NSP was helping; the empirical evidence said otherwise.
+
+**2. Dynamic masking.** In original BERT, the masking pattern for an input is decided once during data preparation. Every epoch sees the same masking. RoBERTa re-masks on every epoch, effectively giving the model many more "different" training examples from the same source data.
+
+**3. Much more data.** RoBERTa observed that BERT was "vastly undertrained" and scaled up the pretraining data significantly (in volume and diversity). Benchmark performance improved correspondingly.
+
+The architecture is the same as BERT; only the pretraining recipe is different.
+
+</details>
+
+**6. How are DistilBERT and RoBERTa related?**
+
+<details>
+<summary>Show answer</summary>
+
+They address different limitations and can be combined. DistilBERT: smaller and faster via distillation, with a slight quality drop. RoBERTa: same size, better quality via training improvements. They are not competitors. DistilRoBERTa exists in the wider ecosystem as a distilled version of RoBERTa that combines RoBERTa's training improvements with DistilBERT's compression approach.
+
+The choice between them (or combinations of them) depends on which constraint matters most for your application: if you need speed, DistilBERT (or DistilRoBERTa); if you need the best-trained BERT-shaped encoder, RoBERTa.
+
+</details>
+
+## Try it yourself: soft vs hard targets
+
+This exercise puts the soft-targets intuition into practice. About 12 minutes.
+
+**Side effects:** none. Pen and paper, or a text editor.
+
+### Part one: hard label vs soft distribution
+
+Suppose you have a trained sentiment classifier that produces three-class output (positive, neutral, negative). For a given input sentence, the model outputs the following probability distribution:
+
+```
+positive:  0.70
+neutral:   0.25
+negative:  0.05
+```
+
+**a)** What is the hard label?
+
+<details>
+<summary>Show answer</summary>
+
+`positive`. The single most likely class.
+
+</details>
+
+**b)** What does the soft distribution tell you that the hard label does not?
+
+<details>
+<summary>Show answer</summary>
+
+The hard label tells you the model thinks this input is positive. The soft distribution tells you the model thinks it is *quite likely* positive (70%) but also *not strongly negative* (only 5%) and has some lingering uncertainty about whether it might be neutral (25%).
+
+That extra information is useful: if a downstream learner is trying to mimic this model, it can learn that "this kind of input has some neutrality character to it" even though the chosen class is positive. A learner trained only on the hard label `positive` would never know.
+
+</details>
+
+### Part two: distillation vs scratch training
+
+Suppose you have a labeled dataset of 100 sentences with their hard sentiment labels (positive / neutral / negative). You want a small classifier model.
+
+**Option A:** train the small model from scratch on the 100 labeled examples.
+
+**Option B:** first train (or borrow) a large teacher model that gets ~95% accuracy on this task. Then for each of your 100 examples, get the teacher's full output distribution. Train the small student model to match those distributions (via KL divergence loss).
+
+Why does Option B (distillation) typically outperform Option A on small training datasets?
+
+<details>
+<summary>Show answer</summary>
+
+Three reasons.
+
+**1. Richer training signal per example.** Each of the 100 examples produces a full distribution as the target instead of just one hard label. The student is being trained on more information per example.
+
+**2. Implicit regularization.** The teacher's distribution captures patterns of confusion ("inputs that look like X are easily confused with Y") that the student inherits. Student learns to be confused in the same ways the teacher is, which encodes generalization knowledge.
+
+**3. Effective extension of the dataset.** Because the teacher is well-trained, its distribution incorporates patterns from the much larger dataset the teacher saw. Distillation lets the student inherit some of that pattern knowledge through 100 examples that wouldn't be possible from 100 hard labels alone.
+
+The combination is why distilled small models often match (or exceed) much larger models trained from scratch on the same labeled data.
+
+</details>
+
+### Part three: when does each derivative apply?
+
+For each scenario, decide whether DistilBERT or RoBERTa (or DistilRoBERTa) is the better starting point.
+
+**a)** A production sentiment classifier serving 10 million inferences per day; latency budget is tight; quality of a "well-trained BERT-base" is enough.
+
+<details>
+<summary>Show answer</summary>
+
+**DistilBERT.** Latency and inference cost are the binding constraint; quality is sufficient. DistilBERT's roughly-half size and corresponding speed-up directly address the production cost. Use the distillation savings.
+
+</details>
+
+**b)** A research project comparing model performance on a benchmark; latency is irrelevant; quality is the only thing that matters.
+
+<details>
+<summary>Show answer</summary>
+
+**RoBERTa.** Same size as BERT, better trained, better benchmark performance. No reason to use DistilBERT here because the size advantage doesn't matter and you would be giving up quality for nothing.
+
+</details>
+
+**c)** A production system with both quality and latency constraints; you want the best small model you can find.
+
+<details>
+<summary>Show answer</summary>
+
+**DistilRoBERTa.** Combines RoBERTa's training improvements (better quality at the same size as RoBERTa) with DistilBERT's compression approach (smaller and faster). The two stack; if both constraints matter, this is the model where they meet.
+
+</details>
+
+**Sanity check:** the rule of thumb is "match the model to the binding constraint." Latency budget tight → DistilBERT family. Quality is everything → RoBERTa family. Both → DistilRoBERTa.
+
+## Flashcards
+
+Twelve cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay out the full set as one card per page.
+
+<FlashcardSet>
+
+<Flashcard question="What are BERT's three limitations the lecturer names?">
+
+Context length (originally 512 tokens; addressed by attention efficiency tricks). Latency and size (110M parameters at BERT-base; addressed by DistilBERT). Pretraining complexity (MLM + NSP without empirical justification for NSP; addressed by RoBERTa).
+
+</Flashcard>
+
+<Flashcard question="What is knowledge distillation in one sentence?">
+
+Train a smaller "student" model to mimic the output distribution of a larger "teacher" model, instead of training the student on the original task's hard labels.
+
+</Flashcard>
+
+<Flashcard question="What is Hinton's framing of why distillation works?">
+
+"The soft targets contain almost all the knowledge." A trained model's full output distribution carries information about how each input relates to every class, not just the most-likely class. That extra information makes the soft distribution a much richer training signal than a hard label.
+
+</Flashcard>
+
+<Flashcard question="What loss function does distillation use, and how does it relate to cross-entropy?">
+
+KL divergence between teacher and student distributions. Cross-entropy is a special case (when the target is a hard label, KL collapses to cross-entropy). Distillation generalizes the supervised loss; it is a richer training signal, not a different paradigm.
+
+</Flashcard>
+
+<Flashcard question="What architectural change does DistilBERT make?">
+
+Halves the number of transformer layers (the lecturer says "reduce by two"; the DistilBERT paper specifies 6 layers vs BERT-base's 12). Then trains the smaller student via distillation against the original BERT's output distribution.
+
+</Flashcard>
+
+<Flashcard question="What is the empirical result of DistilBERT?">
+
+Roughly half the size, correspondingly faster at inference, almost the same downstream performance. The DistilBERT paper is famously short (~4 pages); the mechanism is straightforward enough that the paper does not need to be long.
+
+</Flashcard>
+
+<Flashcard question="What does RoBERTa change relative to BERT?">
+
+Three things, all in the pretraining recipe (architecture is unchanged). (1) Drop NSP entirely, no decrease in performance. (2) Dynamic masking: re-mask the same input differently on each epoch. (3) Much more pretraining data; BERT was undertrained.
+
+</Flashcard>
+
+<Flashcard question="Why drop NSP?">
+
+The RoBERTa authors tested whether NSP was actually contributing to pretraining quality. The lecturer's framing: removing NSP led to "no decrease in performance almost." The original BERT authors had assumed NSP was helping; the empirical evidence said otherwise.
+
+</Flashcard>
+
+<Flashcard question="What is dynamic masking?">
+
+In original BERT, the masking pattern for an input sentence is decided once during data preparation; every epoch sees the same masking. RoBERTa re-masks on every epoch, effectively giving the model many more "different" training examples from the same source data.
+
+</Flashcard>
+
+<Flashcard question="How do DistilBERT and RoBERTa relate?">
+
+They address different limitations and can stack. DistilBERT: smaller and faster via distillation (slight quality drop). RoBERTa: same size, better quality via training recipe changes. DistilRoBERTa exists as a distilled version of RoBERTa that combines both.
+
+</Flashcard>
+
+<Flashcard question="Common pitfall: did RoBERTa change BERT's architecture?">
+
+No. The architecture is the same. RoBERTa changes only the pretraining recipe (drop NSP, dynamic masking, more data).
+
+</Flashcard>
+
+<Flashcard question="What is the one-sentence takeaway?">
+
+DistilBERT is BERT compressed via distillation. RoBERTa is BERT trained better. Same family, different problems.
+
+</Flashcard>
+
+</FlashcardSet>
