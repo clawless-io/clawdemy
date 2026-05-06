@@ -9,6 +9,7 @@ artifact: lesson
 
 import AudioPlayer from '../../../../../components/AudioPlayer.astro';
 import LessonStar from '../../../../../components/LessonStar.astro';
+import TransferLearningParadigm from '../../../../../components/illustrations/TransferLearningParadigm.astro';
 
 <LessonStar slug="how-models-are-pretrained" />
 
@@ -40,19 +41,7 @@ That hypothetical is now reality, and it has a name.
 
 **Transfer learning** is the move from "one model per task" to "one general model, then adapt." You spend an enormous amount of effort up front teaching a model the underlying competence (in our case, language) on a vast unlabeled corpus. That stage is called **pretraining**. Then for any specific task you care about, you take the pretrained model and run a much smaller, much cheaper second stage to **tune** it.
 
-```
-old paradigm:        new paradigm:
-
-[spam data] -> [spam   [pretraining: huge data, no labels]
-              model]                |
-                                    v
-[sentiment]    [sent.    [pretrained base model]
-data       -> model]      /        |       \
-                         v         v        v
-[topic]       [topic]   [tune    [tune    [tune
-data       -> model]    for      for      for
-                        spam]   sentiment] topic]
-```
+<TransferLearningParadigm />
 
 The expensive part shifts left. Pretraining happens once, on the company's dime. Tuning happens many times for many tasks, but each tuning run is small (hundreds of examples instead of millions, hours of compute instead of months) and starts from a model that already knows English.
 
@@ -69,6 +58,8 @@ That is it. There is no labeled data, no human annotation, no task-specific sign
 This is sometimes called the "next-token prediction" objective, sometimes "causal language modeling," sometimes just "language modeling." All three terms refer to the same thing.
 
 A way to see why this works: predicting the next word in arbitrary text exercises almost everything else. To predict that the next word in "The cat sat on the ___" is probably " mat" rather than " roof," the model needs to know what cats are, what surfaces are, that cats are usually inside, that mats are surfaces inside, that "sat on the" is a positional phrase that takes a noun phrase complement, and that some choices are common and others are absurd. A surprising amount of world knowledge, grammar, and statistical pattern can in principle be coaxed out of a model that has gotten very good at next-token prediction.
+
+The model is not memorizing sentences. It is, in effect, building a massive internal map of how concepts relate: which words tend to appear near which others, which kinds of things tend to do which kinds of actions, which categories of nouns fit which categories of verbs. Every training step nudges that map a little. After enough steps on enough text, the map starts to behave like an approximation of the world the text describes.
 
 That is not a small claim, and the reason it is widely accepted is empirical: when you actually run this training on enough data, the model demonstrably acquires the things you wanted it to know. Not by being taught them. Just by being asked to predict next tokens.
 
@@ -88,11 +79,13 @@ You can think of the input to pretraining as: **anything written that is reachab
 
 The pretraining stage is invisible at runtime, but its fingerprints are everywhere in your interactions with a chat assistant. Three concrete consequences worth carrying with you:
 
-- **Knowledge cutoffs are pretraining cutoffs.** When a chat assistant says "I don't know about events after my knowledge cutoff," that cutoff is the date the pretraining corpus was sampled. Tuning happens later but adds little new factual material; the model knows what the open web knew at pretraining time, plus or minus.
+- **Knowledge cutoffs are pretraining cutoffs.** When a chat assistant says "I don't know about events after my knowledge cutoff," that cutoff is the date the pretraining corpus was sampled. Tuning happens later but adds little new factual material; the model knows what the open web knew at pretraining time, plus or minus. Some assistants today can also search the live web while answering, but that is a tool they use, not a change to their brain. Their core, unassisted knowledge stops at the end of pretraining. (Phase 6, lessons on RAG and tool calling, will cover the live-web case directly.)
 - **Most "the model just made it up" moments are pretraining-era statistics, not chat-layer bugs.** When a model invents a plausible-sounding citation, conflates two similar people, or asserts a wrong fact with confidence, the cause is almost always that the model learned the statistical shape of "things that look like this" without learning the specific fact. Tuning improves how the model talks; it cannot retroactively add facts the pretraining corpus did not contain.
 - **The model's "personality" is tuning, not pretraining.** A pretrained base model is fluent but voiceless; it continues whatever you give it. The friendly assistant tone, the refusal patterns, the willingness to clarify, the structured response style: all that comes in Phase 4. If two assistants feel different, they were tuned differently. If they feel the same on factual questions, they probably share a pretraining lineage.
 
 ## A worked trace of one pretraining step
+
+A quick reminder before the trace: "tokens" are not always whole words. Common short words tokenize as themselves, but longer or rarer words split into pieces (so a word like `preparing` might become two tokens, `[ pre][paring]`, depending on the tokenizer). The "next word" framing this lesson uses is the everyday version; the technical training step operates on tokens. Phase 1, lesson 1 covers tokenization in detail.
 
 To make the mechanism concrete, here is one training step on a single example. Suppose the source text is the sentence "The cat sat on the mat." After tokenization (Phase 1, lesson 1) it becomes a sequence of token IDs:
 
@@ -113,6 +106,8 @@ Pick the token " mat" as our target. The model sees the prefix `[The] [ cat] [ s
 " roof":   0.005
 ... (~50,000 other tokens, each with very small probability)
 ```
+
+The model is not just "knowing" the word " mat." It is producing a probability distribution over the entire vocabulary. When " mat" gets 31 percent and " roof" gets 0.5 percent, the model has internalized that cats are more likely to be on floor-coverings than on structural exteriors in general text. That ranking is what gets folded into the model's weights, one tiny adjustment per training step.
 
 The training signal is whatever was actually next in the source text, in this case " mat". The loss for this single step is, roughly, how much probability the model failed to put on " mat". A standard choice is the negative log of that probability, in this case `-log(0.31)` is about `1.17`. We use this loss to compute gradients (Phase 2's discussion of backpropagation applies; the math is the same) and adjust the model's weights very slightly so that next time it sees the prefix `[The] [ cat] [ sat] [ on] [ the]` it gives a tiny bit more probability to " mat".
 
