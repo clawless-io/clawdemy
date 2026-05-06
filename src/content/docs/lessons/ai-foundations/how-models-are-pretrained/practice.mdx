@@ -1,14 +1,264 @@
 ---
 title: "Practice: Pretraining: how a model learns language by predicting the next word"
-description: "Self-check, try-it-yourself, and flashcards for the pretraining lesson. Draft in progress; the full practice will land once the lesson body has had founder review."
+description: "Self-check on the next-token objective and the data, an applied exercise tracing one training step on a fresh sentence, a comparison of decoder-only pretraining vs BERT-family pretraining, and flashcards for retrieval."
+artifact: practice
 sidebar:
   order: 3
   label: Practice
-artifact: practice
 ---
 
-import { Aside } from '@astrojs/starlight/components';
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
 
-<Aside type="caution" title="Draft in progress">
-The lesson body is complete and through the four-stage editorial pipeline. The Practice artifact is being drafted as a derivative of the vetted body and will land in a follow-up. Read the [Brief](../brief/) and [Lesson](../lesson/) for now.
-</Aside>
+## Self-check
+
+Answer in your head (or on paper) before opening the collapsible.
+
+**1. What is the pretraining objective for a decoder-only model, in one sentence?**
+
+<details>
+<summary>Show answer</summary>
+
+Given a piece of text, predict the next token. The model is fed all but the last token of a sequence, asked to assign a probability to every possible next token, and rewarded for putting probability mass on whatever token actually came next in the source. There is no labeled data; the source text is its own training signal.
+
+</details>
+
+**2. Why does training on next-token prediction at internet scale produce general-purpose language ability?**
+
+<details>
+<summary>Show answer</summary>
+
+Because predicting the next word in arbitrary text exercises almost everything else. To predict that the next word in "the kettle started to ___" is more likely " whistle" than " photosynthesize," the model needs to know what kettles are, what they do when heated, which verbs follow "started to" syntactically, and which choices are common in real text vs absurd. Repeated across the open internet, the only way to be good at this objective is to internalize world knowledge, grammar, and statistical regularities. The objective specification is narrow; what the model has to learn to satisfy it is not.
+
+</details>
+
+**3. What is Common Crawl and what role does it play in pretraining?**
+
+<details>
+<summary>Show answer</summary>
+
+Common Crawl is an open project that runs a continuous web crawler and publishes the raw archive (the lecturer cites "something like three billion pages per month" added). Most modern LLM pretraining sets are built on top of a filtered Common Crawl snapshot, supplemented with code (the lecturer specifically names GitHub and Stack Overflow), books, papers, and non-English text. It is the dominant pretraining data source.
+
+</details>
+
+**4. Distinguish the pretraining stage from the later tuning stages.**
+
+<details>
+<summary>Show answer</summary>
+
+**Pretraining** is the giant front-loaded stage, run once. Massive unlabeled text data, single objective (next-token prediction), weeks to months on large GPU clusters. The lecturer calls this "by far the most expensive" stage. The output is a base model: fluent at continuing text but not yet a chat assistant.
+
+**Tuning** (covered in Phase 4) is the later, smaller, cheaper stage. Curated data (instruction-response pairs, human preference comparisons), task-specific objective, hours to days on smaller clusters. The output is the assistant you actually use.
+
+The transfer-learning paradigm is the move from "one model per task, trained from scratch" to "one big pretrained model, then small cheap tuning runs for any specific task." The expensive part shifts left and is reused.
+
+</details>
+
+**5. The Stanford lecturer estimates more than 90 percent of modern LLMs are decoder-only. What does that mean for the term "pretraining"?**
+
+<details>
+<summary>Show answer</summary>
+
+It means that when "pretraining" appears in the wild (in a paper, on a model card, on a press release), it almost always refers to the next-token-prediction recipe this lesson covers. The encoder-only branch (BERT and family) and the encoder-decoder branch (T5 and family) use different pretraining recipes (masked language modeling and span corruption respectively, both covered in Phase 2), but those are smaller branches today. Read for which family before assuming the recipe.
+
+</details>
+
+**6. Why is a freshly-pretrained base model not yet a chat assistant?**
+
+<details>
+<summary>Show answer</summary>
+
+Because pretraining only teaches the model to continue text fluently. A pretrained base model does not know that it is being asked a question, that it should stop talking when the answer ends, that some answers are unhelpful, or that some are harmful. It is a language continuation engine. Turning it into a usable assistant is what Phase 4 covers (instruction tuning, RLHF, DPO). Pretraining sets the language ability; tuning sets the format and the personality.
+
+</details>
+
+## Try it yourself: trace one pretraining step on a fresh sentence
+
+This exercise puts the worked-trace mechanism into practice on a sentence the lesson did not use. About 12 minutes.
+
+**Side effects:** none. Pen and paper, or a text editor.
+
+### Part one: pick the prediction target
+
+Take the source sentence "She poured coffee into the mug." Imagine this sentence appears in the pretraining corpus.
+
+**a)** Tokenize the sentence informally, treating each whole word as one token. Pick a position to predict from. Use position 6 (the word "mug"). What prefix does the model see, and what is the target token?
+
+<details>
+<summary>Show answer</summary>
+
+Prefix the model sees: `[She] [ poured] [ coffee] [ into] [ the]`
+
+Target token at position 6: `[ mug]`
+
+The model is being asked: given the five-word prefix, what is the probability of every possible next token in the vocabulary?
+
+</details>
+
+### Part two: reason about the probability distribution
+
+The model produces a distribution over the entire vocabulary (typically tens of thousands of tokens). Suppose it outputs:
+
+```
+" mug":   0.42
+" cup":   0.28
+" pot":   0.07
+" bowl":  0.04
+" car":   0.001
+" sky":   0.0001
+... (~50,000 other tokens, each with very small probability)
+```
+
+**a)** What does the relative ranking of these probabilities tell you about what the model has learned?
+
+<details>
+<summary>Show answer</summary>
+
+The model has internalized that coffee gets poured into vessels (mug, cup, pot, bowl rank high) rather than into vehicles or weather (car and sky rank essentially zero). The fact that "mug" outranks "pot" tells you the model has learned the more specific contextual pattern that mugs are the prototypical coffee vessel. None of this knowledge was given to the model as an explicit fact; all of it was coaxed out of next-token prediction over enough text to make these patterns statistically reliable.
+
+</details>
+
+**b)** Which one of these would the model not have learned through pretraining alone?
+
+<details>
+<summary>Show answer</summary>
+
+The one most likely to be missing is highly specific factual content: the model would not learn from pretraining alone, for example, that the speaker's particular favorite mug is blue, or what brand of coffee maker she owns, or whether she pours coffee into mugs at exactly 7am every morning. Pretraining gives the model the statistical shape of the world it has seen in text. It does not give the model facts about specific people or events that are not in the training data.
+
+</details>
+
+### Part three: compute the loss for this step
+
+The actual next token in the source text was " mug", and the model gave " mug" a probability of 0.42.
+
+**a)** What is the loss for this single training step? Use the negative-log formulation from the lesson.
+
+<details>
+<summary>Show answer</summary>
+
+`loss = -log(0.42) ≈ 0.87`
+
+(Natural log, as is standard.)
+
+</details>
+
+**b)** What does the model do with this loss?
+
+<details>
+<summary>Show answer</summary>
+
+It uses the loss to compute gradients (backpropagation, covered in Phase 2's discussion of how transformer training works) and adjusts every weight in the model very slightly. The direction of the adjustment is "next time you see the prefix 'She poured coffee into the', give a tiny bit more probability to ' mug' and a tiny bit less to everything else." Over billions of training steps on similar prefixes across the corpus, those tiny adjustments add up to a model that has internalized a lot of statistical pattern about how the world is described in text.
+
+</details>
+
+### Part four: contrast with another pretraining recipe
+
+A reader claims: "All language models are pretrained by predicting the next token; I read about pretraining once, and the recipe is universal."
+
+**a)** What is wrong with that claim?
+
+<details>
+<summary>Show answer</summary>
+
+It is wrong because next-token prediction is the recipe for **decoder-only** models specifically (the dominant family today, more than 90 percent of modern LLMs by the lecturer's count, but not the only family). BERT-family encoder-only models are pretrained with **masked language modeling**: predict words hidden inside a sentence (covered in Phase 2, lesson 7). T5-family encoder-decoder models are pretrained with **span corruption**: predict longer hidden chunks (Phase 2, lesson 6). The recipe varies with the architecture family. The reader is correct that the dominant case is next-token; they are wrong that it is universal.
+
+</details>
+
+**Sanity check:** "Pretraining" is a one-word umbrella over several recipes. When you read about pretraining in a paper or model card, identify which architecture family you are reading about before assuming the recipe.
+
+### Part five: explain it in your own words
+
+This is the lesson's outcome 2 in applied form: the brief promised that you can *explain why training on the internet at scale produces general-purpose language ability.* The earlier parts gave you traces and contrasts; this one asks you to put it into a paragraph.
+
+**Prompt:** Explain in your own words, in 4-6 sentences, why a model trained only to predict the next token ends up with world knowledge, grammar, and statistical pattern that no one explicitly taught it.
+
+<details>
+<summary>Model answer</summary>
+
+The objective sounds narrow because it is one task: given a prefix of text, output a probability distribution over the next token. The narrowness is in the objective specification, not in what the model has to learn to satisfy it. To predict next tokens accurately on arbitrary text from the open internet, the model needs to know what concepts mean, how grammar constrains what can follow what, which patterns of usage are common, what kinds of things tend to do what kinds of actions, and which combinations are absurd. Every training step nudges the model's weights so the next prediction on the next prefix is a tiny bit better, and after billions of steps the cumulative effect is something that behaves like world knowledge, grammar, and reasoning. None of that was given as an explicit fact. All of it was coaxed out of next-token prediction over enough text to make the patterns statistically reliable.
+
+</details>
+
+## Flashcards
+
+Twelve cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay out the full set as one card per page.
+
+<FlashcardSet>
+
+<Flashcard question="What is the pretraining objective for a decoder-only model?">
+
+Predict the next token. Given a piece of text, the model is fed all but the last token, asked to assign a probability to every possible next token, and rewarded for putting probability mass on whatever token actually came next.
+
+</Flashcard>
+
+<Flashcard question="Why does next-token prediction produce general language ability?">
+
+Because predicting the next word in arbitrary text exercises almost everything else: world knowledge, grammar, statistical patterns. The objective is narrow; what the model has to internalize to satisfy it across the open internet is not.
+
+</Flashcard>
+
+<Flashcard question="What is Common Crawl, in one sentence?">
+
+An open project that runs a continuous web crawler and publishes the raw archive (the Stanford lecturer cites something like three billion pages per month added). It is the dominant data source for modern LLM pretraining.
+
+</Flashcard>
+
+<Flashcard question="What scale, in tokens, do modern pretraining corpora reach?">
+
+Hundreds of billions to tens of trillions. Two examples cited in lecture: GPT-3 was trained on roughly 300 billion tokens, Llama 3 on roughly 15 trillion. The order of magnitude is the takeaway.
+
+</Flashcard>
+
+<Flashcard question="What does the lecturer specifically name as the source of code data in pretraining?">
+
+GitHub and Stack Overflow. Code is layered into the corpus alongside natural-language text and non-English text.
+
+</Flashcard>
+
+<Flashcard question="What does the transfer-learning paradigm shift change?">
+
+The move from "one model per task, trained from scratch on its own labeled data" to "one big pretrained base model, then small cheap tuning runs for any specific task." The expensive part shifts left (run once) and is reused across many cheaper tuning runs.
+
+</Flashcard>
+
+<Flashcard question="Distinguish pretraining from tuning, in one sentence.">
+
+Pretraining is the expensive front-loaded stage on massive unlabeled text with the next-token objective; tuning is the smaller cheaper stage on curated data that adapts the pretrained base into a usable assistant for a specific task. Pretraining sets the language; tuning sets the format and personality.
+
+</Flashcard>
+
+<Flashcard question="Why is a freshly-pretrained base model not yet a chat assistant?">
+
+Pretraining only teaches the model to continue text fluently. A base model does not know it is being asked a question, that it should stop talking when an answer ends, or that some answers are unhelpful or harmful. Turning a base model into the assistant you actually use is what Phase 4 covers (instruction tuning, RLHF, DPO).
+
+</Flashcard>
+
+<Flashcard question="What does it mean to say 'knowledge cutoffs are pretraining cutoffs'?">
+
+The cutoff date a chat assistant cites for its knowledge is the date the pretraining corpus was sampled. Tuning happens later but adds little new factual material; the model knows what the open web knew at pretraining time. (Some assistants can also use live-web tools at inference, but that is a tool, not a change to the model's brain.)
+
+</Flashcard>
+
+<Flashcard question="Why do hallucinations usually trace to pretraining, not the chat layer?">
+
+When a model invents a plausible-sounding citation, conflates two similar people, or asserts a wrong fact with confidence, the cause is almost always that pretraining learned the statistical shape of "things that look like this" without learning the specific fact. Tuning improves how the model talks; it cannot retroactively add facts the pretraining corpus did not contain.
+
+</Flashcard>
+
+<Flashcard question="Pitfall: are all language models pretrained by predicting the next token?">
+
+No. Decoder-only models use next-token prediction (the dominant recipe today). BERT-family encoder-only models use masked language modeling. T5-family encoder-decoder models use span corruption. The recipe varies with the architecture family. Always read for which family before assuming.
+
+</Flashcard>
+
+<Flashcard question="What is the one-sentence takeaway?">
+
+Pretraining is one objective: predict the next token. Repeated billions of times across the open internet. Everything else, tuning and alignment and reasoning, is built on top.
+
+</Flashcard>
+
+</FlashcardSet>
+
+**Pretraining is one objective: predict the next token.**\
+**Repeated billions of times across the open internet.**\
+**Everything else, tuning and alignment and reasoning, is built on top.**
