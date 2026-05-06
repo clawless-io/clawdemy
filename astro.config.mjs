@@ -245,9 +245,20 @@ export default defineConfig({
 						{
 							label: 'Phase 3\nHow models are trained at scale',
 							collapsed: true,
-							badge: { text: 'Coming soon', variant: 'note' },
 							items: [
-								{ label: 'Coming soon', slug: 'lessons/ai-foundations/coming-soon' },
+								{
+									label: 'Pretraining',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/ai-foundations/how-models-are-pretrained/brief' },
+										{ label: 'Lesson', slug: 'lessons/ai-foundations/how-models-are-pretrained/lesson' },
+										{ label: 'Practice', slug: 'lessons/ai-foundations/how-models-are-pretrained/practice' },
+										{ label: 'Summary', slug: 'lessons/ai-foundations/how-models-are-pretrained/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/ai-foundations/how-models-are-pretrained/cheatsheet' },
+										{ label: 'References', slug: 'lessons/ai-foundations/how-models-are-pretrained/references' },
+									],
+								},
+								{ label: 'More lessons coming soon', slug: 'lessons/ai-foundations/coming-soon' },
 							],
 						},
 						{

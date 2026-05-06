@@ -1,0 +1,114 @@
+---
+title: "Cheatsheet: Pretraining: how a model learns language by predicting the next word"
+description: "One-page reference. The pretraining objective, the data, the scale, one training step, and the misreads to avoid."
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## The one idea that matters
+
+```
+For a decoder-only model:
+
+  pretraining objective  =  predict the next token
+
+  data                   =  the open internet (Common Crawl + code + more)
+  scale                  =  hundreds of billions to tens of trillions of tokens
+  cost                   =  by far the most expensive stage
+
+The base model is fluent at continuing text.
+It is not yet an assistant. Tuning (Phase 4) handles that.
+```
+
+## Two paradigms, one sentence each
+
+| Paradigm | Pattern |
+| --- | --- |
+| **Old: one model per task** | A separate model is trained from scratch for each task (spam, sentiment, topic), each on its own labeled dataset. |
+| **New: transfer learning** | One large pretrained base model is built once on the open internet, then any specific task is reached by a small, cheap tuning run on top of that base. |
+
+## The objective, in detail
+
+| Property | Value |
+| --- | --- |
+| **Objective name** | Next-token prediction (also "causal language modeling," also "language modeling") |
+| **Data labels** | None. Source text is its own training signal. |
+| **Architecture family** | Decoder-only. (BERT-family uses MLM; T5-family uses span corruption.) |
+| **What the model produces per step** | A probability distribution over the entire vocabulary for the next token |
+| **Loss** | Negative log of the probability the model gave to whatever token actually came next: `-log(p)` |
+| **Effect on weights** | Tiny adjustment so the same prefix gets slightly more probability on the actual next token |
+| **Repeated** | Across every position in every sentence in the training set, billions of times |
+
+## The data, in detail
+
+| Source | Detail |
+| --- | --- |
+| **Common Crawl** | Open web crawler archive. ~3 billion pages added per month per the Stanford lecturer. The dominant base. |
+| **Wikipedia and Reddit** | Cited by name in lecture as examples of the kinds of sites inside the crawl. |
+| **Code** | The lecturer specifically names GitHub and Stack Overflow. Layered alongside natural language. |
+| **Non-English text** | Multilingual support comes from including multiple languages in the same training set. |
+
+| Token-scale anchors (cited in lecture) | |
+| --- | --- |
+| **Order of magnitude** | Hundreds of billions to tens of trillions of tokens |
+| **GPT-3** | Roughly 300 billion tokens |
+| **Llama 3** | Roughly 15 trillion tokens |
+
+## One training step, the worked trace
+
+```
+source: "The cat sat on the mat."
+tokenized: [The] [ cat] [ sat] [ on] [ the] [ mat] [.]
+
+step (target = " mat"):
+
+  prefix:  [The] [ cat] [ sat] [ on] [ the]
+  output:  probability over entire vocabulary, e.g.:
+
+           " mat":   0.31
+           " floor": 0.12
+           " bed":   0.08
+           " roof":  0.005
+           ... (~50,000 other tokens)
+
+  signal:  the actual next token was " mat"
+  loss:    -log(0.31) ≈ 1.17
+  update:  weights nudged so " mat" gets a bit more probability next time
+```
+
+The ranking is what matters. The model has internalized that cats are more likely to be on floor-coverings than structural exteriors. That is what gets folded into weights, one tiny step at a time.
+
+## Why this matters when you use AI
+
+| Phenomenon | Where it comes from |
+| --- | --- |
+| **Knowledge cutoffs** | Pretraining cutoffs. The corpus was sampled at date X; the model knows the open web at X, plus or minus. Some assistants use live-web tools at inference, but that is a tool, not a change to the model's brain. |
+| **Hallucinations** | Pretraining-era statistics. The model learned the shape of "things that look like this" without learning the specific fact. Tuning improves how the model talks; it cannot retroactively add facts. |
+| **Personality differences across assistants** | Tuning, not pretraining. Two assistants that feel different were tuned differently. Two that feel the same on factual questions probably share a pretraining lineage. |
+
+## Pitfalls to dodge
+
+| Pitfall | Reality |
+| --- | --- |
+| "A modern chat assistant was trained on chat data" | The base model was pretrained on next-token prediction over web-scale text, no chat involved. Tuning (Phase 4) added the conversational format and personality. |
+| "Predicting the next word is a narrow task" | The objective is narrow; what the model has to learn to satisfy it at internet scale is not. The narrowness is in the objective, not in the resulting capability. |
+| "All language models are pretrained the same way" | No. Decoder-only uses next-token prediction; BERT-family encoders use MLM; T5-family encoder-decoders use span corruption. Read for the architecture family. |
+| "After pretraining, the model is ready to use" | A pretrained base model is fluent at continuing text but not yet a chat assistant. It does not know it is being asked questions, when to stop, or which answers are appropriate. Phase 4 handles all that. |
+
+## Glossary
+
+- **Pretraining:** the giant front-loaded training stage on a vast unlabeled corpus, run once. For decoder-only models, the objective is next-token prediction.
+- **Next-token prediction:** the objective of producing a probability distribution over the vocabulary for the next token, given a prefix.
+- **Causal language modeling:** another name for the same objective; "causal" because the prediction at each position only depends on tokens to its left.
+- **Transfer learning:** the paradigm of learning the underlying competence (language) once on a vast unlabeled corpus, then adapting to specific tasks via cheaper second-stage training.
+- **Tuning:** the smaller, cheaper second stage that adapts a pretrained base model into a usable assistant for a specific task. Includes instruction tuning, RLHF, DPO (Phase 4).
+- **Common Crawl:** the open web-crawler archive that is the dominant pretraining data source. ~3 billion pages added per month per the Stanford lecturer.
+- **Token:** a chunk of text the model operates on. Often a whole word for common words; longer or rarer words split into sub-pieces. Phase 1, lesson 1 covers tokenization in detail.
+- **Knowledge cutoff:** the date the pretraining corpus was sampled. The model knows the open web as of that date, with later updates limited to whatever tuning data was added.
+- **Base model:** the output of pretraining, before tuning. Fluent at continuing text, not yet a chat assistant.
+
+**Pretraining is one objective: predict the next token.**\
+**Repeated billions of times across the open internet.**\
+**Everything else, tuning and alignment and reasoning, is built on top.**
