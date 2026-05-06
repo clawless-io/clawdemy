@@ -1,0 +1,153 @@
+---
+title: "Lesson: Pretraining: how a model learns language by predicting the next word"
+description: "How a decoder-only transformer is pretrained on the open internet by repeatedly predicting the next token. The single objective that produces almost every language ability you've ever seen in a modern AI system, the data that makes it work, and why this stage costs millions of dollars even before anyone tunes the model for a specific task."
+sidebar:
+  order: 2
+  label: Lesson
+artifact: lesson
+---
+
+import AudioPlayer from '../../../../../components/AudioPlayer.astro';
+import LessonStar from '../../../../../components/LessonStar.astro';
+
+<LessonStar slug="how-models-are-pretrained" />
+
+<AudioPlayer src="https://audio.clawdemy.org/lessons/how-models-are-pretrained-lesson.mp3" approxMinutes={22} />
+
+A modern AI assistant can write a poem, debug a Python script, explain how a transistor works, summarize a legal document, translate between languages, and draft a polite email declining a meeting. None of those came from a poem dataset, a debugging dataset, or a translation dataset. They came from one task, repeated at extraordinary scale: **predict the next word**.
+
+That is what pretraining is. It is by far the most expensive single thing in modern AI, and for the kind of model you actually talk to, it is also the simplest. This lesson covers what pretraining does, what data it uses, and why one objective produces general-purpose language capability when older approaches required a fresh model for every task.
+
+## How this connects to Phase 2
+
+The previous lesson closed Phase 2 on BERT and its derivatives. BERT is an encoder-only model trained with two specific objectives: masked language modeling (predict words hidden inside a sentence) and next-sentence prediction (decide whether two sentences appeared together). That is one valid pretraining recipe and it works well for understanding tasks like classification.
+
+This lesson is about a different recipe, the one used by **decoder-only** models, which the Stanford lecturer flags as "more than 90 percent of the cases" in modern LLMs. Modern chat assistants and most open-weights models you can download are decoder-only; the pretraining recipe for that family is what this lesson is about. When you see the term "pretraining" in the wild (in a paper, on a model card, on a press release), this is almost always what is meant.
+
+So: BERT's MLM and NSP are real and were taught accurately. They just describe the encoder-only branch. Phase 3 starts on the decoder-only branch, where most of the rest of the curriculum lives.
+
+## The old way: one model per task
+
+Ten years ago, if you wanted a machine learning model to do something, you trained one model for that one thing. You wanted spam detection? Train a model on a labeled spam dataset, evaluate on a held-out validation set, deploy. You wanted sentiment extraction? Different dataset, different model, train it from scratch. Topic classification? Same again. Each task got its own model, trained from random initial weights on its own data.
+
+The Stanford lecturer uses exactly this setup as the running example, and it is a good one because the awkwardness lands fast. Spam detection and sentiment extraction are not unrelated problems. Both involve reading a piece of text and understanding what it means. The ability to recognize sarcasm helps with both. The ability to parse "this product changed my life... in the worst possible way" helps with both. But under the old paradigm, every model had to relearn that ability from scratch, from its own labeled training set.
+
+This was a lot of waste. Most of what a "spam detector" needs to know is just **English**, and English is not a property of spam datasets. It is a property of the language. If you could somehow learn English first, then attach a small classifier on top for any specific task, you would only need labeled task data for the small thing on top. You would not need a huge labeled spam corpus to teach the model what a sentence is.
+
+That hypothetical is now reality, and it has a name.
+
+## Transfer learning, the paradigm modern LLMs run on
+
+**Transfer learning** is the move from "one model per task" to "one general model, then adapt." You spend an enormous amount of effort up front teaching a model the underlying competence (in our case, language) on a vast unlabeled corpus. That stage is called **pretraining**. Then for any specific task you care about, you take the pretrained model and run a much smaller, much cheaper second stage to **tune** it.
+
+```
+old paradigm:        new paradigm:
+
+[spam data] -> [spam   [pretraining: huge data, no labels]
+              model]                |
+                                    v
+[sentiment]    [sent.    [pretrained base model]
+data       -> model]      /        |       \
+                         v         v        v
+[topic]       [topic]   [tune    [tune    [tune
+data       -> model]    for      for      for
+                        spam]   sentiment] topic]
+```
+
+The expensive part shifts left. Pretraining happens once, on the company's dime. Tuning happens many times for many tasks, but each tuning run is small (hundreds of examples instead of millions, hours of compute instead of months) and starts from a model that already knows English.
+
+This is the paradigm Phase 4 will cover in detail (instruction tuning, RLHF, DPO, all the techniques that turn a base model into a chat assistant). Phase 3 is about the giant first stage. The rest of this lesson is on what happens during that first stage.
+
+## What pretraining actually is
+
+The actual pretraining objective for a decoder-only model is one sentence long.
+
+> Given a piece of text, predict the next token.
+
+That is it. There is no labeled data, no human annotation, no task-specific signal. You take a sequence of tokens, you feed all but the last one into the model, and you ask the model to assign a probability to every possible next token. The model is rewarded for putting high probability on whatever token actually came next in the source.
+
+This is sometimes called the "next-token prediction" objective, sometimes "causal language modeling," sometimes just "language modeling." All three terms refer to the same thing.
+
+A way to see why this works: predicting the next word in arbitrary text exercises almost everything else. To predict that the next word in "The cat sat on the ___" is probably " mat" rather than " roof," the model needs to know what cats are, what surfaces are, that cats are usually inside, that mats are surfaces inside, that "sat on the" is a positional phrase that takes a noun phrase complement, and that some choices are common and others are absurd. A surprising amount of world knowledge, grammar, and statistical pattern can in principle be coaxed out of a model that has gotten very good at next-token prediction.
+
+That is not a small claim, and the reason it is widely accepted is empirical: when you actually run this training on enough data, the model demonstrably acquires the things you wanted it to know. Not by being taught them. Just by being asked to predict next tokens.
+
+## The data: as much of the internet as you can find
+
+Modern pretraining runs use staggering amounts of text. The corpus is whatever you can scrape, deduplicate, filter for quality, and feed in. The lecturer points to one source by name: **Common Crawl**.
+
+Common Crawl is an open project that runs a web crawler more or less continuously and publishes the raw archive. The Stanford lecture cites "something like three billion pages per month" added to its archive. The lecturer points specifically to Wikipedia and Reddit as examples of the kinds of sites you find inside the crawl, alongside the broader open web.
+
+Code is also pretrained on, often in multiple programming languages. The lecturer specifically names GitHub and Stack Overflow as the kinds of sources that contribute the code portion of the corpus, alongside developer forums where people discuss code. Text in non-English languages is included as well. Many models pretrain on a mix of natural-language text and code in the same training set.
+
+**Scale is measured in tokens.** The lecturer flags this as the order-of-magnitude number to remember: pretraining corpora run from hundreds of billions to tens of trillions of tokens. The two examples cited in lecture: GPT-3 was trained on roughly 300 billion tokens, Llama 3 on roughly 15 trillion. Both numbers will date; the order of magnitude is the takeaway, and it is the one number you should keep handy.
+
+You can think of the input to pretraining as: **anything written that is reachable on a large scale**. The model is asked to predict the next token of that. Everything that follows, in every later phase of this curriculum, is built on top of whatever the model learned during this single objective on this kind of data.
+
+## Why this matters when you use AI
+
+The pretraining stage is invisible at runtime, but its fingerprints are everywhere in your interactions with a chat assistant. Three concrete consequences worth carrying with you:
+
+- **Knowledge cutoffs are pretraining cutoffs.** When a chat assistant says "I don't know about events after my knowledge cutoff," that cutoff is the date the pretraining corpus was sampled. Tuning happens later but adds little new factual material; the model knows what the open web knew at pretraining time, plus or minus.
+- **Most "the model just made it up" moments are pretraining-era statistics, not chat-layer bugs.** When a model invents a plausible-sounding citation, conflates two similar people, or asserts a wrong fact with confidence, the cause is almost always that the model learned the statistical shape of "things that look like this" without learning the specific fact. Tuning improves how the model talks; it cannot retroactively add facts the pretraining corpus did not contain.
+- **The model's "personality" is tuning, not pretraining.** A pretrained base model is fluent but voiceless; it continues whatever you give it. The friendly assistant tone, the refusal patterns, the willingness to clarify, the structured response style: all that comes in Phase 4. If two assistants feel different, they were tuned differently. If they feel the same on factual questions, they probably share a pretraining lineage.
+
+## A worked trace of one pretraining step
+
+To make the mechanism concrete, here is one training step on a single example. Suppose the source text is the sentence "The cat sat on the mat." After tokenization (Phase 1, lesson 1) it becomes a sequence of token IDs:
+
+```
+[The] [ cat] [ sat] [ on] [ the] [ mat] [.]
+```
+
+To create one training step we pick a position in the sequence, feed the model everything before that position, and ask it to predict the token at that position.
+
+Pick the token " mat" as our target. The model sees the prefix `[The] [ cat] [ sat] [ on] [ the]` and produces, as its output, a probability distribution over the entire vocabulary (typically tens of thousands of tokens). For instance the model might say:
+
+```
+" mat":    0.31
+" floor":  0.12
+" bed":    0.08
+" couch":  0.05
+" rug":    0.04
+" roof":   0.005
+... (~50,000 other tokens, each with very small probability)
+```
+
+The training signal is whatever was actually next in the source text, in this case " mat". The loss for this single step is, roughly, how much probability the model failed to put on " mat". A standard choice is the negative log of that probability, in this case `-log(0.31)` is about `1.17`. We use this loss to compute gradients (Phase 2's discussion of backpropagation applies; the math is the same) and adjust the model's weights very slightly so that next time it sees the prefix `[The] [ cat] [ sat] [ on] [ the]` it gives a tiny bit more probability to " mat".
+
+Now repeat for every position in every sentence, of every web page, in the training set. That is many billions of training examples for a large modern model. The loop runs across large GPU clusters for weeks to months. The cost is what makes pretraining "by far the most expensive" stage, the way Stanford CME 295 frames it. The math behind the cost is the subject of the next lesson.
+
+What changes during this loop is only the model's weights. The architecture you learned in Phase 2 is fixed. What is changing is the numbers inside that architecture, very slowly, in a direction that makes the next-token guess on the next training example a little less wrong.
+
+## Common pitfalls
+
+A few mistakes Daniel-shaped readers tend to make on this material. Naming them up front is faster than catching them later.
+
+**"A modern chat assistant was trained on chat data."** No. The underlying base model was pretrained on next-token prediction over web-scale text, no chat involved. It became a chat assistant in a later stage (Phase 4), through a process that uses a much smaller amount of conversation-shaped data. "Trained on" is a sloppy phrase that hides which stage you mean. Pretraining sets the language ability; tuning sets the format and the personality.
+
+**"Predicting the next word is a narrow task."** It looks narrow because it is one objective. It is not narrow because successfully predicting next words across the open internet requires the model to internalize an enormous amount of indirect knowledge. The narrowness is in the **objective specification**, not in what the model has to learn to satisfy it.
+
+**"All language models are pretrained the same way."** Not exactly. BERT (Phase 2, lesson 7) is pretrained with masked language modeling, not next-token prediction; T5 (Phase 2, lesson 6) is pretrained with span corruption. Decoder-only models, the family this lesson is about, use next-token prediction. When a paper talks about "the pretraining objective" it is using the convention of its own architecture family. Always read for which family.
+
+**"After pretraining, the model is ready to use."** It is not. A pretrained base model is fluent at continuing text, but it does not know that you are asking it a question, or that it should stop talking, or that some answers are unhelpful, harmful, or false. The base model is a language continuation engine. Turning it into a usable assistant is what Phase 4 is about.
+
+## What you should remember
+
+- **Pretraining is one objective, repeated at scale.** For decoder-only models (the dominant family for generative AI today), that objective is **predict the next token**. There is no labeled data; the source text is its own training signal.
+
+- **Predicting next tokens at internet scale produces general capability.** Because the only way to be good at this objective on arbitrary text is to know the underlying material, the model ends up internalizing language, world facts, and statistical patterns across the corpus. This is the empirical answer to "why does it work."
+
+- **Common Crawl is the dominant data source.** Most pretraining sets are built on a filtered Common Crawl snapshot, supplemented with code, books, papers, and other curated material. "All of the open internet" is a useful first approximation.
+
+- **Pretraining is one stage of a transfer-learning paradigm.** It is the expensive front-loaded step, run once, that produces a base model. Tuning (Phase 4) is the cheaper second step that adapts the base model into a usable assistant for any specific task. Older "one model per task" approaches are largely obsolete for language work.
+
+- **Different architectures use different pretraining objectives.** This lesson covered the decoder-only / next-token recipe. BERT-family encoders use masked language modeling. T5-family encoder-decoders use span corruption. When you see "pretrained on X" in a paper, identify which family before assuming the recipe.
+
+The next lesson (Phase 3, lesson 2) is about why **scale** specifically is what makes this objective work, and why most pretraining runs in the wild are smaller than the math says they should be.
+
+## If you remember one thing
+
+**Pretraining is one objective: predict the next token.**\
+**Repeated billions of times across the open internet.**\
+**Everything else, tuning and alignment and reasoning, is built on top.**
