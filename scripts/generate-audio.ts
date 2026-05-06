@@ -14,13 +14,21 @@
  * Setup:
  *   1. Copy `.env.example` to `.env`.
  *   2. Add your ElevenLabs API key.
- *   3. (Optional) Adjust the voice ID.
+ *   3. Add your Cloudflare R2 credentials (account ID + access key + secret).
+ *   4. (Optional) Adjust the voice ID.
  *
  * Usage:
- *   bun run audio:generate <slug>           # one lesson by slug
- *   bun run audio:generate --all            # every lesson on the site
- *   bun run audio:generate --list           # show what would generate
- *   bun run audio:generate --dry-run <slug> # preview prose, no API call
+ *   bun run audio:generate <slug>                # render + upload to R2 (default)
+ *   bun run audio:generate --all                 # every lesson, render + upload
+ *   bun run audio:generate --no-upload <slug>    # render locally only, skip R2
+ *   bun run audio:generate --upload-only <slug>  # upload existing local MP3, no render
+ *   bun run audio:generate --upload-only --all   # upload every existing local MP3
+ *   bun run audio:generate --dry-run <slug>      # preview prose, no API call
+ *   bun run audio:generate --list                # show available slugs
+ *
+ * The R2 upload step is idempotent: a HEAD on the public URL
+ * (audio.clawdemy.org/lessons/<slug>-lesson.mp3) is checked first; if the
+ * file is already there, the PUT is skipped.
  *
  * Lesson slugs are the directory names under
  *   src/content/docs/lessons/<track>/<slug>/
@@ -34,6 +42,7 @@ import { mkdir, readFile, writeFile, readdir, stat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { createHash } from 'node:crypto';
+import { S3Client, PutObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
 
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
 const VOICE_ID = process.env.ELEVENLABS_VOICE_ID || 'GuflK5NRKwVLKwEeBYTy';
@@ -46,6 +55,108 @@ const MAX_CHARS_PER_REQUEST = 2500;
 
 const LESSONS_ROOT = 'src/content/docs/lessons';
 const AUDIO_OUT = 'public/audio';
+
+// Cloudflare R2 (S3-compatible) for syncing rendered MP3s to the
+// clawdemy-audio bucket served at audio.clawdemy.org.
+// Env vars come from .env (gitignored); see .env.example for the shape.
+const R2_ACCOUNT_ID = process.env.CLOUDFLARE_ACCOUNT_ID;
+const R2_ACCESS_KEY_ID = process.env.R2_ACCESS_KEY_ID;
+const R2_SECRET_ACCESS_KEY = process.env.R2_SECRET_ACCESS_KEY;
+const R2_BUCKET = 'clawdemy-audio';
+const R2_KEY_PREFIX = 'lessons/';
+const R2_PUBLIC_BASE = 'https://audio.clawdemy.org/';
+
+// ---------------------------------------------------------------------------
+// Cloudflare R2 sync
+// ---------------------------------------------------------------------------
+
+/**
+ * Lazily build the R2 client. We only fail on missing credentials when an
+ * upload is actually attempted, so dry-run / list / --no-upload flows still
+ * work in environments without R2 credentials configured (e.g., CI).
+ */
+let r2ClientInstance: S3Client | null = null;
+function getR2Client(): S3Client {
+	if (r2ClientInstance) return r2ClientInstance;
+	if (!R2_ACCOUNT_ID || !R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY) {
+		throw new Error(
+			'R2 credentials missing. Set CLOUDFLARE_ACCOUNT_ID, R2_ACCESS_KEY_ID, ' +
+				'and R2_SECRET_ACCESS_KEY in .env (see .env.example), or pass --no-upload ' +
+				'to skip the R2 sync step.',
+		);
+	}
+	r2ClientInstance = new S3Client({
+		endpoint: `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+		region: 'auto',
+		credentials: {
+			accessKeyId: R2_ACCESS_KEY_ID,
+			secretAccessKey: R2_SECRET_ACCESS_KEY,
+		},
+	});
+	return r2ClientInstance;
+}
+
+/**
+ * HEAD the object directly via the R2 S3 endpoint. Returns true iff the
+ * bucket has a copy.
+ *
+ * Why S3 and not the public custom-domain URL? Cloudflare's CDN caches
+ * 404 responses on audio.clawdemy.org for ~4 hours. If we HEAD the public
+ * URL on a fresh slug before uploading, CF caches a 404 that listeners
+ * will see for the full TTL even after we PUT the file. The S3 endpoint
+ * goes straight to R2 with no CDN in front, so it's both the right
+ * source of truth and side-effect-free.
+ */
+async function isAlreadyUploaded(slug: string): Promise<boolean> {
+	const client = getR2Client();
+	const key = `${R2_KEY_PREFIX}${slug}-lesson.mp3`;
+	try {
+		await client.send(new HeadObjectCommand({ Bucket: R2_BUCKET, Key: key }));
+		return true;
+	} catch (err: any) {
+		// AWS SDK throws on 404; that's our signal the object is absent.
+		if (err?.name === 'NotFound' || err?.$metadata?.httpStatusCode === 404) {
+			return false;
+		}
+		throw err;
+	}
+}
+
+/**
+ * Upload an MP3 to clawdemy-audio at lessons/<slug>-lesson.mp3 with
+ * Content-Type audio/mpeg, then verify by HEAD-ing the same object via
+ * the S3 endpoint. We avoid the public CF URL for verify too, both to
+ * keep the verify side-effect-free and because R2's eventual consistency
+ * on the S3 endpoint is faster than CF's revalidation against R2.
+ */
+async function uploadToR2(slug: string, body: Buffer): Promise<void> {
+	const client = getR2Client();
+	const key = `${R2_KEY_PREFIX}${slug}-lesson.mp3`;
+	await client.send(
+		new PutObjectCommand({
+			Bucket: R2_BUCKET,
+			Key: key,
+			Body: body,
+			ContentType: 'audio/mpeg',
+		}),
+	);
+	for (let attempt = 0; attempt < 5; attempt++) {
+		await new Promise((r) => setTimeout(r, 300 * (attempt + 1)));
+		try {
+			await client.send(new HeadObjectCommand({ Bucket: R2_BUCKET, Key: key }));
+			return;
+		} catch (err: any) {
+			if (err?.name === 'NotFound' || err?.$metadata?.httpStatusCode === 404) {
+				continue; // not yet visible; retry
+			}
+			throw err;
+		}
+	}
+	throw new Error(
+		`Upload to R2 PUT succeeded for ${key} but a follow-up HeadObject ` +
+			`did not find it after retries. Bucket may be misconfigured.`,
+	);
+}
 
 // ---------------------------------------------------------------------------
 // MDX -> prose
@@ -253,7 +364,35 @@ async function findLessons(): Promise<Lesson[]> {
 // Generate
 // ---------------------------------------------------------------------------
 
-async function generateOne(lesson: Lesson, opts: { dryRun: boolean; force: boolean }) {
+/**
+ * Upload the local MP3 for a slug to R2, idempotent: if the public URL
+ * already returns 200 (file is on R2 + custom domain), skip. Used both
+ * by the render path (after a fresh write) and by --upload-only mode.
+ */
+async function ensureUploadedToR2(slug: string): Promise<'uploaded' | 'already'> {
+	if (await isAlreadyUploaded(slug)) {
+		console.log(`= R2      ${slug.padEnd(30)} already uploaded`);
+		return 'already';
+	}
+	const localPath = join(AUDIO_OUT, `${slug}-lesson.mp3`);
+	if (!existsSync(localPath)) {
+		throw new Error(
+			`Cannot upload ${slug}: no local MP3 at ${localPath}. Run audio:generate ` +
+				`without --upload-only first to render it, or remove --upload-only.`,
+		);
+	}
+	const body = await readFile(localPath);
+	const sizeMb = (body.length / 1024 / 1024).toFixed(2);
+	process.stdout.write(`> upload  ${slug.padEnd(30)} ${sizeMb} MB...`);
+	await uploadToR2(slug, body);
+	console.log(' ok');
+	return 'uploaded';
+}
+
+async function generateOne(
+	lesson: Lesson,
+	opts: { dryRun: boolean; force: boolean; upload: boolean },
+) {
 	const mdx = await readFile(lesson.mdxPath, 'utf-8');
 	const prose = mdxToProse(mdx);
 	const hash = createHash('sha256').update(prose).digest('hex');
@@ -280,6 +419,9 @@ async function generateOne(lesson: Lesson, opts: { dryRun: boolean; force: boole
 
 	if (cached) {
 		console.log(`= cached  ${lesson.slug.padEnd(30)} ${prose.length} chars`);
+		if (opts.upload) {
+			await ensureUploadedToR2(lesson.slug);
+		}
 		return meta;
 	}
 
@@ -313,6 +455,11 @@ async function generateOne(lesson: Lesson, opts: { dryRun: boolean; force: boole
 
 	const sizeMb = (merged.length / 1024 / 1024).toFixed(2);
 	console.log(` ok ${sizeMb} MB, ${meta.estCost}`);
+
+	if (opts.upload) {
+		await ensureUploadedToR2(lesson.slug);
+	}
+
 	return meta;
 }
 
@@ -326,7 +473,19 @@ async function main() {
 	const list = args.includes('--list');
 	const dryRun = args.includes('--dry-run');
 	const force = args.includes('--force');
+	const noUpload = args.includes('--no-upload');
+	const uploadOnly = args.includes('--upload-only');
 	const slug = args.find((a) => !a.startsWith('--'));
+
+	if (noUpload && uploadOnly) {
+		console.error('--no-upload and --upload-only are mutually exclusive.');
+		process.exit(1);
+	}
+	// Render-flow side-flags (--dry-run, --force) make no sense in upload-only.
+	if (uploadOnly && (dryRun || force)) {
+		console.error('--upload-only cannot be combined with --dry-run or --force.');
+		process.exit(1);
+	}
 
 	const lessons = await findLessons();
 
@@ -350,15 +509,40 @@ async function main() {
 		}
 		targets = [found];
 	} else {
-		console.error('Usage: bun run audio:generate <slug> | --all | --list');
-		console.error('       bun run audio:generate --dry-run <slug>');
+		console.error('Usage:');
+		console.error('  bun run audio:generate <slug>                  # render + upload');
+		console.error('  bun run audio:generate --all                    # every lesson, render + upload');
+		console.error('  bun run audio:generate --no-upload <slug>       # render locally, skip R2');
+		console.error('  bun run audio:generate --upload-only <slug>     # upload existing local MP3, no render');
+		console.error('  bun run audio:generate --upload-only --all      # upload every existing local MP3');
+		console.error('  bun run audio:generate --dry-run <slug>         # preview prose, no API call');
+		console.error('  bun run audio:generate --list                   # show available slugs');
 		process.exit(1);
 	}
 
+	if (uploadOnly) {
+		// Skip the render path entirely; just sync existing local MP3s to R2.
+		// Dry-run is intentionally not supported here; the upload either happens or it doesn't.
+		let uploadedCount = 0;
+		let alreadyCount = 0;
+		for (const lesson of targets) {
+			const result = await ensureUploadedToR2(lesson.slug);
+			if (result === 'uploaded') uploadedCount++;
+			else alreadyCount++;
+		}
+		if (targets.length > 1) {
+			console.log('---');
+			console.log(`total: ${targets.length} lesson(s)`);
+			console.log(`uploaded: ${uploadedCount}, already on R2: ${alreadyCount}`);
+		}
+		return;
+	}
+
+	const upload = !noUpload && !dryRun;
 	let totalChars = 0;
 	let totalCachedChars = 0;
 	for (const lesson of targets) {
-		const meta = await generateOne(lesson, { dryRun, force });
+		const meta = await generateOne(lesson, { dryRun, force, upload });
 		totalChars += meta.chars;
 		if (meta.cached) totalCachedChars += meta.chars;
 	}
