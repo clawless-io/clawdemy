@@ -100,7 +100,7 @@ export default defineConfig({
 							// as a line break by `white-space: pre-line` on the .large
 							// container. Pattern repeats for all seven phase entries.
 							label: 'Phase 1\nHow models read text',
-							collapsed: false,
+							collapsed: true,
 							items: [
 								{
 									label: 'Tokens',
@@ -142,7 +142,7 @@ export default defineConfig({
 						},
 						{
 							label: 'Phase 2\nHow models think',
-							collapsed: false,
+							collapsed: true,
 							items: [
 								{
 									label: 'Attention',
