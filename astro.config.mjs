@@ -258,6 +258,18 @@ export default defineConfig({
 										{ label: 'References', slug: 'lessons/ai-foundations/how-models-are-pretrained/references' },
 									],
 								},
+								{
+									label: 'Scaling laws and Chinchilla',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/ai-foundations/why-scale-matters/brief' },
+										{ label: 'Lesson', slug: 'lessons/ai-foundations/why-scale-matters/lesson' },
+										{ label: 'Practice', slug: 'lessons/ai-foundations/why-scale-matters/practice' },
+										{ label: 'Summary', slug: 'lessons/ai-foundations/why-scale-matters/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/ai-foundations/why-scale-matters/cheatsheet' },
+										{ label: 'References', slug: 'lessons/ai-foundations/why-scale-matters/references' },
+									],
+								},
 								{ label: 'More lessons coming soon', slug: 'lessons/ai-foundations/coming-soon' },
 							],
 						},
