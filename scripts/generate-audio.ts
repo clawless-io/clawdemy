@@ -365,12 +365,20 @@ async function findLessons(): Promise<Lesson[]> {
 // ---------------------------------------------------------------------------
 
 /**
- * Upload the local MP3 for a slug to R2, idempotent: if the public URL
- * already returns 200 (file is on R2 + custom domain), skip. Used both
- * by the render path (after a fresh write) and by --upload-only mode.
+ * Upload the local MP3 for a slug to R2, idempotent by default: if the
+ * R2 bucket already has a copy at the target key, skip. Used both by the
+ * render path (after a fresh write) and by --upload-only mode.
+ *
+ * Pass `force: true` to overwrite an existing R2 object. Required when
+ * the lesson body has been revised: a fresh render lands locally with a
+ * new hash, but the R2 object at the same key still holds the old audio,
+ * so listeners would keep hearing the prior version until manual purge.
  */
-async function ensureUploadedToR2(slug: string): Promise<'uploaded' | 'already'> {
-	if (await isAlreadyUploaded(slug)) {
+async function ensureUploadedToR2(
+	slug: string,
+	opts: { force?: boolean } = {},
+): Promise<'uploaded' | 'already'> {
+	if (!opts.force && (await isAlreadyUploaded(slug))) {
 		console.log(`= R2      ${slug.padEnd(30)} already uploaded`);
 		return 'already';
 	}
@@ -420,7 +428,7 @@ async function generateOne(
 	if (cached) {
 		console.log(`= cached  ${lesson.slug.padEnd(30)} ${prose.length} chars`);
 		if (opts.upload) {
-			await ensureUploadedToR2(lesson.slug);
+			await ensureUploadedToR2(lesson.slug, { force: opts.force });
 		}
 		return meta;
 	}
@@ -457,7 +465,7 @@ async function generateOne(
 	console.log(` ok ${sizeMb} MB, ${meta.estCost}`);
 
 	if (opts.upload) {
-		await ensureUploadedToR2(lesson.slug);
+		await ensureUploadedToR2(lesson.slug, { force: opts.force });
 	}
 
 	return meta;
@@ -481,9 +489,11 @@ async function main() {
 		console.error('--no-upload and --upload-only are mutually exclusive.');
 		process.exit(1);
 	}
-	// Render-flow side-flags (--dry-run, --force) make no sense in upload-only.
-	if (uploadOnly && (dryRun || force)) {
-		console.error('--upload-only cannot be combined with --dry-run or --force.');
+	// --dry-run is a render-flow flag and is meaningless in upload-only mode.
+	// --force IS valid with --upload-only: it means "overwrite R2 with the
+	// existing local MP3 even if R2 already has a copy at the target key."
+	if (uploadOnly && dryRun) {
+		console.error('--upload-only cannot be combined with --dry-run.');
 		process.exit(1);
 	}
 
@@ -526,7 +536,7 @@ async function main() {
 		let uploadedCount = 0;
 		let alreadyCount = 0;
 		for (const lesson of targets) {
-			const result = await ensureUploadedToR2(lesson.slug);
+			const result = await ensureUploadedToR2(lesson.slug, { force });
 			if (result === 'uploaded') uploadedCount++;
 			else alreadyCount++;
 		}
