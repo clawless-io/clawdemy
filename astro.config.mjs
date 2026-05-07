@@ -270,6 +270,18 @@ export default defineConfig({
 										{ label: 'References', slug: 'lessons/ai-foundations/why-scale-matters/references' },
 									],
 								},
+								{
+									label: 'Parallelism and Flash Attention',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/ai-foundations/parallelism-and-flash-attention/brief' },
+										{ label: 'Lesson', slug: 'lessons/ai-foundations/parallelism-and-flash-attention/lesson' },
+										{ label: 'Practice', slug: 'lessons/ai-foundations/parallelism-and-flash-attention/practice' },
+										{ label: 'Summary', slug: 'lessons/ai-foundations/parallelism-and-flash-attention/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/ai-foundations/parallelism-and-flash-attention/cheatsheet' },
+										{ label: 'References', slug: 'lessons/ai-foundations/parallelism-and-flash-attention/references' },
+									],
+								},
 								{ label: 'More lessons coming soon', slug: 'lessons/ai-foundations/coming-soon' },
 							],
 						},
