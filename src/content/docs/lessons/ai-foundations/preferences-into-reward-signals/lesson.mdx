@@ -1,0 +1,162 @@
+---
+title: "Lesson: How preferences become reward signals"
+description: "A Phase 4 lesson adapted from Stanford CME 295 Lecture 5. SFT teaches the model what to predict, but not what not to predict. Preference data closes that gap. The lesson covers what a preference pair is, why pairwise comparison is easier than scoring, how the data is collected, and how a reward model is trained from that data to score future responses. The reward model is the bridge between human preferences and the next lesson's reinforcement learning step."
+sidebar:
+  order: 2
+  label: Lesson
+artifact: lesson
+---
+
+import AudioPlayer from '../../../../../components/AudioPlayer.astro';
+import LessonStar from '../../../../../components/LessonStar.astro';
+import SourceLecture from '../../../../../components/SourceLecture.astro';
+
+<LessonStar slug="preferences-into-reward-signals" />
+
+<AudioPlayer src="https://audio.clawdemy.org/lessons/preferences-into-reward-signals-lesson.mp3" approxMinutes={19} />
+
+<SourceLecture
+  url="https://www.youtube.com/watch?v=PmW_TMQ3l0I"
+  title="Stanford CME 295, Lecture 5 (LLM tuning)"
+  instructor="Afshine & Shervine Amidi"
+  timestampStart={308}
+  timestampEnd={2520}
+/>
+
+Ask a freshly instruction-tuned model: *"suggest a new activity I could do with my teddy bear."*
+
+A plausible answer it might give you: *"I would suggest you to not spend much time with your teddy bear at all."*
+
+That is the example the Stanford lecturer opens this section of the lecture with, and it is doing real work. The response is grammatically a response. It is in the right shape. The model heard a request and produced something that fills the response slot. By every measure SFT was tasked with optimizing, this is fine. By the measure that actually matters, that this should feel like the answer of a thoughtful assistant, it is not fine. It is mildly unhelpful and a little mean.
+
+The previous lesson named this gap and left it open. SFT teaches the model what to predict; it does not teach the model what *not* to predict. There is no negative signal in the training data. So the model produces a *valid* response, drawing on the average of what its labelers wrote, and you have to live with whatever falls out. To close the gap, the training data has to start carrying information about which responses are *better*, not just which responses are valid. This lesson is about how that information is collected and how it gets turned into something a model can train on.
+
+By the end you will know what a preference pair looks like, why pairwise comparison is the standard collection format, what the two-stage structure of RLHF is, and what the reward model produced in the first stage actually does. The next lesson is about the second stage: how the reward model is used to nudge the LLM toward better responses.
+
+## Why a third stage at all
+
+A reasonable question, raised by a student in the lecture, is: if the SFT data was the problem, why not just write more SFT examples? Add the better teddy-bear answer to the dataset and let pretraining-style next-token prediction sort it out.
+
+The lecturer gives three reasons it is not that simple.
+
+**SFT data is hard to write.** A high-quality SFT example is an instruction plus a response that someone wrote from scratch. Doing that well, at the volume you need, is slow and expensive. Telling a labeler to *write the great poem* is a much harder ask than showing them two poems and asking which one is better. The lecturer's framing: *"if we asked you to write a great poem from scratch, it would typically be much more difficult than just showing you two poems and ask you to just say which one is better."* Preference data is cheaper to collect because it asks a smaller question.
+
+**SFT prompts have to be balanced.** When you assemble an SFT dataset you have to be careful about the *distribution* of prompts. Add too many translation examples and the model becomes biased toward translation. Add a single example to fix one bad behavior and you may shift the model's overall output in ways you did not intend. Preference tuning sidesteps this; it acts on the model's existing behavior rather than re-balancing what kinds of prompts it sees.
+
+**SFT teaches what, not what-not.** This is the load-bearing one and the same point the previous lesson closed on. Every SFT example is positive: *here is what the response should look like.* There is no slot in the data for *here is what a worse response looks like, do less of that.* Preference tuning, the lecturer says explicitly, *"allows us to inject some negative signal."* Two responses, one better and one worse, gives the training procedure something to push *away from*, not just something to push *toward*. That asymmetry is structural; you cannot SFT your way past it.
+
+A useful caveat the lecturer adds: if your model is genuinely misbehaving, sometimes the right answer really is to fix the SFT dataset. *"Preference tuning is not the answer to everything."* The third stage is for the things SFT cannot do by construction, not a catch-all for bad data.
+
+A natural follow-up question, raised by a student in the lecture: is there a LoRA equivalent for this stage, the way LoRA was the parameter-efficient version of SFT? The lecturer's answer is worth recording: preference tuning is best understood as a *different objective function*, not a different way of training. LoRA, the parameter-efficient method, is orthogonal to that, and the two stack. You can run preference tuning with full-weight updates, or with LoRA-style low-rank updates, or with anything in between. The choice is independent of the choice of objective.
+
+## What a preference pair looks like
+
+The atomic unit of preference data is a **preference pair**: one prompt, two responses, and a label saying which response is preferred.
+
+Concretely:
+
+```
+Prompt:    Suggest a new activity I could do with my teddy bear.
+Response A: Of course! Teddy bears make great companions; here are
+            three activities you could try together: ...
+Response B: I would suggest you to not spend much time with your
+            teddy bear at all.
+Label:     A is better.
+```
+
+That is it. There is no per-token annotation, no rubric score, no rewrite of the bad response. Just two responses to the same prompt, and a tag saying which one wins.
+
+Why this format and not something more informative? The lecturer walks through three options.
+
+| Format | What you collect | Why people don't use it |
+|---|---|---|
+| **Pointwise** | A single score for each response, e.g. 0.9 for A and 0.2 for B. | Hard to do consistently. *"Is this a 0.9 or a 0.85?"* is a question humans cannot answer reliably across many examples; the scale drifts and the labels become noisy. |
+| **Pairwise** | A binary preference between two responses (A > B). | Easier and more reliable. Even subjective tasks survive better here, since *"is A better than B"* is a simpler judgment than *"how good is A on a scale of 0 to 1."* |
+| **Listwise** | A ranking of N candidate responses. | Possible, but more cognitively demanding than pairwise and not significantly more useful. |
+
+**Pairwise is the standard.** Most preference-tuning pipelines you will read about collect pairwise binary labels (*A is better*) and skip the more nuanced *"much better, slightly better, slightly worse, much worse"* scales. The lecturer's framing is matter-of-fact: in practice, *what people do* is collect pair-wise preference data on the binary scale, because the more nuanced scales introduce noise without buying calibration on subjective tasks.
+
+## How preference data is collected
+
+The recipe, as the lecturer presents it, has three steps.
+
+**Step one: pick a prompt.** The prompt should reflect what real users actually ask, so it usually comes from production logs or from a curated set of prompts that mirror the user distribution. Otherwise you tune the model for situations it does not encounter.
+
+**Step two: generate two responses.** The standard trick is to feed the same prompt into the SFT model twice with a positive temperature. (*Temperature* is a decoding parameter you will see again later in the track; for now: positive temperature makes the same prompt produce different responses across runs, by adding randomness to the next-token sampling.) The two outputs are different because the sampling is non-deterministic, not because the model has changed.
+
+**Step three: rate the pair.** A human labeler reads both responses and indicates which one is better, on a binary scale. The lecturer mentions a few alternatives to humans here: an *LLM-as-a-judge* (using a separate language model to do the scoring, a topic that gets its own treatment in a later lecture), and older rule-based metrics like BLEU and ROUGE, which the lecture flags as not as widely used these days.
+
+There is also a less common alternative the lecturer flags: take a bad response from the production logs, hand it to a labeler, and have them *rewrite* it into a good response. The good rewrite plus the original bad response then becomes a preference pair. This is more involved (rewrites are more work than ratings) but useful when you have a clear failure mode you want to fix.
+
+A note on RLHF versus RLAIF that the lecturer makes explicit: **the *human feedback* in *reinforcement learning from human feedback* refers specifically to the labels on which the reward model is trained.** If those labels come from humans, you are doing RLHF. If they come from another AI model, you are doing RLAIF (reinforcement learning from AI feedback). The downstream training procedure is the same; only the source of the preference labels is different.
+
+## Two stages, one goal
+
+With preference data in hand, the question is how to actually use it to update the model. The standard recipe is **RLHF: reinforcement learning from human feedback**, and it is composed of two distinct stages.
+
+**Stage one: train a reward model.** Take the preference pairs and train a separate model whose job is to read a prompt and a response and output a single number, a score. High score for responses humans preferred; low score for responses humans rejected. The reward model is the *learned* version of human preference: a function that, given any new prompt and response, can guess whether a human would have liked it.
+
+**Stage two: use the reward model to align the LLM.** Take the SFT model from the previous lesson and update it so that the responses it generates score higher on the reward model. This is the reinforcement-learning step; the next lesson covers it in full.
+
+This lesson covers stage one. The reward model is the artifact stage one produces, and it is the bridge between *here is what humans liked* and *here is how to push the LLM toward more of that.*
+
+## Training the reward model
+
+The reward model is, structurally, just another neural network. The lecturer describes the typical setup: take a transformer (often a decoder-only model, the same architecture family as the SFT model itself), strip off the language-modeling head that produces token probabilities, and bolt on a *classification head* that produces a single number. Encoder-only architectures like BERT also work; in that case the score comes from a projection of the special CLS token's embedding. The lecturer's reasoning for the prevailing choice is breezy: *"everything is an LM these days,"* so people default to a decoder-only base with a classification head on top.
+
+The training objective is where the preference structure matters. A preference pair gives you two responses to the same prompt, one labeled *winning* and one labeled *losing*. You want the reward model to assign a higher score to the winning response than to the losing one, on every pair, as often as possible.
+
+The standard formulation is named after a 1952 paper on paired comparisons: **the Bradley-Terry model**. You will see the name in papers and release notes. The intuition behind it, without the math: think of each response as having a hidden "quality" number, and the probability that a human prefers response A over response B as a function of the difference between their two quality numbers. The reward model learns to *output those quality numbers*, in such a way that the differences match the human-labeled preferences as closely as possible.
+
+In practice the loss function works out to: *for each preference pair, push the winning response's score up and the losing response's score down by enough that the gap reflects the preference.* The Stanford lecture works through the derivation; this lesson takes the result and moves on. If you want the math, the references for this lesson point at it.
+
+A subtle property worth knowing. **The reward model is trained on pairs, but at inference time it is pointwise.** The lecturer flags this explicitly: *"you're training it pair-wise but it's actually pointwise."* Once trained, the reward model takes a single prompt-and-response and outputs a single score. It does not need a comparison response at inference time to make a prediction. The pairwise structure is used during training to give the loss something to push against; once the weights have converged, each forward pass scores one input.
+
+For data scale, the lecturer's qualitative phrasing is "tens of thousands or maybe even more" preference pairs. Considerably smaller than an SFT dataset, much smaller than a pretraining corpus. Following the same pattern as the previous lesson: each stage's dataset shrinks, but each stage's effect on the model is more targeted.
+
+One last property of this stage worth carrying forward into the next lesson: **the supervision signal is sparse**. The lecturer flags it directly. SFT gives the model one training signal per token, since every token in the response is something to predict and to compute a loss against. The reward model, and the reinforcement-learning step that uses it, gives roughly *one signal per full completion*: the entire response is generated, and then a single score is assigned. That asymmetry is one of the structural reasons RLHF is harder to make work than SFT, and it is the backdrop for several of the design choices the next lesson covers.
+
+## What the reward model actually produces
+
+After training, the reward model is a function: prompt and response in, one number out. By convention, *high score is good, low score is bad*, but the absolute scale is arbitrary. The lecturer's own examples use values like *+1* for a good response and *-2* for a bad one; in production pipelines the scores are usually normalized across a batch before being fed into the next stage.
+
+One thing worth being concrete about: the reward model captures *the dimension of preference that the labelers were asked about*. If the labelers were asked "which response is more helpful," the reward model learns helpfulness. If they were asked "which response is safer," it learns safety. If they were asked some holistic "which is better overall," it learns that holistic preference, with all the messiness that implies.
+
+In practice frontier labs often train *several* reward models, one per dimension (helpfulness, harmlessness, tone, factuality, and so on). The lecturer flags this in passing: *"those rewards are with respect to a given dimension... they can be different reward models."* This lesson sticks with one reward model for clarity, but knowing the singular abstraction is a simplification helps when you read about multi-objective alignment in production systems.
+
+A second thing worth being concrete about: the reward model is only as good as its preference data, which is only as good as the labeling guidelines. The lecturer notes that *"human ratings are very sensitive to the guidelines that you're also exposing"*: ambiguous guidelines produce noisy preferences, which produce a noisy reward model, which produces a noisy second-stage update. Every step downstream of the labeler is at the mercy of how the labeling task was specified. This is where a lot of the actual labor of frontier-model alignment lives, and it is mostly invisible from the outside.
+
+## Why this matters when you use AI
+
+Three direct consequences when you read about a model or interact with one.
+
+- **The reward model is the implicit "what we want" of the system.** When a release announcement says a model was tuned for "helpfulness, harmlessness, and honesty," that is not marketing copy alone; those are usually the dimensions the lab built reward models for. The model's behavior post-tuning reflects what those reward models reward. If a model feels evasive on a topic, that is often the safety reward model dominating; if it feels chatty in an unhelpful way, that is often the tone reward model overshooting.
+
+- **Bias in labelers becomes bias in the model.** The reward model learns whatever the labelers preferred, including their cultural assumptions, their writing-style preferences, and their blind spots. *"Aligned with human preferences"* always means *aligned with the preferences of the specific humans who did the labeling, under the specific guidelines they were given.* It is a real distribution, not a universal one.
+
+- **"More aligned" is a direction, not a destination.** Each round of preference tuning moves the model along the direction the reward model points. Different labs, different guidelines, different reward models, different directions. Two equally well-tuned chat assistants from different labs can have noticeably different personalities, refusal behaviors, and verbosity profiles, all because their respective reward models pointed somewhere slightly different. There is no neutral baseline to converge on.
+
+## Common pitfalls
+
+Three mistakes worth naming.
+
+**Treating preference data as objective truth.** Preferences are subjective, even with good guidelines, and the reward model is averaging over labelers. Reading the score a reward model gives a response as if it were an objective measure of quality is a category error.
+
+**Conflating RLHF with reinforcement learning in general.** *Reinforcement learning from human feedback* uses RL machinery (next lesson), but the *human feedback* part is stage one, the reward-model training step. When you read "RLHF" without further qualification, both stages are usually meant; when someone says "they used RL," they usually mean the second stage. The two are often separable in code and can use different methods.
+
+**Assuming the reward model needs the SFT model's history to score.** The reward model takes a prompt and a response. That is all. It does not need to know which model produced the response, or what the SFT model would have produced, or what the reference response in the original preference pair was. It is a function of the input and nothing else.
+
+## What you should remember
+
+- **The SFT gap is structural.** Every SFT example is positive; there is no slot for negative signal. Preference data adds the missing axis: not just *here is the response*, but *here is the better response among options*.
+- **Pairwise is the standard format.** One prompt, two responses, a binary "A is better" label. Easier for humans to produce than absolute scores, and reliable enough to train on.
+- **Two responses come from the same SFT model with positive-temperature decoding.** The variation between candidates is sampling noise, not model difference.
+- **RLHF is two stages.** Stage one: train a reward model from preference pairs. Stage two: use the reward model to update the LLM (next lesson).
+- **The reward model is trained pairwise but used pointwise.** It takes a single prompt and response at inference time and outputs a score. The pair-structure is a training-time artifact only.
+- **The reward model captures whichever dimension the labelers were asked about.** Multi-objective alignment in practice uses multiple reward models combined in the second stage.
+
+## If you remember one thing
+
+**Supervised fine-tuning teaches the model to answer when someone asks.**\
+**Preference data teaches it which answer to prefer.**\
+**The reward model is how that preference becomes a number a training loop can use.**
