@@ -1,0 +1,35 @@
+---
+title: "Summary: Why precision matters: quantization and mixed precision"
+description: "Phase 3 closer, 5-minute scan version. Floating-point numbers are bits split between sign, exponent, and mantissa. Fewer bits per number means less memory per parameter and faster compute on supporting hardware. Quantization converts a trained model from high to low precision; mixed precision training uses different precisions in different parts of one training step. Weights stay precise to avoid drift; activations and gradients tolerate noise because data is noisy too."
+sidebar:
+  order: 4
+  label: Summary
+artifact: summary
+---
+
+**Precision is the third memory lever Phase 3 covers.** The first two lessons distributed memory across many GPUs (parallelism, ZeRO) and rearranged memory inside one GPU (Flash Attention). The third lever is the precision of the numbers themselves. A weight stored in 16 bits takes half the memory of the same weight in 32 bits, and the GPU runs roughly twice as fast on the lower-precision number. Quantization converts a trained model from higher to lower precision; mixed precision training uses different precisions in different parts of one training step. Both rest on the same intuition: not every digit past the decimal point matters for the model's behavior.
+
+This summary is the scan-it-in-five-minutes version. The full lesson covers the bit structure of floating-point numbers, the memory and speed savings from fewer bits, how quantization works post-training, how mixed precision training works during training, and the asymmetry behind why weights stay at high precision while everything else does not.
+
+## Core ideas
+
+- **A floating-point number is bits split into sign, exponent, and mantissa.** The sign is one bit (positive or negative). The exponent encodes the magnitude (like scientific notation). The mantissa encodes the digits (the precision). More mantissa bits, more precision; fewer mantissa bits, more rounding.
+- **The four standard formats.** FP32 (single precision, 32 bits, the historical default). FP16 (half precision, 16 bits, half the memory of FP32, less precise). FP64 (double precision, 64 bits, more precision than FP32, rarely used in LLMs). BF16 (brain float 16, 16 bits with FP32's exponent range, used heavily in LLM training because the wider range avoids FP16 instability issues).
+- **Lower precision saves memory.** A 70-billion-parameter model in FP32 takes 280 GB of weight memory; in FP16, the same model takes 140 GB. Half the bits, half the storage.
+- **Lower precision speeds up compute.** Modern GPUs run faster at lower precisions. The Stanford lecturer's anchor: FP64 at 34 teraflops, FP32 doubling that, the lower-precision rungs continuing the pattern. Each step down is roughly a 2x speedup on the same hardware.
+- **Quantization is the post-training conversion.** Take a model trained at high precision, convert all the weights to lower precision, ship the smaller model. FP32 to FP16 is usually essentially free. Lower precisions (FP8, INT8, INT4) require more care and sometimes lose capability.
+- **Mixed precision training uses both at once.** Master copy of weights stays in FP32. Forward pass and backward pass arithmetic run in FP16 (the heavy compute). Weight updates are done in FP32 (so the update arithmetic is precise). Result: not noticeably degraded performance, substantial memory savings, faster training.
+- **The asymmetry has a clean intuition.** Weights accumulate over training; precision errors compound across millions of steps. Activations and gradients are temporary, and the underlying training data is itself statistically noisy. So weights need precision (FP32) while everything else can tolerate the noise (FP16 or lower).
+- **User-facing fact: consumer-hardware models are quantized.** When you read about a 7-billion-parameter model running on a laptop, it is almost certainly quantized below FP16 (often INT8 or INT4). The same model in FP32 would not fit. Quantization is what makes "run a real LLM locally" a working sentence.
+- **A locally-downloaded quantized model is not the same as the hosted version.** Behavior differences (subtle word choice, occasional capability gaps) trace partly to the precision difference. "Same model" is not actually the same artifact across deployments.
+- **Pitfall: FP16 and BF16 are not interchangeable.** Same memory footprint, different bit allocation. BF16 has more exponent bits (avoiding overflow) and fewer mantissa bits than FP16; preferred for training large models.
+- **Pitfall: Quantizing then fine-tuning is different from fine-tuning then quantizing.** The two orderings produce different artifacts because where the optimization happens (full-precision weights vs already-rounded weights) changes what the fine-tuning can compensate for.
+- **Pitfall: Quantization is not universal.** It usually works at FP32 to FP16 but degrades capability at INT4 and below for some models.
+
+## What changes for you
+
+When you read about a model release advertising specific precision support (FP8, BF16, INT4 quantization), you now know what those bits-per-number changes mean for memory and speed. When you download a popular open-weights model in a quantized format, you know it is not bit-equivalent to the hosted version. When a quantized model "feels different" from its full-precision sibling, the precision side of the trade-off is one of the variables to consider. This closes Phase 3. The four engineering levers (Chinchilla-aligned data and parameters, parallelism across GPUs, Flash Attention inside one GPU, precision per number) explain how a frontier-class pretraining run is actually built. Phase 4 takes what comes next: turning a base model into a usable assistant via instruction tuning, RLHF, and DPO.
+
+**Precision is the third memory lever.**\
+**Quantization shrinks deployed models; mixed precision shrinks training.**\
+**Weights stay sharp; activations and gradients tolerate noise.**

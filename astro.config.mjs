@@ -282,7 +282,18 @@ export default defineConfig({
 										{ label: 'References', slug: 'lessons/ai-foundations/parallelism-and-flash-attention/references' },
 									],
 								},
-								{ label: 'More lessons coming soon', slug: 'lessons/ai-foundations/coming-soon' },
+								{
+									label: 'Quantization and mixed precision',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/ai-foundations/quantization-and-mixed-precision/brief' },
+										{ label: 'Lesson', slug: 'lessons/ai-foundations/quantization-and-mixed-precision/lesson' },
+										{ label: 'Practice', slug: 'lessons/ai-foundations/quantization-and-mixed-precision/practice' },
+										{ label: 'Summary', slug: 'lessons/ai-foundations/quantization-and-mixed-precision/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/ai-foundations/quantization-and-mixed-precision/cheatsheet' },
+										{ label: 'References', slug: 'lessons/ai-foundations/quantization-and-mixed-precision/references' },
+									],
+								},
 							],
 						},
 						{

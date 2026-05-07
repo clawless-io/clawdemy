@@ -1,0 +1,253 @@
+---
+title: "Practice: Why precision matters: quantization and mixed precision"
+description: "Self-check on floating-point bit structure, the memory and speed savings of lower precision, quantization vs mixed precision training, and the weight-vs-activation asymmetry, plus a worked memory-savings calculation, plus flashcards."
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+**1. Describe how a floating-point number is encoded.**
+
+<details>
+<summary>Show answer</summary>
+
+Three groups of bits. The **sign** bit (one bit, positive or negative). The **exponent** bits (a small group, encoding the magnitude like scientific notation). The **mantissa** bits (the rest, encoding the digits, i.e. the precision). More mantissa bits means more granularity; fewer mantissa bits means more rounding when two close numbers get represented identically.
+
+</details>
+
+**2. What four standard floating-point formats does the lecturer flag, and how do they differ?**
+
+<details>
+<summary>Show answer</summary>
+
+- **FP32** (single precision): 32 bits. The historical default for general numerical computing.
+- **FP16** (half precision): 16 bits. Half the memory of FP32. Less precision and a smaller numerical range.
+- **FP64** (double precision): 64 bits. More precision than FP32. Rarely used in LLMs.
+- **BF16** (brain float 16): 16 bits. Same memory footprint as FP16 but bits divided differently: more exponent bits (matching FP32's range) and fewer mantissa bits than FP16. Heavily used in LLM training because the wider exponent range avoids overflow and underflow problems that bite FP16 at scale.
+
+</details>
+
+**3. Explain why lower precision saves both memory and compute time.**
+
+<details>
+<summary>Show answer</summary>
+
+**Memory:** every parameter takes proportionally fewer bytes. FP16 takes half the memory of FP32 per number, so a 70-billion-parameter model is 140 GB in FP16 vs 280 GB in FP32.
+
+**Compute:** modern GPUs are faster at lower precisions. The Stanford lecturer's anchor: FP64 at 34 teraflops, FP32 doubling that, lower-precision rungs continuing the pattern. Each step down in precision is roughly a 2x speedup on the same hardware. The two gains stack: smaller and faster.
+
+</details>
+
+**4. Distinguish quantization from mixed precision training.**
+
+<details>
+<summary>Show answer</summary>
+
+**Quantization** is a post-training operation. Take a model trained at high precision, convert all the weights to lower precision, ship the smaller model. FP32 to FP16 is usually essentially free. Lower precisions (FP8, INT8, INT4) require more care.
+
+**Mixed precision training** is a different idea. It uses lower precision *during* training, but only in some places. Master copy of weights stays in FP32. Forward pass and backward pass arithmetic run in FP16. Weight updates are done in FP32. The net effect is most of the memory and speed savings of low-precision training without the accumulated error of doing everything at low precision.
+
+</details>
+
+**5. Why does mixed precision keep weights at high precision while running activations and gradients at lower precision?**
+
+<details>
+<summary>Show answer</summary>
+
+The asymmetry has a clean intuition. **Weights accumulate.** Every training step adds a small adjustment to the weights; over millions of steps, even tiny precision errors compound and the weights drift away from where they should be. Storing weights in FP32 protects against that accumulated drift, and doing the update arithmetic in FP32 protects against rounding the update.
+
+**Activations and gradients are temporary.** They live for the duration of one forward and backward pass and are recomputed each step. They do not accumulate. The underlying training data is itself statistically noisy, so the activations and gradients computed from it do not need to be precise far past the decimal point. The gradient telling the model "your weights should move in this direction" only needs the direction to be approximately right.
+
+So: precision protects the persistent (weights), noise tolerance is fine for the temporary (activations, gradients).
+
+</details>
+
+**6. What is the difference between FP16 and BF16, and why does it matter?**
+
+<details>
+<summary>Show answer</summary>
+
+Same total bits (16). Different allocation. FP16 has more mantissa bits (more precision) and fewer exponent bits (smaller numerical range). BF16 has fewer mantissa bits (less precision) and more exponent bits, matching the wider numerical range of FP32.
+
+Why it matters: at scale, gradients can produce very small or very large numbers (underflow / overflow). FP16's narrower range means these extreme values get clipped or lost more often, destabilizing training. BF16's wider range avoids that issue. So FP16 has slightly more precision per number, but BF16 is more *robust* across a wide range of values, which is what large-scale LLM training needs more.
+
+</details>
+
+## Try it yourself: a memory-savings calculation
+
+This exercise puts the precision-as-memory picture into a concrete back-of-envelope. About 8 minutes.
+
+### Part one: weight memory
+
+A team trains a model with **40 billion parameters**.
+
+**a)** How much memory do the weights take in FP32?
+
+<details>
+<summary>Show answer</summary>
+
+`40 billion parameters × 4 bytes per parameter = 160 GB`
+
+</details>
+
+**b)** How much memory do the weights take in FP16 or BF16?
+
+<details>
+<summary>Show answer</summary>
+
+`40 billion × 2 bytes = 80 GB`
+
+Exactly half. The model now fits where FP32 needed two devices.
+
+</details>
+
+**c)** How much memory do the weights take in INT8?
+
+<details>
+<summary>Show answer</summary>
+
+`40 billion × 1 byte = 40 GB`
+
+A quarter of FP32. INT8 quantization is a popular choice for inference on consumer hardware specifically because of this size.
+
+</details>
+
+### Part two: total training memory under mixed precision
+
+The same 40-billion-parameter model trained under standard mixed precision: weights in FP32, gradients in FP16, optimizer (Adam) moments in FP32.
+
+**a)** Compute the total of these three categories.
+
+<details>
+<summary>Show answer</summary>
+
+```
+FP32 weights:        40B × 4 bytes = 160 GB
+FP16 gradients:      40B × 2 bytes =  80 GB
+FP32 optimizer (2x): 40B × 4 × 2   = 320 GB
+                                    ------
+Total                                560 GB
+```
+
+</details>
+
+**b)** Why is the optimizer-state cost in mixed precision higher than naive "2x parameters" math suggests?
+
+<details>
+<summary>Show answer</summary>
+
+Adam tracks two moments per parameter (first and second). Naive math says: 2 moments × parameter count = 2x parameter memory. But in mixed precision, the moments are typically stored in FP32 even when weights are FP16. So:
+
+- "2x parameters" assumes same precision throughout, which would give: 2 × 40B × 2 bytes = 160 GB.
+- In actual mixed precision: 2 × 40B × 4 bytes = 320 GB, because FP32 doubles each moment's bytes.
+
+The 2x ratio is bytes-per-byte; the FP32 master copy of the moments doubles that on top. Lesson 3 mentioned this in passing; this exercise puts the math out.
+
+</details>
+
+### Part three: where does this fit?
+
+Suppose the team has eight GPUs of 80 GB each, total 640 GB across the cluster. Will the 560 GB total above fit when you also need room for activations during the forward pass?
+
+<details>
+<summary>Show answer</summary>
+
+It will be tight. 640 GB of cluster memory minus 560 GB for weights + gradients + optimizer states leaves 80 GB for activations across the entire cluster, or 10 GB per GPU on average. That is plausible for small batches and short context lengths but not for frontier-scale runs.
+
+To fit comfortably, the team needs at least one of: (a) ZeRO-3 to partition the parameters, gradients, and optimizer states across the eight GPUs (which would drop the per-GPU portion of those 560 GB by a factor of 8); (b) lower-precision quantization of some of those quantities (FP8 instead of FP16 for activations, INT8 quantization for inference); (c) more GPUs.
+
+This is the lesson of Phase 3 in one calculation: the memory math does not work out for one GPU even with mixed precision; you need parallelism + ZeRO + Flash Attention + precision tricks all stacked.
+
+</details>
+
+**Sanity check:** the four levers compose. Lower precision shrinks each byte. Parallelism + ZeRO distributes the bytes. Flash Attention rearranges the bytes inside one GPU. Frontier training uses all four at once.
+
+## Flashcards
+
+Twelve cards.
+
+<FlashcardSet>
+
+<Flashcard question="What three groups of bits make up a floating-point number?">
+
+Sign (one bit, positive/negative), exponent (encodes magnitude), mantissa (encodes precision/digits). More mantissa bits means more granularity.
+
+</Flashcard>
+
+<Flashcard question="What is FP32 and how is it different from FP16?">
+
+FP32 (single precision) is 32 bits, the historical default. FP16 (half precision) is 16 bits, takes half the memory, less precise, smaller numerical range.
+
+</Flashcard>
+
+<Flashcard question="What is BF16 and why is it preferred for LLM training?">
+
+BF16 (brain float 16) is 16 bits with FP32's exponent range and fewer mantissa bits than FP16. Same memory footprint as FP16, wider numerical range, fewer overflow/underflow issues at scale. Preferred over FP16 for training large models.
+
+</Flashcard>
+
+<Flashcard question="By how much does dropping from FP32 to FP16 cut weight memory?">
+
+In half. Each parameter takes 2 bytes instead of 4. A 70B-parameter model goes from 280 GB to 140 GB.
+
+</Flashcard>
+
+<Flashcard question="What pattern does the lecturer cite for compute speed across precisions?">
+
+Each step down in precision roughly doubles throughput on the same hardware. The lecturer's anchor: FP64 at 34 teraflops, FP32 roughly doubling that, lower-precision rungs continuing the pattern.
+
+</Flashcard>
+
+<Flashcard question="What is quantization?">
+
+The process of converting a number from one precision representation to another, almost always from higher to lower. As a deployment technique: take a model trained in FP32, convert all the weights to a lower-precision format (FP16, INT8, INT4) to ship a smaller model.
+
+</Flashcard>
+
+<Flashcard question="What is mixed precision training?">
+
+A training technique that uses different precisions in different parts of one step. Master copy of weights in FP32; forward pass and backward pass operations in FP16; weight updates done in FP32. Saves memory and compute time without accumulated precision drift.
+
+</Flashcard>
+
+<Flashcard question="Why are weights kept at high precision in mixed precision training?">
+
+Because weights accumulate. Every training step adds a small adjustment; over millions of steps, precision errors compound. Storing weights in FP32 prevents that drift.
+
+</Flashcard>
+
+<Flashcard question="Why are activations and gradients tolerated at lower precision?">
+
+They are temporary (recomputed each step, do not accumulate) and the underlying data is statistically noisy, so the values they encode do not need precision far past the decimal point. Direction of the gradient matters; exact decimals do not.
+
+</Flashcard>
+
+<Flashcard question="Pitfall: are FP16 and BF16 interchangeable?">
+
+No. Same memory footprint (16 bits) but different bit allocation. FP16 has more mantissa bits (more precision) and a smaller exponent range. BF16 has fewer mantissa bits and FP32's wider exponent range. BF16 is more robust at scale because the wider range avoids overflow/underflow.
+
+</Flashcard>
+
+<Flashcard question="Pitfall: does the order of quantizing and fine-tuning matter?">
+
+Yes. Quantize-then-fine-tune lets the fine-tuning compensate for the rounding. Fine-tune-then-quantize quantizes weights that were optimized at full precision and may degrade more under the rounding. Different artifacts; pick deliberately based on the deployment target.
+
+</Flashcard>
+
+<Flashcard question="What is the one-sentence takeaway?">
+
+Precision is the third memory lever. Quantization shrinks deployed models; mixed precision shrinks training. Weights stay sharp; activations and gradients tolerate noise.
+
+</Flashcard>
+
+</FlashcardSet>
+
+**Precision is the third memory lever.**\
+**Quantization shrinks deployed models; mixed precision shrinks training.**\
+**Weights stay sharp; activations and gradients tolerate noise.**
