@@ -1,23 +1,24 @@
 ---
-title: "How a model learns to be helpful: fine-tuning and RLHF"
-description: The first lesson in our adaptation of Stanford CME 295 Lecture 5 (LLM tuning); also covers the supervised-fine-tuning topic from Lecture 4 (LLM training) since the SFT-to-RLHF arc is one continuous story. A pretrained transformer just predicts next tokens; the assistants you actually talk to feel helpful because they have been through two more training stages after pretraining. We'll walk through supervised fine-tuning, reinforcement learning from human feedback, and the steps that align the model with what people want.
+title: "How instruction tuning makes a model helpful"
+description: "The first lesson of Phase 4 in our adaptation of Stanford CME 295 Lecture 5 (LLM tuning). A pretrained transformer is a great autocompleter, not an assistant. Supervised fine-tuning is the bridge: same next-token-prediction objective as pretraining, but on a small curated set of instruction-response examples. The lesson covers what changes (response shape) and what stays the same (the knowledge already in the weights), why a few high-quality examples can transform surface behavior, where parameter-efficient methods like LoRA fit, and the structural limitation that makes the next lesson necessary."
 track: ai-foundations
 order: 7
 phase: tuning
 phase_order: 1
 difficulty: standard
-estimated_read_minutes: 25
-estimated_practice_minutes: 15
-prerequisites: []
+estimated_read_minutes: 18
+estimated_practice_minutes: 12
+prerequisites:
+  - lessons/ai-foundations/quantization-and-mixed-precision
 learning_outcomes:
-  - Explain the three-stage training pipeline (pretraining, supervised fine-tuning, RLHF) and what each stage adds to a base model
-  - Describe what supervised fine-tuning does and why instruction-following emerges from it
-  - Walk through the RLHF loop in plain language (reward model trained on human preference data, then policy optimization against that reward model)
-  - Identify which observable behaviors of modern AI assistants come from pretraining versus fine-tuning versus RLHF
+  - Distinguish a base model from an instruction-tuned model and explain what each one can and cannot do
+  - Describe the SFT mechanism (same next-token loss as pretraining, applied to curated instruction-response pairs)
+  - Explain why SFT teaches response shape rather than new knowledge
+  - Recognize LoRA as a parameter-efficient way to do SFT and the structural limitation (no negative signal) that motivates the next lesson
 authors:
   - clawdemy
 published_at: 2026-04-30
-last_reviewed: 2026-04-30
+last_reviewed: 2026-05-07
 status: published
 artifact: brief
 source_material:
@@ -36,27 +37,33 @@ import SourceLecture from '../../../../../components/SourceLecture.astro';
 
 <SourceLecture
   url="https://www.youtube.com/watch?v=PmW_TMQ3l0I"
-  title="Stanford CME 295, Lecture 5"
+  title="Stanford CME 295, Lecture 5 (LLM tuning)"
   instructor="Afshine & Shervine Amidi"
+  timestampStart={110}
+  timestampEnd={320}
 />
 
 ## What you'll learn
 
-This is the first lesson in our adaptation of Stanford CME 295 Lecture 5 (LLM tuning). It also covers the supervised-fine-tuning topic from Lecture 4 (LLM training), since the SFT-to-RLHF arc is one continuous story and it would be odd to split it across two lessons. The earlier lessons in this track covered the transformer architecture (Lecture 1) and how that architecture generates text at runtime (Lecture 3). What they described is a *base model*: the raw output of pretraining, a transformer that has read a lot of text and gotten good at predicting the next token. A base model is not yet a chat assistant. The thing you actually talk to has been through two more training stages after pretraining, and those stages are why it feels helpful instead of just plausible. This lesson walks through both of them: supervised fine-tuning, where the model learns to follow instructions, and reinforcement learning from human feedback, where it learns which kinds of responses people rated higher in training. Course materials are at [cme295.stanford.edu](https://cme295.stanford.edu/).
+This is the opener of Phase 4 in our adaptation of Stanford CME 295. Phase 3 ended with a pretrained base model: trillions of tokens of compute spent making it a great autocompleter. The model is impressive in a specific way and limited in another. It knows facts, languages, and idioms. It does not follow instructions. You write *"summarize this paragraph"* and it produces more paragraph, not a summary. The chat assistants you actually use feel different. Supervised fine-tuning, often abbreviated SFT, is the first of the post-training stages that closes that gap. It uses the same training objective as pretraining (predict the next token) on a much smaller, much higher quality dataset of instruction-response pairs hand-written by humans. After enough examples, the model has learned the *pattern* of instruction-following. The knowledge was already in the weights from pretraining; SFT teaches the model when to apply it. The lesson also names the parameter-efficient variant (LoRA) and the structural limitation that makes the next lesson necessary: SFT can only teach the model what to predict, not what *not* to predict.
+
+## Where this fits
+
+This is lesson 1 of Phase 4, *How models learn to be helpful*, and the phase opener. Phase 3 ended with a pretrained base model and the engineering tricks that make pretraining tractable. Phase 4 is the post-training arc: how you turn a base model into something useful. This lesson covers SFT as the foundation; the next two lessons in the phase complete the post-training arc. The previous lesson in Track 5 was *Why precision matters: quantization and mixed precision* (Phase 3 closer).
 
 ## Before you start
 
-**Prerequisites:** the attention lesson (Lecture 1) and the text generation lesson (Lecture 3) are strongly recommended. Attention is the mechanism the assistant builds on; text generation explains what "the model produces tokens one at a time" actually means in operation. We assume both are familiar. If "logits," "softmax," or "next-token prediction" feel unfamiliar, read those lessons first.
+**Prerequisites:** the [Phase 3 closer on quantization and mixed precision](/lessons/ai-foundations/quantization-and-mixed-precision/lesson/), and ideally the rest of Phase 3. You should be comfortable with what a pretrained base model is, what its objective was during training, and the rough scale of pretraining (trillions of tokens, months of compute). No new math beyond the previous phases.
 
 ## By the end, you'll be able to
 
-- Explain the three-stage training pipeline (pretraining, supervised fine-tuning, RLHF) and what each stage adds to a base model
-- Describe what supervised fine-tuning does and why instruction-following emerges from it
-- Walk through the RLHF loop in plain language (reward model, policy optimization, the human-feedback signal)
-- Identify which observable behaviors of modern AI assistants come from pretraining versus fine-tuning versus RLHF
+- Distinguish a base model from an instruction-tuned model and explain what each one can and cannot do
+- Describe the SFT mechanism (same next-token loss as pretraining, applied to curated instruction-response pairs)
+- Explain why SFT teaches response shape rather than new knowledge
+- Recognize LoRA as a parameter-efficient way to do SFT and the structural limitation (no negative signal) that motivates the next lesson
 
 ## Time and difficulty
 
-- **Read time:** about 25 minutes
-- **Practice time:** about 15 minutes (a comparison exercise: identify which stage produced which observed behavior on real assistant outputs)
+- **Read time:** about 18 minutes
+- **Practice time:** about 12 minutes (a base-vs-SFT classification exercise plus flashcards)
 - **Difficulty:** standard

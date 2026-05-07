@@ -1,6 +1,6 @@
 ---
-title: "Cheatsheet: How a model learns to be helpful: fine-tuning and RLHF"
-description: One-page reference. The three-stage pipeline, RLHF in two parts, modern variants, behavior-to-stage decomposition, common pitfalls, glossary.
+title: "Cheatsheet: How instruction tuning makes a model helpful"
+description: One-page reference. Pretraining versus SFT, the SFT mechanism, what SFT changes versus what stays the same, LoRA, the structural limitation, common pitfalls, glossary.
 artifact: cheatsheet
 sidebar:
   order: 5
@@ -11,79 +11,90 @@ tableOfContents: false
 ## The one idea that matters
 
 ```
-pretraining (trillions)  →  SFT (tens of thousands)  →  RLHF (hundreds of thousands)
-       (knows)                  (follows)                    (has taste)
+pretraining (huge, raw text)  →  SFT (small, curated instructions)
+       (knows)                          (follows)
 ```
 
-## The three-stage pipeline
+## Pretraining vs SFT, side by side
 
-| Stage | Data (typical) | Objective | Output | Time |
-| --- | --- | --- | --- | --- |
-| 1. Pretraining | Trillions of tokens of unfiltered web text | Next-token prediction | Base model | Months on a cluster |
-| 2. Supervised fine-tuning (SFT) | Tens of thousands of curated instruction-response pairs | Imitate the responses | Instruction-tuned model | Days |
-| 3. RLHF | Hundreds of thousands of human preference comparisons | Maximize a learned reward | Chat assistant | Days, plus a separate reward model |
-
-## RLHF in two parts
-
-| Part | Input | Process | Output |
-| --- | --- | --- | --- |
-| 1. Reward model | Human preference comparisons (`prompt`, `response_A`, `response_B`, `picked`) | Train a model to predict the human pick as a scalar score | Reward model that scores `(prompt, response)` |
-| 2. Policy optimization | SFT model (the policy) and the reward model | Policy generates response, reward model scores, RL algorithm (commonly PPO) nudges policy weights toward higher-scoring responses; a KL-style regularization penalty tethers the policy to the SFT model to prevent reward hacking | Chat assistant |
-
-## Modern variants
-
-| Approach | What changes vs canonical RLHF |
-| --- | --- |
-| **DPO** (Direct Preference Optimization) | Skips the separate reward model; optimizes the SFT model directly on preference data. Simpler pipeline, often comparable quality, increasingly popular in open-source. |
-| **CAI** (Constitutional AI) | Some human comparisons replaced by AI-generated critiques working from a written set of principles. Reduces labeling burden; introduces critic-bias risk. |
-| **RLAIF** (RL from AI Feedback) | Umbrella term for using AI rather than human comparisons during the preference-learning step. |
-
-## Which observable behavior comes from which stage
-
-| Observable behavior | Primary stage | Notes |
+| Property | Pretraining | SFT |
 | --- | --- | --- |
-| Knows facts about the world | Pretraining | Knowledge encoded in weights from reading text |
-| Follows an instruction at all | SFT | Base model would continue the prompt as text |
-| Polished, structured, polite tone | RLHF (SFT seeds) | Format often present in SFT, RLHF reinforces |
-| Refuses harmful or out-of-scope requests | RLHF | Refusals were labeled as preferred during preference training |
-| Self-identifies with a product persona | SFT + RLHF | System prompt examples in SFT; persona reinforcement in RLHF |
-| Style / personality changes between releases | New SFT + new RLHF | Architecture rarely changes between releases; post-training does |
+| Data | Trillions of tokens of unfiltered web text | A curated, much smaller corpus of instruction-response pairs |
+| Objective | Next-token prediction | Same: next-token prediction (on response tokens only) |
+| Output | Base model | Instruction-tuned model |
+| Time | Months on a cluster | Hours to days, depending on model size |
+| What it adds | Knowledge, grammar, idiom, the ability to continue text plausibly | Response shape: instruction comes in, response comes out |
+| What it does *not* add | Instruction-following, helpfulness, response shape | New knowledge (with a hedge at very high volumes) |
+
+## The SFT mechanism
+
+```
+Take a base model.
+Show it (instruction, response) pairs hand-written by humans.
+Train the same way pretraining did (predict the next token),
+  but only score the response tokens against the loss.
+After enough examples, the model generalizes:
+  any instruction → response in the same shape.
+```
+
+## What SFT changes (and what it does not)
+
+| Question | Answer | Why |
+| --- | --- | --- |
+| Does SFT teach new knowledge? | No (at typical scales) | The base model already knows the content from pretraining. SFT teaches it when to deploy that knowledge in response form. |
+| Does SFT change the architecture? | No | Same model, same weights, slightly nudged. |
+| Does SFT change the objective? | No | Same next-token prediction loss. |
+| Does SFT make the model helpful in tone? | No | SFT produces a response shape rather than a continuation; which response is best in tone is a preference-tuning concern (lesson 2). |
+| Can a few thousand examples change behavior dramatically? | Yes | The underlying capability is already in the weights. SFT just activates the trigger. |
+
+## LoRA in one line
+
+| Approach | What it changes | Why it matters |
+| --- | --- | --- |
+| **Full SFT** | Updates all model weights | Slower, more expensive; needs more memory |
+| **LoRA** | Holds base weights largely fixed; trains a small set of low-rank matrices on the SFT data | Cheaper, equally effective for the conceptual mechanism, lets you keep many specialized fine-tunes around one base |
+
+You will see "LoRA" and "PEFT" (parameter-efficient fine-tuning) in open-source training repos and model release notes. Same idea, different acronym.
+
+## The structural limitation (the bridge to lesson 2)
+
+The lecturer's framing: SFT is all about teaching the model what it should predict, but it does not teach the model what it *should not* predict.
+
+| Question | SFT can teach this | SFT cannot teach this |
+| --- | --- | --- |
+| What response shape to produce | Yes | |
+| Which of two valid responses is better | | No |
+| Which kinds of responses to refuse | | No |
+| Calibrated uncertainty ("I do not know") | | No |
+
+Everything in the right column is the next lesson's territory.
 
 ## Pitfalls to dodge
 
 | Pitfall | Reality |
 | --- | --- |
-| SFT teaches new knowledge | No. SFT teaches response shape. Knowledge was in the base model from pretraining. |
-| RLHF gives a model "values" | No. RLHF gives preferences toward responses the reward model rates highly. The reward model captures labelers' picks, not philosophical commitments. |
-| Fine-tuning equals RLHF | No. Fine-tuning is the umbrella; SFT is one kind. RLHF builds on SFT by adding reward modeling and policy optimization. |
-| Reward model output equals truth | No. The reward model scores responses the way labelers would. It is a proxy for helpfulness, not a guarantee of factual accuracy or calibrated uncertainty. |
-| The assistant has a fixed personality | No. Same base model can be post-trained in different directions to produce assistants that feel very different. The base is the same; post-training shapes the personality. |
+| SFT teaches new knowledge | At typical scales, no. SFT teaches response shape. Knowledge was in the base model from pretraining. (Hedge: at very high SFT volumes the line with continued pretraining starts to blur.) |
+| SFT alone is sufficient for a polished assistant | No. SFT is a real capability jump and is not the last step. The structural "no negative signal" limit is what the next lessons fix. |
+| Fine-tuning equals SFT | Fine-tuning is the umbrella term; SFT is one kind. Many other fine-tuning regimes exist for narrower domain tasks. SFT is specifically scoped to instruction-following. |
 
 ## Translating model release language
 
-| Vendor claim | What it usually means |
+| Vendor or repo claim | What it usually means |
 | --- | --- |
-| "We retrained the assistant" | New SFT data plus new RLHF preferences. Days, not months. |
-| "We improved safety" | New refusal labels in the preference data; reward model now scores those refusals higher. |
-| "We released a base model / instruction-tuned model" | Stage 1 only, or stages 1 and 2. Stage 3 (RLHF) adds the polish you associate with chat assistants. |
+| "Fine-tuned on N instruction-response pairs" | SFT, classic recipe. Stages 1 and 2 done. Nothing about preference tuning. |
+| "LoRA fine-tune of model X" | SFT-via-LoRA on a specific base model. Cheap to produce, often shipped as small adapter weights you load on top of the base. |
+| "Instruction-tuned base" | SFT done, no preference tuning yet. Useful, often visibly less polished than a fully tuned chat assistant. |
 
 ## Glossary
 
 - **Base model:** the output of pretraining. Predicts next tokens; does not follow instructions.
-- **SFT (supervised fine-tuning):** trains the base model on curated instruction-response examples using next-token prediction.
-- **Instruction-tuned model:** the post-SFT, pre-RLHF model. Follows instructions; has no preference among valid responses.
-- **RLHF (reinforcement learning from human feedback):** uses a learned reward model trained on human preference data to optimize the SFT model.
-- **Reward model:** a separate model that scores `(prompt, response)` pairs; trained to predict human preferences.
-- **Policy:** in RL terminology, the model being optimized; in RLHF, the SFT model.
-- **PPO (Proximal Policy Optimization):** the RL algorithm commonly used to update the policy against the reward model.
-- **Reward hacking:** the policy finding ways to score high on the reward model without actually being helpful, prevented by KL regularization.
-- **KL penalty / regularization:** a term in the RLHF loss that keeps the policy close to the SFT model, preventing reward hacking.
-- **DPO (Direct Preference Optimization):** an alternative to canonical RLHF that skips the separate reward model and optimizes the SFT model directly on preference data.
-- **CAI (Constitutional AI):** an approach that replaces some human comparisons with AI-generated critiques based on written principles.
-- **RLAIF (Reinforcement Learning from AI Feedback):** umbrella term for using AI rather than humans for preference data.
-- **Preference data:** pairs of model responses ranked by human (or AI) labelers. The raw input to the reward model.
-- **Post-training:** any training stage after pretraining. SFT and RLHF are both post-training.
+- **SFT (supervised fine-tuning):** trains the base model on curated instruction-response pairs using next-token prediction.
+- **Instruction-tuned model:** the post-SFT model. Follows instructions; has no learned preference among valid responses.
+- **LoRA (Low-Rank Adaptation):** a parameter-efficient SFT technique that holds the base weights largely fixed and trains a small set of low-rank matrices.
+- **PEFT (Parameter-Efficient Fine-Tuning):** umbrella term for techniques like LoRA that update only a small fraction of model parameters.
+- **Continued pretraining:** training a base model on more raw text from a new domain (different from SFT in objective scope; SFT trains on instructions, continued pretraining trains on free text).
+- **Negative signal:** information that some outputs are worse than others. SFT does not provide it; preference-based methods (next lesson) do.
+- **Post-training:** any training stage after pretraining. SFT is the first.
 
-**Pretraining gives the model knowledge.**\
-**Fine-tuning gives it instructions.**\
-**RLHF gives it taste.**
+**Pretraining fills the weights with everything the model knows.**\
+**Supervised fine-tuning teaches it to answer when someone asks.**
