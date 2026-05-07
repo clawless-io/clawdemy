@@ -1,0 +1,295 @@
+---
+title: "Practice: Why scale matters: scaling laws and Chinchilla"
+description: "Self-check on the FLOPs unit, the Kaplan scaling laws, the Chinchilla rule, and the Kaplan-vs-Chinchilla reconciliation, plus an applied compute-optimal calculation on a fresh model, plus flashcards for retrieval."
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Answer in your head (or on paper) before opening the collapsible.
+
+**1. What is a FLOP, and why is it the unit pretraining cost is measured in?**
+
+<details>
+<summary>Show answer</summary>
+
+A FLOP is a floating-point operation: a single multiplication or addition over a decimal number. Pretraining cost is measured in FLOPs because the training loop is mostly matrix multiplications across many GPUs over many weeks, and the total count of those operations is what the cost (in dollars and time) ultimately scales with. Training a frontier-class LLM is on the order of `10^25` FLOPs, the Stanford lecturer's anchor for "extraordinary." Be careful: FLOPs (a count) and FLOP/s (a rate, operations per second) use the same letters and are easy to confuse.
+
+</details>
+
+**2. State the Kaplan scaling-laws result in three sentences, one per knob.**
+
+<details>
+<summary>Show answer</summary>
+
+(1) **More compute, less loss.** Throw more FLOPs at the same model and data shape and the model gets predictably better at next-token prediction. (2) **More parameters, less loss.** Make the model bigger, holding data and compute, and loss falls predictably. (3) **More training tokens, less loss.** Train on more data, holding model and compute, and loss falls predictably. All three relationships are smooth power-law-shaped curves, not step functions or plateaus, which is why "predictably" is the load-bearing word. The smoothness was the surprise; before Kaplan 2020, scaling neural networks was less predictable.
+
+</details>
+
+**3. State the Chinchilla rule in one sentence.**
+
+<details>
+<summary>Show answer</summary>
+
+For a fixed compute budget, the compute-optimal balance is roughly 20 training tokens per model parameter. A 10-billion-parameter model deserves around 200 billion tokens; a 70-billion-parameter model deserves around 1.4 trillion. The relationship holds across orders of magnitude.
+
+</details>
+
+**4. Why do Kaplan and Chinchilla seem to contradict each other, and how do they reconcile?**
+
+<details>
+<summary>Show answer</summary>
+
+Kaplan said "bigger is better, including more sample-efficient per token." Chinchilla said "more tokens with a smaller model is optimal." These look like opposite claims, but they answer different optimization questions.
+
+- **Kaplan's question:** with effectively unlimited data, what is the most sample-efficient model size? Answer: bigger.
+- **Chinchilla's question:** with a *fixed compute budget*, what is the optimal balance of model size and training data? Answer: roughly 20 tokens per parameter.
+
+They share the same scaling-laws empirical foundation (smooth predictable improvement with scale on all three knobs). They lead to different practical recommendations because they are optimizing under different constraints. The 2019-2024 "bigger is reliably better" period happened under the Kaplan question with the unstated assumption that data was effectively unlimited. Chinchilla rebalanced the picture by making the data constraint explicit.
+
+</details>
+
+**5. Was GPT-3 compute-optimal under Chinchilla? Show the math.**
+
+<details>
+<summary>Show answer</summary>
+
+GPT-3 had roughly 175 billion parameters and was trained on roughly 300 billion tokens.
+
+```
+actual ratio: 300B / 175B ≈ 1.7 tokens per parameter
+target ratio: 20 tokens per parameter (Chinchilla)
+target tokens for 175B params: 175 × 20 = 3,500B = 3.5 trillion
+```
+
+GPT-3 received roughly 1.7 tokens per parameter where Chinchilla says it needed about 20. By that standard, GPT-3 was, in the lecturer's words, "really undertrained." The same compute budget could in principle have produced a better model with a smaller parameter count and a much larger training set, or a similarly-sized model with substantially more data.
+
+</details>
+
+**6. Why is "X has Y billion parameters" only half a description of a modern language model?**
+
+<details>
+<summary>Show answer</summary>
+
+Because tokens-per-parameter is the other half. Two models with the same parameter count but very different training-data sizes will behave differently. A 70-billion-parameter model trained on 1.4 trillion tokens (Chinchilla-aligned) is not the same as a 70-billion-parameter model trained on 300 billion tokens. The shorthand of citing parameter count alone hides the data-side variable. Modern releases (after Chinchilla) increasingly cite both numbers; older releases tended to cite just the parameter count, which made the comparison harder.
+
+</details>
+
+## Try it yourself: compute-optimal check on a fresh model
+
+This exercise applies the Chinchilla rule to a hypothetical model. About 10 minutes. Pen and paper, or a calculator.
+
+### Part one: was the model Chinchilla-aligned?
+
+A team trains a model with **30 billion parameters** on **400 billion tokens**. Use the Chinchilla rule (about 20 tokens per parameter) for the comparisons.
+
+**a)** Compute the actual tokens-per-parameter ratio.
+
+<details>
+<summary>Show answer</summary>
+
+`400B / 30B ≈ 13.3 tokens per parameter`
+
+</details>
+
+**b)** Compute the Chinchilla-aligned token target for a 30-billion-parameter model.
+
+<details>
+<summary>Show answer</summary>
+
+`30B × 20 = 600B tokens`
+
+</details>
+
+**c)** Was this model data-undertrained, data-overtrained, or roughly Chinchilla-aligned? Justify.
+
+<details>
+<summary>Show answer</summary>
+
+**Data-undertrained.** Actual ratio is 13.3, target is 20. The model received about two-thirds of the training data the Chinchilla rule recommends for its parameter count. This is not as severe as GPT-3's 1.7-to-1, but it is still leaving compute on the table: at the same compute budget, a smaller model trained on more tokens (or the same-size model trained on the additional ~200B tokens) would likely have produced lower pretraining loss.
+
+</details>
+
+### Part two: rebalance under a fixed compute budget
+
+Suppose the team had a fixed compute budget that supported roughly the same total FLOPs as the 30B-params, 400B-tokens run. They want to rebalance toward Chinchilla-optimal.
+
+Recall the rough rule of thumb: training cost scales like the *product* of parameters and tokens. So `30B × 400B = 12 × 10^21` is the FLOP-proportional product they have to work with.
+
+**a)** If they keep the model at 30B parameters, how many tokens would Chinchilla-optimal require, and what does that do to the FLOP-proportional product?
+
+<details>
+<summary>Show answer</summary>
+
+Chinchilla-optimal at 30B params is 600B tokens. The product would be `30B × 600B = 18 × 10^21`, which is 1.5 times their original budget. Going from 400B tokens to 600B tokens at the same parameter count would require 50 percent more compute. They cannot do that under the fixed budget assumption.
+
+</details>
+
+**b)** If they shrink the model to keep the FLOP-proportional product fixed at `12 × 10^21`, what model-size and token-count combination would be Chinchilla-optimal?
+
+<details>
+<summary>Show answer</summary>
+
+Use the constraints together: tokens = 20 × params, and params × tokens = `12 × 10^21`. Substitute:
+
+```
+params × (20 × params) = 12 × 10^21
+20 × params² = 12 × 10^21
+params² = 0.6 × 10^21
+params = √(0.6 × 10^21) = √(6 × 10^20) ≈ 2.45 × 10^10
+params ≈ 24.5 × 10^9 = 24.5 billion
+tokens ≈ 24.5B × 20 = 490 billion
+```
+
+A 24.5-billion-parameter model trained on 490 billion tokens uses roughly the same compute budget as the original 30B-on-400B run, but is Chinchilla-aligned. The Chinchilla rule says this is the better way to spend that compute.
+
+</details>
+
+**Sanity check:** the rebalancing always shrinks the model and grows the data when moving from a too-many-parameters regime toward Chinchilla-optimal at the same compute budget.
+
+### Part four: recognize the misleading press-release shorthand
+
+The brief's fourth outcome was *Recognize why citing parameter count alone underdescribes a modern language model*. This part puts that into the recognition modality.
+
+Three press releases land on your desk on the same day. For each one, identify what is missing or potentially misleading about the description:
+
+**a)** Press release A: "Our new model has 100 billion parameters and is 50 percent larger than the previous version. It will set a new standard for AI capability."
+
+<details>
+<summary>Show answer</summary>
+
+**Missing:** training-token count. Without that number you cannot tell whether the model is Chinchilla-aligned. A 100B-parameter model needs about 2 trillion tokens to be compute-optimal under the rule. If they trained it on 300 billion tokens (still substantial in absolute terms), it is undertrained by Chinchilla and the parameter increase from the previous version may not translate into a proportional capability gain. The "50 percent larger" framing implicitly invokes Kaplan-era "bigger is better" without acknowledging the data side.
+
+</details>
+
+**b)** Press release B: "Our new model was trained on 5 trillion tokens, the largest training run in our company's history."
+
+<details>
+<summary>Show answer</summary>
+
+**Missing:** parameter count. Tokens alone, without parameters, has the symmetric problem. 5 trillion tokens trained on a 250-billion-parameter model is exactly Chinchilla-aligned (20-to-1). 5 trillion tokens on a 50-billion-parameter model is data-overtrained (100-to-1, well past optimal for the budget; possibly fine for inference cost reasons but not compute-optimal). Without the parameter count, you cannot know which case applies.
+
+</details>
+
+**c)** Press release C: "Our new 70B-parameter model was trained on 1.4 trillion tokens of curated, deduplicated, high-quality text."
+
+<details>
+<summary>Show answer</summary>
+
+**Best of the three.** 1.4T / 70B = 20-to-1, exactly Chinchilla-aligned. The release also gestures at the data-quality side, which the Chinchilla rule glosses over (Chinchilla treats tokens as fungible; in practice they are not). This is the kind of release where parameter count plus token count together actually tell a useful story about the model.
+
+</details>
+
+**Sanity check on the recognition habit:** when you read a model release, immediately ask the second question. "N billion parameters" alone tells you almost nothing without "and how many training tokens." The Chinchilla rebalancing is what made the second question first-class.
+
+### Part three: read a real model release
+
+Suppose a press release says: "Our new model has 70 billion parameters and was trained on 2 trillion tokens. It performs at parity with GPT-3 on standard benchmarks."
+
+**a)** Is this Chinchilla-aligned?
+
+<details>
+<summary>Show answer</summary>
+
+Roughly yes. `2T / 70B ≈ 28.6 tokens per parameter`. The Chinchilla rule says about 20-to-1, so this model is at or slightly above the rule. It is not severely undertrained or overtrained. The "parity with GPT-3" performance is consistent with Chinchilla's prediction: a smaller-parameter, more-data-trained model can match or beat a larger-parameter, less-data-trained model under the same scaling-laws regime.
+
+</details>
+
+**b)** What does the parity-with-GPT-3 claim tell you about the press-release shorthand of citing parameter count alone?
+
+<details>
+<summary>Show answer</summary>
+
+It tells you the shorthand is misleading. GPT-3 had 175B parameters; this model has 70B (less than half). On parameter count alone, GPT-3 should "win." But on training data, GPT-3 had 300B tokens and this model has 2 trillion (more than 6 times). Once you bring tokens-per-parameter into the picture, the Chinchilla rule predicts the smaller model can match the larger one. The parameter-count shorthand makes the comparison look impossible; the data side explains it.
+
+</details>
+
+## Flashcards
+
+Twelve cards. Click any card to reveal the answer.
+
+<FlashcardSet>
+
+<Flashcard question="What is a FLOP, in one sentence?">
+
+A FLOP (floating-point operation) is a single multiplication or addition over a decimal number. FLOPs is the unit pretraining cost is measured in. Training a frontier-class LLM is on the order of `10^25` FLOPs.
+
+</Flashcard>
+
+<Flashcard question="FLOPs vs FLOP/s, the difference?">
+
+FLOPs (capital S optional) is a *count*: how many operations the training loop has performed. FLOP/s (with a slash) is a *rate*: how many operations per second a GPU can perform. Easy to confuse. Identify which one is meant from context.
+
+</Flashcard>
+
+<Flashcard question="What did the Kaplan scaling-laws paper find?">
+
+Loss on next-token prediction falls predictably with more compute, more parameters, and more training data. The relationships are smooth power-law-shaped curves, not step functions or plateaus.
+
+</Flashcard>
+
+<Flashcard question="What was the surprise in the Kaplan paper?">
+
+The smoothness. Before Kaplan 2020, scaling neural networks was a hope-it-works activity. After Kaplan, scaling was closer to engineering: double the parameters and you could predict roughly how much loss would fall.
+
+</Flashcard>
+
+<Flashcard question="What is sample efficiency in scaling-laws context?">
+
+For an equal amount of training data, a larger model gets more out of it (lower loss per token processed). The Kaplan paper observed this empirically. It is one of the reasons "bigger is reliably better" became the framing for the 2019-2024 era.
+
+</Flashcard>
+
+<Flashcard question="State the Chinchilla rule.">
+
+For a fixed compute budget, the compute-optimal balance is roughly 20 training tokens per model parameter. A 70-billion-parameter model deserves around 1.4 trillion tokens.
+
+</Flashcard>
+
+<Flashcard question="Do Kaplan and Chinchilla contradict each other?">
+
+No. They answer different optimization questions. Kaplan: "with unlimited data, what is the most sample-efficient model size?" Answer: bigger. Chinchilla: "with a *fixed compute budget*, what is the optimal balance of model size and data?" Answer: roughly 20 tokens per parameter. Same empirical foundation, different constraints.
+
+</Flashcard>
+
+<Flashcard question="Was GPT-3 Chinchilla-optimal? Why or why not?">
+
+No. GPT-3 had 175 billion parameters and 300 billion tokens, a 1.7-to-1 ratio. Chinchilla says about 20-to-1, or roughly 3.5 trillion tokens at that parameter count. The lecturer calls GPT-3 "really undertrained" by this standard.
+
+</Flashcard>
+
+<Flashcard question="What does it mean to call a model 'data-undertrained'?">
+
+It means the model was trained on too few tokens for its parameter count under the Chinchilla rule. The same compute budget could have produced a better model with fewer parameters and more data, or the same parameters with substantially more data.
+
+</Flashcard>
+
+<Flashcard question="Why is parameter count alone a poor description of a modern model?">
+
+Because tokens-per-parameter is the other half. Two models with the same parameter count but very different training-data sizes behave differently. A 70-billion-parameter model trained on 1.4 trillion tokens is not the same as a 70-billion-parameter model trained on 300 billion tokens.
+
+</Flashcard>
+
+<Flashcard question="Pitfall: do scaling laws give an exact loss number for a model?">
+
+No. They predict the *shape* of the loss curve (smooth, predictable, power-law-ish). Constants depend on architecture, data, tokenizer, and optimization setup. The qualitative claim ("more compute, predictably less loss") is robust; the precise quantitative claim is not portable across setups.
+
+</Flashcard>
+
+<Flashcard question="Why was the pre-Chinchilla era 'leaving compute on the table'?">
+
+Because most large pretraining runs of that period had too many parameters relative to training data under the Chinchilla rule. The same compute budget could have produced a better model with fewer parameters and more data. The era was implicitly optimizing under Kaplan's "unlimited data" assumption, which Chinchilla showed was wrong.
+
+</Flashcard>
+
+</FlashcardSet>
+
+**Scale produces predictable improvement.**\
+**Chinchilla pinned the optimal split at 20 tokens per parameter.**\
+**Pre-Chinchilla pretraining left compute on the table.**

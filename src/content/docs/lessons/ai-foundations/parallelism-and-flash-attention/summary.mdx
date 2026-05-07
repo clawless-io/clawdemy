@@ -1,0 +1,38 @@
+---
+title: "Summary: Why pretraining is a memory engineering problem (parallelism and Flash Attention)"
+description: "The 5-minute scan version. A Chinchilla-aligned pretraining run does not fit on one GPU. The field uses four engineering tricks to make it fit: data parallelism (split batch across GPUs), ZeRO (stop duplicating optimizer states / gradients / parameters), model parallelism (split the model itself, three variants), and Flash Attention (use GPU SRAM via tiling to remove the HBM data-movement bottleneck)."
+sidebar:
+  order: 4
+  label: Summary
+artifact: summary
+---
+
+**Pretraining at scale is a memory engineering problem.** A Chinchilla-aligned 70-billion-parameter run does not fit on one GPU, and the activations from a forward pass do not fit either. The field has invented four engineering tricks to make Chinchilla-scale training tractable in practice: data parallelism, the ZeRO optimization on top of it, model parallelism, and Flash Attention. The first three distribute memory across many GPUs; the fourth uses the memory hierarchy inside a single GPU more cleverly.
+
+This summary is the scan-it-in-five-minutes version. The full lesson walks through what has to fit in memory, why a single GPU is not enough, and how each technique addresses a different bottleneck.
+
+## Core ideas
+
+- **What has to fit in memory during training.** Parameters, gradients, two Adam optimizer moments per parameter, plus all the activations from the forward pass. Activation memory grows with model size, batch size, and the square of context length (because attention is `O(n²)` in sequence length).
+- **Single-GPU memory is the constraint.** An H100 has 80 GB. The Stanford lecturer's framing: "a lot of things to save" against memory that "is not unlimited." Frontier-scale training cannot fit any forward pass on one device.
+- **Data parallelism: split the batch, copy the model.** Every GPU has its own complete model copy and works on a slice of the batch. Reduces activation memory (since each GPU sees only part of the batch). Requires gradients to be averaged across GPUs before each weight update, which costs communication bandwidth that grows with GPU count.
+- **Data parallelism only helps if the model fits on one GPU.** It distributes batch memory, not model memory. So the technique alone is not enough for frontier-scale models.
+- **ZeRO removes the duplication in plain data parallelism.** ZeRO is data parallelism with the redundant copies of optimizer states, gradients, and parameters partitioned across GPUs.
+- **ZeRO has three increasing levels.** ZeRO-1 partitions optimizer states (which are roughly 2x the parameter memory because Adam tracks two moments per parameter). ZeRO-2 also partitions gradients. ZeRO-3 also partitions parameters. More memory savings, more communication cost, as you go up.
+- **Model parallelism splits the model itself across GPUs.** Three variants. *Tensor parallelism* cuts large matrix multiplications across GPUs. *Pipeline parallelism* splits the layer stack across GPUs (GPU 1 holds early layers, GPU 2 holds middle layers, etc.). *Expert parallelism* (specific to MoE architectures) puts different experts on different GPUs.
+- **Frontier runs combine multiple flavors.** A typical setup runs ZeRO-3 plus tensor parallelism plus pipeline parallelism. Each technique addresses a different bottleneck.
+- **Flash Attention is a GPU-internal memory trick.** Developed at Stanford by Tri Dao and collaborators in 2022. Standard attention reads and writes Q, K, V matrices to the slow large HBM memory many times. Flash Attention tiles the computation into pieces small enough to fit in fast SRAM, computes each tile end-to-end (matrix multiply, partial softmax, multiply by V, all of it) without leaving SRAM, and writes back to HBM only once.
+- **Flash Attention is mathematically exact.** It uses a softmax-block-by-block trick (each block has its own scaling factor that combines correctly with the others) but produces the same output as standard attention. The speedup is entirely from data movement, not from approximation.
+- **Long context windows are largely a Flash Attention story.** The context windows in the tens to hundreds of thousands of tokens that frontier assistants advertise became practical in part because Flash Attention fit the attention computation at those sequence lengths on real hardware. Other ingredients matter (position encoding choices, KV-cache tricks), but Flash Attention is the central memory-side reason.
+- **"Frontier model" is partly a hardware-cluster story.** Very large GPU clusters are a real moat: only a handful of organizations can run a frontier pretraining loop end-to-end with the data-parallelism + ZeRO + model-parallelism stack at the required scale.
+- **Pitfall: data parallelism is not linear in GPU count.** Communication cost grows with the number of GPUs; there is a regime where adding more GPUs hurts more than it helps.
+- **Pitfall: ZeRO is not separate from data parallelism.** It is data parallelism with the duplication removed.
+- **Pitfall: Flash Attention is not faster because it skips work.** It produces the same answer; the speedup is from fewer HBM read/write operations.
+
+## What changes for you
+
+When you read about a model trained on "a very large GPU cluster" or "tens of thousands of GPUs," you now know what those clusters are doing: running ZeRO + tensor parallelism + pipeline parallelism so the model and the activations fit. When you read about "long context windows" in a model release, Flash Attention is the central reason that feature ships at that scale. When you ask why only a handful of labs can train frontier models, the answer is partly the hardware investment and partly the operational complexity of running these techniques together at scale. The next lesson takes the last variable left untouched: the precision of the numbers themselves. Quantization and mixed precision let each byte be smaller, complementing the per-byte distribution this lesson covered.
+
+**Pretraining at scale is a memory engineering problem.**\
+**Parallelism distributes memory across many GPUs.**\
+**Flash Attention rearranges memory inside one GPU.**

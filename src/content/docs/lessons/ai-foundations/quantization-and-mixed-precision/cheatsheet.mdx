@@ -1,0 +1,108 @@
+---
+title: "Cheatsheet: Why precision matters: quantization and mixed precision"
+description: "One-page reference. Floating-point bit structure, the four standard formats, what lower precision saves, quantization, and mixed precision training."
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## The one idea that matters
+
+```
+Lower precision = less memory per number + faster compute on the GPU.
+
+Quantization (post-training)     :  shrink a trained model
+Mixed precision training         :  shrink training itself
+
+Weights stay precise (drift accumulates).
+Activations and gradients tolerate noise (data is noisy too).
+```
+
+## Floating-point bit structure
+
+| Component | What it encodes |
+| --- | --- |
+| **Sign** | 1 bit. Positive or negative. |
+| **Exponent** | A small group of bits. Magnitude (like scientific notation). |
+| **Mantissa** | The rest. The digits, i.e. precision/granularity. |
+
+More mantissa bits → more precision. Fewer mantissa bits → more rounding when close numbers get represented identically.
+
+## The four standard formats
+
+| Format | Bits | Memory | Notes |
+| --- | --- | --- | --- |
+| **FP32** (single precision) | 32 | Baseline | The historical default for general numerical computing. |
+| **FP16** (half precision) | 16 | 0.5x FP32 | Half memory, less precise, smaller numerical range than FP32. |
+| **FP64** (double precision) | 64 | 2x FP32 | More precision than FP32. Rare in LLM training. |
+| **BF16** (brain float 16) | 16 | 0.5x FP32 | Same memory as FP16; bits divided differently (more exponent, fewer mantissa). FP32-like range. Preferred over FP16 for training large models. |
+
+## What you save
+
+| Lever | Detail |
+| --- | --- |
+| **Memory per parameter** | Each step down in precision halves storage. 70B-parameter model: 280 GB in FP32, 140 GB in FP16, 70 GB in FP8/INT8. |
+| **Compute throughput** | Lecturer's anchor: FP64 at 34 teraflops, FP32 doubling, lower precisions continuing. Each step down ≈ 2x speedup. |
+| **Both stack** | Smaller and faster on the same hardware. |
+
+## Quantization (post-training)
+
+```
+Train at high precision (typically FP32 or BF16).
+Convert weights to lower precision before deploying.
+Hope that the rounding error does not change behavior noticeably.
+```
+
+| Step | Difficulty |
+| --- | --- |
+| **FP32 → FP16 / BF16** | Usually essentially free for modern LLMs |
+| **FP32 → FP8** | Requires more care; calibration helps |
+| **FP32 → INT8** | Common for inference on consumer hardware |
+| **FP32 → INT4** | Aggressive; sometimes degrades long-form reasoning or math |
+
+## Mixed precision training (during training)
+
+```
+Master copy of weights:           FP32  (precision protects against drift)
+Forward + backward pass ops:      FP16  (data is noisy; tolerates rounding)
+Weight update arithmetic:         FP32  (so the update itself is precise)
+```
+
+The asymmetry has a clean intuition. Weights accumulate over training; precision errors compound across millions of steps. Activations and gradients are temporary (recomputed each step) and the underlying data is itself statistically noisy, so they can tolerate the noise.
+
+Result per the original paper: not noticeably degraded performance, substantial memory savings, faster training.
+
+## Why this matters when you use AI
+
+| Phenomenon | What it tells you |
+| --- | --- |
+| **Model running on a laptop or phone** | Almost certainly quantized below FP16 (often INT8 or INT4). FP32 would not fit. |
+| **Locally-downloaded quantized model behaves differently from the hosted version** | Precision side of "same model" not actually being the same artifact. |
+| **A quantized model "feels dumber" on hard tasks** | Aggressive low-precision (INT4 and below) sometimes degrades long arithmetic and careful reasoning more than other capabilities. |
+| **Press release citing FP8 / BF16 / INT4 support** | The bytes-per-number side of training and deployment economics. |
+
+## Pitfalls to dodge
+
+| Pitfall | Reality |
+| --- | --- |
+| FP16 and BF16 are interchangeable | Same memory footprint, different bit allocation. BF16 has FP32's exponent range; FP16 does not. BF16 is more robust at scale. |
+| Mixed precision means each layer is at a different precision | No. Mixed precision means some *operations* (forward / backward arithmetic) run in low precision while *master weight storage and weight updates* run in high precision. Same parameter exists at multiple precisions during one step. |
+| Quantization always works | Often it works at FP32 → FP16. Below that, results depend on the model. INT4 quantization that works for a strong frontier model may noticeably degrade a smaller one. |
+| Quantize-then-fine-tune is the same as fine-tune-then-quantize | They produce different artifacts. Quantize-then-fine-tune lets fine-tuning compensate for the rounding. Fine-tune-then-quantize may degrade more under the rounding. |
+
+## Glossary
+
+- **Floating-point number:** a number stored as bits divided into sign, exponent, and mantissa.
+- **FP32:** single-precision floating point, 32 bits per number. Historical default.
+- **FP16:** half-precision floating point, 16 bits per number.
+- **FP64:** double-precision floating point, 64 bits per number. Rare in LLMs.
+- **BF16 (brain float 16):** 16-bit format with FP32's exponent range and fewer mantissa bits than FP16.
+- **FP8:** 8-bit floating-point format. Newest of the four flavors covered.
+- **INT8 / INT4:** integer quantization formats (no fractional bits). Used for aggressive compression at deployment time.
+- **Quantization:** post-training conversion from one precision representation to another (almost always higher to lower).
+- **Mixed precision training:** a training technique using different precisions in different parts of one training step (weights at FP32, operations at FP16, updates at FP32).
+
+**Precision is the third memory lever.**\
+**Quantization shrinks deployed models; mixed precision shrinks training.**\
+**Weights stay sharp; activations and gradients tolerate noise.**
