@@ -1,59 +1,63 @@
 ---
-title: "Lesson: How a model learns to be helpful: fine-tuning and RLHF"
-description: A focused walk-through of the post-pretraining training stages. We open with a base model that follows no instructions, build the three-stage pipeline (pretraining, supervised fine-tuning, RLHF) one stage at a time, walk the RLHF loop in plain language, and end on which observable behaviors of modern chat assistants come from which stage.
+title: "Lesson: How instruction tuning makes a model helpful"
+description: "A Phase 4 opener adapted from Stanford CME 295 Lecture 5. A pretrained transformer is a great autocompleter, not an assistant. Supervised fine-tuning is the bridge: same next-token-prediction objective as pretraining, but on a small curated set of instruction-response examples. The lesson covers what changes (response shape) and what stays the same (the knowledge already in the weights), why a few high-quality examples can transform surface behavior, and where parameter-efficient methods like LoRA fit. It sets up the next lesson, where preferences pick the better response."
 sidebar:
   order: 2
   label: Lesson
 artifact: lesson
 ---
 
-import TrainingPipeline from '../../../../../components/illustrations/TrainingPipeline.astro';
 import AudioPlayer from '../../../../../components/AudioPlayer.astro';
 import LessonStar from '../../../../../components/LessonStar.astro';
+import SourceLecture from '../../../../../components/SourceLecture.astro';
 
 <LessonStar slug="how-models-learn-to-be-helpful" />
 
-<AudioPlayer src="https://audio.clawdemy.org/lessons/how-models-learn-to-be-helpful-lesson.mp3" approxMinutes={25} />
+<AudioPlayer src="https://audio.clawdemy.org/lessons/how-models-learn-to-be-helpful-lesson.mp3" approxMinutes={18} />
 
-A pretrained transformer, on its own, does not follow instructions.
+<SourceLecture
+  url="https://www.youtube.com/watch?v=PmW_TMQ3l0I"
+  title="Stanford CME 295, Lecture 5 (LLM tuning)"
+  instructor="Afshine & Shervine Amidi"
+  timestampStart={110}
+  timestampEnd={320}
+/>
 
-If you take a fresh base model (the raw output of pretraining) and feed it the prompt *"Translate this to French: hello"*, it might respond with *"Translate this to Spanish: hola"*. Not because it is being clever. Because it has seen text on the internet that contains exactly that pattern: someone asking for a translation, then someone else asking for a different translation. The base model is just continuing the pattern. It is not interpreting your request. It is doing what every previous lesson in this course said it does, namely predicting plausible next tokens.
+A pretrained transformer is a great autocompleter. It is not an assistant.
 
-The chat assistants you actually use feel different. They follow instructions. They refuse certain requests. They format answers cleanly. They sound helpful. None of those behaviors come from pretraining alone. They come from two more training stages that happen after the base model has learned what plausible text looks like. Those stages are **supervised fine-tuning** (SFT) and **reinforcement learning from human feedback** (RLHF), and they are the subject of this lesson.
+If you take a fresh base model (the raw output of pretraining) and give it the prompt *"Translate this to French: hello"*, a plausible thing for it to produce next is *"Translate this to Spanish: hola"*. Not because it is being clever. Because somewhere in the trillions of tokens it read during pretraining, it has seen exactly that pattern: someone asks for a translation, then someone else asks for a different translation. The base model is continuing that pattern. It is not interpreting your request. It is doing what every previous lesson in this track described: predicting plausible next tokens given the previous ones.
 
-By the end you will know what each stage adds, why one is not enough without the other, what a "reward model" is, and which observable behaviors of a modern chat assistant come from which stage.
+The chat assistants you actually use feel different. You write *"summarize this paragraph"* and they produce a summary, not a continuation of the paragraph. You write *"explain this code"* and you get an explanation, not more code. That gap, between *predicting plausible text* and *responding to your request*, is the gap this phase closes.
+
+The Stanford lecturer puts it as a one-line setup: pretraining gives you a model that is "a great autocompleter, but it's not a helpful model yet, which is why we have a second step." That second step is **supervised fine-tuning**, often abbreviated **SFT**. It is what this lesson is about, and it is the thing that turns a base model into something that follows instructions at all.
+
+By the end you will know what SFT changes about the model, what it does *not* change, why a few thousand carefully written examples can transform surface behavior, what kind of model you have at the end of this stage, and the structural limitation that makes the next lesson necessary.
 
 ## What pretraining gives you (and what it does not)
 
-A base model is the model you have at the end of the pretraining loop. The architecture lessons in Lecture 1 (tokens, embeddings, attention, multi-head attention, the transformer block) and the text-generation lesson in Lecture 3 together describe what that model is and what it does at runtime: it has seen a very large amount of text, and it has gotten good at one specific objective: predict the next token given the previous tokens.
+A base model is what you have at the end of the pretraining loop. The Phase 3 lessons described that loop: trillions of tokens of unfiltered text, one objective (predict the next token), months of compute, the engineering tricks that make it tractable on real hardware. What you get at the end of all that is impressive in a specific way and limited in another.
 
-What that gives you, in practice:
+What pretraining gives you, in practice:
 
 - A vast store of factual knowledge implicitly encoded in the weights.
-- A working sense of grammar, syntax, and idiom across many languages.
+- A working sense of grammar, syntax, and idiom across the languages it was trained on.
 - The ability to continue almost any kind of text in a stylistically plausible way.
 
-What that does not give you:
+What pretraining does *not* give you:
 
 - Instruction-following. The base model continues patterns; it does not interpret commands.
-- Helpfulness, in any human sense. Helpfulness is a property of responses, and the base model has no preference among responses.
-- Refusal. The base model will continue any prompt, including ones that produce harmful or unwanted output. It has no reason to do otherwise.
+- Helpfulness, in any human sense. Helpfulness is a property of responses to a request. The base model has no concept of a request; it is just continuing text.
+- A reliable response shape. Ask the same prompt twice and you may get a continuation, a list, a question, or a contradiction, depending on what plausibly follows in some corpus.
 
-The post-pretraining stages exist to bolt those properties on top.
+The lecturer's framing is the same one in different words: the pretrained model "knows about the structure of language, about code, basically all the text that it has been fed. But what this model can do is only predict the next token." Knowing language is necessary. It is not sufficient.
 
-## The three-stage pipeline
+## SFT in one paragraph
 
-<TrainingPipeline />
+Take the base model. Show it a small dataset of instruction-response pairs hand-written by humans. Train it the same way pretraining trained it (predict the next token), but only on those examples, and only train it to predict the response tokens given the instruction tokens. After enough examples, the model generalizes: when it sees a new instruction it has never seen before, it produces something that looks like a valid response, in the shape the training examples used.
 
-Stage 1 (pretraining) is what we covered in the previous lessons. Stage 2 and stage 3 are what this lesson covers. Each stage starts from the output of the previous stage and trains on a smaller, more targeted dataset with a different objective.
+That is the whole mechanism. Same loss function as pretraining. Same architecture. Same weights, slightly nudged. Different data and a different scope.
 
-The data scale is worth pausing on. Pretraining commonly sees trillions of tokens of unfiltered web text. Supervised fine-tuning typically sees tens of thousands of carefully written instruction-response examples. RLHF often sees hundreds of thousands of human comparisons of model outputs. Volume drops by many orders of magnitude across the stages; signal becomes increasingly targeted at each step.
-
-## Stage 2: Supervised fine-tuning (SFT)
-
-Take the base model. Show it a small dataset of (instruction, response) pairs hand-written by humans. Train it the same way pretraining trained it (predict the next token), but only on those examples. The result is a model that has learned the **pattern of instruction-following**.
-
-A typical SFT example might look like:
+A typical SFT example might look like this in raw form:
 
 ```
 Instruction: Translate the following English sentence to French.
@@ -61,114 +65,78 @@ Input: The cat sat on the mat.
 Response: Le chat s'est assis sur le tapis.
 ```
 
-The model is taught to predict the response tokens given the instruction-and-input tokens. After enough examples (somewhere between five thousand and one hundred thousand is typical), the model generalizes: when it sees a new instruction it has never seen before, it produces something that looks like a valid response to that instruction.
+The model is taught to predict the *response tokens* given the instruction-and-input tokens. After enough of these (the lecturer's qualitative phrasing is "much smaller in scale, much higher quality" than the pretraining corpus), the model has learned the *pattern* of "instruction goes in, response comes out" well enough to apply it to instructions it has never seen.
 
-Two things to notice:
+## What SFT actually adds (and what was already there)
 
-- **The knowledge is still from pretraining.** SFT is not teaching the model French. SFT is teaching the model to use the French it already learned during pretraining when someone asks for a translation. SFT is teaching response shape, not new content.
-- **A few thousand high-quality examples can change behavior dramatically.** The base model's weights barely move during SFT (relative to pretraining), but the surface behavior of the model changes enormously. The "instruction-following" pattern is a relatively shallow capability that the base model has all the components for; SFT just teaches it when to apply them.
+This is the load-bearing distinction in the entire phase, and it is the place beginners most often get the mental model wrong.
 
-After SFT, you have an **instruction-tuned model**. It is genuinely useful. You could ship it as a chat assistant, and many open-source models are essentially SFT-only. But it has a problem: among the many possible responses to a given instruction, the SFT model picks one that looks like the average of the human-written examples. It is correct on average. It is rarely the *best* response.
+**SFT does not teach the model new knowledge.** SFT teaches the model when to apply the knowledge it already has. The base model already knows French because it read French during pretraining. It already knows how to write code, summarize, explain, and translate, in the sense that all those capabilities are latent in its weights. What it does not know is *that a user prompt asking for a translation is a request for a translation*. SFT teaches it that. The lecturer puts it this way: "the model already knows what language is, what code is. You're just trying to make it behave like the use case you're trying to tune it for."
 
-That is what stage 3 fixes.
+So when you fine-tune a base model on a few thousand French-translation examples, you are not teaching it French. You are teaching it that the string *"translate to French"* is a signal to produce French output rather than continue the prompt as text. The capability was there. The trigger was not.
 
-## Stage 3: RLHF in two parts
+This is why a few thousand high-quality SFT examples can change surface behavior dramatically. Relative to pretraining, the weights barely move during SFT. But the *pattern* of producing a response shape rather than a continuation shape shifts decisively. SFT is teaching a relatively shallow capability that the base model has all the underlying components for. It just teaches it when to apply them.
 
-RLHF (reinforcement learning from human feedback) teaches the model **which responses humans prefer over others**. It happens in two parts: first you train a reward model, then you use the reward model to optimize the SFT model.
+## The volume drop
 
-### Part one: train the reward model
+Look at the data scale across the two stages so far:
 
-Collect a dataset of human comparisons. For a given prompt, you generate two responses (often from the SFT model itself, sampling at high temperature to get variety) and ask a human which one they prefer.
+| Stage | Typical data | Objective | Time |
+|---|---|---|---|
+| Pretraining | Trillions of tokens of unfiltered web text | Next-token prediction | Months on a cluster |
+| SFT | A curated, much smaller corpus of instruction-response pairs | Same: next-token prediction (on response tokens) | Hours to days, depending on model size |
 
-```
-Prompt: Explain quantum entanglement to a curious 10-year-old.
+Volume drops by many orders of magnitude. Compute drops by a similar factor. And yet the model after SFT feels recognizably like an assistant in a way the base model never could.
 
-Response A: Quantum entanglement is when two particles become linked so that
-the state of one instantly affects the state of the other, no matter how far
-apart they are. It is one of the strangest things in physics.
+That asymmetry is the whole reason post-training is interesting. You do most of the work in pretraining (building general capability into the weights at enormous cost), and then a tiny, targeted training run shapes how that capability presents itself. The lecturer's phrasing: SFT data is "much smaller in scale but of much higher quality." Quality means the examples were written carefully, by humans, demonstrating exactly the response shape the model is meant to produce.
 
-Response B: When two atoms hang out, they sometimes get connected like best
-friends. Then no matter how far apart they go, when one feels something, the
-other one feels it too. That is called entanglement.
+## Parameter-efficient fine-tuning (a quick name)
 
-Human picks: B
-```
+The lecturer mentions one engineering refinement worth a name: **LoRA** (Low-Rank Adaptation). LoRA is a way of doing SFT without updating all of the model's weights. Instead, the base weights are largely held fixed, and a small number of additional weights (in the form of low-rank matrices) get trained on the SFT data. The model behaves as if you fine-tuned the whole thing, but you only paid to update a tiny fraction of the parameters.
 
-Collect hundreds of thousands of these. Then train a separate model, called the **reward model**, to predict the human preference: input is `(prompt, response)`, output is a single number representing how good the response is. The reward model learns to score responses the way the humans who labeled the data would score them.
+This matters in practice for two reasons: SFT runs become much cheaper (you do not need a cluster of GPUs to fine-tune a frontier model with LoRA), and you can keep many specialized fine-tunes around without storing many full copies of the model (each LoRA is small relative to the base). LoRA does not change anything about *what* SFT does conceptually. It changes the engineering of *how* you do it. The mental model from the previous section (response shape, not new knowledge) still applies.
 
-Note what just happened. We do not have to write down a rule for "what makes a response good." We do not have to enumerate all the desired behaviors. We just collect comparisons and train a model to predict the comparison outcome. The complexity of "good" is captured implicitly by the reward model's parameters.
+You will see "LoRA" and "PEFT" (parameter-efficient fine-tuning, the umbrella term) in model release notes and open-source training repositories. The lesson does not need more than the name and the one-line idea.
 
-### Part two: optimize the SFT model against the reward model
+## What kind of model you have at the end
 
-Now we have an SFT model (the policy) and a reward model (the scorer). For each new prompt:
+After SFT, you have an **instruction-tuned model**. Concretely:
 
-1. The policy generates a response.
-2. The reward model scores it.
-3. A reinforcement learning algorithm (commonly Proximal Policy Optimization, PPO) nudges the policy's weights to make high-scoring responses more likely.
+- It follows instructions. Asked to summarize, it summarizes. Asked to translate, it translates. Asked to explain, it explains.
+- It produces responses in a recognizable shape: greeting, body, closing, formatted appropriately for the request.
+- It has all the knowledge of the base model, accessible now in response form.
 
-Repeat for many prompts. Over time, the policy learns to produce responses the reward model rates highly. Since the reward model was trained on human preferences, the policy ends up producing responses humans prefer.
+This is genuinely useful. Many open-source models you can download today are SFT-only. You could ship one as a chat assistant and many tasks would work fine. The lecturer comes back to this point explicitly: at the end of stage 2, the assistant may already behave the way you want, but, as he immediately adds, "not at the tone that you want." That qualifier is the load-bearing one and is worth spelling out. SFT teaches the model to produce a response. It does not teach the model which response, among the many it could produce, is best.
 
-There is a subtle but important detail: a regularization term keeps the policy from drifting too far from the SFT model. Without this regularization, the policy would find weird ways to game the reward model (a phenomenon called **reward hacking**) and start producing fluent-looking but useless or strange output. The regularization tethers the policy to its SFT starting point so it remains a coherent text generator while it climbs the reward gradient.
+Later in the lecture, the lecturer makes that limitation structural in a way every reader of this lesson should remember: "SFT is all about teaching the model what it should predict, but it does not teach the model what it should not predict." Every example in an SFT dataset is a positive example, "this is what to do." There are no negative examples, no "this would also be valid but worse," no "this is a failure mode to avoid." The training data does not contain that information, so the trained model does not learn it.
 
-The result of stage 3 is the **chat assistant** you actually talk to. Same architecture, same weights mostly inherited from SFT, but with a layer of preference-tuning that makes it choose better responses among the many it could have generated.
-
-## Modern variants
-
-The pipeline above (SFT + reward model + PPO) is the canonical RLHF recipe from the work that produced the first widely-deployed chat assistants. Several variations have since emerged:
-
-- **Direct Preference Optimization (DPO)** skips the reward model entirely. Instead of training a separate scorer and then optimizing against it, DPO uses a clever loss function that directly optimizes the SFT model on preference data. Simpler, often comparable quality, increasingly popular.
-- **Constitutional AI (CAI)** replaces some human comparisons with critiques generated by another AI model, working from a written set of principles. Reduces the human labeling burden; introduces new failure modes (the AI critic may have its own biases).
-- **Reinforcement Learning from AI Feedback (RLAIF)** is the broader term for approaches that use AI rather than human comparisons during the preference-learning step.
-
-The exact recipe varies by lab and model, but the broad shape (pretrain, fine-tune, align with preferences) is universal across modern chat assistants.
-
-## Which observable behavior comes from which stage?
-
-This is the practical payoff. When you interact with a chat assistant, you can roughly trace each behavior back to its training stage:
-
-- **Knowing facts about the world.** Pretraining. The model encoded this in its weights when it read large amounts of text.
-- **Following an instruction at all.** Supervised fine-tuning. The base model would not have known to produce a response shape; SFT taught it that.
-- **Using a polite, structured, helpful tone.** Mostly RLHF. The shape comes from SFT; the *style* comes from preference optimization.
-- **Refusing harmful or out-of-scope requests.** RLHF, almost entirely. The reward model was trained with refusals labeled as preferred for certain prompt categories; the policy learned to refuse.
-- **Adopting a specific persona (the assistant's self-identification as a particular named product).** Some SFT (system prompt training), some RLHF (reinforcing the persona).
-- **Updating its style or personality in a new model release.** New SFT data plus new RLHF preferences. The architecture often does not change much between releases; the post-training does.
-
-This decomposition is approximate and the boundaries are fuzzy in real systems. The pattern is robust enough to be useful when you read about model behavior or release notes.
+A concrete illustration of the gap: ask an instruction-tuned model *"suggest a new activity I could do with my teddy bear,"* and a plausible SFT response is *"I would suggest not spending much time with your teddy bear at all."* That is in the shape of an answer. It is grammatically a response to the request. It is also unhelpful, slightly mean, and the kind of response a real assistant would never produce. The lecturer uses this example as the bridge into the next stage: SFT got you to "an answer shape;" preferences are how you get to "the better answer."
 
 ## Why this matters when you use AI
 
-Three direct consequences when you read AI model cards, release notes, or vendor blog posts.
+Three direct consequences when you read about AI models or interact with one.
 
-- **"We retrained the assistant" usually means RLHF, not pretraining.** Pretraining a frontier model takes months and costs tens of millions of dollars. Updating an existing model with new SFT data and new RLHF preferences takes days. Most of what feels like "the model got better" between releases is post-training, not new architecture.
-- **Open-source SFT-only models exist and are useful.** When you see an open-source release described as "the base model" or "instruction-tuned only," it has gone through stages 1 and 2 but not 3. These are often perfectly fine for many tasks, especially with good prompting, but they typically feel less polished than a fully-RLHF-trained chat assistant.
-- **Refusal behavior is learned, not built-in.** When a model refuses a request, that refusal was rewarded during RLHF. It is a property of the post-trained model, not the architecture. A model can be retrained to refuse fewer things, more things, or different things by changing the preference data. This is why "uncensored" community fine-tunes exist: they are SFT or DPO retrains that strip the refusal behavior the original RLHF added.
+- **"The base model" and "the assistant" are different artifacts.** When a research lab releases both, you should treat them differently. The base model is the post-pretraining checkpoint; it does not follow instructions in the way you expect. The assistant is the post-tuning checkpoint; it does. This distinction is technical, not marketing.
+- **An open-source "instruction-tuned" model has typically had SFT but may or may not have anything beyond.** You will see model cards that say "fine-tuned on N instruction-response pairs" or "trained with SFT on dataset X." That is exactly the stage this lesson covered. Such models tend to feel less polished than fully tuned commercial assistants, and the gap you feel is exactly what the next two lessons close.
+- **Knowledge is from pretraining, but the *answer* is from SFT.** When a model gives you a wrong answer, the wrongness often comes from one or the other. Pretraining can be missing the fact, or have an outdated version of it. SFT can be applying the wrong response shape (giving you a list when you wanted a paragraph, or formal language when you wanted casual). The two stages tend to fail in different ways, and noticing which is which makes you a better user of the model.
 
 ## Common pitfalls
 
-A few mistakes are common enough to be worth naming.
+Two mistakes worth naming.
 
-**Conflating SFT with continued pretraining.** Both look like "training a model on more data," but the objective is the same (next-token prediction) while the data is dramatically different (curated instruction examples versus raw web text). SFT is a specific kind of fine-tuning, scoped to instruction-following.
+**Thinking SFT alone is sufficient for a polished assistant.** SFT is a real capability jump. It is not the last step. The "no negative signal" limitation the lecturer named is structural; you cannot SFT your way past it without changing the training objective. The next lesson is the structural fix.
 
-**Thinking RLHF gives a model "values."** RLHF gives a model preferences toward responses the reward model scores highly. The reward model was trained on whatever the labelers preferred. If the labelers preferred polite refusals to certain prompts, the model will produce polite refusals. The "values" you observe are an indirect product of training data, not philosophical commitments.
-
-**Equating fine-tuning with RLHF.** Fine-tuning is the umbrella term for adapting a base model to a new task. SFT is one kind of fine-tuning. RLHF builds on SFT by adding the reward-model-and-policy-optimization step. Saying "the model was fine-tuned" is correct but coarse; saying "the model went through RLHF" is more specific.
-
-**Assuming reward model output equals truth.** The reward model scores a response higher if it looks like the kind of response the labelers preferred. That is an excellent proxy for "helpfulness" much of the time. It is not a guarantee of factual accuracy, calibrated uncertainty, or consistent reasoning. Reward hacking and proxy gaming are active research problems.
-
-**Thinking the assistant is a fixed personality.** The same base model can be fine-tuned and RLHF-tuned in different directions to produce assistants that feel very different. The base is the same; the post-training shapes the personality. This is why two products built on similar underlying architectures can feel like two completely different assistants.
+**Assuming SFT teaches new knowledge.** It does not. Knowledge comes from pretraining. SFT teaches the model when to deploy what it already has. (One nearby gotcha: at very high SFT volumes the line with continued pretraining starts to blur, since enough new data can move the weights enough to inject new knowledge. At typical SFT scales the distinction is clean; the mental model "knowledge is from pretraining" remains the right starting point.)
 
 ## What you should remember
 
-- **Pretraining produces a base model.** It is good at predicting next tokens; it does not follow instructions.
-- **Supervised fine-tuning teaches instruction-following.** Train the base model on hand-written instruction-response pairs. The model learns response shape; the knowledge was already there from pretraining.
-- **RLHF teaches preferences via a proxy.** Train a reward model on human comparisons of responses. Then optimize the SFT model to maximize the reward model's score, with regularization to prevent reward hacking.
-- **Modern variants iterate on the recipe.** Direct Preference Optimization skips the reward model. Constitutional AI replaces some human comparisons with AI-generated ones. The broad shape is universal.
-- **Each observable behavior of a chat assistant traces to a stage.** Knowledge from pretraining. Instruction-following from SFT. Tone, refusal, polish from RLHF.
-
-You are now ready for the practice section, where you will identify which stage produced which behavior on a small set of real assistant outputs.
+- **Pretraining produces a base model.** It is good at predicting next tokens. It does not follow instructions.
+- **SFT teaches response shape, not new knowledge.** Same loss as pretraining, different data: a curated, much smaller corpus of instruction-response pairs. The model learns to produce a response when it sees an instruction.
+- **A few thousand high-quality examples are enough.** The capability is already in the weights from pretraining. SFT activates it.
+- **LoRA is a parameter-efficient way to do SFT.** Engineering refinement, not a conceptual change.
+- **The end-state is "correct on average."** SFT can only inject positive signal ("here is what to do"). It cannot teach which of many valid responses is best, and it cannot teach what *not* to predict. Lesson 2 is about how to collect those preferences and use them to teach the better response.
 
 ## If you remember one thing
 
-**Pretraining gives the model knowledge.**\
-**Fine-tuning gives it instructions.**\
-**RLHF gives it taste.**
+**Pretraining fills the weights with everything the model knows.**\
+**Supervised fine-tuning teaches it to answer when someone asks.**
