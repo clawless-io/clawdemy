@@ -1,0 +1,151 @@
+---
+title: "Cheatsheet: New ways to generate, speculative decoding and diffusion LLMs"
+description: "One-page reference. The autoregressive default, speculative decoding mechanism, diffusion-LLM paradigm shift, and when each alternative fits."
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## The one idea that matters
+
+```
+Autoregressive (one token at a time) is the default.
+It is not the only option.
+Speculative decoding makes it faster (same output).
+Diffusion LLMs change the paradigm (parallel generation).
+```
+
+## Autoregressive vs the alternatives
+
+| Aspect | Autoregressive (default) | Speculative decoding | Diffusion LLM |
+| --- | --- | --- | --- |
+| **Output flow** | One token at a time, left to right | Same as autoregressive | All positions in parallel |
+| **Forward passes** | One per output token | Many tokens per target-model pass | K denoising steps total |
+| **Output distribution** | Target model's distribution | Same as target's (mathematically) | Different paradigm; outputs from refinement |
+| **Quality** | Standard | Same as autoregressive | Approaching, not yet at frontier |
+| **Production-ready?** | Yes | Yes (now standard) | Mostly research |
+
+## Speculative decoding mechanism
+
+```
+PROMPT
+   ↓
+DRAFT MODEL (small): generates K tokens autoregressively (fast)
+   ↓
+TARGET MODEL (big): one forward pass on prompt + K draft tokens
+   ↓ produces K+1 probability distributions (one per draft position + 1 next)
+   ↓
+ACCEPTANCE-REJECTION:
+   for each draft token:
+     compare draft prob to target prob at that position
+     accept with probability min(target_prob/draft_prob, 1)
+     if rejected: resample from a corrected distribution
+   ↓
+OUTPUT (same distribution as target-model-alone, faster)
+```
+
+**Why it works:** LLM inference is memory-bound at scale. A single target-model pass with K tokens is roughly as expensive as one with 1 token. Many tokens per pass = many tokens per memory roundtrip.
+
+## Why speculative decoding is "free" quality-wise
+
+```
+Acceptance-rejection scheme designed so:
+  marginal distribution over output = target model's distribution
+  
+Proof: law of total probability + rejection-sampling math.
+A few-line derivation. The marginal distribution is exact.
+```
+
+**You cannot tell from the output whether a response was generated speculatively or naively.**
+
+## Diffusion LLM mechanism
+
+```
+TRAINING (forward process):
+  Start with clean text sequence.
+  Step t=0: clean.
+  Step t=1: 10% of tokens replaced with [MASK].
+  Step t=2: 20%.
+  ...
+  Step t=T: 100% [MASK].
+
+TRAINING (reverse process):
+  Train model to predict original tokens
+  given partially-masked sequence at any t.
+
+INFERENCE (generation):
+  Step t=T: start with all-[MASK] (conditioned on prompt).
+  Run model: predict all positions in parallel.
+  Step t=T-1: keep most-confident predictions; re-mask others.
+  Step t=T-2: same.
+  ...
+  Step t=0: fully unmasked. Output.
+```
+
+**Key translation:** noise is to images what `[MASK]` is to text.
+
+## DLLM advantages
+
+| Advantage | Why |
+| --- | --- |
+| **Speed** | K passes (typical K = 10-50) vs N passes (N = output length, often thousands) |
+| **Bidirectional context** | Each pass sees the whole sequence; future positions inform earlier predictions |
+| **Fill-in-the-middle natural** | Bidirectional context + parallel generation = the right shape for code editors |
+| **Coarse-to-fine refinement** | Lecturer's "writing a speech" analogy: rough plan → drafty sections → refined output |
+
+## DLLM limitations
+
+| Limitation | What it means |
+| --- | --- |
+| **Quality not yet at frontier** | Autoregressive models still win on most benchmarks; gap is closing (LLaDA, etc.) |
+| **Inference techniques don't transfer cleanly** | CoT, reasoning chains, RLHF were designed for autoregressive; need adaptation |
+| **Production tooling immature** | Most LLM serving infrastructure assumes autoregressive |
+
+## Triage: which technique fits which problem?
+
+| Problem | Reach for |
+| --- | --- |
+| "Make our chat API faster, no quality compromise" | **Speculative decoding** (purely beneficial) |
+| "Optimize throughput costs of existing serving" | **Speculative decoding** + quantization + batching (stack) |
+| "Code editor with fill-in-the-middle autocomplete" | **DLLM** (if tooling allows) or **autoregressive with FIM training** |
+| "Extreme low-latency long-form generation" | **DLLM** (if tooling allows) |
+| "Benchmark different models on reasoning" | **Neither directly** (use autoregressive frontier) |
+| "General-purpose chat at frontier quality" | **Autoregressive** (with speculative decoding under the hood) |
+
+## Variant: multi-token prediction
+
+```
+Same idea as speculative decoding, but the draft and target
+are embedded in the SAME model:
+
+  - Multiple "heads" on top of the final-layer representation
+  - Each head predicts a different position
+  - Acceptance-rejection picks among candidates
+
+Advantage: no separate small model needed.
+Cited paper: Gloeckle et al. 2024 (Meta).
+```
+
+## Pitfalls to dodge
+
+| Pitfall | Reality |
+| --- | --- |
+| "Speculative decoding = quantization." | Different. Quant uses lower-precision arithmetic; speculative uses a draft model. Can be combined. |
+| "DLLMs are production-ready." | Not yet for most use cases. Quality and tooling are catching up. |
+| "Speculative decoding loses quality." | No. Same output distribution as target-model-alone. The math guarantees it. |
+| "DLLMs replace autoregressive." | They don't. They occupy different niches. Most general-purpose use stays autoregressive. |
+
+## Glossary
+
+- **Autoregressive (AR):** one token at a time, each from a full forward pass conditional on all previous tokens. The default LLM generation paradigm.
+- **Speculative decoding:** serving optimization. Small draft model proposes K tokens; big target model verifies in one pass; acceptance-rejection guarantees same output distribution.
+- **Multi-token prediction:** speculative decoding with the draft mechanism embedded in the target model via multiple heads. No separate small model.
+- **Diffusion LLM (DLLM):** non-autoregressive generation. Start from all-masked sequence, refine across K denoising steps.
+- **Masked diffusion model (MDM):** alternative term for DLLM emphasizing the masking mechanism.
+- **`[MASK]` token:** the discrete-text equivalent of "noise" in image diffusion. Tokens are progressively replaced with `[MASK]` during training's forward process.
+- **Memory-bound inference:** the property that LLM inference's dominant cost is memory load, not compute. The reason speculative decoding works.
+
+**Autoregressive (one token at a time) is the default. It is not the only option.**\
+**Speculative decoding makes autoregressive faster without changing the output distribution.**\
+**Diffusion LLMs change the paradigm: start from all-mask, refine in parallel passes.**

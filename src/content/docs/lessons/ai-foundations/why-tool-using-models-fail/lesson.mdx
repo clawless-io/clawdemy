@@ -1,0 +1,165 @@
+---
+title: "Lesson: Why tool-using models fail"
+description: "Phase 7 lesson on tool-use failure modes in our adaptation of Stanford CME 295 Lecture 8. Tool-use failures fall into three buckets: tool-prediction errors (the LLM picked wrong), tool-execution errors (the tool itself misbehaved), and synthesis errors (the LLM mishandled the structured response). This lesson walks all three with named sub-failures and the lecturer's debugging methodology."
+sidebar:
+  order: 2
+  label: Lesson
+artifact: lesson
+---
+
+import AudioPlayer from '../../../../../components/AudioPlayer.astro';
+import LessonStar from '../../../../../components/LessonStar.astro';
+
+<LessonStar slug="why-tool-using-models-fail" />
+
+<AudioPlayer src="https://audio.clawdemy.org/lessons/why-tool-using-models-fail-lesson.mp3" approxMinutes={13} />
+
+A user types: "Find a teddy bear store near me." The agent has tools available. Something goes wrong.
+
+That sentence is a placeholder for thousands of real bug reports against tool-using AI systems. The shape of the failure varies: the model didn't call any tool, or it called a function that doesn't exist, or it called the right function with the wrong location coordinates, or the function ran fine but returned an unhelpful error, or the function returned good data and the model summarized it as "I couldn't find anything." Each one is a different failure mode with different debugging.
+
+The Stanford lecturer's methodology for this is the through-line of Phase 7: **categorize errors before chasing them**. Don't try to fix all tool-use failures at once. Identify which bucket the failure belongs to, then handle each bucket systematically. This lesson walks the three buckets, names the nine specific failure modes inside them, and gives the debugging recipe for each.
+
+By the end you will be able to look at any tool-use failure (yours or someone else's) and place it in one of three buckets, which gets you most of the way to the fix.
+
+## The three buckets
+
+Every tool-use failure happens at one of three stages of the call (which we covered in Phase 6's function-calling lesson):
+
+- **Stage 1: tool prediction** (the LLM picks the function and arguments).
+- **Stage 2: tool execution** (regular code runs the function).
+- **Stage 3: response synthesis** (the LLM wraps the structured response in natural language).
+
+Failures cluster at each stage. The debug recipe depends on which stage broke. Categorizing the failure correctly is most of the work; the fix tends to follow.
+
+## Bucket 1: tool-prediction errors (Stage 1)
+
+The LLM picked something wrong (or picked nothing). Four named sub-failures.
+
+### Punting (didn't use any tool when it should have)
+
+The user asks something the available tools could answer. The LLM responds with "I'm not sure" or "Sorry, I can't help with that." The tool sat there unused. In assistant-design language, this is called a **punt**.
+
+Two common causes:
+
+1. **Tool router miss.** Production systems often have a tool router (or tool selector) that filters the list of available functions before exposing them to the LLM at each call. If the router didn't include the relevant function in this turn's filtered list, the LLM literally couldn't call it. Fix: adjust the tool router to include the tool for queries of this shape.
+
+2. **Tool present but ignored.** The tool was in the LLM's context, but the LLM didn't think to use it. Fix: revisit the SFT data (if you fine-tuned for tool use, add examples of this query shape) or the prompt (if you're prompt-engineering, make the tool's role clearer in the system message).
+
+### Tool hallucination (called a function that doesn't exist)
+
+The LLM emits a call to a function name that was never defined. The tool was `find_teddy_bear`; the model called `find_bear`. Outright invention.
+
+Common causes:
+
+1. **Model is too weak.** Older or smaller models sometimes invent plausible-sounding function names instead of grounding on the available API. Fix: upgrade the model.
+
+2. **Tool API is poorly named or documented.** The lecturer's framing: tool-using LLMs were trained on large corpora of well-written APIs. If your tool's name or docstring is unusual or vague, the model may not recognize it as a "real" function and instead invent something more familiar. Fix: rename the function, refine the arguments, tighten the docstring. The lecturer specifically calls these "three knobs to tune" for fixing tool-API hallucination.
+
+3. **Top-level instructions don't enforce grounding.** The system prompt should explicitly say "use available functions" rather than letting the model assume it can invent ones. Fix: tighten the horizontal (across-tools) instructions in the system prompt.
+
+### Wrong-tool selection (used a different tool than the right one)
+
+The LLM picked a tool, but it picked the wrong one for this query. Two real tools both seemed relevant; the model chose A when B was correct.
+
+Common causes:
+
+1. **Tool router included both, model picked the wrong one.** Fix: rewrite the tool API descriptions to be more precise about scope. "Use this for X, not for Y" in the docstring goes a long way.
+
+2. **Tool descriptions overlap in scope.** Two tools have similar-sounding names and descriptions. Fix: refactor the API design. Either consolidate them into one tool with an additional parameter, or tighten the descriptions so they don't compete.
+
+### Wrong-arguments error (right tool, wrong values)
+
+The LLM picked the right tool but passed the wrong arguments. The user asked for stores nearby; the model called `find_teddy_bear_store(location="0,0")`, which is somewhere in the southern Atlantic Ocean.
+
+Common causes:
+
+1. **Missing context.** The model needs the user's location but the system never put it in the prompt. The model invented coordinates because it had to put something. Fix: ensure the user's relevant context (location, account ID, current time) is in the prompt before the tool call.
+
+2. **Permission gate.** The model needed to call a `get_user_location` tool first, but couldn't (no permission). Fix: handle the permission failure explicitly with a meaningful error response that the model can use to ask the user, rather than letting it fabricate.
+
+3. **Argument-format confusion.** The tool expects a specific argument format the model isn't reliably producing. Fix: tighten the docstring with explicit examples, retrain on better SFT data, or use structured-output validation to reject malformed calls.
+
+## Bucket 2: tool-execution errors (Stage 2)
+
+The model picked the right tool with the right arguments. The function ran. Something went wrong inside the function. Two named sub-failures.
+
+### Tool returned an error
+
+The function hit a runtime exception (a Python `ValueError`, a database connection failure, a 500 from an upstream API). The model receives the error message and has to handle it.
+
+The lecturer flags a subtle point: **errors are sometimes useful and sometimes harmful**. A useful error: "Permission denied; the user has not granted location access." The model can read that and ask the user appropriately. A harmful error: a raw stack trace. The model may interpret it as "I can't do this," produce a vague apology, and not surface the actual issue to the user.
+
+Fix: design tool implementations to return **structured outputs** that distinguish between actionable errors (useful for the model to relay) and internal-error catch-all (which should be sanitized into a meaningful structured response). The implementation work is unglamorous but high-leverage.
+
+### Tool returned nothing (or returned `None`)
+
+The tool ran without error but didn't return anything meaningful. The model receives a null response and has to guess what happened. The classic failure mode is the lecturer's thermostat example from Phase 6: a `set_thermostat()` function that returns nothing leaves the model unable to confirm whether the action succeeded. The model often produces a false confirmation ("I've increased the thermostat") without knowing whether it actually happened.
+
+Fix: every tool should return a meaningful structured response, even on success. The lecturer's specific guidance: prefer an empty JSON object over `None`. An empty JSON `{}` means "I executed and found nothing"; `None` means "I have no idea." Both are valid responses to the same situation; the empty JSON is interpretable, the `None` is not.
+
+## Bucket 3: response-synthesis errors (Stage 3)
+
+The model picked the right tool. The tool ran correctly and returned good data. The model still produced a wrong final response. The structured tool output existed; the model just mishandled it. Three named sub-failures.
+
+### Model didn't ground on the response
+
+The tool returned `{"name": "Teddy", "distance_miles": 1.0}`. The model produced "Sorry, I couldn't find any teddy bears." The response was right there in the structured data; the model didn't reference it.
+
+The lecturer notes this used to be common with early LLMs but has mostly resolved as base models got stronger at following structured-context instructions. When it does happen, the fix is upgrading the model.
+
+### Tool output buried under irrelevant data
+
+The tool returned the answer, but it was a small field inside a large structured response with thirty other fields the model didn't need. The model couldn't identify the load-bearing piece and produced an incomplete answer (or no answer).
+
+Fix: trim the tool's output to only what the model needs. If the upstream API returns rich data, post-process it inside the function before returning. Smaller, focused structured responses are easier for the model to ground on.
+
+### Tool output wasn't structured meaningfully
+
+The tool returned valid data but in a flat or poorly-named format. A response like `{"data": "Teddy Bear at coords 37.4,-122.1, 1.5"}` is technically a string and technically informative, but the model has to parse semantics from a single field. A response like `{"name": "Teddy Bear", "coordinates": "37.4,-122.1", "distance_miles": 1.5}` is much easier for the model to use.
+
+Fix: use named-field structured responses with semantic field names. Python `dataclass` or Pydantic models help. The model is reading docstrings and field names; make them clear.
+
+## The debugging recipe
+
+Putting it all together, the three-bucket recipe for any tool-use failure:
+
+1. **Categorize the failure.** Did the model produce a tool call (or punt)? If no tool call, you're in Bucket 1. If yes, check whether the call ran and returned. If the function hit an error or returned nothing useful, Bucket 2. If the function returned good data and the final response is still wrong, Bucket 3.
+
+2. **Within the bucket, identify the specific sub-failure.** Each bucket has named sub-failures; match the failure to one of them.
+
+3. **Apply the corresponding fix.** Each sub-failure has its own remediation pattern, which the lesson named above.
+
+The discipline matters because tool-using systems can have many small failures, and trying to fix all of them at once is overwhelming and ineffective. Categorize, debug, fix one bucket at a time, then move on.
+
+## Why this matters when you use AI
+
+Three things to hold onto.
+
+- **Most "the AI did X wrong" moments in production are tool-use failures.** When a chat app gives a wrong answer for a question that should have triggered a tool call (or a tool call that should have worked), the failure is almost always one of the seven sub-failures named in this lesson. Knowing the taxonomy helps you produce useful bug reports and helps developers fix them faster.
+- **Tool implementation quality matters more than people expect.** A well-designed tool (clear name, precise docstring, structured response with semantic fields) is much easier for an LLM to use correctly than a clever-but-clunky one. Software-engineering polish on tools is often the highest-leverage work for improving an AI feature, even though it isn't AI work.
+- **Debugging an AI system is different from debugging classical software.** Failures aren't single-cause; they're probabilistic. The same input can produce a different failure mode on each call. The categorization-before-chasing discipline is what lets you debug productively despite that variability.
+
+## Common pitfalls
+
+Three mistakes worth dodging.
+
+**Treating every failure as "the model hallucinated."** That phrase is too coarse. Of the named sub-failures in this lesson, only one (tool hallucination, where the model invents a function name) is what people usually mean by hallucination. The others are ground-able failures with specific, often non-AI fixes.
+
+**Fixing in the wrong bucket.** A common pattern: the model produces a vague answer for a tool-able query, and the team assumes the model is too weak. They upgrade the model. The real failure was Bucket 2 (the tool returned an unhelpful error). The model upgrade doesn't fix it. Categorizing first prevents this.
+
+**Letting tool outputs be ad-hoc.** Production tool-using systems can have hundreds of tools with inconsistent naming conventions, error handling, and response structures. Each inconsistency is a future failure mode. A small amount of tool-output discipline (always return structured, always include semantic field names, always handle errors meaningfully) prevents disproportionate downstream pain.
+
+## What you should remember
+
+- **Tool-use failures fall into three buckets.** Stage 1 (tool prediction): the LLM picked wrong. Stage 2 (tool execution): the tool itself misbehaved. Stage 3 (response synthesis): the LLM mishandled a correct tool response.
+- **Nine named sub-failures across the three buckets.** Bucket 1: punt, hallucination, wrong-tool, wrong-arguments. Bucket 2: tool-error, tool-returned-nothing. Bucket 3: didn't-ground, buried-in-noise, poorly-structured.
+- **Categorize before chasing.** Identify which bucket the failure is in before reaching for fixes. Most "AI is broken" failures resolve cleanly once correctly placed.
+- **Tool implementation quality is high-leverage.** Well-named functions, precise docstrings, structured-output discipline, meaningful error handling. None of this is AI work; all of it makes AI features more reliable.
+- **The lecturer's methodology is durable.** "Categorize errors before chasing them" is the discipline that runs through Phase 7. It applied to LaaJ. It applied to benchmarks. It applies here.
+
+## If you remember one thing
+
+**Tool-use failures fall into three buckets: tool prediction, tool execution, response synthesis.**\
+**Categorize the failure before chasing the fix. Most "AI is broken" cases resolve cleanly once placed.**\
+**Tool quality (names, docstrings, structured outputs) is the high-leverage non-AI work that makes AI features reliable.**

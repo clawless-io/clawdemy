@@ -1,0 +1,119 @@
+---
+title: "Cheatsheet: Why tool-using models fail"
+description: "One-page reference. The three buckets, all named sub-failures with causes and fixes, and the practitioner's debugging recipe."
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## The one idea that matters
+
+```
+Tool-use failures fall into three buckets matching
+the three stages of a function call.
+Categorize before chasing. Most "AI is broken" cases
+resolve cleanly once placed in the right bucket.
+```
+
+## The three buckets
+
+| Bucket | Stage of the function call | What goes wrong |
+| --- | --- | --- |
+| **1. Tool prediction** | Stage 1 (LLM picks function + arguments) | LLM picked wrong (or picked nothing) |
+| **2. Tool execution** | Stage 2 (code runs the function) | Tool itself misbehaved |
+| **3. Response synthesis** | Stage 3 (LLM wraps response in natural language) | LLM mishandled a correct response |
+
+## Bucket 1 sub-failures (tool prediction)
+
+| Sub-failure | Recognizable signature | Common cause | First fix |
+| --- | --- | --- | --- |
+| **Punt** | "I'm not sure" or "I can't help" when a tool could answer | Tool router miss, or SFT/prompt issue | Check router; add SFT examples; tighten system prompt |
+| **Tool hallucination** | Function name that doesn't exist | Model too weak, or API poorly named | Upgrade model; rewrite docstring + names |
+| **Wrong-tool selection** | Real function call, but wrong function | Tool descriptions overlap in scope | Rewrite descriptions to be precise about scope |
+| **Wrong-arguments** | Right function, wrong values (fabricated ID, "0,0" coords) | Missing context, or argument-format confusion | Ensure context in prompt; tighten docstring with examples |
+
+## Bucket 2 sub-failures (tool execution)
+
+| Sub-failure | Recognizable signature | Fix |
+| --- | --- | --- |
+| **Tool returned an error** | Function hit an exception | Sanitize raw errors into structured responses; distinguish actionable vs internal errors |
+| **Tool returned nothing** | `None` or empty silent return | Always return structured output. Empty JSON `{}` beats `None`. |
+
+## Bucket 3 sub-failures (response synthesis)
+
+| Sub-failure | Recognizable signature | Fix |
+| --- | --- | --- |
+| **Didn't ground** | Tool returned answer; model ignored it | Upgrade model (rare on modern frontier models) |
+| **Buried in noise** | Answer present in tool response, but among many fields the model couldn't filter | Trim tool output to only what's needed; post-process inside function |
+| **Poorly structured** | Tool output is flat or vaguely named (`{"data": "Teddy Bear at coords"}`) | Use named-field structured responses (`{"name": "Teddy Bear", "coordinates": "..."}`); Python dataclass or Pydantic |
+
+## The debugging recipe
+
+```
+STEP 1: Did the model produce a tool call?
+        NO  → Bucket 1 (sub-failure: punt)
+        YES → continue
+
+STEP 2: Did the function run AND return useful data?
+        Function errored or returned nothing useful → Bucket 2
+        Function returned good data → continue
+
+STEP 3: The model's final response is wrong.
+        It must be Bucket 3 (response synthesis).
+
+WITHIN A BUCKET:
+  Match the failure to one of the named sub-failures.
+  Apply the corresponding fix.
+```
+
+## Why this categorization helps
+
+```
+WITHOUT categorization:
+  → "the AI is broken"
+  → reach for AI fixes (more SFT, bigger model)
+  → may not be the right fix at all
+
+WITH categorization:
+  → "this is a Bucket 2 fail (tool returned None)"
+  → fix: have the tool return structured output
+  → 5-line code change, no AI work needed
+```
+
+## High-leverage non-AI work
+
+| Tool-implementation polish | Why it matters |
+| --- | --- |
+| Clear, specific function names | Reduces tool-hallucination + wrong-tool failures |
+| Precise docstrings (with argument examples) | Reduces wrong-arguments failures |
+| Always return structured responses | Eliminates Bucket 2 "returned nothing" failures |
+| Distinguish actionable vs internal errors | Makes Bucket 2 errors useful instead of harmful |
+| Trim tool outputs to what's needed | Reduces Bucket 3 "buried in noise" failures |
+| Use semantic field names | Reduces Bucket 3 "poorly structured" failures |
+
+**None of this is AI work. All of it makes AI features more reliable.**
+
+## Pitfalls to dodge
+
+| Pitfall | Reality |
+| --- | --- |
+| "The AI hallucinated, period." | Of the named sub-failures, only one (tool hallucination) is actually a hallucination. Most are non-hallucination failures with specific non-AI fixes. |
+| "Upgrading the model fixes everything." | Often it doesn't. A Bucket 2 failure persists across model upgrades. Categorize first. |
+| "Every failure needs a different fix." | True only when not categorized. Within a bucket, fixes patternize. |
+| "Tool implementation is just engineering glue." | False. Tool quality is the highest-leverage work for making AI features reliable. |
+
+## Glossary
+
+- **Tool prediction:** Stage 1 of the function-call mechanism; LLM picks function and arguments. Bucket 1 of failures.
+- **Tool execution:** Stage 2; regular code runs the function. Bucket 2 of failures.
+- **Response synthesis:** Stage 3; LLM wraps the structured response in natural language. Bucket 3 of failures.
+- **Punt:** assistant-design term for when the model says "I can't help" instead of using an available tool.
+- **Tool hallucination:** model emits a call to a function name that doesn't exist.
+- **Tool router (or tool selector):** intermediary system that filters the list of available tools before showing them to the LLM. Used at scale when the tool inventory is large.
+- **Grounding:** model's ability to use information that's present in its context (in this case, the structured tool response).
+- **Structured output:** API feature that guarantees the LLM (or tool) produces output matching a JSON schema. Required for production reliability.
+
+**Tool-use failures fall into three buckets: tool prediction, tool execution, response synthesis.**\
+**Categorize the failure before chasing the fix. Most "AI is broken" cases resolve cleanly once placed.**\
+**Tool quality (names, docstrings, structured outputs) is the high-leverage non-AI work that makes AI features reliable.**

@@ -1,0 +1,206 @@
+---
+title: "Practice: How chain of thought makes models think out loud"
+description: "Self-check on what CoT is, why it works, and the practical CoT-versus-direct comparison. Plus a hands-on prompt-construction exercise on multi-step word problems and flashcards."
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+A short retrieval pass. Answer in your head (or on paper) before opening the collapsible.
+
+**1. What is chain-of-thought prompting, in one sentence?**
+
+<details>
+<summary>Show answer</summary>
+
+Chain-of-thought (CoT) prompting is the technique of asking a model to produce a reasoning path before its final answer, instead of jumping straight to the answer. The "thinking" happens in the output tokens. Same model, same weights; the difference is what the prompt asks the model to produce.
+
+</details>
+
+**2. Distinguish zero-shot CoT from few-shot CoT.**
+
+<details>
+<summary>Show answer</summary>
+
+**Zero-shot CoT.** Append a phrase like "Let's think step by step" or "Let's reason about this carefully" to the prompt with no examples. The model interprets the phrase as a request to write reasoning before the answer.
+
+**Few-shot CoT.** Show examples in the prompt that include the reasoning chain, not just the final answer. Each example demonstrates the kind of step-by-step thinking you want. The model picks up the pattern.
+
+Zero-shot CoT is essentially free (one extra phrase). Few-shot CoT costs tokens (each example adds tokens to the context) but tends to be more reliable on harder tasks because it shows the *kind* of reasoning, not just asks for "some" reasoning.
+
+</details>
+
+**3. The lesson gave two reasons CoT works. State both.**
+
+<details>
+<summary>Show answer</summary>
+
+**Decomposition.** A hard problem may not appear in the training data verbatim. Its subproblems often do. By forcing the model to break the question into steps, you give it pieces it has seen variants of and can solve. The lecturer's analogy is the student-on-a-test framing: hard problems are solved by breaking them into pieces you have studied, not by leaping to an answer in one mental motion.
+
+**More tokens equals more compute.** Each token a model generates is the output of one full forward pass through the network. Generating more tokens means running the network more times, which gives the model more thinking time. CoT cashes this compute in productively (instead of just adding filler) by producing reasoning steps that the final answer can be built on.
+
+</details>
+
+**4. What is self-consistency, and what trade-off does it make?**
+
+<details>
+<summary>Show answer</summary>
+
+Self-consistency is sampling N CoT chains for the same prompt (each chain may take a different reasoning path because of sampling temperature), parsing the final answer from each, and majority-voting across them. The most-voted answer wins.
+
+The trade-off is cost-for-accuracy. Each sample is one full inference. N samples cost N times the throughput. Latency stays roughly the same as a single sample if you run them in parallel (waiting for the slowest one), but the compute and dollar cost scales with N.
+
+Typical N is 5 to 40 depending on cost budget. Self-consistency tends to be most worth running on hard reasoning problems where one chain is unreliable but the majority of chains arrive at the right answer.
+
+</details>
+
+**5. The lesson said CoT can produce "confident-sounding nonsense." Why does that matter and what should you do about it?**
+
+<details>
+<summary>Show answer</summary>
+
+CoT is correlated with correct answers on problems the model can solve. It is not a certification of correctness on problems the model cannot solve. A model that does not know something can still produce a reasoning chain that *looks* like reasoning and arrives at a confident wrong answer. The chain may even be internally consistent.
+
+What to do about it: treat CoT chains as one signal of correctness, not as the final word. For high-stakes decisions, validate the chain's intermediate steps against external sources or a different solver. For low-stakes decisions, the chain is usually a useful signal even if it's not airtight. The technique is most reliable on problems where you have some way to check the answer.
+
+</details>
+
+## Try it yourself: convert a direct prompt to a CoT prompt
+
+About 15 minutes. Pen and paper, or any LLM you can interact with.
+
+**Setup.** You're trying to get a model to solve word problems like:
+
+> "Alice has 24 apples. She gives 1/3 to Bob and 1/4 of what's left to Carol. How many apples does Alice have now?"
+
+The direct prompt is:
+
+```
+Solve the following word problem.
+
+Alice has 24 apples. She gives 1/3 to Bob and 1/4 of what's
+left to Carol. How many apples does Alice have now?
+```
+
+A weaker model might guess wrong on this. Even a stronger model will be more reliable with CoT.
+
+**Step 1.** Write the zero-shot CoT version of this prompt.
+
+<details>
+<summary>Show one possible answer</summary>
+
+```
+Solve the following word problem. Let's think step by step.
+
+Alice has 24 apples. She gives 1/3 to Bob and 1/4 of what's
+left to Carol. How many apples does Alice have now?
+```
+
+The phrase "Let's think step by step" is the standard zero-shot CoT trigger. Variations like "Reason carefully about this" or "Walk through the steps" work too. The mechanism is the same: the model interprets the phrase as a request to produce reasoning before the answer.
+
+</details>
+
+**Step 2.** Now write a few-shot CoT version, with one or two examples that demonstrate the kind of reasoning you want.
+
+<details>
+<summary>Show one possible answer</summary>
+
+```
+Solve the following word problem.
+
+Q: A box has 30 apples. 1/5 are taken out, then 2 more are added.
+How many are in the box now?
+A: Step 1: 30 apples to start. Step 2: 1/5 of 30 = 6 apples removed,
+leaving 30 - 6 = 24. Step 3: 2 apples added: 24 + 2 = 26.
+Final answer: 26 apples.
+
+Q: A jar has 40 marbles. 1/4 are red. How many are not red?
+A: Step 1: 40 marbles total. Step 2: 1/4 of 40 = 10 red marbles.
+Step 3: not red = total - red = 40 - 10 = 30.
+Final answer: 30 marbles.
+
+Q: Alice has 24 apples. She gives 1/3 to Bob and 1/4 of what's
+left to Carol. How many apples does Alice have now?
+A:
+```
+
+Each example uses numbered steps and ends with a labeled "Final answer." The model picks up on the format and structure, then applies it to the new query. Few-shot CoT generally outperforms zero-shot CoT on harder problems because it constrains the *style* of the reasoning, not just the request to do reasoning.
+
+</details>
+
+**Step 3.** When would you reach for self-consistency on top of this?
+
+<details>
+<summary>Show one possible answer</summary>
+
+You'd reach for self-consistency if a single CoT call is unreliable, the cost of a wrong answer is high, and you can afford to run the model 5 to 40 times for one query. Examples:
+
+- A math benchmark where you want to maximize correctness regardless of cost.
+- A high-stakes decision where being wrong is expensive.
+- A research evaluation where you're comparing models and need stable measurements.
+
+For everyday use, single-sample CoT is usually enough. Self-consistency is the move when you have evidence that one chain is unreliable and you have the budget for multiple samples. Each sample is independent, so you can run them in parallel and total wall-clock time is roughly one sample's worth.
+
+</details>
+
+## Flashcards
+
+Eight cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay out the full set as one card per page.
+
+<FlashcardSet>
+
+<Flashcard question="What is chain-of-thought prompting?">
+
+Asking a model to produce a reasoning path before its final answer, instead of jumping straight to the answer. The reasoning happens in the output tokens. Same model, same weights, different prompt asking for different output.
+
+</Flashcard>
+
+<Flashcard question="What's the difference between zero-shot CoT and few-shot CoT?">
+
+Zero-shot CoT appends a phrase like "Let's think step by step" with no examples. Free in tokens. Works on many models. Few-shot CoT shows examples in the prompt that include reasoning chains, not just final answers. Costs tokens but more reliable on hard problems because it constrains the style of reasoning.
+
+</Flashcard>
+
+<Flashcard question="Why does CoT work? Give the two reasons from the lesson.">
+
+(1) Decomposition: hard problems may not appear in training data verbatim, but their subproblems often do; breaking the problem down lets the model route through capabilities it already has. (2) More tokens equals more compute: each generated token is one full forward pass, so producing reasoning steps before the answer gives the model more thinking time on the problem.
+
+</Flashcard>
+
+<Flashcard question="What is self-consistency in CoT prompting?">
+
+Sample N CoT chains for the same prompt (typical N is 5 to 40), parse the final answer from each, and majority-vote on the most common. Improves accuracy at the cost of running the model N times. Latency stays roughly one-sample's worth if you run in parallel; throughput cost scales with N.
+
+</Flashcard>
+
+<Flashcard question="When does CoT help most and when is it overkill?">
+
+CoT helps most on multi-step reasoning: math word problems, multi-hop questions, code with subtle logic. CoT is overkill on simple knowledge lookup ("What's the capital of France?") because the answer requires no reasoning chain. CoT can also be misleading on problems the model genuinely cannot solve: it can produce confident-sounding nonsense.
+
+</Flashcard>
+
+<Flashcard question="Why is a CoT chain a 'signal of correctness, not a certification'?">
+
+A model can produce a reasoning chain that looks like reasoning but isn't actually performing the reasoning. The output is tokens that match the *form* of reasoning. On problems the model can solve, the chain correlates with correct answers. On problems it cannot solve, it can confidently produce a wrong chain that arrives at a wrong answer. For high-stakes decisions, validate the chain externally instead of trusting it.
+
+</Flashcard>
+
+<Flashcard question="What's the difference between CoT prompting and a 'reasoning model'?">
+
+CoT prompting is the *technique* of asking any LLM to produce reasoning before its answer. A reasoning model is a model that has been *trained* to produce long internal reasoning chains as part of its policy, not just when prompted. CoT works on any model (better on larger ones); reasoning models bake the reasoning into the model itself. Phase 6 covers reasoning models.
+
+</Flashcard>
+
+<Flashcard question="What does the practitioner's escalation ladder look like for inference-time prompting?">
+
+Zero-shot → few-shot → zero-shot CoT → few-shot CoT → CoT with self-consistency. Each step costs more tokens. Each step buys reliability on harder tasks. Stop at the first level that gives you the reliability you need.
+
+</Flashcard>
+
+</FlashcardSet>

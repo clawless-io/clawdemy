@@ -1,0 +1,187 @@
+---
+title: "Practice: Why tool-using models fail"
+description: "Self-check on the three buckets, the named sub-failures, and the debug recipes. Plus a hands-on triage exercise on real-style failure descriptions and flashcards."
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+**1. Name the three buckets where tool-use failures cluster, and what each maps to.**
+
+<details>
+<summary>Show answer</summary>
+
+The three buckets map onto the three stages of a function call (from Phase 6's function-calling lesson):
+
+**Bucket 1: tool prediction (Stage 1).** The LLM picks the function and arguments. Failures here mean the LLM picked wrong (or picked nothing).
+
+**Bucket 2: tool execution (Stage 2).** Regular code runs the function. Failures here mean the tool itself misbehaved.
+
+**Bucket 3: response synthesis (Stage 3).** The LLM wraps the structured response in natural language. Failures here mean the LLM mishandled an otherwise-correct tool response.
+
+The three-bucket framing is the lecturer's "categorize before chasing" methodology applied to tool-use debugging. Identifying which bucket a failure is in is most of the work; the fix tends to follow.
+
+</details>
+
+**2. Bucket 1 has four named sub-failures. List them with their recognizable signatures.**
+
+<details>
+<summary>Show answer</summary>
+
+**Punt.** The LLM responds with "I'm not sure" or "I can't help with that" when it should have used a tool. Recognizable: no tool call was made, even though the user's query is the kind a tool could answer.
+
+**Tool hallucination.** The LLM emits a call to a function that doesn't exist. Recognizable: structured tool call has a function name that's not in the registered tool set. The function `find_teddy_bear` exists; the model called `find_bear`.
+
+**Wrong-tool selection.** The LLM picked a tool, but it's the wrong one. Recognizable: a real function call ran (Bucket 2 succeeded), but the wrong function for the actual query.
+
+**Wrong-arguments.** The LLM picked the right tool but passed wrong values. Recognizable: real function call to the right function, but with values like `location="0,0"` for a user clearly not in the southern Atlantic, or with a date in the wrong format.
+
+</details>
+
+**3. Bucket 2 has two named sub-failures. What are they and what does each look like?**
+
+<details>
+<summary>Show answer</summary>
+
+**Tool returned an error.** The function hit a runtime exception (Python `ValueError`, a 500 from an upstream API, a database failure). The model receives the error and has to handle it. The lecturer flags that errors are sometimes useful (a permission-denied error the model can relay to the user) and sometimes harmful (a raw stack trace the model interprets as "I can't").
+
+**Tool returned nothing.** The function ran without error but didn't return anything meaningful. The model gets `None` and has to guess what happened. The classic case: a `set_thermostat()` function that returns nothing leaves the model unable to confirm the action succeeded.
+
+The fix in both cases is structured-output discipline: every tool should return a meaningful structured response, distinguishing actionable errors (useful for the model) from internal-error catch-alls (which should be sanitized). Empty JSON `{}` beats `None`.
+
+</details>
+
+**4. Bucket 3 has three named sub-failures. Walk through each and the typical fix.**
+
+<details>
+<summary>Show answer</summary>
+
+**Didn't ground on the response.** The tool returned the answer in structured form, but the model didn't reference it in its final response. Rare on modern models; typical fix is upgrading the model.
+
+**Buried in noise.** The tool returned the answer, but inside a structured response with thirty other fields the model didn't need. The model couldn't identify the load-bearing piece. Fix: trim the tool output to what's actually needed. Post-process inside the function before returning.
+
+**Poorly structured output.** The tool returned valid data but in flat or vaguely-named fields. A response like `{"data": "Teddy Bear at 37.4,-122.1"}` is harder for the model to use than `{"name": "Teddy Bear", "coordinates": "37.4,-122.1"}`. Fix: use named-field structured responses with semantic field names. Python `dataclass` or Pydantic models help.
+
+</details>
+
+**5. Why is "the model hallucinated" too coarse a description of most tool-use failures?**
+
+<details>
+<summary>Show answer</summary>
+
+Of the named sub-failures across the three buckets, only one (tool hallucination, where the model invents a function name) is what people usually mean by "hallucination." The other failures have specific, often non-AI causes:
+
+- Punt is a tool-router or SFT/prompt issue.
+- Wrong-tool is an API description overlap.
+- Wrong-arguments is missing context or format confusion.
+- Bucket 2 failures are tool-implementation issues (no AI involvement).
+- Most Bucket 3 failures are tool-output-design issues.
+
+Calling all of these "hallucinations" both blurs the cause and pushes the fix toward AI work (model upgrade, more SFT) when the real fix is often engineering work (better docstrings, better structured outputs). Categorizing precisely is what unlocks the right fix.
+
+</details>
+
+## Try it yourself: triage three real-style bug reports
+
+About 15 minutes. Pen and paper.
+
+For each bug report, identify which bucket, which sub-failure, and what the first fix would be.
+
+**Bug Report 1.** "User asked our chat support agent: 'What's the status of my order ORD_99812?' The agent replied: 'I'm not sure how to help with that.' The agent has a `get_order_status(order_id)` tool registered."
+
+<details>
+<summary>Show analysis</summary>
+
+**Bucket 1, sub-failure: punt.** The user's query is exactly the kind `get_order_status` could answer. The agent didn't call any tool.
+
+**First fix to investigate:** is the tool router including `get_order_status` for queries of this shape? If yes, then the issue is the model not recognizing the query as tool-callable, which calls for revisiting the SFT data (add examples of "What's the status of my order" patterns) or the system prompt (make sure it instructs the model to use tools for order-related queries). If the tool router is filtering it out, fix the router.
+
+</details>
+
+**Bug Report 2.** "User asked our agent to find a teddy bear store. Tool call ran fine, returned the actual nearest store. Agent's final response: 'I couldn't find any teddy bear stores nearby.'"
+
+<details>
+<summary>Show analysis</summary>
+
+**Bucket 3, sub-failure: didn't ground.** The tool returned the right answer; the model didn't use it.
+
+**First fix to investigate:** what does the structured tool response look like? If it's clean (`{"name": "Bear Necessities", "distance_miles": 0.5, ...}`), the failure is the model not reading it correctly, which is rare on modern models, so try upgrading. If the response is poorly structured (single-field flat string, semantically vague), that's a Bucket 3 sub-failure (poorly-structured) instead, and the fix is to refactor the tool's output format.
+
+This is a case where two Bucket 3 sub-failures look similar from the user's side; checking the structured response is what disambiguates.
+
+</details>
+
+**Bug Report 3.** "Agent successfully called `set_thermostat(target=70)`. Tool returned `None`. Agent then told user: 'I've set the thermostat to 70 and the heat is on.'"
+
+<details>
+<summary>Show analysis</summary>
+
+**Bucket 2, sub-failure: tool returned nothing.** The tool ran without error but didn't return a meaningful structured response. The agent had to guess whether the action succeeded and produced a confident but unverified claim.
+
+**First fix to investigate:** modify `set_thermostat()` to return a structured response on every call. Something like `{"target_set": 70, "current_status": "heating", "estimated_arrival_minutes": 5}`. Now the model can ground its final response on actual confirmed state, not on a hopeful guess.
+
+This kind of failure is common in production tool-using systems and is almost always a tool-implementation issue, not an AI issue. The fix is engineering polish, not model work.
+
+</details>
+
+## Flashcards
+
+Eight cards.
+
+<FlashcardSet>
+
+<Flashcard question="What are the three buckets where tool-use failures cluster?">
+
+Bucket 1, tool prediction (Stage 1 of the function call): the LLM picks the function and arguments; failures here mean the LLM picked wrong. Bucket 2, tool execution (Stage 2): regular code runs the function; failures here mean the tool itself misbehaved. Bucket 3, response synthesis (Stage 3): the LLM wraps the structured response; failures here mean the LLM mishandled an otherwise-correct tool response.
+
+</Flashcard>
+
+<Flashcard question="What's a 'punt' in tool-using-AI debugging vocabulary?">
+
+Punt is when the LLM responds with something like "I'm not sure" or "I can't help with that" instead of using an available tool that could answer the query. The tool sat unused. Punt is one of the four Bucket 1 (tool prediction) sub-failures. Common causes: tool router didn't include the function for queries of this shape, or the model was trained/prompted to be over-cautious.
+
+</Flashcard>
+
+<Flashcard question="What's tool hallucination, and how do you debug it?">
+
+Tool hallucination is when the LLM emits a call to a function name that doesn't exist. The function `find_teddy_bear` exists; the model called `find_bear`. Common causes: model is too weak (upgrade), or the tool API is poorly named or documented (the lecturer's "three knobs": rename function, refine arguments, tighten docstring). Top-level instructions can also help if they explicitly enforce grounding on available tools.
+
+</Flashcard>
+
+<Flashcard question="What's the difference between wrong-tool selection and wrong-arguments error?">
+
+Wrong-tool selection: the LLM picked the wrong tool from the available set when a different one would have been correct. Fix: rewrite tool descriptions to be more precise about scope. Wrong-arguments: the LLM picked the right tool but passed wrong values (a fabricated user ID, coordinates of "0,0," a date in the wrong format). Fix: ensure the prompt has the necessary context, or tighten the docstring with explicit argument-format examples.
+
+</Flashcard>
+
+<Flashcard question="Why are tool errors sometimes useful and sometimes harmful?">
+
+Useful errors are structured and meaningful: "Permission denied; the user has not granted location access." The model can read this and ask the user appropriately. Harmful errors are unstructured: a raw Python stack trace or a 500 internal error. The model often interprets these as "I can't do this" and produces a vague apology without surfacing the actual issue. Fix: design tools to return structured responses that distinguish actionable errors from internal-error catch-alls.
+
+</Flashcard>
+
+<Flashcard question="Why does the lecturer recommend empty JSON over None for tool returns?">
+
+An empty JSON object `{}` is a meaningful response: "I executed and found nothing." A `None` is non-informative: the model has no idea what happened. The model can ground its final response on `{}` (it can tell the user "I searched and found nothing matching"), but it has to guess on `None`, often producing false confirmations. The discipline: every tool should return a meaningful structured response, even on success or empty result.
+
+</Flashcard>
+
+<Flashcard question="What's a 'buried in noise' tool-output failure, and how is it different from 'didn't ground'?">
+
+Buried-in-noise: the tool returned the answer, but inside a structured response with many other fields the model couldn't filter through. The answer was there but lost in irrelevant data. Didn't-ground: the model didn't reference the structured response at all (rare on modern models). Buried-in-noise is fixed by trimming the tool output; didn't-ground is fixed by upgrading the model (or by switching to a model that better handles long structured contexts).
+
+</Flashcard>
+
+<Flashcard question="When debugging a tool-using AI system, what's the practitioner's recipe?">
+
+Three steps. (1) Categorize the failure: which bucket? (Did a tool call happen? Did the call run? Did the call return useful data?) (2) Identify the specific sub-failure within that bucket. (3) Apply the matching fix. The discipline matters because tool-using systems can have many small failures simultaneously, and trying to fix all of them at once is overwhelming. Categorize, debug, fix one bucket at a time.
+
+</Flashcard>
+
+</FlashcardSet>

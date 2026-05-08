@@ -1,0 +1,220 @@
+---
+title: "Practice: How few-shot examples teach in context"
+description: "Self-check on the in-context-learning concept, the zero/one/few distinction, and the practical recipe for writing a useful few-shot prompt. Plus a hands-on prompt-construction exercise and flashcards."
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+A short retrieval pass. Answer in your head (or on paper) before opening the collapsible.
+
+**1. Why is "learning" an overloaded term in "in-context learning"?**
+
+<details>
+<summary>Show answer</summary>
+
+Because nothing about the model is actually being learned. The weights are exactly the same after the prompt as before. What in-context learning changes is the model's *immediate* behavior on this specific input. The next user asking the same question gets the same untrained model again, just with their own context. "Learning" usually implies a persistent change to the learner; in-context learning is a transient pattern-completion that exists only inside one inference call. A more accurate phrase might be "in-context cueing," but the field settled on "learning" early and the name stuck.
+
+</details>
+
+**2. What distinguishes zero-shot, one-shot, and few-shot prompting?**
+
+<details>
+<summary>Show answer</summary>
+
+The number of examples included in the prompt before the real query.
+
+**Zero-shot:** no examples. Just the task description and the query.
+
+**One-shot:** one example showing input-output, then the query.
+
+**Few-shot:** multiple examples (typically 3 to 5), then the query.
+
+The conceptually important shift is from zero (no demonstrations) to nonzero. The line between one and few is mostly convention; "few-shot" is sometimes used loosely to mean any number of examples greater than zero.
+
+</details>
+
+**3. Few-shot works because pretrained LLMs already know many patterns. Why does this framing predict the cases where few-shot will fail?**
+
+<details>
+<summary>Show answer</summary>
+
+If few-shot helps the model *select* which existing pattern to invoke, then it cannot help in cases where the right pattern is not in the model. Three predictable failures fall out of this framing:
+
+1. **Unknown facts.** If the task requires a fact the model never saw during training, no number of examples can manufacture it. The pattern in the examples cannot create knowledge from nothing.
+2. **Inconsistent or ambiguous examples.** If three examples accidentally share a feature that is not the intended pattern (all start with "T," all are about cats, etc.), the model can lock onto the wrong pattern. The selection is only as good as the cue.
+3. **Out-of-distribution tasks.** If the task is well outside the kind of thing the model encountered during pretraining, examples cannot bridge the gap. A handful of demonstrations is small relative to the millions of training samples that shaped what the model can do.
+
+</details>
+
+**4. When does an explicit natural-language instruction tend to outperform a pure few-shot prompt?**
+
+<details>
+<summary>Show answer</summary>
+
+When the examples are serving to convey a **rule** that the model has to infer from them, rather than a **format** that just needs to be matched. Modern reasoning-capable models can sometimes apply a written-out rule to arbitrary inputs more reliably than they can infer the rule from a few examples and then generalize.
+
+The format-versus-rule heuristic: if your examples are mostly establishing what the output should look like (a JSON shape, a one-word label, a specific phrasing), few-shot is the right tool. If they are trying to teach a complex multi-step procedure that the reader should generalize, an explicit instruction tends to do better. In practice, hybrid prompts (a clear instruction plus one or two illustrative examples) often beat both pure-instruction and pure-example versions.
+
+</details>
+
+**5. You have a classification task. Zero-shot is unreliable. What is the practical recipe for moving to few-shot?**
+
+<details>
+<summary>Show answer</summary>
+
+Six moves that consistently improve few-shot results:
+
+1. **Use 3 to 5 examples by default.** One example is unstable; ten is rarely better than five.
+2. **Make examples diverse.** Cover the full range of expected output categories; if all your examples have the same label, the model may infer that's the only acceptable output.
+3. **Make examples representative.** Match the length, style, and complexity of the real queries. Short examples can lead the model to produce short outputs even when long ones are appropriate.
+4. **Watch for accidental patterns.** Vary irrelevant dimensions (capitalization, topic, voice) so the model doesn't latch onto a feature you didn't intend.
+5. **Format consistently.** The model will mimic the format of the examples. If you want JSON, use JSON in every example. If you want a single word, use a single word.
+6. **Place the real query last.** The model attends to all examples but recent context tends to weigh more heavily. Putting your real query immediately after the examples gives the cleanest pattern to extend.
+
+</details>
+
+## Try it yourself: convert a fragile zero-shot prompt to a robust few-shot prompt
+
+About 15 minutes. Pen and paper, or any LLM you can interact with.
+
+**Setup.** Imagine you are building a tool that auto-tags incoming customer emails with one of these categories: `bug-report`, `feature-request`, `account-issue`, `general-question`. Your zero-shot prompt looks like this:
+
+```
+Tag the following email with one of these categories:
+bug-report, feature-request, account-issue, general-question.
+
+Email: "Could you add a way to export my data as CSV?"
+Tag:
+```
+
+Zero-shot is mostly working but it sometimes picks the wrong category on edge cases. You want to use few-shot to make it more reliable.
+
+**Step 1.** Write four diverse examples covering all four categories. Each example should be one to two sentences and feel like a real customer email.
+
+<details>
+<summary>Show one possible answer</summary>
+
+```
+Tag the following email with one of these categories:
+bug-report, feature-request, account-issue, general-question.
+
+Email: "When I click submit, the page just hangs and nothing happens."
+Tag: bug-report
+
+Email: "Could you add a way to schedule reports for delivery on a specific day?"
+Tag: feature-request
+
+Email: "I'm trying to update my billing email but the change isn't saving."
+Tag: account-issue
+
+Email: "Do you offer a free trial for the team plan?"
+Tag: general-question
+
+Email: "Could you add a way to export my data as CSV?"
+Tag:
+```
+
+Each category appears once. The examples vary in style (declarative, question, modal) so the model isn't picking up on a syntactic accident. The format is identical for every example, so the model knows to output exactly one tag.
+
+</details>
+
+**Step 2.** Now look at your example set with the format-versus-rule heuristic. Are your examples conveying a format (one-word output, specific tag set) or a rule (when to choose `account-issue` over `general-question`)?
+
+<details>
+<summary>Show one possible answer</summary>
+
+Both, but mostly format. The categories are well-defined enough that most edge cases will be obvious from the example set. The hard rule (account-issue requires the user to be talking about their own account; general-question is anything else) is implicit in the examples but could be made more reliable by adding it as an explicit sentence:
+
+```
+Tag the following email with one of these categories:
+bug-report, feature-request, account-issue, general-question.
+
+Use account-issue when the user is having trouble with
+their own account specifically. Use general-question for
+anything else that isn't a bug or a feature request.
+
+Email: ...
+```
+
+Hybrid prompts (instruction plus examples) tend to outperform pure-example prompts on tasks where the rule isn't obvious from the format alone.
+
+</details>
+
+**Step 3.** What is one accidental pattern you should make sure your examples don't have?
+
+<details>
+<summary>Show one possible answer</summary>
+
+A few common accidents:
+
+- All examples start with the same word ("Could," "When," "I'm").
+- All examples are similar in length.
+- All examples come from the same product domain.
+- The order of categories in your examples accidentally encodes a priority.
+
+The fix in each case is to vary the irrelevant dimension so the model is forced to lock onto the actual signal (the email's content) rather than a syntactic accident. Diversity is the cheapest way to defend against accidental patterns.
+
+</details>
+
+## Flashcards
+
+Eight cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay out the full set as one card per page.
+
+<FlashcardSet>
+
+<Flashcard question="What does in-context learning mean?">
+
+Using the prompt to shape the model's immediate behavior on one inference call. The model reads task descriptions and examples in the input, infers the pattern, and applies it. None of the model's weights change. The effect is local to this one inference and does not persist.
+
+</Flashcard>
+
+<Flashcard question="Why is the term 'learning' overloaded in 'in-context learning'?">
+
+Because nothing about the model is actually being learned. The weights are identical after the prompt as before. What changed is the model's behavior on this one input. A more accurate name would be "in-context cueing" but the field settled on "learning" early and the name stuck.
+
+</Flashcard>
+
+<Flashcard question="What's the difference between zero-shot, one-shot, and few-shot?">
+
+Zero-shot: no examples in the prompt, just the task description and query. One-shot: one input-output example, then the query. Few-shot: multiple examples (typically 3 to 5), then the query. The conceptually important step is from zero examples to any examples; the difference between one and few is mostly convention.
+
+</Flashcard>
+
+<Flashcard question="Why does few-shot work at all?">
+
+Pretrained LLMs internalize an enormous variety of patterns during training. Examples in the prompt do not teach the model new facts; they help the model select which of its existing patterns to invoke and in what format. Few-shot is closer to cuing a trained actor than teaching a student.
+
+</Flashcard>
+
+<Flashcard question="What are three predictable ways few-shot can fail?">
+
+(1) The task requires a fact the model never saw during training. Examples cannot manufacture knowledge from nothing. (2) The examples are inconsistent or ambiguous, and the model locks onto the wrong pattern. (3) The task is far outside the training distribution. A handful of demonstrations cannot close a gap of a million missing pretraining samples.
+
+</Flashcard>
+
+<Flashcard question="What's a practical sweet spot for the number of few-shot examples?">
+
+Three to five for most tasks. One example is often unstable. Past five, returns diminish quickly. Past ten, you may actively confuse the model or overfit it to a narrow pattern. The right number is the smallest count that makes the pattern unambiguous.
+
+</Flashcard>
+
+<Flashcard question="What is the format-versus-rule heuristic for choosing between few-shot and an explicit instruction?">
+
+If your examples are mostly conveying a *format* (output shape, label set, phrasing style), few-shot is the right tool because the model just needs to match the pattern. If they are conveying a *rule* the model has to infer (a multi-step procedure, a complex condition), an explicit instruction tends to do better, and a hybrid (instruction plus one or two examples) often beats both.
+
+</Flashcard>
+
+<Flashcard question="What's the practical recipe for writing a robust few-shot prompt?">
+
+Three to five examples. Diverse (cover the range of outputs). Representative (match the real-query length and style). Consistent format (same shape every time, since the model will mimic it). Vary irrelevant dimensions (capitalization, topic, voice) so the model doesn't lock onto an accidental pattern. Place the real query last, immediately after the examples.
+
+</Flashcard>
+
+</FlashcardSet>

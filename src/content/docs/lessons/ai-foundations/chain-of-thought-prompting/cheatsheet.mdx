@@ -1,0 +1,137 @@
+---
+title: "Cheatsheet: How chain of thought makes models think out loud"
+description: "One-page reference. Zero-shot vs few-shot CoT, why CoT works, self-consistency, the practitioner's escalation ladder, and the limits of the technique."
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## The one idea that matters
+
+```
+More tokens = more compute.
+CoT is how you spend that compute on a hard problem.
+The reasoning chain happens in the output tokens.
+```
+
+## Two flavors
+
+| Flavor | What's in the prompt |
+| --- | --- |
+| **Zero-shot CoT** | Append "Let's think step by step" (or similar) to the prompt. No examples. |
+| **Few-shot CoT** | Show examples in the prompt that include the reasoning chain, not just the final answer. |
+
+**Both produce a reasoning chain followed by a final answer.** Few-shot tends to be more reliable on hard problems because it constrains the style of reasoning.
+
+## Why it works
+
+| Reason | What it captures |
+| --- | --- |
+| **Decomposition** | A hard problem may not be in training data; its subproblems usually are. CoT routes through capabilities the model already has. |
+| **More tokens = more compute** | Each token is one full forward pass. Producing reasoning before the answer gives the model more thinking time on the problem. |
+
+**Empirical pattern:** the gain from CoT scales with model size. Tiny models benefit little or sometimes hurt; large models benefit substantially.
+
+## A worked example
+
+```
+Prompt:
+A teddy bear was born in 2020. The current year is 2025.
+How old is the teddy bear?
+
+Direct (no CoT):
+"5 years old."
+
+Zero-shot CoT (append "Let's think step by step"):
+"The bear was born in 2020. Current year is 2025.
+Age = 2025 - 2020 = 5. The bear is 5 years old."
+
+Few-shot CoT:
+[Show one or two examples with reasoning, then the new query]
+```
+
+## Self-consistency
+
+```
+1. Sample N CoT chains in parallel (typical N: 5 to 40).
+2. Parse the final answer from each.
+3. Majority-vote on the most common answer.
+```
+
+**Trade-off:** cost scales with N, latency stays roughly one-sample's worth.
+
+**When to use:** hard reasoning problems where one chain is unreliable and you have budget for multiple samples.
+
+## The escalation ladder
+
+```
+Zero-shot
+  ↓ (zero-shot is unreliable)
+Few-shot (3 to 5 examples)
+  ↓ (still unreliable on multi-step reasoning)
+Zero-shot CoT (append "Let's think step by step")
+  ↓ (need stronger reasoning constraint)
+Few-shot CoT (examples with reasoning chains)
+  ↓ (high stakes, willing to pay N times the cost)
+CoT with self-consistency (sample N, majority-vote)
+```
+
+**Stop at the first level that gives you the reliability you need.** Each step costs more tokens.
+
+## When CoT helps and when it doesn't
+
+| Scenario | CoT recommended? |
+| --- | --- |
+| Multi-step math word problems | Yes |
+| Multi-hop questions (combining several facts) | Yes |
+| Code with subtle conditions or edge cases | Yes |
+| Simple knowledge lookup | No (overkill, just paying for tokens) |
+| Problems the model genuinely cannot solve | No (can produce confident-sounding nonsense) |
+| High-stakes decisions where the chain is mistaken for proof | Use, but validate externally |
+
+## A useful side benefit: debugging
+
+```
+Wrong answer with CoT:
+  → The chain shows you WHERE it went wrong
+  → You can fix the system prompt, context, or examples
+  → Faster than guessing at why the model is wrong
+
+Wrong answer without CoT:
+  → No trace of how the model got there
+  → Guess and check
+```
+
+## CoT prompting vs reasoning models (Phase 6 preview)
+
+| | CoT prompting | Reasoning models |
+| --- | --- | --- |
+| **What it is** | Technique applied at inference | Architectural shift; models trained to reason |
+| **Where the reasoning lives** | In the user prompt | In the model's policy |
+| **Works on any model?** | Yes (better on larger) | Only on models trained for it |
+| **Examples** | Any LLM with the right prompt | OpenAI o1, DeepSeek-R1, Gemini Flash Thinking, Claude thinking modes |
+
+**The Phase 5 → 6 shift:** from "steering one inference call" to "letting the model think longer, look things up, or take actions."
+
+## Pitfalls to dodge
+
+| Pitfall | Reality |
+| --- | --- |
+| "Trust a CoT chain because it looks like reasoning." | The chain is correlated with correctness, not a certification of it. Models can produce confident wrong reasoning. |
+| "Add CoT to every prompt." | CoT costs tokens. On simple lookup, it's just paying for tokens you don't need. Use the escalation ladder. |
+| "CoT prompting and reasoning models are the same." | They are not. CoT is a prompting technique; reasoning models are trained to reason as part of their policy. |
+| "More tokens always means a better answer." | Only if the extra tokens are productive (reasoning steps that build to the answer). Padding tokens that aren't load-bearing don't help. |
+
+## Glossary
+
+- **Chain-of-thought (CoT) prompting:** asking a model to produce reasoning steps before its final answer. Same model, different prompt.
+- **Zero-shot CoT:** CoT triggered by a phrase like "Let's think step by step" with no examples.
+- **Few-shot CoT:** CoT demonstrated by examples in the prompt that include the reasoning chain.
+- **Self-consistency:** sample N CoT chains, majority-vote on the answer. Cost-for-accuracy multiplier.
+- **Compute budget:** the amount of compute (tokens times model size) the model is allowed for one query. CoT is one way to spend a larger compute budget on harder problems.
+- **Reasoning model:** a model trained to produce long internal reasoning as part of its policy. Different from CoT prompting. Phase 6 territory.
+
+**More tokens means more compute. CoT is how you spend that compute on a hard problem.**\
+**Zero-shot CoT for free, few-shot CoT to demonstrate the kind of reasoning, self-consistency for the cheap multiplier.**\
+**The chain is a signal, not a certification. The model can be wrong with reasoning that sounds right.**

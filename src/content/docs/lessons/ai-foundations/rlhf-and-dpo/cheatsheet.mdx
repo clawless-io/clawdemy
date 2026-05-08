@@ -1,0 +1,149 @@
+---
+title: "Cheatsheet: How RLHF and DPO align models"
+description: "One-page reference. The reward-to-weight-update gap, why naive maximization fails, PPO's two guardrails, DPO's derivation insight, and the practical PPO-vs-DPO contrast."
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## The one idea that matters
+
+```
+A reward model is a measuring tool, not an algorithm.
+RLHF (PPO) and DPO are the algorithms that turn its
+scores into actual weight updates on the LLM.
+```
+
+## RLHF as RL, briefly
+
+| RL term | LLM equivalent |
+| --- | --- |
+| **Agent** | The LLM |
+| **State** | Input seen so far (prompt + tokens generated to date) |
+| **Action** | Next token to generate |
+| **Environment** | Vocabulary of possible tokens |
+| **Policy** | LLM's probability distribution over next token |
+| **Reward** | From the reward model, delivered after the full completion |
+
+**Sparse signal:** SFT gets one signal per token. RLHF gets one signal per completion. Less information per training step.
+
+## Why "just maximize reward" fails
+
+| Failure mode | What breaks |
+| --- | --- |
+| **Catastrophic forgetting** | Pushes weights too far; damages pretrained + SFT knowledge |
+| **Reward hacking** | Reward model is imperfect; model exploits gaps in the proxy |
+| **Training instability** | RL updates can diverge; aggressive steps destroy the policy |
+
+**Fix:** keep the policy close to the SFT reference model via a KL penalty. The objective becomes "maximize reward AND stay close to reference."
+
+## Reward hacking, the clapping analogy
+
+```
+True goal:    Give an informative lecture
+Proxy:        How loudly the audience claps at the end
+Failure:      Optimizer learns jokes get loud claps
+              Reward goes up. Lecture is no longer informative.
+```
+
+**Generalizes to any AI system trained against an imperfect proxy reward.**
+
+## PPO in plain language
+
+```
+Loss = maximize advantage  -  beta * KL(policy || reference)
+                                      (clipped per-step update)
+```
+
+| Term | Role |
+| --- | --- |
+| **Advantage** | Reward minus expected reward (baseline). Reduces gradient variance. |
+| **KL penalty** | Distance between current policy and frozen SFT reference. Beta tunes strength. |
+| **Clipping** | Caps how much policy can change in one iteration. Epsilon tunes the range. |
+
+**Math is name-only at this level.** The intuition is: maximize reward, anchor to reference, take small steps.
+
+### What PPO needs in memory
+
+| Model copy | Frozen? | Why |
+| --- | --- | --- |
+| **Policy** | No (training) | The LLM you're updating |
+| **Reference model** | Yes | For the KL penalty (typically the SFT model) |
+| **Reward model** | Yes | From stage one |
+| **Value function** | No (trained jointly) | Estimates advantage |
+
+**Four model copies. Frontier-LLM scale. Heavy.**
+
+### PPO complexity
+
+- Two-stage training (reward model + policy). Bug in stage one means restart everything.
+- Multiple sensitive hyperparameters (beta, epsilon, GAE parameters, learning rates).
+- Instability risk despite all guardrails.
+- On-policy data: model generates its own training rollouts each iteration.
+
+## DPO and the "secretly a reward model" insight
+
+```
+1. Start with PPO objective: max reward - beta * KL(policy || reference)
+2. Solve in closed form for optimal policy.
+3. Rearrange: express reward as a function of the optimal policy.
+4. Plug into Bradley-Terry: P(winner > loser) = sigmoid(R(w) - R(l))
+5. Partition function cancels in the subtraction.
+6. What remains: a supervised loss on policy log-ratios.
+```
+
+**Result:** no reward model. Just a supervised loss directly on preference pairs.
+
+```
+DPO loss shape:
+  -E[ log sigmoid( beta * ( log(p(yw|x)/p_ref(yw|x))
+                          - log(p(yl|x)/p_ref(yl|x)) ) ) ]
+```
+
+Same Bradley-Terry shape as the reward-model loss from the previous lesson, with **policy log-ratios in place of reward scores**.
+
+## PPO vs DPO
+
+| Axis | PPO | DPO |
+| --- | --- | --- |
+| **Model copies** | 4 | 2 |
+| **Training stages** | 2 (reward model + RL) | 1 (direct loss) |
+| **Main hyperparameters** | Beta, epsilon, GAE params, etc. | Beta (typically around 0.1) |
+| **Training type** | On-policy RL | Supervised |
+| **Reported performance** | Slightly better on harder benchmarks | Slightly behind PPO; gap varies |
+| **Pipeline complexity** | High | Dramatically lower |
+| **Known wrinkle** | Instability, hyperparameter tuning | Distribution shift (preferences vs model outputs) |
+
+**Both need preference data.** DPO removes the reward-model-training step, not the data-collection step.
+
+## Where else to look in this family
+
+- **Best-of-N (BoN):** skip RL entirely. Generate N completions at inference, pick the highest-rated. Pushes cost from training to inference. Good for prototyping; not how production systems are aligned.
+- **GRPO** (Group Relative Policy Optimization): variant of PPO that drops the value function. Used in some recent reasoning-model training (DeepSeek-Math). Covered in Phase 6.
+
+## Pitfalls to dodge
+
+| Pitfall | Reality |
+| --- | --- |
+| "RLHF and DPO are completely different ideas." | They are not. DPO is mathematically derived from the PPO objective. Same family. |
+| "DPO eliminates the need for preference data." | No. It eliminates reward-model training. Both methods need preference pairs. |
+| "The SFT model is replaced by the preference-tuned one." | Not exactly. SFT becomes the frozen reference. Preference-tuned policy ships, but the reference is load-bearing during training. |
+| "Reward hacking is a theoretical worry." | It is a practical one. The clapping-volume analogy generalizes. Whenever a reward model approximates human preferences, hard optimization can drift the model away from the actual goal. |
+
+## Glossary
+
+- **RLHF:** Reinforcement Learning from Human Feedback. Two-stage: train reward model, then RL-tune policy against it.
+- **PPO:** Proximal Policy Optimization. The classic RL algorithm used in RLHF stage two. Originally a 2017 RL paper.
+- **DPO:** Direct Preference Optimization. The supervised shortcut, derived from the PPO objective in closed form. 2023.
+- **Reference model:** the frozen SFT model that anchors the policy via KL penalty. Both PPO and DPO use one.
+- **Beta:** the KL coefficient. How strongly the reference model anchors the policy. Typically around 0.1 (rough order of magnitude).
+- **Advantage:** "how much better than expected." Reward minus baseline. Reduces gradient variance.
+- **Clipping:** PPO trick that caps per-iteration policy change. Controlled by epsilon.
+- **On-policy training:** model generates training data from its own current policy. PPO is on-policy. DPO works on a fixed dataset, so is not strictly on-policy.
+- **Reward hacking:** model optimizing too hard against an imperfect proxy reward. Result: high reward, missed actual goal.
+- **GRPO:** Group Relative Policy Optimization. PPO variant without value function, popularized in reasoning-model training.
+
+**A reward model tells you what's good. It cannot tell the LLM how to get there.**\
+**RLHF uses RL with guardrails (PPO) to push toward higher reward without forgetting.**\
+**DPO is the supervised shortcut: skip the reward model, optimize the policy directly on preferences.**

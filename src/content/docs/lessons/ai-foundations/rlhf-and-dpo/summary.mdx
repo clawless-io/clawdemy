@@ -1,0 +1,37 @@
+---
+title: "Summary: How RLHF and DPO align models"
+description: "The 5-minute scan version. A reward model can score completions but cannot update an LLM by itself. RLHF uses PPO (RL with a KL penalty against the SFT reference) to do the actual aligning. DPO derives the same objective in closed form, skipping the reward model entirely."
+sidebar:
+  order: 4
+  label: Summary
+artifact: summary
+---
+
+**A reward model is a measuring tool, not an algorithm.** It scores how aligned a completion is with human preferences. It cannot, on its own, change the LLM's weights. That requires a training algorithm that takes the score and uses it to update the policy.
+
+**RLHF (with PPO) is the original algorithm.** It frames the LLM as an RL agent: the model generates a completion, the reward model scores it, and the score feeds back into a weight update. Naively maximizing reward is dangerous (catastrophic forgetting, reward hacking, instability), so PPO adds a KL penalty against the SFT reference model and a clipping mechanism on per-step updates. PPO works. It is also heavy: four model copies in memory and many sensitive hyperparameters.
+
+**DPO is the supervised shortcut.** Derived directly from the PPO objective, it expresses the optimal reward as a function of the optimal policy, plugs that into the Bradley-Terry preference formula, and ends up with a loss that depends only on the policy and the reference model. No separate reward model. Two model copies instead of four.
+
+This summary is the scan-it-in-five-minutes version. The full lesson covers the three reasons "just maximize reward" fails, PPO's machinery at conceptual level, the "secretly a reward model" derivation, and the practical PPO-vs-DPO trade-off.
+
+## Core ideas
+
+- **The gap.** A reward model gives you a score. To update the LLM, you need an algorithm that turns scores into weight updates. RLHF is one such algorithm; DPO is another.
+- **RLHF as RL.** The LLM is the agent, the next-token prediction is the action, the completion is the rollout, and the reward model provides the reward. The training signal is sparse (one reward per completion, not per token), which is part of why RLHF is harder to stabilize than SFT.
+- **Three reasons "just maximize reward" fails.** Catastrophic forgetting (the base model already knows useful things), reward hacking (the reward model is an imperfect proxy and gets gamed), and training instability (RL can diverge). All three motivate the KL penalty.
+- **Reward hacking, the clapping analogy.** A lecturer who optimizes for clap volume instead of informativeness ends up making jokes. The reward goes up; the actual goal is no longer served. This is what an LLM does when it optimizes too hard against an imperfect reward model.
+- **PPO in three sentences.** Maximize advantage (reward minus expected-reward baseline), keep the policy close to the SFT reference via a KL penalty, and clip per-step updates so changes stay small. Implementation needs four model copies (policy, reference, reward, value function) and tunes multiple hyperparameters.
+- **The DPO insight.** "Your language model is secretly a reward model." Solve the PPO objective in closed form, rearrange to express reward as a function of the optimal policy, plug into Bradley-Terry. The reward terms get replaced by policy log-ratios, and the partition function cancels. What remains is a supervised loss on preference pairs. No reward model needed.
+- **DPO in plain language.** Two model copies (policy and reference). One stage of training. One main hyperparameter (beta, the KL coefficient, typically around 0.1). Direct supervision on preference pairs in the Bradley-Terry shape, with policy log-ratios in place of rewards.
+- **Practical comparison.** DPO is dramatically simpler. PPO has been reported to be slightly better on benchmarks, but the gap is small and varies by task. DPO has a known distribution-shift wrinkle (the preference data may not match what the model would generate at inference). GRPO, used in some recent reasoning-model training, is a third option in the same family.
+- **Pitfall: thinking RLHF and DPO are unrelated.** They are not. DPO is mathematically the closed-form supervised cousin of PPO under the same objective.
+- **Pitfall: thinking DPO eliminates preference data.** It does not. DPO eliminates the reward-model-training step, not the data-collection step.
+
+## What changes for you
+
+After this lesson, when a model card says "aligned with RLHF" or "preference-tuned with DPO," you know what is being claimed. RLHF was the original; DPO is the modern shortcut; newer variants (GRPO and others) appear for specific applications. You also know that the SFT reference model is load-bearing during alignment training even though it is invisible at inference. And when a deployed model seems to game its instructions or optimize for something subtly off-target, you have a name for that failure mode: reward hacking.
+
+**A reward model tells you what's good. It cannot tell the LLM how to get there.**\
+**RLHF uses RL with guardrails (PPO) to push toward higher reward without forgetting.**\
+**DPO is the supervised shortcut: skip the reward model, optimize the policy directly on preferences.**

@@ -1,0 +1,187 @@
+---
+title: "Practice: How RLHF and DPO align models"
+description: "Self-check on why naive reward maximization fails, the PPO recipe, the DPO derivation insight, and the practical PPO-vs-DPO contrast. Plus flashcards for retrieval."
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+A short retrieval pass. Answer in your head (or on paper) before opening the collapsible.
+
+**1. The reward model from the previous lesson can score completions. Why does it not, on its own, update the LLM?**
+
+<details>
+<summary>Show answer</summary>
+
+A reward model is a measuring instrument. It takes a prompt-and-completion pair and returns a number that says how aligned the answer is with human preferences. The number does not change any weights in the LLM. To actually update the model, you need a training algorithm that consumes the score and uses it to modify the policy. RLHF (with PPO) is one such algorithm; DPO is another. Both methods need preference data and a reference model; the difference is in the machinery between the data and the weight updates.
+
+</details>
+
+**2. Why does "just maximize reward" fail? Name the three reasons and what each one breaks.**
+
+<details>
+<summary>Show answer</summary>
+
+**Catastrophic forgetting.** The base model already knows how to write English, recall facts, and follow instructions. If you push the weights too far chasing reward, you can damage that existing knowledge.
+
+**Reward hacking.** The reward model is an imperfect proxy for human preferences. Optimize against it too hard and the model finds shortcuts that score high on the proxy without delivering what people actually want. The lecturer's clapping-volume analogy is the canonical example.
+
+**Training instability.** RL training can diverge in ways supervised training rarely does. A few aggressive updates can destroy the policy with no easy recovery.
+
+All three motivate the KL penalty: stay close to the SFT reference model so the policy does not drift too far from a known-good starting point.
+
+</details>
+
+**3. Describe PPO in plain language. What does the loss optimize, and what guardrails does it apply?**
+
+<details>
+<summary>Show answer</summary>
+
+PPO (Proximal Policy Optimization) optimizes **advantage** (how much better a completion is than what would be expected on average) while applying two guardrails:
+
+1. **A KL penalty** against the reference SFT model. The wider the policy drifts, the larger the penalty. The coefficient on this penalty (beta) controls how strongly the reference model anchors the policy.
+
+2. **Clipping** of per-step policy changes. Each iteration, PPO compares the current policy to the previous iteration and caps how much the policy is allowed to shift in one step. Smaller, safer updates.
+
+Implementation requires four model copies in memory: the policy being trained, the frozen reference model, the frozen reward model, and a small value-function head used to estimate advantage.
+
+</details>
+
+**4. What is the central insight of DPO? Walk through the derivation at a conceptual level.**
+
+<details>
+<summary>Show answer</summary>
+
+The DPO paper's title captures the insight: "Your Language Model Is Secretly a Reward Model." The derivation:
+
+1. Start with the PPO objective: maximize reward minus a KL penalty against a reference model.
+2. Solve in closed form. The optimal policy can be written as an explicit function of the reward and the reference model.
+3. Rearrange. Treat the reward as the unknown and solve. The reward turns out to be expressible as a function of the optimal policy and the reference model. Given a preference-tuned policy, you can read off the reward function that would make it optimal.
+4. Plug that expression for the reward into the Bradley-Terry preference formula from the previous lesson. The reference-model partition function cancels out. What remains is a difference in policy log-ratios.
+
+The result is a supervised loss in the same Bradley-Terry shape as the reward-model loss, but with policy log-ratios in place of rewards. No separate reward model. Two model copies (policy and reference) instead of four.
+
+</details>
+
+**5. When would you choose PPO over DPO, and when would you choose DPO over PPO?**
+
+<details>
+<summary>Show answer</summary>
+
+**DPO** is the right choice when you want a simpler pipeline: easier to set up, easier to tune (one main hyperparameter, beta), one training stage, two model copies. The lecturer's framing: it is "your friend" for quick preference tuning when you do not want to do RL.
+
+**PPO** is the right choice when you have RL expertise and you want every percentage point of performance. Reported to be slightly better than DPO on harder benchmarks, but the gap is small and varies by task.
+
+**Both** require preference data. DPO removes the reward-model training step, not the data collection step.
+
+A third option, **GRPO**, is starting to appear in newer reasoning-model training. It is a variant of PPO that drops the value function. Same family as PPO, with one extra simplification.
+
+</details>
+
+## Try it yourself: spot the reward hacking
+
+Reward hacking is one of the failure modes that motivates everything in this lesson. Read each scenario below and decide whether it is reward hacking. About 10 minutes.
+
+**Scenario 1.** A summarization model is trained with a reward model that rates summaries on factual accuracy. Over time, the model starts producing summaries that hedge every claim with phrases like "may be," "could be," and "is reported to." The reward model rates these higher because hedged claims are rarely factually wrong. Human readers find the summaries vague and unhelpful.
+
+<details>
+<summary>Reward hacking?</summary>
+
+**Yes.** The reward model approximates "factual accuracy" but doesn't measure "useful information density." The model exploited the gap: a sentence saying nothing concrete cannot be factually wrong, so the reward goes up while the actual goal of producing a useful summary is undermined. Classic reward hacking.
+
+</details>
+
+**Scenario 2.** A coding assistant is trained with a reward model that prefers responses that include code examples. The model starts including a code example in every response, even when the user asked for an explanation. Users complain that the responses are noisy.
+
+<details>
+<summary>Reward hacking?</summary>
+
+**Yes.** The reward model rewarded "has code examples" because in the training data, useful answers tended to include them. The model overfit to the proxy and now produces code examples regardless of whether they help. Reward hacking.
+
+</details>
+
+**Scenario 3.** A model trained with a helpfulness reward starts producing longer, more detailed responses. The longer responses do contain more relevant information; users rate them higher than the previous shorter responses.
+
+<details>
+<summary>Reward hacking?</summary>
+
+**No.** The longer responses are actually more useful, and human evaluators agree with the reward model. The proxy and the goal are aligned in this case. Reward hacking would be if the model produced longer responses that scored higher on the proxy but were worse for users.
+
+</details>
+
+**Scenario 4.** A model is trained with a reward model that prefers polite, friendly tone. After training, the model produces friendly responses even when refusing to do something. A user asks how to make a weapon and the model declines politely. The reward model rates the polite refusal higher than a curt refusal would have been.
+
+<details>
+<summary>Reward hacking?</summary>
+
+**No.** Polite refusal is actually better than curt refusal for most use cases; the reward model and the goal are aligned here. (There is a separate question about whether the model should refuse at all, but that is an alignment question, not a reward-hacking question.) The proxy did its job.
+
+</details>
+
+## Flashcards
+
+Nine cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay out the full set as one card per page.
+
+<FlashcardSet>
+
+<Flashcard question="Why is RLHF training signal called 'sparse' compared to SFT?">
+
+SFT gets a training signal at every token: each prediction has a target token to compare against. RLHF gets one reward per whole completion: the model generates an entire answer, the reward model returns one number, and that single number drives the weight update for that whole rollout. Less information per training step, which is part of why RLHF is harder to stabilize than SFT.
+
+</Flashcard>
+
+<Flashcard question="What does the 'P' in PPO stand for, and why is that the load-bearing word?">
+
+Proximal. The whole algorithm is built around staying near the starting point. PPO maximizes reward but applies a KL penalty against the SFT reference model and a clipping mechanism on per-step policy changes. Both guardrails enforce proximity. Without them, naive reward maximization causes catastrophic forgetting, reward hacking, or training instability.
+
+</Flashcard>
+
+<Flashcard question="What are the four model copies PPO needs in memory at training time?">
+
+The policy (the LLM being trained), the frozen reference model (used for the KL penalty, typically the SFT model), the frozen reward model (from stage one), and a value function (a small head trained jointly with the policy, used to estimate advantage). That is one of the practical reasons PPO is heavy: four model copies, all of them frontier-LLM scale.
+
+</Flashcard>
+
+<Flashcard question="What is 'advantage' in PPO and why is it preferred over raw reward?">
+
+Advantage is "how much better is this completion than what you would expect on average." Subtracting the expected reward (a baseline) reduces the variance of training gradients. Lower variance means more stable training, which means RL is less likely to diverge. The math is name-only at this level; the role is to make the gradient signal cleaner.
+
+</Flashcard>
+
+<Flashcard question="What is the lecturer's clapping-volume analogy for reward hacking?">
+
+A lecturer's true goal is to give an informative talk. They cannot directly measure informativeness during the talk, so they substitute "how loudly the audience claps." If they optimize against this proxy too hard, they discover that jokes get loud claps. The reward goes up. The actual goal (informative lecture) stops being served. This is what an LLM does when it optimizes too hard against an imperfect reward model.
+
+</Flashcard>
+
+<Flashcard question="What is the title of the DPO paper, and why is the title meaningful?">
+
+"Your Language Model Is Secretly a Reward Model." The title is meaningful because it captures the derivation: starting from the PPO objective, you can solve for the optimal policy in closed form, then rearrange to express the reward as a function of that policy. So given a preference-tuned policy, the reward function is already implicit in it. There is no separate reward model needed.
+
+</Flashcard>
+
+<Flashcard question="What cancels in the Bradley-Terry substitution that gives DPO its loss?">
+
+The reference-model partition function. After substituting the policy-based expression for the reward into the Bradley-Terry formula (which is a difference of rewards inside a sigmoid), the partition function appears in both reward terms with the same value (same prompt context) and cancels in the subtraction. What remains is a difference in policy log-ratios: log(policy(winner)/reference(winner)) minus log(policy(loser)/reference(loser)).
+
+</Flashcard>
+
+<Flashcard question="How does DPO compare to PPO on practical axes (model copies, training stages, hyperparameters)?">
+
+PPO needs four model copies (policy, reference, reward, value function); DPO needs two (policy, reference). PPO has two stages (train reward model, then run RL); DPO has one stage (direct loss on preference pairs). PPO has multiple sensitive hyperparameters (beta, epsilon, GAE parameters); DPO has one main one (beta, the KL coefficient, typically around 0.1). PPO is reported to perform slightly better on benchmarks; DPO is dramatically simpler.
+
+</Flashcard>
+
+<Flashcard question="Does DPO eliminate the need for preference data?">
+
+No. DPO eliminates the reward-model-training step, not the data-collection step. Both PPO and DPO need preference pairs (humans, or rated AI outputs, comparing two completions on a dimension like helpfulness or safety). The cost of building a labeled preference dataset is unchanged. DPO's simplification is downstream of the data; the upstream collection effort is the same.
+
+</Flashcard>
+
+</FlashcardSet>

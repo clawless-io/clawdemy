@@ -1,0 +1,129 @@
+---
+title: "Lesson: How reasoning models think differently"
+description: "Phase 6 opener in our adaptation of Stanford CME 295 Lecture 6. Reasoning models are trained to produce long internal reasoning chains as part of their policy, not just when prompted. This lesson covers what makes them different from standard LLMs, the compute-budget framing, the major reasoning benchmarks (AIME, GSM8K, HumanEval, SWE-bench, CodeForces), and how to read a Pass@K claim."
+sidebar:
+  order: 2
+  label: Lesson
+artifact: lesson
+---
+
+import AudioPlayer from '../../../../../components/AudioPlayer.astro';
+import LessonStar from '../../../../../components/LessonStar.astro';
+
+<LessonStar slug="how-reasoning-models-think" />
+
+<AudioPlayer src="https://audio.clawdemy.org/lessons/how-reasoning-models-think-lesson.mp3" approxMinutes={13} />
+
+The previous lesson ended with a distinction: chain-of-thought is a prompting technique, while reasoning models are something else. They are *trained* to produce reasoning chains as part of their policy, not just *prompted* to. That distinction is the through-line of Phase 6.
+
+This lesson is about what reasoning models actually are, what they are different from, and how to read the claims their model cards make. By the end you will know why "OpenAI o1" or "DeepSeek R1" is a different kind of object than "GPT-4," what "thinking time" means in a chat UI, what AIME and GSM8K and HumanEval and SWE-bench measure, and how to read a Pass@K number without getting confused.
+
+This is the Phase 6 opener. The next three lessons cover RAG (fetching text the model does not have), function calling (emitting structured tool calls), and agent loops (chaining tools together). Each one extends what a single LLM call can do. This lesson is about the foundational change to the call itself.
+
+## A reasoning model versus a standard LLM
+
+A standard LLM produces a final answer in one continuous output. Maybe it produces some reasoning along the way if prompted with "let's think step by step," but the *training objective* that produced the model never explicitly rewarded reasoning. The model knows about reasoning because reasoning text was in its pretraining and SFT corpora. It does not specialize in producing it.
+
+A reasoning model is a model whose training pushed it toward producing long internal reasoning chains. The output of a reasoning-model call is two things: a long reasoning chain, then a final answer. Both are tokens the model generated. The reasoning is not a separate process; it is part of the same generation. But the model has been trained, often via reinforcement learning on problems with verifiable answers, to spend significant compute on reasoning before committing to an answer.
+
+The lecturer's framing for this is worth holding onto. A standard LLM is trained to predict the most plausible next token. Given a hard problem, it will produce a plausible-sounding answer because that is what it has learned to do; whether the answer is correct is a side effect, not a target. A reasoning model is trained on problems where correctness can be checked (math problems with known answers, coding problems with test cases), and the reward signal is the correctness of the final answer after the reasoning chain. The model learns to spend reasoning tokens productively because reasoning correlates with arriving at correct answers, and the training process directly rewards arrival at correct answers.
+
+## When you are using one
+
+You can usually tell. Modern chat UIs surface a "thinking" indicator when the underlying call is to a reasoning model. ChatGPT shows "thinking..." with a spinner and a time counter. Claude has a thinking summary. Gemini exposes "thinking" toggles. The visible part of the experience is that the model takes longer (sometimes much longer) to produce its first output token.
+
+What the UI shows is not the raw reasoning chain. It is typically a summary. The lecturer offers three plausible reasons providers don't show the raw chain:
+
+1. The raw chain may be hard to follow as plain English. Internal model thinking does not always come out as polished prose.
+2. Users don't necessarily want pages of reasoning to read. A summary respects their time.
+3. The raw chain is valuable training data. A competitor could distill it into their own model. Hiding the raw chain is partly a competitive moat.
+
+The user-facing implication: when you see a reasoning model's "thinking" UI, you are watching the model spend compute before committing to an answer. The summary you see afterward is not the whole picture. The model probably reasoned through more than the visible summary suggests.
+
+## Compute as a budget
+
+Modern reasoning models expose **compute budgets** as a user-facing concept. Some APIs and UIs let you toggle "standard" versus "extended" thinking. The toggle controls how many tokens the model is allowed to spend on its reasoning chain before producing the final answer.
+
+This makes "more compute equals more capability" explicit, in a way it never was for standard LLMs. The same underlying model can produce a quick approximate answer (low compute budget, short reasoning) or a careful answer (high compute budget, long reasoning). Trade-off is straightforward: more reasoning tokens cost more dollars and add latency.
+
+Pricing reflects this. Output tokens on reasoning-model APIs include reasoning tokens, even though the user does not see all of them. You are paying for the model to think, whether or not you read the thoughts. The price-per-token framing of LLM APIs gets sharper here: a reasoning-model query may use far more output tokens than the visible response suggests.
+
+## Why this approach works (the verifiable-reward intuition)
+
+Reasoning models tend to be trained or fine-tuned on problems where correctness can be verified mechanically. Math problems have answers that can be parsed and checked against ground truth. Coding problems have test cases that can be run. These domains let the trainer assign a clear correctness signal to each completion: did this final answer match the right answer? Yes or no.
+
+That clear signal is what enables reinforcement learning to push the model toward producing reasoning that arrives at correct answers. Compare this to RLHF (Phase 4), where the reward came from a learned preference model approximating human judgments. Verifiable rewards are cleaner, harder to game, and produce stronger training signals when they are available.
+
+The cost: reasoning models are typically strongest on tasks that look like their training domain. Math, coding, and some forms of structured logic. They are less obviously stronger on tasks where "correct" is fuzzy: creative writing, open-ended advice, anything where the reward signal cannot be reduced to a yes-or-no check. The lecturer is careful to flag this is an area where the literature is still developing, and the boundary of where reasoning models help is moving.
+
+## How reasoning is measured
+
+When a paper or model card claims a reasoning-model benchmark, it is usually one of a small set. These are worth knowing.
+
+**HumanEval** is a set of about 164 human-written coding problems. Each problem is a function signature and a docstring; the model has to write the function body. Correctness is checked against a small set of unit tests included with the problem. Released by OpenAI in 2021. Saturated by frontier models now, but still cited.
+
+**SWE-bench** is a harder coding benchmark derived from real GitHub issues. The model is given a real bug report from a real open-source project and has to produce a code patch that fixes it. Correctness is checked by running the project's test suite. SWE-bench is a current-generation benchmark and frontier reasoning models still leave substantial room.
+
+**CodeForces** is competitive programming problems. Models compete on the same problems human contest participants solve, with a rating system that lets you compare a model's effective skill level to a human contestant's.
+
+**GSM8K** is about 8,500 grade-school math word problems. Each problem requires a few steps of arithmetic reasoning. Saturated by frontier models. Most useful now as a baseline that any reasoning model should clear.
+
+**AIME** is the American Invitational Mathematics Examination, a US qualifying test for the math olympiad. Significantly harder than GSM8K. AIME problems are the kind where a strong human student might solve a few out of fifteen in a three-hour exam. Reasoning models score well on AIME relative to standard LLMs; that gap is one of the cleanest signals of what reasoning models add.
+
+When you see a model card claiming "x% on AIME 2024" or "y% Pass@1 on HumanEval," you can now place it: a benchmark, a metric, and a year. The exact number rotates rapidly as new models ship; the benchmark names don't.
+
+## Pass@K, slowly
+
+The metric you will see most often in reasoning-model claims is **Pass@K**. The K is a number, usually 1 or sometimes higher.
+
+The intuition: Pass@K measures the probability that at least one of K attempts at a problem produces a correct answer. If you let the model try K times and at least one of those attempts passes, that counts as a success.
+
+- **Pass@1** means "the first attempt is correct." This is the most stringent and the most user-relevant. It approximates "if a user asks once, what is the chance they get a right answer."
+- **Pass@K for K greater than 1** means "any of K attempts is correct." Higher K makes the score higher because more attempts give more chances.
+
+The technical definition involves a sampling-without-replacement formula that the lecture derives. The headline takeaway is shorter than the derivation:
+
+> "Probability of at least one of K being correct = 1 minus probability of all K being wrong."
+
+That phrasing is the load-bearing intuition. If the model gets any single problem right with probability p, then K independent attempts all wrong has probability (1 minus p) to the K, which approaches zero as K grows. Pass@K starts low at K=1 and grows toward 1 as K grows.
+
+When reading a Pass@K claim, ask three questions:
+
+1. **What is K?** Pass@1 is a much stronger claim than Pass@10. A model can have a great Pass@10 and a mediocre Pass@1 if its answers are noisy.
+2. **What is the temperature?** Higher temperatures produce more diverse samples, which can boost Pass@K when K is greater than 1, but hurts Pass@1. Different choices make different claims.
+3. **Is the model verified to be correct, or just claimed to be?** Pass@K requires running each attempt against the verifier (test cases, ground truth math answer). Some papers report self-evaluated correctness, which is weaker.
+
+Frontier reasoning-model Pass@1 results on AIME or SWE-bench are the kind of number where, when it doubles in a year, it represents a real capability shift. Reading those numbers without understanding the metric was the gap this lesson is closing.
+
+## Why this matters when you use AI
+
+Three things to hold onto.
+
+- **A reasoning model's "thinking" is not metaphorical.** It is generating reasoning tokens that get factored into the final answer, and you are paying for those tokens whether you see them or not. Your dollar cost on a reasoning-model query is meaningfully higher than on a standard-model query of the same prompt.
+- **Reasoning models are strongest where verifiable rewards exist.** Math, coding, structured logic. They are less obviously stronger on creative or open-ended tasks. When choosing whether to reach for a reasoning model, ask whether your task has a clear right answer. If yes, the reasoning model is probably worth the extra cost. If no, a standard model with good prompting may be enough.
+- **Pass@K and benchmark numbers go stale fast, but the metric framework does not.** Knowing what AIME measures, what Pass@1 means versus Pass@K, and why verifiable rewards matter will outlast any specific number you read in a model card next month. The numbers move; the framework does not.
+
+## Common pitfalls
+
+Three mistakes worth dodging.
+
+**Confusing "thinking" with consciousness.** When a UI says the model is "thinking for 12 seconds," it is producing reasoning tokens during those 12 seconds. The model is not pondering. It is running its forward pass repeatedly, one token at a time, on a reasoning chain that may or may not be coherent. The user-facing word "thinking" is convenient and roughly accurate; do not read too much into it.
+
+**Treating Pass@K like a single number.** Pass@1 and Pass@10 on the same model can differ substantially. A claim of "75% on benchmark X" is incomplete without specifying K. Asking "Pass at what K?" is the right reflex when you read these numbers.
+
+**Assuming reasoning models dominate everywhere.** They are stronger on tasks where their training distribution gave them practice. They are not necessarily stronger on tasks far from that distribution. A reasoning model is not always the right reach for every problem; sometimes the cost-and-latency cost is not worth the marginal capability gain.
+
+## What you should remember
+
+- **A reasoning model is trained to produce long internal reasoning chains as part of its policy.** A standard LLM produces reasoning only when prompted, and the training objective never specifically rewarded reasoning. Reasoning models reward correctness of the final answer after the reasoning chain.
+- **The "thinking" UI you see is a summary, not the raw chain.** Three reasons providers hide the raw chain: legibility, user attention, and competitive-moat protection of training-quality reasoning data.
+- **Compute budgets are user-facing.** "Standard" vs "extended" thinking lets you trade dollars and latency for capability. Reasoning tokens are billed even when not shown.
+- **Reasoning models work because of verifiable rewards.** RL trained on math (ground-truth answers) and coding (test cases) produces strong reasoning signals. The boundary of where this generalizes to fuzzy tasks is the current research frontier.
+- **The major reasoning benchmarks** are HumanEval (small coding), SWE-bench (real GitHub issues), CodeForces (competitive programming), GSM8K (grade-school math), and AIME (US math olympiad qualifier). Pass@K (with K commonly 1) is the standard metric for coding benchmarks; math benchmarks more often report accuracy or majority-vote-at-K.
+- **Pass@K is "probability at least one of K attempts is correct."** Equals 1 minus probability all K attempts are wrong. Higher K means higher Pass@K. Pass@1 is the strongest claim.
+
+## If you remember one thing
+
+**A standard LLM is trained to sound plausible. A reasoning model is trained to be correct.**\
+**Compute budget is the new dial: more thinking time, more capability, more cost.**\
+**Pass@K is "any of K right." Read K before you read the percentage.**

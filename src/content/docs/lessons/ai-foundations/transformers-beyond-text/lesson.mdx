@@ -1,0 +1,115 @@
+---
+title: "Lesson: Transformers beyond text, ViT and Mixture-of-Experts"
+description: "Phase 7 lesson on transformer adaptations in our adaptation of Stanford CME 295 Lecture 9. The transformer block has been reused for non-text inputs (Vision Transformers) and rewired for sparse routing (Mixture-of-Experts). This lesson covers what each enables and why both matter."
+sidebar:
+  order: 2
+  label: Lesson
+artifact: lesson
+---
+
+import AudioPlayer from '../../../../../components/AudioPlayer.astro';
+import LessonStar from '../../../../../components/LessonStar.astro';
+
+<LessonStar slug="transformers-beyond-text" />
+
+<AudioPlayer src="https://audio.clawdemy.org/lessons/transformers-beyond-text-lesson.mp3" approxMinutes={11} />
+
+The transformer block was originally designed for machine translation. Phase 2 covered that original architecture in detail. The interesting part of the transformer's story is what happened next: the same block, with minor adaptations, turned out to be useful for many things that have nothing to do with text.
+
+This lesson covers two of those adaptations. **Vision Transformers** (ViT) take the transformer block and apply it to image patches instead of text tokens, producing image classification and image understanding capabilities that compete with the convolutional networks the field had used for a decade. **Mixture-of-Experts** (MoE) keeps the transformer architecture but rewires the feed-forward network into a set of "experts" that get sparsely activated, letting frontier models scale parameter counts dramatically without proportionally scaling per-token compute.
+
+These are not the only adaptations. The lecturer mentions diffusion transformers, recommendation transformers, and speech transformers as further examples; you will hear those names if you read across AI research. Two are enough to make the broader point: **the transformer block has been adapted in major directions, and ViT and MoE are the canonical examples to know.**
+
+This is lesson 4 of Phase 7, the second-to-last lesson on the path to closing the track. The next lesson covers new ways models generate (speculative decoding and diffusion language models). The closer pulls together the safety threads from Phases 4 through 7.
+
+## Vision Transformers (ViT)
+
+The traditional approach for image tasks was the **convolutional neural network** (CNN). CNNs had a strong inductive bias built in: they processed images as 2D grids of pixels, looked at small local patches via convolutions, and combined them through pooling and stacking. The architecture made strong assumptions about images (translation equivariance, local features compose into global features) and those assumptions matched image data well enough that CNNs dominated image work for years.
+
+The Vision Transformer paper (Dosovitskiy et al., 2021) tried something almost opposite. Instead of building image-specific structure into the model, it took the transformer block (which has very low inductive bias about its inputs) and just fed it image patches as if they were tokens.
+
+Here is what that looks like end-to-end:
+
+1. **Split the image into patches.** Take an image (say 224×224 pixels) and divide it into a grid of fixed-size non-overlapping patches (typically 16×16 pixels each, giving 196 patches for a 224×224 image).
+2. **Convert each patch to a vector.** Each patch is a small grid of pixels; flatten it and project through a learned linear layer to get a single vector per patch. Now each patch is a "token" in the sequence sense.
+3. **Add a CLS token at the start.** Same idea as BERT (Phase 2 lesson). A learned vector that gets to attend to all the patch tokens.
+4. **Add position embeddings.** Each patch needs to know where it sat in the original image. Position embeddings are added the same way they are in text transformers (Phase 1's lesson is the original answer; modern ViTs sometimes use learned 2D position embeddings).
+5. **Run through a transformer encoder.** The standard architecture. Self-attention lets every patch attend to every other patch, just as text-transformer attention lets every token attend to every other token.
+6. **Project the CLS token's final embedding to a class.** A small feed-forward network at the end maps the CLS embedding to a class label (cat, dog, teddy bear, etc.).
+
+The Stanford lecturer's framing of why this works: with enough training data, the model learns the inductive biases that CNNs had built in, instead of needing them imposed by the architecture. The ViT paper's empirical headline was that on small datasets, CNNs still won; on large datasets, ViT caught up and then surpassed CNNs. The lesson is that architectural inductive bias is helpful when data is scarce, but with enough data, more flexible architectures with higher capacity can learn the bias themselves.
+
+That observation carried weight beyond image classification. Once ViT showed that the transformer block worked for non-text inputs, the field started applying transformers to other modalities. Multimodal models (vision-language, audio-text, etc.) typically use a ViT-style image encoder plus a text-decoder LLM, with cross-attention letting the text model see image tokens. The lecturer mentions LLaVA as one popular example.
+
+The pattern is the same as any modern multimodal model you have used (GPT-4V, Claude with vision, Gemini, etc.): an image goes through a ViT or ViT-style encoder, comes out as a sequence of tokens, and gets concatenated with text tokens for the LLM to work with.
+
+## Mixture-of-Experts (MoE)
+
+The other major adaptation is structural rather than modal. ViT changed what kind of input the transformer processes; MoE changes what happens *inside* the transformer block.
+
+The motivation: as language models scaled up, the question became whether all those parameters need to be active for every token. A 100-billion-parameter dense model uses all 100 billion parameters for every forward pass on every input token. That is expensive. If you could route different inputs to different subsets of parameters, you could have more total parameters without proportionally more per-token compute.
+
+That is what MoE does. The trick is in the feed-forward network layer of the transformer block (the FFN that comes after attention; covered in Phase 2's transformer-block lesson). Instead of having one FFN, you have many "experts," each of which is its own FFN with its own weights. A small **gating network** decides which experts to send each token to, typically choosing 2 of N experts.
+
+So the per-token computation looks like:
+
+1. **Token enters the FFN layer** with its representation from the attention sublayer.
+2. **The gating network produces a routing decision.** "Send this token to expert 3 and expert 7." The decision is per-token, not per-input.
+3. **Only those two experts are activated.** The other N-2 experts sit idle for this token.
+4. **The two experts' outputs are combined** (typically via weighted sum, with the gate's confidences as weights) and passed up.
+
+Total parameters scale linearly with N (number of experts). Per-token compute stays roughly constant (always 2 experts). The lever is dramatic: a 200-billion-parameter MoE model with 8 experts and 2-of-8 routing has the per-token compute cost of a 50-billion-parameter dense model while having 4× the total parameter count.
+
+The Stanford lecturer flags an important practical detail: routing happens at the **token level**, not the input level. Different tokens within the same prompt might be routed to different experts. This lets you place experts on different GPUs and parallelize the token routing, which is why MoE is easier to train at scale than the parameter count alone would suggest.
+
+Several frontier-grade open-source models are MoE: Mixtral, DeepSeek-V3, GPT-OSS, GLM 4. Closed-source frontier models often are too, though vendor disclosure varies. When you read about a "1-trillion-parameter model," there is a good chance it is MoE; the active-parameters-per-token number is much smaller (maybe 200 billion), which is why the model runs at all.
+
+## What ViT and MoE each enable, in one sentence
+
+- **ViT enables** the transformer architecture to process non-text modalities (images, video frames, audio spectrograms, almost anything that can be tokenized into patches). It is the architectural foundation for modern multimodal models.
+- **MoE enables** scaling total parameter count dramatically without proportionally scaling per-token compute. It is the architectural reason frontier models can have parameter counts that would otherwise be unaffordable to run.
+
+Different things; same underlying point. The transformer block has been adapted in major directions, and these two are the canonical examples of how that adaptation works.
+
+## A handful of other adaptations worth naming
+
+Out of scope for this lesson but worth knowing exist:
+
+- **Diffusion transformers** apply transformer self-attention inside a denoising diffusion process for image generation. Most modern image-generation models (Stable Diffusion 3, Flux, the diffusion side of GPT-4o) use transformer-based diffusion architectures.
+- **Speech transformers** process audio (often via mel-spectrograms tokenized into patches, ViT-style) for speech recognition and synthesis. Whisper is the canonical example.
+- **Recommendation transformers** apply self-attention over user behavior sequences for ranking and personalization tasks. Common in production at large platforms.
+- **Diffusion-based LLMs** (the next lesson covers these): instead of generating text token-by-token, generate text by denoising. Active research area.
+
+The pattern is the same in each case: the transformer block, with minor adaptations to how inputs are tokenized and how outputs are decoded. The block itself is doing the work.
+
+## Why this matters when you use AI
+
+Three things to hold onto.
+
+- **The transformer is now a general-purpose neural-network primitive, not just a language-model component.** When you read about a "vision model," "audio model," or "multimodal system," the underlying architecture is almost certainly a transformer with modality-specific adaptations. Knowing this means a single mental model (Phase 2's transformer block) carries you across most of modern AI research, not just LLMs.
+- **MoE is why frontier models can have massive parameter counts.** When you see "X-billion-parameter model" in a press release, ask whether it is dense or MoE. The two have very different cost profiles. A 100-billion-parameter dense model and a 100-billion-parameter MoE model with 2-of-8 routing run at roughly 4× different speeds. The active-parameter count is the relevant comparison.
+- **Multimodal AI is closer to "more transformers" than to "different architecture."** The shift from text-only to vision-language to general multimodal is largely a story of plugging more ViT-style encoders into the same LLM core. The interesting innovations are increasingly in *how* modalities interact (cross-attention patterns, token-mixing strategies) rather than in the underlying transformer block.
+
+## Common pitfalls
+
+Three mistakes worth dodging.
+
+**Treating MoE parameter counts as comparable to dense parameter counts.** A 200-billion-parameter MoE model with 2-of-8 routing has roughly the per-token compute of a 50-billion-parameter dense model. The "200 billion" number is the total parameter count, not the active count. Comparing this to a 200-billion-parameter dense model is not apples-to-apples on speed, even if it is on capability.
+
+**Assuming ViT replaced CNNs for everything.** It did not. CNNs are still competitive on small datasets and on tasks where their inductive biases (locality, translation equivariance) match the data. For frontier-scale image and multimodal work, ViT-style encoders dominate; for embedded-vision applications and constrained-data tasks, CNNs are often still the better tool.
+
+**Overinterpreting "transformer for X" announcements.** When a paper claims "we built a transformer-based system for [novel task]," the underlying transformer block is almost always close to the standard architecture. The novelty is usually in input tokenization, output decoding, or training data, not in the block itself. Reading these claims carefully helps separate genuine architectural innovation from "we used a known architecture for a new task."
+
+## What you should remember
+
+- **The transformer block has been adapted in major directions beyond text.** ViT and MoE are the two canonical examples; many others exist.
+- **Vision Transformers (ViT)** apply the transformer architecture to image patches. Split image into patches, project to vectors, add CLS and position embeddings, run through encoder, project CLS embedding to class. With enough data, the model learns inductive biases CNNs had built in. Foundation for modern multimodal systems.
+- **Mixture-of-Experts (MoE)** keeps the transformer architecture but replaces the dense feed-forward layer with multiple experts and a gating network that routes each token to a subset. Scales total parameter count without proportionally scaling per-token compute. Used by most frontier-scale models.
+- **In one sentence each.** ViT enables transformers to process non-text modalities. MoE enables scaling parameter counts without scaling per-token compute.
+- **The transformer block is now a general-purpose neural-network primitive.** Reading "transformer-based system for X" should not surprise you anywhere in modern AI research.
+
+## If you remember one thing
+
+**The transformer block was designed for translation. It turned out to work for almost everything.**\
+**ViT adapts it to non-text inputs. MoE adapts the block's internal compute for sparse routing.**\
+**Most modern AI systems are some combination of these adaptations on the same underlying architecture.**
