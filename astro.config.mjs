@@ -390,7 +390,18 @@ export default defineConfig({
 										{ label: 'References', slug: 'lessons/ai-foundations/in-context-learning-and-few-shot/references' },
 									],
 								},
-								{ label: 'More lessons coming soon', slug: 'lessons/ai-foundations/coming-soon' },
+								{
+									label: 'Chain of thought: thinking out loud',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/ai-foundations/chain-of-thought-prompting/brief' },
+										{ label: 'Lesson', slug: 'lessons/ai-foundations/chain-of-thought-prompting/lesson' },
+										{ label: 'Practice', slug: 'lessons/ai-foundations/chain-of-thought-prompting/practice' },
+										{ label: 'Summary', slug: 'lessons/ai-foundations/chain-of-thought-prompting/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/ai-foundations/chain-of-thought-prompting/cheatsheet' },
+										{ label: 'References', slug: 'lessons/ai-foundations/chain-of-thought-prompting/references' },
+									],
+								},
 							],
 						},
 						{

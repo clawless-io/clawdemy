@@ -1,0 +1,146 @@
+---
+title: "Lesson: How chain of thought makes models think out loud"
+description: "Phase 5 closer in our adaptation of Stanford CME 295 Lectures 3 and 6. Asking a model to reason step by step before answering reliably improves accuracy on multi-step problems. This lesson covers what chain-of-thought prompting is, the two flavors (zero-shot and few-shot), why it works, when it fails, and how it sets up Phase 6's reasoning models."
+sidebar:
+  order: 2
+  label: Lesson
+artifact: lesson
+---
+
+import AudioPlayer from '../../../../../components/AudioPlayer.astro';
+import LessonStar from '../../../../../components/LessonStar.astro';
+
+<LessonStar slug="chain-of-thought-prompting" />
+
+<AudioPlayer src="https://audio.clawdemy.org/lessons/chain-of-thought-prompting-lesson.mp3" approxMinutes={12} />
+
+A teddy bear was born in 2020. How old is the teddy bear in 2025?
+
+Ask an LLM that question and you may or may not get "5" depending on the model. The smaller and older the model, the less reliable the answer. Now ask the same model the same question with one phrase added: "Let's think step by step." Suddenly the model writes:
+
+> "The bear was born in 2020. The current year is 2025. The age is 2025 minus 2020. That equals 5. The bear is 5 years old."
+
+It worked through it. The answer is right. The trick is exactly the four words appended to the prompt.
+
+That trick is **chain-of-thought prompting** (CoT), and it is one of the most useful prompting moves in the modern toolkit. It works on math, on multi-step logic, on questions where the answer requires combining several known facts. It is also surprising: nothing about the model changed. The same weights produced a wrong answer without "let's think step by step" and a right one with it. The reasoning is sitting in the model already; the prompt just nudges the model to use it.
+
+This lesson covers what CoT is, the two ways it shows up in practice, why it works at all, what it cannot do, and how it sets up the reasoning models we will meet in Phase 6.
+
+## What chain-of-thought actually is
+
+CoT is the prompting move of asking a model to produce a reasoning path before producing the final answer. Two variants:
+
+**Zero-shot CoT.** Take whatever prompt you have and append a phrase like "Let's think step by step" or "Let's reason about this carefully." The model interprets the phrase as a request to write out the reasoning, and many models will then do so. No examples needed. The technique was documented in 2022 and stuck because the cost (one phrase) is so much lower than the gain on hard problems.
+
+**Few-shot CoT.** Combine in-context learning (the previous lesson) with reasoning. Instead of showing input-output examples, show input-reasoning-output examples. Each example demonstrates the kind of step-by-step thinking you want. The model picks up the pattern and applies it to your real query.
+
+Compare a normal few-shot prompt:
+
+```
+Q: A box has 12 apples. 5 are red, the rest are green.
+A: 7
+
+Q: A box has 8 apples. 3 are red, the rest are green.
+A:
+```
+
+Versus the few-shot CoT version:
+
+```
+Q: A box has 12 apples. 5 are red, the rest are green.
+A: The total is 12. Red apples: 5. Green = total minus red = 12 - 5 = 7.
+The answer is 7.
+
+Q: A box has 8 apples. 3 are red, the rest are green.
+A:
+```
+
+The CoT version takes more tokens, but the model is far more reliable on harder problems because the answer is built from intermediate steps it can check.
+
+For trivial arithmetic, CoT is overkill. For multi-step problems where the model would otherwise rush to a guess, it is the difference between getting it right and getting it wrong.
+
+## Why it works
+
+There is more than one explanation, and the lecturer offers two complementary ones.
+
+**Decomposition into tractable subproblems.** A hard problem may not appear in the model's training data verbatim. Easier subproblems do. By forcing the model to break the question down, you give it pieces it has seen variants of and can solve. The teddy bear age problem is not in the training corpus. Subtraction of small numbers very much is. CoT lets the model route the hard problem through capabilities it already has.
+
+The lecturer's framing for this is reminiscent of how students approach exams. When you get a complex problem on a test, you do not try to solve it in one mental leap. You break it down into things you have studied, solve each piece, and assemble the answer. CoT is the same shape applied to LLMs.
+
+**More tokens equals more compute.** This one is mechanical. Every token a model generates is the output of a full forward pass through the network. Generating ten tokens means running the full model ten times. If a problem benefits from "thinking longer," the easiest way to give a model more thinking time is to make it produce more tokens. CoT does that automatically; the reasoning chain is the additional compute.
+
+This is also why the technique scales unevenly with model size. Tiny models do not have much capability to invoke; CoT helps them less or sometimes hurts them. Large frontier models have substantial reasoning capacity, and CoT lets them cash it in. The empirical literature reports CoT as more effective on larger models, with the gain sometimes appearing only above a certain scale.
+
+## Self-consistency: many chains, one answer
+
+Once you have CoT working, an obvious next move is to run it multiple times. The model samples differently each time, so it produces several reasoning chains. If most of them agree on the same final answer, that answer is more likely to be correct than any one chain alone.
+
+This technique is called **self-consistency**. The procedure:
+
+1. Sample N completions of the same CoT prompt (typical N is 5 to 40, depending on cost budget).
+2. Parse the final answer from each chain.
+3. Majority-vote across the answers; return the most common.
+
+Self-consistency improves accuracy on math and reasoning benchmarks at the cost of running the model N times instead of once. The Stanford lecturer flags this trade-off explicitly: each sample is independent, so you can run them in parallel, which means latency is roughly the slowest single run rather than N times the cost. Throughput cost still scales with N.
+
+Self-consistency is one of the cheaper "wrap an LLM in a loop" techniques. We are still using a single base model. We are still using regular prompting. We are just running it multiple times and aggregating.
+
+## When CoT helps and when it doesn't
+
+CoT is not a universal upgrade. A few patterns worth knowing.
+
+**CoT helps most on multi-step reasoning problems.** Math word problems, logic puzzles, multi-hop questions, code with subtle conditions. Anything where the answer requires composing several pieces of knowledge or performing a sequence of operations.
+
+**CoT helps less on simple knowledge lookup.** "What is the course code of Stanford's transformers class?" needs no reasoning chain; the answer is either in the model or it is not. Adding CoT here is just paying for tokens.
+
+**CoT can produce confident-sounding nonsense on problems the model genuinely cannot solve.** A model that does not know something can invent a plausible reasoning chain that arrives at a confidently wrong answer. The chain looks like reasoning. It is not. This is a known failure mode in the CoT literature: the model is producing tokens that match the *form* of reasoning rather than performing the reasoning. CoT is *correlated* with correct answers on problems the model can solve; it is not a proof that the answer is right.
+
+**CoT can be debugged.** This is one of the under-appreciated uses. When a CoT response is wrong, the chain shows you *where* it went wrong. "The bear was born in 2020, the current year is 2024, so the bear is 4." If the year is supposed to be 2025, you can see that the model has the wrong date in context. You can fix that by adjusting the system prompt or providing the date explicitly. Debugging without CoT is much harder because the wrong answer comes with no trace of how the model got there.
+
+## Where this fits in the prompting toolkit
+
+By the end of this phase you have three steerable moves available at inference time, with rough guidance for when each one is the right reach.
+
+- **Zero-shot prompting.** Just ask. Cheap, fast, often enough. Use as the default and escalate when results are unreliable.
+- **Few-shot prompting.** Three to five examples in the prompt. Use when zero-shot is unreliable and the issue is mostly about format or category disambiguation.
+- **Chain-of-thought prompting.** Add reasoning steps. Use when the task requires multi-step reasoning. Combine with few-shot when you want to demonstrate the *kind* of reasoning, not just the *kind* of answer.
+
+A practitioner's escalation ladder looks roughly like: zero-shot → few-shot → CoT (zero-shot version) → CoT few-shot → CoT few-shot with self-consistency. Each step costs more tokens. Each step buys reliability on harder tasks. Stop at the first level that gives you the reliability you need.
+
+## Why this matters when you use AI
+
+Three things to hold onto.
+
+- **Modern frontier models often do CoT internally without you asking.** GPT-style, Claude-style, and Gemini-style models have been trained on large amounts of CoT-shaped data. Many of them produce reasoning steps by default on hard problems. You may not need to add "think step by step" yourself; the model often does. But for older models, smaller models, and edge cases, the explicit prompt still earns its keep.
+- **A "reasoning model" is something different.** When a model is described as a "reasoning model" (OpenAI's o1, DeepSeek-R1, Anthropic's thinking modes), it has been *trained* to produce long reasoning chains as part of its policy, not just *prompted* to. Phase 6 covers reasoning models in detail. CoT prompting is the technique; reasoning models are the architectural shift that bakes CoT into the model itself.
+- **The compute-budget framing matters.** "More tokens equals more compute" is becoming a load-bearing concept in production AI. When a model is given more time to think (more tokens), it can solve harder problems. Cost of compute scales with tokens generated. The trade-off you make every time you turn CoT on is buying accuracy with tokens.
+
+## Common pitfalls
+
+Three mistakes worth dodging.
+
+**Trusting a CoT chain because it looks like reasoning.** A confidently-written reasoning chain is *not* a guarantee that the answer is right. Models can generate plausible-sounding reasoning that arrives at wrong conclusions. CoT improves correlation with correctness on problems the model can solve; it does not certify correctness. For high-stakes decisions, the chain is one signal among several, not the final word.
+
+**Adding CoT to every prompt by default.** CoT costs tokens. If your task is simple lookup or short factual answers, "let's think step by step" is just paying for tokens you do not need. The escalation ladder is the right discipline: start cheap, add CoT when accuracy demands it.
+
+**Confusing CoT prompting with reasoning models.** They are different things. CoT prompting works on any model (with better effect on larger ones). Reasoning models are trained specifically to produce long reasoning chains as part of their output. Phase 6 will be explicit about the distinction.
+
+## What you should remember
+
+- **Chain-of-thought is asking a model to produce reasoning steps before the answer.** Two flavors: zero-shot ("let's think step by step") and few-shot (examples that include reasoning).
+- **It works because of two things.** Decomposition (the model can solve subproblems even when it cannot solve the whole problem in one leap) and more tokens (each generated token is one full forward pass; more tokens means more compute).
+- **Self-consistency is the cheap multiplier.** Sample multiple CoT chains, majority-vote on the answer. Buys accuracy at the cost of running the model multiple times.
+- **CoT is best on multi-step reasoning, less helpful on simple lookup, dangerous when used as proof of correctness.** A model can produce confident reasoning chains that are wrong.
+- **Modern frontier models often produce reasoning steps without being asked.** "Reasoning models" go further: they are trained to produce long internal reasoning chains as part of their policy. Phase 6 covers them.
+
+## If you remember one thing
+
+**More tokens means more compute. CoT is how you spend that compute on a hard problem.**\
+**Zero-shot CoT for free, few-shot CoT to demonstrate the kind of reasoning, self-consistency for the cheap multiplier.**\
+**The chain is a signal, not a certification. The model can be wrong with reasoning that sounds right.**
+
+## What changes in Phase 6
+
+This is the closer for Phase 5. You now know how text comes out (decoding), how the prompt shapes it (prompting), how examples in the prompt cue capabilities (in-context learning), and how reasoning steps unlock harder problems (chain-of-thought). All of that is steering a single LLM call at inference time.
+
+Phase 6 changes that. The next four lessons cover what happens when the model can do more than answer in one shot. **Reasoning models** are trained to produce long internal reasoning chains as part of their policy, not just when prompted. **RAG** lets a model fetch relevant text it does not have in its weights. **Function calling** lets a model emit structured calls to external tools. **Agent loops** chain those tools into longer-horizon work. The shift from "prompt the model" to "let the model think longer, look things up, or take actions" is the through-line of Phase 6.
