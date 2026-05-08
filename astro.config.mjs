@@ -474,6 +474,18 @@ export default defineConfig({
 										{ label: 'References', slug: 'lessons/ai-foundations/how-we-evaluate-models/references' },
 									],
 								},
+								{
+									label: 'Why benchmarks can mislead',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/ai-foundations/why-benchmarks-can-mislead/brief' },
+										{ label: 'Lesson', slug: 'lessons/ai-foundations/why-benchmarks-can-mislead/lesson' },
+										{ label: 'Practice', slug: 'lessons/ai-foundations/why-benchmarks-can-mislead/practice' },
+										{ label: 'Summary', slug: 'lessons/ai-foundations/why-benchmarks-can-mislead/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/ai-foundations/why-benchmarks-can-mislead/cheatsheet' },
+										{ label: 'References', slug: 'lessons/ai-foundations/why-benchmarks-can-mislead/references' },
+									],
+								},
 								{ label: 'More lessons coming soon', slug: 'lessons/ai-foundations/coming-soon' },
 							],
 						},
