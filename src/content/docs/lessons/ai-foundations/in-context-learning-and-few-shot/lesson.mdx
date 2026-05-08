@@ -1,0 +1,190 @@
+---
+title: "Lesson: How few-shot examples teach in context"
+description: "Phase 5 lesson on in-context learning and few-shot prompting in our adaptation of Stanford CME 295 Lecture 3. The model's weights are frozen at inference. You can still 'teach' it the shape of a task by putting examples in the prompt. This lesson covers what zero-shot, one-shot, and few-shot mean, why in-context learning works at all, and when examples help versus when detailed instructions work better."
+sidebar:
+  order: 2
+  label: Lesson
+artifact: lesson
+---
+
+import AudioPlayer from '../../../../../components/AudioPlayer.astro';
+import LessonStar from '../../../../../components/LessonStar.astro';
+
+<LessonStar slug="in-context-learning-and-few-shot" />
+
+<AudioPlayer src="https://audio.clawdemy.org/lessons/in-context-learning-and-few-shot-lesson.mp3" approxMinutes={12} />
+
+The model is trained. Pretraining is done. SFT is done. Preference tuning is done. The weights are frozen. You are typing into the prompt at inference time and the model produces tokens.
+
+You can still, at this point, change what kind of task the model performs. Not by retraining it. By putting examples of the task in the prompt. The model reads the examples, infers the pattern, and applies it to your query. None of its weights move. Nothing about the model changes for the next user. The "learning" exists only inside the context of this one conversation.
+
+This is in-context learning, and the surprising fact about it is that it works at all. Researchers building the first large language models did not design this capability. It emerged. A model trained to predict next tokens, given enough scale and enough training data, started picking up new tasks from a handful of examples in the prompt. That observation became one of the load-bearing claims of the GPT-3 era and helped move LLMs from "generate plausible text" to "do work I can describe."
+
+This lesson covers what in-context learning is, what zero-shot, one-shot, and few-shot mean, when examples help, and when detailed instructions might do better than examples. By the end you will be able to construct a few-shot prompt and have a useful intuition for when to bother.
+
+## What "in context" actually means
+
+Every interaction with an LLM has a context: the input the model sees before it generates. The context contains your question, any system instructions, any prior turns of conversation, and any examples you have included. Everything in that context is fair game for the model to reference when producing its next token.
+
+In-context learning means using the context to teach the model the shape of a task. You put the task description, plus zero or more worked examples, in the input. The model reads through them, picks up on the pattern, and continues the pattern when it gets to the query you actually care about.
+
+The "learning" word is overloaded. Nothing about the model has been updated. The weights are exactly the same after the prompt as they were before. What changed is the model's *immediate* behavior on this specific input. The next user asking a question gets the same untrained model again. In-context learning is more like cuing a trained actor than teaching a student.
+
+## Zero-shot, one-shot, few-shot
+
+The vocabulary distinguishes three patterns based on how many examples you include before your real query.
+
+**Zero-shot.** Just ask. No examples, no demonstrations. The prompt contains your task description and your query. The model relies entirely on what it learned during training to know what you want.
+
+```
+Translate the following from English to French: "Hello, world."
+```
+
+**One-shot.** One example before the real query. You show the model what input-output looks like for this task, then ask for one more.
+
+```
+Translate from English to French.
+English: "Good morning."
+French: "Bonjour."
+
+English: "Hello, world."
+French:
+```
+
+**Few-shot.** Multiple examples before the real query. Same pattern as one-shot, repeated.
+
+```
+Translate from English to French.
+English: "Good morning."
+French: "Bonjour."
+
+English: "How are you?"
+French: "Comment allez-vous?"
+
+English: "Where is the library?"
+French: "Où est la bibliothèque?"
+
+English: "Hello, world."
+French:
+```
+
+The line between zero, one, and few is mostly just convention. People sometimes say "few-shot" loosely to mean any number of examples. The shift that matters is from zero (no demonstrations) to nonzero (some demonstrations). Zero is the cheapest and the most common; few is what you reach for when zero is producing inconsistent results.
+
+## Why it works at all
+
+The honest answer is "we are still figuring that out." The empirical answer is that pretrained LLMs internalize an enormous variety of patterns during training, and well-chosen examples in the prompt help the model select which pattern to invoke.
+
+The Stanford lecturer's framing: when the model sees examples, you have given it an idea of what shape the answer should take. The model then connects what it has learned during training to that shape and reproduces it. The examples do not teach the model new facts. They tell it which of its existing capabilities you want to deploy, and in what format.
+
+This explains why few-shot can fail in predictable ways:
+
+- **If the task requires a fact the model has never seen during training, examples will not help.** The pattern in the examples cannot manufacture knowledge that is not already in the weights.
+- **If the examples are inconsistent or ambiguous, the model can lock onto the wrong pattern.** Three examples that all happen to start with the letter "T" can lead the model to think the task is about words starting with T.
+- **If the task is well outside the training distribution, no number of examples will rescue it.** A handful of demonstrations cannot close a gap of a million missing pretraining samples.
+
+## A few-shot example you can run
+
+Here is a small classification task. Imagine you want the model to label customer-support messages as "billing," "technical," or "account-management."
+
+Zero-shot:
+
+```
+Classify the following customer support message as billing,
+technical, or account-management.
+
+Message: "My password reset email never arrived."
+Label:
+```
+
+The model probably gets this right (account-management) because the task description is clear and the example is unambiguous. Zero-shot is enough.
+
+Now consider a harder version where the categories are less obvious:
+
+```
+Classify the following customer support message as billing,
+technical, or account-management.
+
+Message: "I was charged twice for the same subscription this month."
+Label:
+```
+
+This is "billing" but the model could plausibly label it "account-management" given that the user mentions a subscription. Adding a couple of examples disambiguates:
+
+```
+Classify the following customer support message as billing,
+technical, or account-management.
+
+Message: "My credit card was declined when I tried to renew."
+Label: billing
+
+Message: "I cannot log in even though my password is correct."
+Label: technical
+
+Message: "I need to update the billing address on my account."
+Label: account-management
+
+Message: "I was charged twice for the same subscription this month."
+Label:
+```
+
+The three examples establish what each label means. The model picks up on it and labels the new message correctly. Zero-shot might or might not have nailed this; few-shot makes it reliable.
+
+That is the typical use case. Take a task where zero-shot is unreliable, add three to five clean examples, watch reliability go up.
+
+## When examples help, and when they don't
+
+Few-shot is not free. Each example costs tokens, which costs latency and money at inference time. Each example also constrains what the model considers acceptable output. If your examples accidentally encode a narrow pattern, the model may struggle on inputs that don't match that pattern.
+
+The Stanford lecturer flags an interesting recent shift. Modern reasoning-capable models can sometimes outperform their few-shot self when given a clear, detailed instruction in natural language instead of examples. The intuition: if you spell out the rule explicitly, the model can apply it to arbitrary inputs. If you only show examples, the model has to *guess* at the rule from the examples, and the guess constrains it.
+
+A toy version of this:
+
+- **Few-shot version:** show the model three examples of "calculate the area of a triangle, given base and height." It will probably get it right.
+- **Instruction version:** tell the model "given a base and height, return the area as half of base times height." It will *also* get it right, often with better generalization to edge cases (very small numbers, very large numbers, rounding) because the rule is explicit.
+
+This is an emerging pattern in practitioner reports rather than a settled benchmarked finding. The lecturer flags that the literature on "instructions versus examples" is still developing. For most everyday tasks, few-shot still works fine. For complex tasks where modern reasoning models exist, well-written instructions are increasingly competitive with example-laden prompts; the next lesson on chain-of-thought picks up where this comparison stops.
+
+A practical heuristic from this contrast: if your examples are mostly serving to convey a *format*, few-shot is probably the right tool. If they are serving to convey a *rule*, an instruction may serve you better. For multi-step reasoning specifically, the next lesson on chain-of-thought is the relevant pickup point.
+
+## A practical recipe
+
+When few-shot is the right tool, a few moves consistently improve results.
+
+- **Use 3 to 5 examples by default.** One example is often unstable; a dozen is rarely needed. Three to five is enough to establish the pattern and cheap on tokens.
+- **Make your examples diverse.** If all your examples have the same output category, the model may infer that the only acceptable output is that category. Cover the full range of expected outputs.
+- **Make your examples representative.** If your real queries will involve sentences of 50 words, use 50-word examples. Short examples in the prompt can lead the model to produce short outputs even when long ones are appropriate.
+- **Watch for accidental patterns.** If your three examples all happen to start with capital letters, all happen to be about cats, or all happen to be passive-voice, the model may pick up on the wrong feature. Vary the irrelevant dimensions.
+- **Format consistently.** The model will mimic the format of the examples. If you want a specific output structure (JSON, comma-separated list, single word), make sure all examples follow it.
+- **Place the real query last.** The model attends to all examples, but recent context tends to weigh more heavily. Putting your real query immediately after the examples gives the model the cleanest pattern to extend.
+
+## Why this matters when you use AI
+
+Three things to hold onto when you encounter modern AI tools.
+
+- **Most "this AI tool just understood what I wanted" moments are in-context learning.** Whether you typed a worked example, pasted a sample, or gave it a specification, you used the context to shape the model's immediate behavior. Knowing this has a name is useful. Knowing it does not change the model is more useful.
+- **The model is the same for every user.** Two people running the same prompt get the same untrained model with different contexts. There is no learning across sessions unless the application explicitly stores something. This is the foundational fact that makes "what your AI app does" mostly a function of what is in the system prompt and tool calls, not the underlying model.
+- **Few-shot is a workhorse, not a magic wand.** Three to five clean examples reliably improve narrow tasks. They cannot teach the model facts it does not know, and they cannot rescue tasks that are outside its training distribution. Knowing both ends of the curve is what separates "uses few-shot well" from "throws examples at every problem."
+
+## Common pitfalls
+
+Three mistakes worth dodging.
+
+**Thinking few-shot teaches the model.** It does not. The model is exactly the same after the prompt as before. Few-shot cues an existing capability; it does not install a new one. If you find yourself wanting the model to "remember" something across sessions, that is an application-design problem, not a prompting problem.
+
+**Thinking more examples are always better.** Past the third or fourth example, returns diminish quickly. Past ten, you may actively confuse the model or overfit it to a narrow pattern. The right number is the smallest number that makes the pattern unambiguous.
+
+**Mistaking a format pattern for a rule.** Few-shot is reliable when your examples convey a stable format. It is less reliable when your examples are supposed to convey a complex rule that the model has to *infer*. If the rule is hard to infer, write it out. Prompts that combine an explicit instruction with one or two illustrative examples usually outperform pure-example prompts on hard tasks.
+
+## What you should remember
+
+- **In-context learning means using the prompt to shape the model's immediate behavior.** Weights do not change. The "learning" is local to one inference call.
+- **Zero-shot, one-shot, few-shot.** The vocabulary distinguishes how many demonstrations you include. The conceptually important shift is from zero to nonzero examples.
+- **Few-shot works because pretrained LLMs internalize many patterns during training.** Examples in the prompt help the model select which pattern to invoke. They cannot create knowledge the model does not already have.
+- **Three to five clean, diverse, representative examples is the typical sweet spot.** Format consistently. Place the real query last. Watch for accidental patterns the model could lock onto.
+- **For complex reasoning tasks, an explicit instruction may outperform pure few-shot.** Modern reasoning models can sometimes do better with a written-out rule than with examples. The next lesson covers chain-of-thought, which picks up the multi-step-reasoning thread.
+
+## If you remember one thing
+
+**The model is frozen. The prompt is not.**\
+**Examples in the prompt cue patterns the model already knows.**\
+**Zero-shot when the task is clear, few-shot when zero-shot is unreliable, instructions when the rule is hard to infer.**

@@ -378,6 +378,18 @@ export default defineConfig({
 										{ label: 'References', slug: 'lessons/ai-foundations/how-prompting-works/references' },
 									],
 								},
+								{
+									label: 'Few-shot and in-context learning',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/ai-foundations/in-context-learning-and-few-shot/brief' },
+										{ label: 'Lesson', slug: 'lessons/ai-foundations/in-context-learning-and-few-shot/lesson' },
+										{ label: 'Practice', slug: 'lessons/ai-foundations/in-context-learning-and-few-shot/practice' },
+										{ label: 'Summary', slug: 'lessons/ai-foundations/in-context-learning-and-few-shot/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/ai-foundations/in-context-learning-and-few-shot/cheatsheet' },
+										{ label: 'References', slug: 'lessons/ai-foundations/in-context-learning-and-few-shot/references' },
+									],
+								},
 								{ label: 'More lessons coming soon', slug: 'lessons/ai-foundations/coming-soon' },
 							],
 						},
