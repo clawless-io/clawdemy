@@ -1,0 +1,31 @@
+---
+title: "Summary: How models know word order"
+description: The 4-minute scan version. Transformers process all tokens in parallel and lose the implicit position signal that recurrent models had for free. The 2017 paper fixed this by adding a position vector to each token embedding. Two schemes were proposed; sinusoidal won. Modern LLMs use something different, covered in Phase 2.
+sidebar:
+  order: 4
+  label: Summary
+artifact: summary
+---
+
+**Transformers process all tokens in parallel.** "The cat sat on the mat" and "the mat sat on the cat" use the same tokens. Without an explicit position signal, the model cannot tell them apart. RNNs had position for free because they processed tokens one at a time, in order. Transformers traded that recurrence for parallelism and lost the signal as a side effect. Position information has to be added back explicitly.
+
+This summary is the scan-it-in-four-minutes version. The full lesson walks through the permutation-invariance problem in detail, compares the two original schemes, derives the sinusoidal formula concretely, and explains why the story is not over (a Phase 2 lesson covers the modern answer after attention has been taught).
+
+## Core ideas
+
+- **Self-attention is permutation-invariant by default.** The `Q · K^T` attention computation compares every token to every other token. Nothing in that computation knows which token came first. Without a position signal, shuffling the input tokens would produce identical attention weights.
+- **The fix: add a position vector to each token embedding before the first layer.** If the embedding for *cat* is `e_cat` and the position vector for slot 3 is `p_3`, then what reaches the first attention layer is `e_cat + p_3`. Same word at position 7 arrives as `e_cat + p_7`. The position rides along in the same vector as the token meaning.
+- **Option 1: learned position embeddings.** Allocate one trainable vector per position. Learn it from data, just like any other parameter. Works; has two real limitations. Cannot represent positions beyond the training-set maximum (no learned vector for position 513 if training maxed at 512). And the learned vectors can overfit to positional patterns in the training data.
+- **Option 2: sinusoidal position embeddings.** Use a fixed formula instead of learned parameters. Each position `m` gets a vector of sines and cosines at different frequencies: `PE(m, 2i) = sin(m / 10000^(2i / d_model))` and `PE(m, 2i+1) = cos(m / 10000^(2i / d_model))`. Deterministic, no training required.
+- **Why sinusoidal won.** Two reasons. First, it extrapolates: the formula is well-defined for any position `m`, including ones never seen during training. Second, the dot product of two sinusoidal embeddings at positions `m` and `n` is a function of `m - n` (relative distance), not absolute positions, via the identity `cos(a - b) = cos a cos b + sin a sin b`. Closer tokens produce a higher dot product; distant tokens produce a lower one. The 2017 paper reported comparable performance for both schemes and picked sinusoidal for the extrapolation advantage.
+- **The story is not over.** Sinusoidal embeddings are still in textbooks. Most modern LLMs use a different scheme called RoPE (rotary position embeddings) that injects position directly into the attention computation rather than adding it to the input. That lesson is in Phase 2, after attention has been taught. The same trigonometric machinery comes back there, in a cleaner place.
+- **Pitfall: thinking position "just works" from training.** Without an explicit position signal, the model genuinely treats your sentence as a bag of vectors. Position embeddings are not a cosmetic detail.
+- **Pitfall: confusing token embeddings with position embeddings.** Token embeddings encode *what* a token is (meaning). Position embeddings encode *where* a token sits (slot in sequence). Both are vectors; both get added together; they carry completely different information.
+
+## What changes for you
+
+Before this lesson, "the model knows word order" was probably a vague assumption. After it, you know exactly what that means: a position vector (sinusoidal or learned) is added to the token embedding before the first attention layer. When a model card lists "max context length" or "context window," the position-embedding scheme is part of what determines that number. A model trained with learned embeddings capped at 4K positions cannot extend to 128K without retraining or architectural changes; a model using a scheme that extrapolates (like sinusoidal, or the modern RoPE) can go further.
+
+**Without an explicit position signal, the model treats your sentence as a bag of vectors.**\
+**The 2017 transformer added a position vector to each token before the rest of the model saw it.**\
+**Sinusoidal embeddings work, extend to any sequence length, and naturally encode relative distance.**
