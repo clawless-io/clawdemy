@@ -498,6 +498,18 @@ export default defineConfig({
 										{ label: 'References', slug: 'lessons/ai-foundations/why-tool-using-models-fail/references' },
 									],
 								},
+								{
+									label: 'Transformers beyond text',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/ai-foundations/transformers-beyond-text/brief' },
+										{ label: 'Lesson', slug: 'lessons/ai-foundations/transformers-beyond-text/lesson' },
+										{ label: 'Practice', slug: 'lessons/ai-foundations/transformers-beyond-text/practice' },
+										{ label: 'Summary', slug: 'lessons/ai-foundations/transformers-beyond-text/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/ai-foundations/transformers-beyond-text/cheatsheet' },
+										{ label: 'References', slug: 'lessons/ai-foundations/transformers-beyond-text/references' },
+									],
+								},
 								{ label: 'More lessons coming soon', slug: 'lessons/ai-foundations/coming-soon' },
 							],
 						},

@@ -1,0 +1,156 @@
+---
+title: "Cheatsheet: Transformers beyond text, ViT and Mixture-of-Experts"
+description: "One-page reference. The ViT pipeline, the MoE mechanism, dense-vs-MoE parameter-count math, and other transformer adaptations to know."
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## The one idea that matters
+
+```
+The transformer block was designed for translation.
+It turned out to work for almost everything else too.
+ViT adapts it to non-text inputs.
+MoE rewires its internal compute for sparse routing.
+```
+
+## The ViT pipeline
+
+```
+IMAGE (e.g., 224×224)
+   ↓
+Split into fixed-size patches (e.g., 16×16) → 196 patches
+   ↓
+Each patch → linear projection → 1 vector per patch
+   ↓
+Prepend CLS token (learned vector) + add position embeddings
+   ↓
+Run through transformer encoder (standard architecture)
+   ↓
+Take CLS token's final embedding
+   ↓
+Feed-forward network → class label
+```
+
+**Same transformer block as Phase 2.** What changes is input tokenization (patches instead of words) and output decoding (class via CLS).
+
+## ViT vs CNN: the trade-off
+
+| | CNN | ViT |
+| --- | --- | --- |
+| **Inductive bias** | High (translation equivariance, locality, built-in) | Low (must be learned from data) |
+| **Small data** | Wins | Loses |
+| **Large data** | Loses | Wins |
+| **Modern frontier image work** | Embedded/constrained | Default |
+
+## ViT as multimodal foundation
+
+```
+Image  → ViT-style encoder    → image tokens
+Text   → tokenizer/embeddings  → text tokens
+                                       ↓
+                                 LLM decoder
+                                       ↓
+                                  response
+```
+
+**Examples:** LLaVA, GPT-4V, Claude with vision, Gemini. All ViT-style encoder + LLM.
+
+## The MoE mechanism
+
+Standard transformer block:
+
+```
+TOKEN → attention → FFN (single dense network) → output
+```
+
+MoE transformer block:
+
+```
+TOKEN → attention → gating network decides: "send to experts 3 and 7"
+                       ↓
+                   activate only those 2 of N experts
+                       ↓
+                   weighted combine → output
+                       ↑
+                   other (N-2) experts idle for this token
+```
+
+**Routing is per-token, not per-input.** Different tokens in the same prompt go to different experts.
+
+## Dense vs MoE compute math
+
+```
+Dense, 70B parameters:
+  active params per token = 70B
+  per-token compute = proportional to 70B
+
+MoE, 200B total params, 2-of-8 routing (each expert ~22B, shared ~6B):
+  active params per token = 2 × 22B + 6B = 50B
+  per-token compute = proportional to 50B
+  
+2.85× more total parameters, similar per-token cost.
+```
+
+**This is why frontier-scale models use MoE.** Scale capability without scaling latency.
+
+## Reading parameter-count claims
+
+```
+"1-trillion-parameter model"
+   ↓
+Ask: dense or MoE?
+   ↓
+If dense: per-token active = 1T (very expensive)
+If MoE:   per-token active = MUCH less (typically 100-200B)
+   ↓
+Active-parameters-per-token is the relevant comparison
+for cost and latency.
+```
+
+## Other adaptations to know exist
+
+| Adaptation | What it does |
+| --- | --- |
+| **Diffusion transformers** | Transformer self-attention inside denoising diffusion (modern image generation) |
+| **Speech transformers** | Audio mel-spectrograms tokenized into patches, ViT-style (Whisper) |
+| **Recommendation transformers** | Self-attention over user behavior sequences |
+| **Diffusion-based LLMs** | Text generation by denoising; next lesson covers |
+
+**Pattern in each case:** same transformer block, modality-specific input/output handling.
+
+## When to use dense vs MoE
+
+| Choose dense when | Choose MoE when |
+| --- | --- |
+| Memory constrained (single GPU) | More memory available (multi-GPU or cloud) |
+| Small batch sizes | Large batch sizes |
+| Maximum predictable latency | Want capability scaling without latency scaling |
+| Mature tooling required | OK with MoE-specific tooling |
+
+## Pitfalls to dodge
+
+| Pitfall | Reality |
+| --- | --- |
+| "Comparing dense and MoE parameter counts directly." | Per-token active matters; MoE total is misleading for cost. |
+| "ViT replaced CNNs everywhere." | No. CNNs still competitive on small data and resource-constrained tasks. |
+| "Transformer-based system for X = architectural innovation." | Usually the novelty is in tokenization/decoding, not the block. |
+| "MoE = automatically faster." | MoE is faster per-token compute but has training-stability and memory costs. |
+
+## Glossary
+
+- **Vision Transformer (ViT):** transformer architecture applied to image patches. Split image into patches, project to vectors, run through encoder, classify via CLS.
+- **CLS token:** learned vector prepended to the input sequence, used to produce a single embedding for the whole input. Convention from BERT (Phase 2).
+- **Mixture-of-Experts (MoE):** transformer variant where the FFN is replaced by N experts plus a gating network that routes each token to a subset (typically 2 of N).
+- **Gating network:** small neural network that decides which experts to send each token to. Trained jointly with the experts.
+- **Dense model:** all parameters are active for every token. Standard transformer.
+- **Sparse model:** only a subset of parameters are active for any given token. MoE is the dominant sparse-architecture pattern.
+- **Total parameters:** the size of the model on disk. Includes inactive parameters.
+- **Active parameters per token:** the parameters used during a forward pass on a single token. The relevant cost number.
+- **Diffusion transformer:** transformer architecture inside a denoising diffusion process for image generation.
+
+**The transformer block was designed for translation. It turned out to work for almost everything.**\
+**ViT adapts it to non-text inputs. MoE adapts the block's internal compute for sparse routing.**\
+**Most modern AI systems are some combination of these adaptations on the same underlying architecture.**

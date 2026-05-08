@@ -1,0 +1,200 @@
+---
+title: "Practice: Transformers beyond text, ViT and Mixture-of-Experts"
+description: "Self-check on the ViT pipeline, the MoE mechanism, and how to read parameter-count claims. Plus a hands-on exercise comparing dense vs MoE compute and flashcards."
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+**1. Walk through the ViT pipeline. What happens to an image to turn it into a class prediction?**
+
+<details>
+<summary>Show answer</summary>
+
+Six steps:
+
+1. **Split the image into fixed-size patches.** Typically 16×16 pixels each. A 224×224 image becomes 196 patches.
+
+2. **Convert each patch to a vector.** Flatten the patch (so a 16×16 RGB patch becomes 768 numbers) and project through a learned linear layer to get a single embedding vector per patch.
+
+3. **Prepend a CLS token.** A learned vector at position 0, same convention as BERT.
+
+4. **Add position embeddings.** Each patch needs to know where it sat in the original image grid.
+
+5. **Run through a transformer encoder.** Standard architecture. Self-attention lets every patch attend to every other patch.
+
+6. **Project the CLS token's final embedding to a class.** A small feed-forward network maps the CLS embedding to a class label.
+
+Same transformer block as Phase 2 covered, just fed different kinds of tokens.
+
+</details>
+
+**2. Why does ViT work, and what's the trade-off compared to CNNs?**
+
+<details>
+<summary>Show answer</summary>
+
+ViT works because, with enough training data, the transformer learns the inductive biases CNNs had built in by hand. The key biases for image classification (translation equivariance, locality, hierarchical composition) emerge from the data and self-attention pattern rather than being imposed by the architecture.
+
+The trade-off: CNNs win on small datasets because their built-in inductive biases save a lot of training data. ViT wins on large datasets because the same flexibility that hurts on small data lets it learn richer patterns from larger data. The empirical headline of the original ViT paper was that on ImageNet alone, CNNs were still competitive; on JFT-300M (a much larger Google internal dataset), ViT dominated. Modern frontier-scale image and multimodal work uses ViT-style encoders almost universally.
+
+</details>
+
+**3. Walk through the MoE mechanism. What changes about a transformer block when you add MoE?**
+
+<details>
+<summary>Show answer</summary>
+
+The change is in the feed-forward network (FFN) layer. In a standard transformer block, after attention, the token's representation passes through a single FFN. In MoE, the FFN is replaced by:
+
+1. **N experts**, each its own FFN with its own weights. Typical N is 8, 16, 32, or 64.
+
+2. **A small gating network** that takes the token's representation and produces a routing decision: "send this token to experts 3 and 7." Typically 2 of N experts are selected.
+
+3. **Only the selected experts are activated.** The other N-2 sit idle for this token. The selected experts process the token's representation in parallel.
+
+4. **Their outputs are combined**, typically via weighted sum with the gating network's confidences as weights.
+
+The result: total parameter count scales with N, but per-token compute scales with how many experts are activated (always 2 in this scheme). A 200-billion-parameter MoE model with 2-of-8 routing has the per-token compute of a roughly 50-billion-parameter dense model.
+
+</details>
+
+**4. Why is per-token MoE routing (rather than per-input routing) the design choice?**
+
+<details>
+<summary>Show answer</summary>
+
+Two reasons:
+
+**Specialization.** Different experts can specialize in different kinds of tokens. The gate learns over training that "code-like tokens" go to experts trained on code, "math tokens" go to math experts, etc. Per-token routing lets the model use its full capacity in a fine-grained way that per-input routing would miss.
+
+**Parallelism.** Each expert can live on a different GPU. Per-token routing means a single prompt's tokens get distributed across the GPUs holding different experts, parallelizing the computation. Per-input routing would force all tokens of a prompt onto the same expert (and its GPU), losing the parallelism opportunity.
+
+The Stanford lecturer flagged this as the key practical detail: the routing is per-token, and that's what makes MoE actually trainable at scale.
+
+</details>
+
+**5. Why is "1 trillion parameter model" potentially misleading without more context?**
+
+<details>
+<summary>Show answer</summary>
+
+Because the parameter count could be either:
+
+**Dense** (1 trillion total parameters all activated for every token). Per-token compute is proportional to 1 trillion. Latency and cost are very high.
+
+**MoE** (1 trillion total parameters, with sparse routing). Per-token active parameters might be 100-200 billion, depending on the expert count and routing scheme. Per-token compute is proportional to that smaller number.
+
+A "1-trillion-parameter MoE model with 2-of-8 routing" has the per-token compute profile of roughly a 250-billion-parameter dense model. Comparing it to a 1-trillion-parameter dense model is not apples-to-apples on speed or cost.
+
+The right question to ask: dense or MoE? If MoE, what are total and active parameters? Modern model cards usually report both numbers explicitly, but press releases often quote only the headline.
+
+</details>
+
+## Try it yourself: dense vs MoE compute math
+
+About 10 minutes. Pen and paper.
+
+**Setup.** You're choosing between two models for a deployment:
+
+- **Model A:** dense, 70 billion parameters.
+- **Model B:** MoE, 200 billion total parameters, 2-of-8 expert routing (each expert is roughly 22 billion parameters; only 2 are active per token).
+
+**Step 1.** Compute the per-token active parameter count for each model.
+
+<details>
+<summary>Show answer</summary>
+
+**Model A (dense):** 70 billion active per token. All parameters are active for every token in a dense model.
+
+**Model B (MoE):** ~50 billion active per token. The shared parameters of the architecture (attention layers, embeddings, normalization, etc.) plus the 2 active experts. If we estimate each expert at roughly 22 billion and the shared architecture at ~6 billion, then 2 × 22 + 6 = 50 billion active.
+
+So in terms of per-token compute, Model B is similar to Model A; in terms of total parameter count it is 2.85× larger.
+
+</details>
+
+**Step 2.** Which model would you expect to have higher per-token inference latency, and why?
+
+<details>
+<summary>Show answer</summary>
+
+**Model A** would generally be slightly slower per-token, because per-token compute is what determines latency, and 70 billion > 50 billion. (In practice, the gap could be smaller or even reversed depending on hardware, MoE routing overhead, batch effects, etc., but the underlying compute is the right first-order analysis.)
+
+This is the practical motivation for MoE: you can have a model with substantially more total parameters (200B vs 70B) at similar or even better per-token inference speed. The trade-off is that MoE training is more complex (gating network must be trained well, expert utilization must be balanced) and memory pressure is higher (all experts must be loaded even if only 2 are active per token).
+
+</details>
+
+**Step 3.** When would you choose Model A over Model B, and vice versa?
+
+<details>
+<summary>Show one possible answer</summary>
+
+**Model A (dense):** prefer when memory is constrained (you need to fit the model on a single GPU), when batch sizes are small (per-token compute matters more than expert utilization), or when tooling is more mature (dense-model serving has more options). Also prefer when you need the most predictable latency (MoE routing introduces variability).
+
+**Model B (MoE):** prefer when you have more memory and can host all the experts (often across multiple GPUs), when batch sizes are large (per-token compute is the dominant cost), and when you want capability scaling without latency scaling. Also prefer for general-purpose models where the broader expertise across many experts is useful.
+
+In practice, frontier-scale serving increasingly uses MoE because the capability-per-token-compute ratio is better. Smaller-scale and memory-constrained deployments still favor dense.
+
+</details>
+
+## Flashcards
+
+Eight cards.
+
+<FlashcardSet>
+
+<Flashcard question="What does ViT (Vision Transformer) do, in one sentence?">
+
+ViT applies the transformer architecture to images by splitting the image into fixed-size patches, treating each patch as a token, and running the sequence through a standard transformer encoder. With enough training data, the model learns image-classification inductive biases that CNNs had built in by hand.
+
+</Flashcard>
+
+<Flashcard question="Walk through the ViT pipeline at a high level.">
+
+(1) Split the image into fixed-size patches (typically 16×16 pixels). (2) Project each patch to a vector via a learned linear layer. (3) Prepend a CLS token (learned vector). (4) Add position embeddings. (5) Run through a transformer encoder. (6) Project the CLS token's final embedding to a class label via a feed-forward network.
+
+</Flashcard>
+
+<Flashcard question="What does MoE (Mixture-of-Experts) do, in one sentence?">
+
+MoE keeps the transformer architecture but replaces the dense feed-forward layer with multiple "experts" (each its own FFN) plus a gating network that routes each token to a subset of experts (typically 2 of N). The result: total parameter count scales with N, but per-token compute stays roughly constant.
+
+</Flashcard>
+
+<Flashcard question="Why is MoE routing per-token, not per-input?">
+
+Two reasons. Specialization: different experts can specialize in different kinds of tokens (code-like, math, prose, etc.); per-token routing lets the model use its full capacity in a fine-grained way. Parallelism: each expert can live on a different GPU; per-token routing distributes a prompt's tokens across the GPUs holding different experts, parallelizing the computation. Per-input routing would force all tokens onto the same GPU and lose the parallelism.
+
+</Flashcard>
+
+<Flashcard question="When you see 'X-billion-parameter model' in a press release, what should you ask?">
+
+Two questions. (1) Is it dense or MoE? Dense means all X billion parameters are active for every token. MoE means total X billion but per-token active count is much smaller (depending on routing scheme). (2) If MoE, what are total parameters and active parameters per token? Modern model cards usually report both; press releases often quote only the headline. The active number is the relevant comparison for cost and latency.
+
+</Flashcard>
+
+<Flashcard question="What inductive biases does a CNN have that ViT does not?">
+
+CNNs build in translation equivariance (a feature recognized at one location is recognized anywhere) and locality (small kernels look at small image patches, building hierarchically). These biases save training data on image tasks because the architecture imposes structure that matches image data. ViT has very low inductive bias by comparison; it has to learn equivariance and locality from data. With enough data, ViT can match or exceed CNNs; with little data, CNNs win.
+
+</Flashcard>
+
+<Flashcard question="Why does ViT make multimodal AI possible?">
+
+Because ViT proves the transformer block works on non-text inputs once you have a way to tokenize them. Once you have a ViT-style image encoder that produces tokens, you can concatenate those image tokens with text tokens and feed everything into a text-decoder LLM. That is the architecture of modern multimodal systems (LLaVA, GPT-4V, Claude with vision, Gemini): a ViT-style encoder + LLM. The pattern generalizes: speech, video, even structured data can be tokenized and fed into a transformer the same way.
+
+</Flashcard>
+
+<Flashcard question="Beyond ViT and MoE, what other transformer adaptations did the lesson name?">
+
+Diffusion transformers (transformer self-attention inside a denoising diffusion process for image generation). Speech transformers (audio tokenized into mel-spectrogram patches, ViT-style; Whisper is the canonical example). Recommendation transformers (self-attention over user behavior sequences). Diffusion-based LLMs (next lesson covers them: text generation by denoising rather than token-by-token). The pattern in each case is the same: same transformer block, modality-specific input tokenization and output decoding.
+
+</Flashcard>
+
+</FlashcardSet>
