@@ -1,0 +1,204 @@
+---
+title: "Practice: New ways to generate, speculative decoding and diffusion LLMs"
+description: "Self-check on the speculative decoding mechanism, the diffusion-LLM paradigm shift, and when each alternative fits. Plus a hands-on triage exercise and flashcards."
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+**1. Walk through the speculative decoding mechanism. What does each step do, and why does it speed things up?**
+
+<details>
+<summary>Show answer</summary>
+
+Three steps:
+
+1. **Draft model generates K tokens autoregressively.** A small "draft" model produces the next K tokens (typically K=4-8). Because the model is small, this is fast.
+
+2. **Target model verifies in one pass.** All K draft tokens (plus the prefix) get fed through the big "target" model in a single forward pass. The target produces probability distributions for K+1 positions: one for each of the K draft positions, plus one for the next position.
+
+3. **Acceptance-rejection scheme.** Each draft token is compared to the target's distribution at that position. If the target's probability for that token is high enough, accept. Otherwise, fall back to sampling from the target's distribution at that position.
+
+Why it speeds things up: at frontier scale, LLM inference is memory-bound. A single big-model forward pass that processes K tokens is roughly as expensive as one with 1 token, because the bottleneck is loading the model's weights from GPU memory, not the computation itself. Speculative decoding turns this property into many-tokens-per-pass instead of one.
+
+</details>
+
+**2. Why is speculative decoding's quality guarantee mathematically guaranteed (not just usually)?**
+
+<details>
+<summary>Show answer</summary>
+
+The acceptance-rejection scheme is designed so the marginal distribution over generated tokens exactly matches the target model's distribution. Specifically: when the draft model's probability for a token is lower than the target's, the token is accepted with a probability that, combined with the rejection-and-resample step, yields the same overall distribution as if the target had generated each token alone.
+
+The proof comes from the law of total probability: split the probability of any token into "draft proposed it and target accepted it" plus "draft didn't propose it and we resampled," and the algebra works out to the target's distribution. The Stanford lecturer cited this as a few-line proof in the original paper; if you've seen rejection sampling in probability class, the structure is the same.
+
+The practical implication: you cannot tell from the output whether a response was generated speculatively or naively. Same output distribution; faster generation.
+
+</details>
+
+**3. Walk through the diffusion-LLM mechanism. How does it differ from autoregressive generation?**
+
+<details>
+<summary>Show answer</summary>
+
+**Training (forward + reverse process):**
+
+- Forward: take a clean text sequence; gradually replace tokens with `[MASK]` token over many noise levels, until the entire sequence is masked.
+- Reverse: train a model to predict original tokens given a partially-masked sequence. Loss is on prediction quality at each noise level.
+
+**Inference (generation):**
+
+- Start with an all-masked sequence (conditioned on a prompt).
+- Run the model for K denoising steps (typically 10-50).
+- Each step produces a refined prediction across all positions in parallel.
+- After K steps, the sequence is fully unmasked and serves as the output.
+
+Compared to autoregressive: autoregressive is sequential (token i depends on tokens 1 to i-1) and the number of forward passes equals the number of output tokens. Diffusion is parallel (each step considers the whole sequence at once) and the number of forward passes equals K (much smaller than output length on long generations). This is where the ~10× speed advantage on long outputs comes from.
+
+</details>
+
+**4. Why does "noise is to images what mask is to text" make sense?**
+
+<details>
+<summary>Show answer</summary>
+
+For images, diffusion adds Gaussian noise to clean images and trains a model to reverse the process. Gaussian noise works because images are continuous (each pixel has a continuous color value) and Gaussian noise has clean mathematical properties.
+
+For text, you can't add Gaussian noise because tokens are discrete. There's no "halfway between cat and dog" token to add a small amount of noise to. So researchers needed a discrete equivalent of "gradually adding noise."
+
+The current consensus: replace tokens with a `[MASK]` token gradually. At step t=0, the sequence is clean. At step t=1, replace 10% of tokens with mask. Step t=2, 20%. Step t=T, 100% (all mask). The model learns to predict original tokens given a sequence that's been partially masked. At inference, start at t=T (all mask), run reverse to t=0 (fully predicted).
+
+It's the discrete analog of "noise level" for images, and the mathematics of the diffusion process carry over with minor adjustments. Different paradigm, same shape of training-and-generation framework.
+
+</details>
+
+**5. When would you reach for speculative decoding vs diffusion LLMs?**
+
+<details>
+<summary>Show answer</summary>
+
+**Speculative decoding: always (where available).** It's a "purely beneficial" optimization. Same output distribution as the target model, just faster. Modern API serving uses it implicitly; you benefit without doing anything. As an applied person, you don't need to "reach for" speculative decoding; it's already running for most production LLM endpoints.
+
+**Diffusion LLMs: specific applications, with caveats.**
+
+- **Fill-in-the-middle code generation.** DLLMs naturally consider both prefix and suffix; autoregressive models have to be specially trained for this and it's not their default strength.
+- **Extreme low-latency on long outputs.** ~10× speedup on outputs of thousands of tokens. Useful for streaming code generation, long-form drafts.
+- **Niche structured-output applications.** Form filling, data generation, anywhere the output has a known shape that benefits from coarse-to-fine refinement.
+
+**Don't reach for DLLMs:** general-purpose chat (autoregressive frontier models still win on quality), reasoning-heavy tasks (CoT and similar techniques need adaptation), or any application where the production tooling matters and you can't host research-grade infrastructure.
+
+</details>
+
+## Try it yourself: triage four scenarios
+
+About 10 minutes. For each scenario, decide which alternative (speculative decoding, diffusion LLM, or neither) is the right fit and why.
+
+**Scenario 1.** Your team is launching a chat API and wants the fastest possible response times without changing the model's quality.
+
+<details>
+<summary>Show analysis</summary>
+
+**Speculative decoding.** This is the textbook use case. You get faster generation (often 2-3× speedup) with no quality change. The user-facing latency drops; the perceived quality stays the same. Modern serving frameworks (vLLM, TensorRT-LLM, TGI) make this a configuration option rather than a research project.
+
+Don't reach for diffusion: production tooling is immature, quality is not yet at frontier, and you'd be giving up a known-good autoregressive model for a less-tested architecture.
+
+</details>
+
+**Scenario 2.** You're building a code editor's autocomplete feature. Users want suggestions inserted in the middle of an existing function, given both the code before and after the cursor.
+
+<details>
+<summary>Show analysis</summary>
+
+**Diffusion LLM is a real option here.** Fill-in-the-middle is exactly where DLLMs shine: the bidirectional context (the model considers both the code before and after the insertion point at each step) maps cleanly to the user's mental model of "complete this missing piece."
+
+Caveat: production deployment of DLLMs as of late 2025 is still mostly research-grade. You might need to host the model yourself or use one of a small number of dedicated DLLM endpoints. For comparison, autoregressive models with explicit fill-in-the-middle training (like Qwen2.5-Coder, DeepSeek-Coder) work well too and are more battle-tested.
+
+Honest answer: it depends on whether you can afford the operational overhead of DLLM hosting. If yes, the user experience may be better. If no, autoregressive with FIM training is the safer choice.
+
+</details>
+
+**Scenario 3.** You're benchmarking different LLMs against each other and want to compare their reasoning quality on AIME problems.
+
+<details>
+<summary>Show analysis</summary>
+
+**Neither is directly relevant.** Speculative decoding doesn't change quality, just speed; it doesn't affect benchmark comparisons. Diffusion LLMs aren't yet at autoregressive parity on reasoning benchmarks, so comparing them on reasoning would underestimate their capabilities relative to where they're headed.
+
+If you're benchmarking reasoning, focus on the autoregressive frontier (with or without speculative decoding under the hood). The quality you measure is what users experience.
+
+</details>
+
+**Scenario 4.** You're optimizing an existing autoregressive LLM serving infrastructure. Your throughput cost is the dominant operational expense.
+
+<details>
+<summary>Show analysis</summary>
+
+**Speculative decoding** is the right reach. It's compatible with your existing model and existing infrastructure; modern serving frameworks make it a configuration option. Throughput improvements of 2-3× are typical with no quality compromise.
+
+Other complementary techniques worth pairing with speculative decoding: quantization (lower-precision weights, smaller memory footprint), continuous batching (process incoming requests across many ongoing generations), and KV cache optimization. These are all "horizontal" wins that stack.
+
+DLLMs would require throwing out your existing model and infrastructure, which is a much bigger commitment than what the question asks for.
+
+</details>
+
+## Flashcards
+
+Eight cards.
+
+<FlashcardSet>
+
+<Flashcard question="What does speculative decoding do, in one sentence?">
+
+A small "draft" model proposes the next K tokens; the big "target" model verifies them in a single forward pass; an acceptance-rejection scheme guarantees the output distribution matches the target's. Net: many tokens per target-model pass instead of one, with no quality compromise.
+
+</Flashcard>
+
+<Flashcard question="Why does speculative decoding speed things up, mechanically?">
+
+LLM inference at frontier scale is memory-bound, not compute-bound. A single big-model forward pass with K tokens is roughly as expensive as one with 1 token because the bottleneck is loading model weights from GPU memory. Speculative decoding turns this into many-tokens-per-pass instead of one, with no extra cost on the dominant memory load.
+
+</Flashcard>
+
+<Flashcard question="Why is speculative decoding's quality guarantee mathematical, not just empirical?">
+
+The acceptance-rejection scheme is designed so the marginal distribution over generated tokens exactly matches the target model's. The proof uses the law of total probability and is just a few lines. You cannot tell from the output whether a response was generated speculatively or naively; same distribution, faster generation.
+
+</Flashcard>
+
+<Flashcard question="What does multi-token prediction do, and how does it differ from speculative decoding?">
+
+Multi-token prediction embeds the draft mechanism inside the target model with multiple heads on top of the final-layer representation. Each head predicts a different position; an acceptance scheme picks among the candidates. Same idea as speculative decoding, but no separate small model needed. The model itself produces all the candidates.
+
+</Flashcard>
+
+<Flashcard question="What does a diffusion LLM (DLLM) do, in one sentence?">
+
+DLLMs generate text by starting from an all-masked output sequence and refining it across K denoising steps. Each step considers the whole sequence in parallel. The output emerges from coarse-to-fine refinement, not autoregressive token-by-token.
+
+</Flashcard>
+
+<Flashcard question="What's the 'noise is to images what mask is to text' translation?">
+
+For image diffusion, the noise added to clean images is Gaussian (continuous). For text, tokens are discrete; you can't add Gaussian noise. The discrete analog is the `[MASK]` token: gradually replace tokens with mask tokens over diffusion steps, train the model to predict original tokens given partially-masked input. The mathematics of diffusion carry over with minor adjustments.
+
+</Flashcard>
+
+<Flashcard question="Why are DLLMs ~10× faster than autoregressive on long outputs?">
+
+Number of forward passes for autoregressive = number of output tokens (could be thousands). For DLLMs = number of denoising steps (typically 10-50). On a 1000-token output, DLLMs do ~50 passes vs autoregressive's 1000. Each pass is full-sequence (more expensive than autoregressive's single-token pass), but the multiplier is small enough that DLLMs come out ahead substantially.
+
+</Flashcard>
+
+<Flashcard question="When should you reach for speculative decoding vs DLLMs?">
+
+Speculative decoding: essentially always, where serving infrastructure supports it. It's a "purely beneficial" optimization with no quality compromise. Most production LLM APIs use it implicitly. DLLMs: specific applications where fill-in-the-middle matters (code editors), extreme low-latency on long outputs is critical, or structured-output generation benefits from coarse-to-fine refinement. Not yet for general-purpose use; quality not at frontier and tooling is research-grade.
+
+</Flashcard>
+
+</FlashcardSet>

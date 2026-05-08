@@ -510,6 +510,18 @@ export default defineConfig({
 										{ label: 'References', slug: 'lessons/ai-foundations/transformers-beyond-text/references' },
 									],
 								},
+								{
+									label: 'New ways to generate',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/ai-foundations/new-ways-to-generate/brief' },
+										{ label: 'Lesson', slug: 'lessons/ai-foundations/new-ways-to-generate/lesson' },
+										{ label: 'Practice', slug: 'lessons/ai-foundations/new-ways-to-generate/practice' },
+										{ label: 'Summary', slug: 'lessons/ai-foundations/new-ways-to-generate/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/ai-foundations/new-ways-to-generate/cheatsheet' },
+										{ label: 'References', slug: 'lessons/ai-foundations/new-ways-to-generate/references' },
+									],
+								},
 								{ label: 'More lessons coming soon', slug: 'lessons/ai-foundations/coming-soon' },
 							],
 						},
