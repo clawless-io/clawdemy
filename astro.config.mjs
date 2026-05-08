@@ -432,6 +432,18 @@ export default defineConfig({
 										{ label: 'References', slug: 'lessons/ai-foundations/how-rag-works/references' },
 									],
 								},
+								{
+									label: 'Function calling and tools',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/ai-foundations/how-models-call-functions/brief' },
+										{ label: 'Lesson', slug: 'lessons/ai-foundations/how-models-call-functions/lesson' },
+										{ label: 'Practice', slug: 'lessons/ai-foundations/how-models-call-functions/practice' },
+										{ label: 'Summary', slug: 'lessons/ai-foundations/how-models-call-functions/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/ai-foundations/how-models-call-functions/cheatsheet' },
+										{ label: 'References', slug: 'lessons/ai-foundations/how-models-call-functions/references' },
+									],
+								},
 								{ label: 'More lessons coming soon', slug: 'lessons/ai-foundations/coming-soon' },
 							],
 						},

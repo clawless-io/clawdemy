@@ -1,0 +1,221 @@
+---
+title: "Practice: How models call functions"
+description: "Self-check on the three-stage mechanism, what the LLM sees, the two SFT training pairs, and the common failure modes. Plus a hands-on tracing exercise on a worked function-call flow and flashcards."
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+A short retrieval pass. Answer in your head (or on paper) before opening the collapsible.
+
+**1. What's the relationship between function calling and RAG?**
+
+<details>
+<summary>Show answer</summary>
+
+They are siblings. Both close the gap between an LLM's frozen weights and information the model needs at inference time. RAG handles **unstructured** data: documents, web pages, knowledge-base entries that the model retrieves and reads as text. Function calling handles **structured** data: API responses, database records, and structured side effects that the model invokes via predefined function signatures.
+
+Both work by giving the model relevant external information at inference time, then letting the model produce a natural-language response wrapping that information. The data type and the access pattern differ; the underlying problem (close the knowledge-and-action gap) is the same.
+
+</details>
+
+**2. Walk through the three-stage mechanism. What does each stage do, and which ones involve the LLM?**
+
+<details>
+<summary>Show answer</summary>
+
+**Stage 1: tool prediction.** LLM reads the user query plus function descriptions (signatures + docstrings) in the preamble. The model decides whether any of the available functions are relevant, and if so, fills in the arguments. The output is a structured call (function name + arguments, typically JSON), not natural language. **LLM involved.**
+
+**Stage 2: function execution.** Regular code parses the structured call and actually runs the function. This stage is not LLM-driven; it is whatever the function implementation does (an API call, a database query, a side effect). The LLM is paused. **LLM not involved.**
+
+**Stage 3: response formatting.** The runtime feeds the structured function output back to the LLM, along with the conversation history (original query, function call, structured response). The model produces a natural-language answer that wraps the structured data. **LLM involved.**
+
+The user sees only the Stage 3 output. Stages 1 and 2 happen inside the system.
+
+</details>
+
+**3. What does the LLM see at each stage, and what does it not see?**
+
+<details>
+<summary>Show answer</summary>
+
+The LLM **sees**:
+
+- The user's query in natural language.
+- The function signature (name + argument types).
+- The function's docstring (what it does, what it returns).
+- The conversation history so far, including any prior function calls and their structured responses.
+
+The LLM **does not see**:
+
+- The function's implementation (the actual code).
+- The internals of the API the function calls.
+- Anything that happens during Stage 2 except the structured return value.
+
+This is why function descriptions have to be complete and specific: the model has nothing else to go on. A vague docstring leads to wrong-argument failures; a missing edge-case description leads to wrong-tool selection.
+
+</details>
+
+**4. Name the two SFT training pairs that typically go into a function-calling model.**
+
+<details>
+<summary>Show answer</summary>
+
+**Pair 1: tool prediction.** Examples that teach the model to map a user query plus a function description to a structured function call. Each training example is a (query, function-description, expected-call) triple. The model learns when to call the function, when not to, and how to fill in the arguments correctly. Many examples cover edge cases like the user query being slightly indirect (the model has to infer it should still call the function) or unrelated to any available function (the model should not call anything).
+
+**Pair 2: response formatting.** Examples that teach the model to map a structured function response (plus conversation history) to a natural-language answer. Each example is a (full-history, expected-response) pair. The model learns the right tone and format for tool-augmented responses.
+
+Newer alternative: sufficiently strong reasoning-capable models can sometimes skip explicit SFT for tool prediction and rely on their reasoning ability to figure out the right call from the function description alone. This is an active area; the boundary is moving as base models improve.
+
+</details>
+
+**5. What are the most common function-calling failure modes, and where would you look to debug them?**
+
+<details>
+<summary>Show answer</summary>
+
+**Argument hallucination.** The model emits a function call with plausible-looking but wrong arguments: a date in the wrong format, a parameter name slightly off, a fabricated ID. Debug by inspecting the structured Stage 1 output before Stage 2 runs. Modern function-calling APIs validate the JSON schema, which catches the most obvious cases, but subtle hallucinations (real-format-wrong-value) still slip through.
+
+**Wrong-tool selection.** When multiple tools are available, the model picks the wrong one. The fix is usually clearer tool descriptions or better SFT data. This becomes more important when the available tool set grows; the next lesson (agent loops) covers tool-selection patterns.
+
+**Latency.** Stage 2 is real network calls. The user-perceived response time is the LLM's two roundtrips plus the function call. Apps that need fast responses sometimes cache results, parallelize calls, or skip the function-call detour when not needed.
+
+The general debugging frame: when an AI feature using tools misbehaves, look at the structured Stage 1 call, not just the natural-language output. Most failures are traceable to "model picked the wrong function" or "model passed the wrong arguments," not "model hallucinated in plain English."
+
+</details>
+
+## Try it yourself: trace a function-call flow
+
+About 12 minutes. Pen and paper.
+
+You're building a customer-support assistant. The user asks: "What was my last order?"
+
+You have a function defined like this:
+
+```python
+def get_recent_orders(customer_id: str, limit: int = 5) -> list[Order]:
+    """Fetches the customer's most recent orders.
+
+    Args:
+      customer_id: The customer's unique ID.
+      limit: Max number of recent orders to return (default 5).
+
+    Returns:
+      List of Order objects, each with order_id, date, total, status.
+    """
+```
+
+The system context already has the customer's ID (let's say `CUST_8842`).
+
+**Step 1.** Write what Stage 1 (tool prediction) should output as a structured call.
+
+<details>
+<summary>Show one possible answer</summary>
+
+```json
+{
+  "function": "get_recent_orders",
+  "arguments": {
+    "customer_id": "CUST_8842",
+    "limit": 1
+  }
+}
+```
+
+The model recognized the user's question maps to this function. It pulled the customer ID from the context. It picked `limit: 1` because the user asked about "my last order" (singular). A model that emitted `limit: 5` (the default) would also be technically correct but wasteful; the user only needs one. A model that hallucinated a different customer ID would be a Stage 1 failure (argument hallucination) and the support assistant would return wrong data.
+
+</details>
+
+**Step 2.** Stage 2 runs and returns this structured response:
+
+```json
+{"order_id": "ORD_99812", "date": "2026-04-30", "total": "$87.42", "status": "delivered"}
+```
+
+What does Stage 3 (the LLM response-formatting step) need to do?
+
+<details>
+<summary>Show one possible answer</summary>
+
+The LLM gets the structured response plus the conversation history (original query: "What was my last order?"). It produces a natural-language answer that wraps the structured data:
+
+> "Your most recent order was ORD_99812, placed on April 30, 2026, for $87.42. It was delivered."
+
+The model added natural-language framing ("most recent," "placed on," "for"), formatted the date in a friendlier form, and named the status without the JSON shape. A poorly-tuned model might dump the JSON directly or mix the response oddly; a well-trained one produces the natural answer above.
+
+</details>
+
+**Step 3.** Now suppose the user followed up with: "Can you tell me what kind of bear that was?" Should the LLM call the function again?
+
+<details>
+<summary>Show one possible answer</summary>
+
+Probably no, since `get_recent_orders` returns order metadata (ID, date, total, status), not product-level details. The model would need a different function (perhaps `get_order_details(order_id)`) to answer this question.
+
+A well-trained function-calling model would recognize the gap between the user's question and the available tools, and respond with something like: "I have your order ID and totals, but I don't have access to product-level details from this tool. Is there a way I can help with something else?" If the model instead hallucinates a "fluffy brown bear" answer with no tool call, that is a hallucination failure (the model invented information instead of saying it doesn't know).
+
+This is where tool selection matters. With more tools available, the right move would be calling `get_order_details(order_id)` automatically. The next lesson (agent loops) covers patterns for that.
+
+</details>
+
+## Flashcards
+
+Eight cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay out the full set as one card per page.
+
+<FlashcardSet>
+
+<Flashcard question="What problem does function calling solve that RAG doesn't?">
+
+Function calling closes the gap for *structured* data: API responses, database records, transactional actions. RAG closes the gap for *unstructured* data: documents, web pages, knowledge-base text. The LLM has frozen weights and finite training data; both function calling and RAG let it work with information that wasn't in the weights. Different data types, same underlying gap-closing function.
+
+</Flashcard>
+
+<Flashcard question="Walk through the three stages of a function call.">
+
+Stage 1 (tool prediction): LLM reads user query plus function descriptions, decides which function to call, fills in arguments, emits a structured call. Stage 2 (function execution): regular code parses the call and runs the function; no LLM involvement. Stage 3 (response formatting): structured function output plus conversation history go back to the LLM, which produces a natural-language answer. User sees only Stage 3.
+
+</Flashcard>
+
+<Flashcard question="What does the LLM see during a function call, and what does it not see?">
+
+The LLM sees: the user query, the function signature and docstring (in the preamble), and the conversation history (including prior calls and their responses). The LLM does NOT see: the function's implementation, the internals of any API the function calls, or anything that happens during Stage 2 beyond the final structured return value. This is why tool descriptions have to be specific and complete.
+
+</Flashcard>
+
+<Flashcard question="What are the two SFT training pairs that typically produce a function-calling model?">
+
+Tool prediction: examples teaching the model to map (query + function description) to a structured function call. Response formatting: examples teaching the model to map (structured function response + history) to a natural-language answer. Sufficiently strong reasoning models can sometimes skip explicit SFT for tool prediction.
+
+</Flashcard>
+
+<Flashcard question="What's argument hallucination and how do you debug it?">
+
+Argument hallucination is when the model emits a function call with plausible-looking but wrong arguments (date in wrong format, fabricated ID, parameter name slightly off). Debug by inspecting the Stage 1 structured call before Stage 2 runs. Modern function-calling APIs validate JSON schemas to catch the most obvious cases, but subtle hallucinations still slip through.
+
+</Flashcard>
+
+<Flashcard question="What's the difference between function calling and code execution?">
+
+Function calling means the LLM emits a structured call to a *predefined* function whose implementation already exists. Code execution (sometimes called "code interpreter") means the LLM generates *new* code, which is then executed in a sandbox. Function calling is more constrained and predictable; code execution is more flexible and more dangerous (the model could write code that does something unexpected). The two often coexist in modern apps.
+
+</Flashcard>
+
+<Flashcard question="What kinds of tasks does function calling shine on?">
+
+Three classes. Real-time data (stock prices, weather, locations, anything that changes faster than a model is retrained). Transactional actions (booking, sending, posting; the side effect is the point). Structured queries (database lookups, CRM records, product catalogs; where RAG suits fuzzy text retrieval, function calling suits "give me record X").
+
+</Flashcard>
+
+<Flashcard question="When debugging a function-calling AI feature, where should you look first?">
+
+The structured Stage 1 call between the LLM and the function execution. Most failures are traceable to "model picked the wrong function" or "model passed the wrong arguments," not "model hallucinated in natural language." The natural-language output (Stage 3) often masks Stage 1 errors; inspecting the structured call directly is the fastest way to identify what went wrong.
+
+</Flashcard>
+
+</FlashcardSet>

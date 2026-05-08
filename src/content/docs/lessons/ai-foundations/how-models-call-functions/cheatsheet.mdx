@@ -1,0 +1,138 @@
+---
+title: "Cheatsheet: How models call functions"
+description: "One-page reference. The structured-data gap, the three-stage mechanism, what the LLM sees, the two SFT training pairs, and the common failure modes."
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## The one idea that matters
+
+```
+Function calling is how an LLM acts on the world.
+The model picks a predefined function, code runs it,
+the model wraps the structured response in natural language.
+```
+
+## RAG vs function calling
+
+| | RAG | Function calling |
+| --- | --- | --- |
+| **Closes the gap for...** | Unstructured data (documents, text) | Structured data (APIs, databases, transactional actions) |
+| **Mechanism** | Fetch documents, inject relevant chunks into prompt | LLM emits structured call; code executes; structured response goes back to LLM |
+| **Common use case** | Q&A over a knowledge base | Real-time data, transactional actions, structured queries |
+| **What's in the prompt** | Retrieved text passages | Function signatures + docstrings |
+
+## The three-stage mechanism
+
+```
+USER QUERY  →  STAGE 1 (LLM): pick function + arguments
+                       ↓
+                 Structured call (e.g., JSON)
+                       ↓
+            STAGE 2 (CODE): execute the function (no LLM)
+                       ↓
+                 Structured response
+                       ↓
+            STAGE 3 (LLM): wrap response in natural language
+                       ↓
+            FINAL RESPONSE → USER
+```
+
+**Stages 1 and 3 are LLM-driven. Stage 2 is regular code.**
+
+**The user sees only Stage 3.** Stages 1 and 2 happen inside the system.
+
+## What the LLM sees vs doesn't see
+
+| Sees | Does not see |
+| --- | --- |
+| User query | Function implementation |
+| Function signature (name + arguments) | API internals |
+| Function docstring (what it does, what it returns) | Sandbox/runtime details |
+| Conversation history (prior calls + structured responses) | Anything in Stage 2 except the structured return |
+
+**Why this matters:** docstrings have to be specific. The model has nothing else to infer behavior from.
+
+## A worked example: find a teddy bear
+
+```
+User: "Find a teddy bear store near me."
+
+STAGE 1 (LLM emits):
+{
+  "function": "find_teddy_bear_store",
+  "arguments": {"location": "37.4275,-122.1697", "radius": "1mi"}
+}
+
+STAGE 2 (code runs):
+→ Hits maps API with structured arguments
+→ Returns: [{"name": "Bear Necessities", "address": "...", "distance": "0.3mi"}]
+
+STAGE 3 (LLM responds):
+"There are three teddy bear stores within a mile of you.
+The closest is Bear Necessities at 525 University Ave..."
+```
+
+## Two SFT training pairs
+
+| Pair | Input | Expected output |
+| --- | --- | --- |
+| **Tool prediction** | User query + function description | Structured function call (name + arguments) |
+| **Response formatting** | Structured function response + conversation history | Natural-language answer |
+
+**The two pairs combine** with the model's regular SFT data. After training, the model has both new capabilities: emit a call when one is appropriate, format a response afterwards.
+
+**Newer pattern:** sufficiently strong reasoning models can skip explicit SFT for tool prediction; they figure out the call from the description alone.
+
+## Where function calling shines
+
+| Task class | Example | Why function calling? |
+| --- | --- | --- |
+| **Real-time data** | "What's the weather in Boston now?" | Model's training data is stale; function fetches live data |
+| **Transactional actions** | "Book a 3pm meeting tomorrow" | The side effect is the point; model is the natural-language interface |
+| **Structured queries** | "Get customer record for ID 12345" | Structured data, structured access pattern |
+
+## Common failure modes
+
+| Failure | What goes wrong | Where to debug |
+| --- | --- | --- |
+| **Argument hallucination** | Plausible-but-wrong arguments (wrong format, fabricated values) | Inspect Stage 1 structured call before execution |
+| **Wrong-tool selection** | Multiple tools available; model picks wrong one | Tool descriptions; SFT data quality; tool-selection patterns (next lesson) |
+| **Added latency** | Stage 2 = real API call; user waits | Cache results; parallelize calls; skip detour when not needed |
+
+## Function calling vs code execution
+
+| | Function calling | Code execution |
+| --- | --- | --- |
+| **What's executed** | Predefined function; implementation exists already | LLM-generated new code |
+| **Risk** | Constrained (only declared functions) | Higher (sandbox required; model could do anything) |
+| **Predictability** | High (function contract is fixed) | Lower (depends on LLM's code generation) |
+| **Common use** | Most tool-augmented AI in production | Code interpreter features, data analysis sandboxes |
+
+**They often coexist in modern apps.** Different tools for different jobs.
+
+## Pitfalls to dodge
+
+| Pitfall | Reality |
+| --- | --- |
+| "The model wrote the function." | No. Implementation existed before. Model picks when to call and what arguments to fill. |
+| "Function calling = code execution." | Different things. Function calling = predefined functions. Code execution = LLM generates new code. |
+| "Function calling eliminates hallucination." | Only for the structured tool output. Natural-language framing in Stage 3 can still contain wrong claims. |
+| "If the AI does something, it must be tool calling." | Not always. Could be RAG (text retrieval), pure prompt engineering, or just the model's training data. Knowing which one was used helps you reason about reliability. |
+
+## Glossary
+
+- **Tool calling:** general term for any LLM-emitted call to an external resource. Function calling is the structured subset.
+- **Function calling:** specific protocol where the LLM emits a structured call to a predefined function with documented signature.
+- **Tool prediction:** Stage 1 of the mechanism; the LLM picking the function and arguments.
+- **Response formatting:** Stage 3 of the mechanism; the LLM turning structured tool output into natural language.
+- **Function definition:** the signature + docstring shown to the LLM in the preamble. The contract the model uses to decide what to call.
+- **Argument hallucination:** failure mode where the LLM emits a function call with plausible-but-wrong arguments.
+- **Code execution / code interpreter:** sibling capability where the LLM generates new code (not just calls predefined functions).
+- **ReAct:** one common pattern for combining reasoning and tool use. Mentioned in the next lesson on agent loops.
+
+**Function calling is how an LLM acts on the world.**\
+**Three stages: pick the function, run the function, explain the result.**\
+**The model never sees the implementation. Only the contract.**
