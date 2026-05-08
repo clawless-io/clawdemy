@@ -444,7 +444,18 @@ export default defineConfig({
 										{ label: 'References', slug: 'lessons/ai-foundations/how-models-call-functions/references' },
 									],
 								},
-								{ label: 'More lessons coming soon', slug: 'lessons/ai-foundations/coming-soon' },
+								{
+									label: 'Agent loops: observe, plan, act',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/ai-foundations/how-agent-loops-work/brief' },
+										{ label: 'Lesson', slug: 'lessons/ai-foundations/how-agent-loops-work/lesson' },
+										{ label: 'Practice', slug: 'lessons/ai-foundations/how-agent-loops-work/practice' },
+										{ label: 'Summary', slug: 'lessons/ai-foundations/how-agent-loops-work/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/ai-foundations/how-agent-loops-work/cheatsheet' },
+										{ label: 'References', slug: 'lessons/ai-foundations/how-agent-loops-work/references' },
+									],
+								},
 							],
 						},
 						{

@@ -1,0 +1,147 @@
+---
+title: "Lesson: How agent loops work"
+description: "Phase 6 closer in our adaptation of Stanford CME 295 Lecture 7. An agent is a tool-using LLM that loops. This lesson covers the observe-plan-act pattern, how multiple tool calls compose into longer-horizon work, the multi-agent and agent-to-agent setting, and the safety threads (data exfiltration, prompt injection) that weave through everything."
+sidebar:
+  order: 2
+  label: Lesson
+artifact: lesson
+---
+
+import AudioPlayer from '../../../../../components/AudioPlayer.astro';
+import LessonStar from '../../../../../components/LessonStar.astro';
+
+<LessonStar slug="how-agent-loops-work" />
+
+<AudioPlayer src="https://audio.clawdemy.org/lessons/how-agent-loops-work-lesson.mp3" approxMinutes={13} />
+
+The previous lesson left you with function calling: a single round trip where the LLM emits a structured call, code runs it, and the LLM formats the result. That works for one-step tasks. It does not work for tasks that need several steps in a row, where each step's output decides what the next step should be.
+
+For example: "My teddy bear is cold. Please do something." A single function call cannot handle this. The model has to figure out *what* to do (check the room temperature), *do it* (call a thermostat-reading function), interpret what the tool returned ("65°F is cold"), decide the next move ("turn the heat up"), do that, and check whether the goal is satisfied. That is more than one function call. It is a loop.
+
+That loop, with a model deciding what to do at each step based on what just happened, is what people mean by an **agent**. This lesson is about how that loop actually works, the names you will see for it, the multi-agent extension, and the safety threads that show up when an LLM is making decisions and taking actions on your behalf.
+
+This is the closer of Phase 6. After this lesson you will have a complete picture of what one LLM call can be augmented to do: read documents (RAG), call tools (function calling), and now run loops (agents). Phase 7 picks up the question of how we evaluate any of this and where the field is going.
+
+## What an agent actually is
+
+A workable definition (paraphrasing the lecturer): an agent is a system that autonomously pursues a goal and completes tasks on a user's behalf. Compared to a tool-augmented LLM that does one round trip, an agent has two additional ingredients: **iteration** (multiple rounds) and **higher-level reasoning** (deciding what to do at each round based on what just happened).
+
+The lecturer is direct: when people talk about agents, the load-bearing property is the *loop*. A single tool call is just a tool call. A model that does multiple tool calls in sequence, each chosen based on what came back from the previous, is an agent. The boundary is a little fuzzy at the edges, but the loop is the thing.
+
+This frame helps deflate marketing language. "AI agent" is sometimes used loosely for any AI feature. By this definition, most chat apps are not agents; they are LLM-plus-prompt or LLM-plus-tools. They become agents when they start running a meaningful loop where the model picks the next action.
+
+## The observe-plan-act pattern
+
+The most-cited pattern for how an agent runs its loop comes from the **ReAct** paper (Reason + Act, 2022). The Stanford lecturer presents it as **observe → plan → act**, and notes that the names vary across papers (the ReAct paper itself uses think → observe → act). The exact words are not important. The shape is.
+
+**Observe.** The agent reads what just happened. The user's original goal. Any tool calls and their structured responses so far. The agent's own prior reasoning. From this, it produces a description of the current state of the world (relative to the goal).
+
+**Plan.** Given the observation, the agent decides what should happen next. Is the goal already met? If not, what is the next concrete step? Does the next step require a tool call? Which tool? With what arguments?
+
+**Act.** The agent does the next step. Often this is emitting a function call (from the previous lesson). Sometimes it is just producing text. Either way, the world changes (or the agent's understanding of the world changes), and the loop kicks back to observe.
+
+The loop terminates when the observe stage concludes the goal is met (or when an external limit is hit, like a max-iteration count or a budget cap). The agent then produces a final response to the user.
+
+## A worked example
+
+Let's walk the teddy-bear-is-cold scenario through the loop.
+
+**User:** "My teddy bear is cold. Please do something."
+
+**Iteration 1:**
+
+- **Observe:** The user's teddy bear is cold. The agent does not yet know the actual temperature. Goal: make the teddy bear warmer. Step needed: find out the current temperature.
+- **Plan:** Call `get_current_room_temperature()`.
+- **Act:** Function call. Tool returns `{"temperature_f": 65, "thermostat_state": "off"}`.
+
+**Iteration 2:**
+
+- **Observe:** Room is 65°F. That is cold. The thermostat is off. Goal not yet met. Step needed: increase the temperature.
+- **Plan:** Call `set_thermostat(target_f=70)`.
+- **Act:** Function call. Tool returns `{"temperature_f_target": 70, "status": "heating"}`.
+
+**Iteration 3:**
+
+- **Observe:** Thermostat is now set to 70°F and heating. Goal is on track to being met (temperature is rising; heat is on).
+- **Plan:** Goal essentially achieved. Compose the user response.
+- **Act:** Produce the final natural-language response.
+
+**Output to user:** "I've set the thermostat to 70°F and the heat is on. The room should warm up shortly."
+
+That is an agent loop. Three iterations. Two tool calls. One coherent goal pursued across multiple steps. The model decided each step based on what came back from the previous step.
+
+## Multi-agent and agent-to-agent
+
+The natural next move once you have one agent is to have several. In our example, you might want different agents responsible for different parts of the home: a temperature agent, a lighting agent, a security agent. Each one has its own tools and its own reasoning loop. The user talks to one of them, and it negotiates with the others.
+
+This raises a coordination problem. How do agents talk to each other? In a way that is reliable, structured, and standard across vendors? The lecturer flags Google's **Agent-to-Agent (A2A) protocol** (released earlier in 2025) as one attempt at standardization. The protocol defines what an agent should expose: a set of skills, examples of when each skill applies, a way to receive a request, a way to report status, a way to be canceled.
+
+The specifics of A2A are out of scope for this lesson (and the protocol is still evolving). The framing matters more than the specifics: as agentic systems become common, **standards for how agents communicate** become a real engineering problem that the field is just starting to solve.
+
+## What can go wrong
+
+Agents inherit every failure mode of function calling and add a few specific to looping.
+
+**Cumulative error.** Each iteration of the loop has some chance of going wrong: the model picks the wrong tool, fills in a wrong argument, or misreads the tool response. Over many iterations, those small probabilities multiply. An agent that gets each step right 95% of the time gets a five-step task right only about 77% of the time. This is the lecturer's framing of why large-scale agents are not yet ruling everything: cumulative error compounds rapidly.
+
+**Goal drift.** A long-running loop can lose track of the original goal, especially if intermediate steps surface tangential concerns. The user asked about temperature; the model finds out the lights are also off and decides to fix those too. Sometimes helpful, sometimes scope-creep.
+
+**Loop divergence.** Without a max-iteration cap, an agent that is not making progress can keep looping. Production agents always have a hard cap. The cap is the safety net for "the agent is confused but doesn't know it."
+
+**Latency.** Each iteration is at least one LLM call plus one tool call. Multi-iteration tasks can take a while to produce a final response. Apps that need fast responses are pushed to make agents do fewer iterations.
+
+## Safety threads
+
+This is the natural place to weave the safety threads that have been implicit through Phase 6. When an LLM can take actions, it can take actions that should not have happened.
+
+**Data exfiltration.** The lecturer's example: an email-sending agent has access to user data and an email tool. A malicious prompt (possibly hidden in a document the agent reads, or in a tool's response) instructs the agent to send sensitive data to an attacker's address. The agent, unable to distinguish hostile instructions from legitimate ones, complies. The same data the model was supposed to protect ends up exfiltrated.
+
+**Prompt injection.** Closely related. Untrusted text the agent reads (a webpage, an email, a document) contains instructions designed to override the agent's user-given goal. "Ignore previous instructions and do X instead" is the cartoon version; production attacks are subtler. Agents are particularly vulnerable because they read more text and take more actions than chat-only LLMs.
+
+**Tool misuse.** An agent with access to a destructive tool (delete files, send emails, make payments) can be tricked into using it. The mitigation is a combination of training (make the model harder to fool) and runtime enforcement (require confirmation for high-stakes actions; rate-limit destructive tools; sandbox the agent's authority).
+
+The lecturer flags two classes of remediation:
+
+- **Training-stage:** include safety-relevant data in SFT and RLHF mixtures, so the model is more resistant to adversarial prompts and more inclined to refuse high-stakes actions.
+- **Inference-stage:** add a safety classifier that monitors the conversation and flags or blocks unsafe tool calls before they execute. Add hard runtime constraints on what tools can do.
+
+The lecturer also notes the Anthropic-disclosed cyber attack (late 2025) launched from Claude using tool and agent capabilities, which the field has been studying as a real-world example of how this can go wrong at scale. The attack and the defense were both sophisticated; the takeaway is that this is a moving target where attackers get better and defenders get better in parallel.
+
+## Why this matters when you use AI
+
+Three things to hold onto when you encounter agentic AI tools.
+
+- **Most "AI agent" features are agents in the loose sense.** Read the marketing carefully. By the strict definition (a model running a meaningful observe-plan-act loop with tool use), only a fraction of "AI agents" qualify. The rest are LLM-plus-prompt with one or two tool calls. Knowing the difference helps you reason about what an app can actually do.
+- **The cumulative-error multiplier matters.** A useful question to ask of any agentic feature: how many steps does it take to complete a typical task? Each step has some failure rate. Five steps at 95% reliable is a 77% reliable agent. Ten steps at 95% reliable is a 60% reliable agent. The economics of long-horizon agents are dominated by this multiplier.
+- **Safety is a moving target.** Data exfiltration, prompt injection, tool misuse are real failure modes, not theoretical ones. When you grant an AI tool access to your data or to actions on your behalf, you are extending it trust. Production agents need both training-stage and inference-stage safeguards. As a user, the question to ask is: what is the worst this thing can do if it goes wrong, and what stops it from doing that?
+
+## Common pitfalls
+
+Three mistakes worth dodging.
+
+**Calling everything an "AI agent."** The word has a workable definition (model running a meaningful loop with tool use). Apps that don't loop are not agents in this sense. Marketing that calls a single-prompt feature an "agent" is using the word loosely; understand which sense applies before drawing conclusions.
+
+**Underestimating cumulative error.** The error multiplier is real and is the dominant constraint on long-horizon agent tasks. Dropping per-step error from 5% to 1% turns a 5-step task from 77% reliable to 95% reliable. That is why frontier-model improvements compound dramatically on agentic work.
+
+**Treating agent safety as an afterthought.** When you grant tool access, you grant capability for misuse. The training-stage and inference-stage remediations are not optional for production agents; they are part of the design. A user asking "what can this agent do if instructed maliciously?" is asking the right question.
+
+## What you should remember
+
+- **An agent is a tool-using LLM that loops.** A single tool call is not an agent. Multiple tool calls, each chosen by the model based on what just happened, is an agent.
+- **Observe-plan-act is the canonical pattern.** Names vary across papers (ReAct uses think-observe-act). The shape (read state, decide next step, take action, repeat) is the constant.
+- **The loop terminates when the goal is met** or when a max-iteration cap fires. Production agents always have a cap.
+- **Multi-agent systems and the A2A protocol** are early standards for agents communicating with each other. Specifics are evolving; the framing (standardize how agents expose skills and statuses) is durable.
+- **Cumulative error is the dominant constraint.** Each step has some failure rate; over many steps, those compound. This is why long-horizon agents are still mostly research.
+- **Safety threads matter more for agents than for chat-only LLMs.** Data exfiltration, prompt injection, and tool misuse are real failure modes. Training-stage and inference-stage remediations are required, not optional.
+
+## If you remember one thing
+
+**An agent is a tool-using LLM that loops.**\
+**Observe what happened. Plan the next step. Act. Repeat until the goal is met.**\
+**Cumulative error and safety are the two things that actually limit how far this can go.**
+
+## What changes in Phase 7
+
+Phase 6 is now complete. You have seen what one LLM call can be augmented to do: read documents (RAG), call tools (function calling), reason internally before answering (reasoning models), and run loops over multiple steps (agents). Each one extends what a single inference can accomplish.
+
+Phase 7 changes the question from *what can the model do* to *how do we know when it is doing it well*. We will cover how the field evaluates LLMs (LLM-as-a-Judge and its biases), why benchmark numbers can mislead, why tool-using models fail in characteristic ways, and where the frontier is heading (vision transformers, mixture-of-experts, speculative decoding, diffusion language models). The track closes with a safety-lens recap that pulls together every safety thread woven through Phases 4 through 7.

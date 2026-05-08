@@ -1,0 +1,157 @@
+---
+title: "Cheatsheet: How agent loops work"
+description: "One-page reference. The agent definition, the observe-plan-act loop, the cumulative-error multiplier, the multi-agent setting, and the safety threads."
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## The one idea that matters
+
+```
+An agent is a tool-using LLM that loops.
+Without iteration, you have a single tool call.
+With iteration + reasoning between iterations, you have an agent.
+```
+
+## The observe-plan-act loop
+
+```
+USER GOAL
+   ↓
+   →  OBSERVE: read current state (goal, tool responses, prior reasoning)
+   ↓
+      PLAN: decide next step. Is goal met? If not, which tool with which args?
+   ↓
+      ACT: take the step (often a function call)
+   ↓
+      [Loop until OBSERVE concludes goal is met, OR max-iter cap fires]
+   ↓
+FINAL RESPONSE
+```
+
+**Naming variants:** ReAct paper uses think-observe-act. Other papers use different orderings. Names vary; the shape (read → decide → act → iterate) is constant.
+
+## A worked example (teddy bear is cold)
+
+```
+USER: "My teddy bear is cold. Please do something."
+
+ITER 1:
+  Observe: bear is cold. Need to know temperature.
+  Plan:    call get_current_room_temperature()
+  Act:     tool returns {"temperature_f": 65, "thermostat_state": "off"}
+
+ITER 2:
+  Observe: 65°F is cold. Thermostat off. Need to turn heat up.
+  Plan:    call set_thermostat(target_f=70)
+  Act:     tool returns {"temperature_f_target": 70, "status": "heating"}
+
+ITER 3:
+  Observe: heat is on, target is 70. Goal essentially met.
+  Plan:    compose final response.
+  Act:     return natural-language answer.
+
+OUTPUT: "I've set the thermostat to 70°F and the heat is on..."
+```
+
+**Three iterations. Two tool calls. One coherent goal pursued across multiple steps.**
+
+## The cumulative-error multiplier
+
+```
+Per-step reliability  Reliability over N steps
+  95% (0.95)          5 steps:  77%
+                      10 steps: 60%
+                      20 steps: 36%
+
+  99% (0.99)          5 steps:  95%
+                      10 steps: 90%
+                      20 steps: 82%
+```
+
+**The dominant constraint on long-horizon agents.** Per-step model improvements compound dramatically: a 95→99% step-reliability gain takes a 10-step task from 60% to 90% total reliability.
+
+## Multi-agent and A2A
+
+```
+USER ←→ AGENT_1 (temperature)
+              ↕ (A2A protocol)
+        AGENT_2 (energy)
+              ↕
+        AGENT_3 (security)
+```
+
+**Google's Agent-to-Agent (A2A) protocol (2025)** is one early standard. It defines how agents expose: skills, examples, request/response/cancel methods.
+
+**Specifics evolving.** Framing (standardize how agents talk) is durable.
+
+## Safety threads
+
+| Threat | What can happen | Remediation class |
+| --- | --- | --- |
+| **Data exfiltration** | Agent with user data + outbound tool tricked into sending data to attacker | Training-stage + inference-stage |
+| **Prompt injection** | Untrusted text (webpage, email) contains instructions overriding the user goal | Training-stage + inference-stage |
+| **Tool misuse** | Agent with destructive tool (delete, send, pay) pushed into using it | Inference-stage runtime limits |
+
+### Two classes of remediation
+
+```
+TRAINING-STAGE
+  → Safety data in SFT and RLHF mixtures
+  → Model is more resistant to adversarial prompts
+  → Model more inclined to refuse high-stakes actions
+
+INFERENCE-STAGE
+  → Safety classifier monitors conversation
+  → Flags or blocks unsafe tool calls before execution
+  → Runtime constraints on tools (rate limits, scope, confirmations)
+```
+
+**Both required for production agents. Neither is optional.**
+
+## What can go wrong (beyond safety)
+
+| Failure mode | What it looks like |
+| --- | --- |
+| **Cumulative error** | Long-horizon tasks fail because per-step error compounds |
+| **Goal drift** | Loop loses track of original goal as intermediate steps surface tangents |
+| **Loop divergence** | Agent that's not making progress keeps looping (until cap fires) |
+| **Latency** | Each iteration = at least 1 LLM call + 1 tool call. Multi-step tasks take time. |
+
+## How to read an "AI agent" claim
+
+**First question:** how many steps does it run, and what is each step?
+- Few steps + sequential: probably a useful tool-using feature, marketing the "agent" label loosely
+- Many steps + branching based on outputs: real agent in the strict sense
+
+**Second question:** what is the worst this thing can do if instructed maliciously, and what stops it from doing that?
+- Tool access scope
+- Inference-stage runtime limits
+- Worst-case tool capability
+
+## Pitfalls to dodge
+
+| Pitfall | Reality |
+| --- | --- |
+| "Calling everything an AI agent." | The strict definition is loop + reasoning + tool use. Many "agents" are LLM-plus-prompt with one or two tool calls. |
+| "Underestimating cumulative error." | The error multiplier is real and dominant. 5% per-step error over 10 steps is 40% total failure rate. |
+| "Treating agent safety as an afterthought." | Tool access = capability for misuse. Training-stage + inference-stage remediations are part of the design. |
+| "Assuming an agent will reliably stay on the original goal." | Goal drift is common. Long loops can wander; production agents need explicit goal-anchoring patterns. |
+
+## Glossary
+
+- **Agent:** tool-using LLM that loops, autonomously pursuing a goal across multiple iterations.
+- **Observe-plan-act:** canonical agent loop pattern. Naming varies (ReAct: think-observe-act); shape constant.
+- **ReAct:** Reason + Act. The 2022 paper that introduced the agent-loop pattern. Name-only treatment in this lesson.
+- **A2A protocol:** Google's Agent-to-Agent communication standard, released 2025. Specifies how agents expose skills and statuses.
+- **Cumulative error:** total failure probability over a multi-step agent task. Equals 1 minus product of per-step success rates.
+- **Goal drift:** agent loses track of the original goal as intermediate steps surface tangential concerns.
+- **Data exfiltration:** safety threat where an agent is tricked into sending sensitive data to an attacker.
+- **Prompt injection:** safety threat where untrusted text contains instructions designed to override the user's goal.
+- **Tool misuse:** safety threat where an agent with a destructive tool is tricked into using it.
+
+**An agent is a tool-using LLM that loops.**\
+**Observe what happened. Plan the next step. Act. Repeat until the goal is met.**\
+**Cumulative error and safety are the two things that actually limit how far this can go.**

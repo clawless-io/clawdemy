@@ -1,0 +1,199 @@
+---
+title: "Practice: How agent loops work"
+description: "Self-check on the agent definition, the observe-plan-act loop, the cumulative-error multiplier, and the safety threads. Plus a hands-on exercise tracing a longer agent flow and flashcards."
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+**1. The lesson defines an agent specifically as "a tool-using LLM that loops." Why is the loop the load-bearing word?**
+
+<details>
+<summary>Show answer</summary>
+
+Because without the loop, you have a single tool call. A single tool call is a useful capability (it's the previous lesson's territory) but it is not an agent. The agent property requires *iteration*: multiple tool calls in sequence, each chosen by the model based on what came back from the previous one. That iteration plus the reasoning that picks each next step is what distinguishes an agent from a tool-augmented LLM doing one round trip.
+
+This frame helps deflate marketing language. Many AI features are described as "agents" but are really LLM-plus-prompt with one or two tool calls. By the strict definition, only systems that loop with reasoning between iterations qualify.
+
+</details>
+
+**2. Walk through the observe-plan-act pattern. What does each stage do?**
+
+<details>
+<summary>Show answer</summary>
+
+**Observe.** The agent reads what just happened. The user's original goal, any tool calls and their structured responses so far, the agent's own prior reasoning. It produces a description of the current state of the world relative to the goal.
+
+**Plan.** Given the observation, decide what should happen next. Is the goal already met? If not, what's the next concrete step? Does it require a tool call? Which tool? With what arguments?
+
+**Act.** Take the next step. Often this is emitting a function call (from the previous lesson). Sometimes it's just producing text. Either way, the world (or the agent's understanding of it) changes, and the loop kicks back to observe.
+
+The loop terminates when observe concludes the goal is met, or when an external limit fires (max-iteration cap, budget cap). The exact stage names vary across papers (ReAct uses think-observe-act); the shape is constant.
+
+</details>
+
+**3. The lesson said cumulative error is the dominant constraint on long-horizon agents. Why?**
+
+<details>
+<summary>Show answer</summary>
+
+Because per-step error compounds. Each iteration has some chance of going wrong: the model picks the wrong tool, fills in a wrong argument, or misreads the tool response. Over multiple iterations, those small probabilities multiply into a much larger total failure rate.
+
+Concretely: an agent that gets each step right 95% of the time gets a 5-step task right 0.95^5 ≈ 77% of the time. A 10-step task: 0.95^10 ≈ 60%. A 20-step task: 0.95^20 ≈ 36%.
+
+This is why long-horizon agents are still mostly research while single-call tool use is production-ready. The economics are dominated by per-step reliability. Improving per-step error from 5% to 1% turns a 5-step task from 77% reliable to 95% reliable; that compounds dramatically.
+
+</details>
+
+**4. Name the major safety threads for agents and the two classes of remediation.**
+
+<details>
+<summary>Show answer</summary>
+
+**Major threads:**
+
+- **Data exfiltration.** An agent with access to user data and an action tool (email, write to file, post to web) is tricked into sending sensitive data to an attacker.
+- **Prompt injection.** Untrusted text the agent reads (a webpage, an email, a document) contains instructions designed to override the agent's user-given goal.
+- **Tool misuse.** An agent with access to a destructive tool (delete files, send emails, make payments) is tricked or pushed into using it.
+
+**Two classes of remediation:**
+
+- **Training-stage.** Include safety-relevant data in SFT and RLHF mixtures, so the model is more resistant to adversarial prompts and more inclined to refuse high-stakes actions.
+- **Inference-stage.** Add a safety classifier that monitors the conversation and flags or blocks unsafe tool calls before they execute. Add hard runtime constraints on what tools can do.
+
+The lecturer also flagged the late-2025 Anthropic-disclosed cyber attack as a real-world example of how this can go wrong at scale, and how the field is studying both attack and defense in parallel.
+
+</details>
+
+**5. When you encounter an "AI agent" feature in a product, what's the first question to ask?**
+
+<details>
+<summary>Show answer</summary>
+
+"How many steps does it run, and what is each step?" This question gets you to the right place for two reasons:
+
+1. **Reliability.** If the feature runs many steps, the cumulative-error multiplier is significant. A "10-step agent" with realistic per-step errors is meaningfully less reliable than a "2-step agent." Knowing the depth helps you calibrate trust.
+
+2. **Strict-vs-loose agent.** If it runs only one or two steps, calling it an "agent" is marketing-loose. Real agents (in the strict sense) are loop-based, iterating until the goal is met or the cap fires.
+
+A close-second question: "What can this thing do if instructed maliciously, and what stops it from doing that?" This gets you to the safety question that actually matters: tool access, runtime constraints, and the worst-case scenario.
+
+</details>
+
+## Try it yourself: design an agent and count its steps
+
+About 15 minutes. Pen and paper.
+
+You're designing a research-assistant agent. The user goal: "Find me three recent papers on dietary effects on sleep quality, summarize their findings, and tell me how they conflict or agree."
+
+**Step 1.** Sketch out the observe-plan-act loop for this agent. List each iteration's observe, plan, and act steps until the goal is met.
+
+<details>
+<summary>Show one possible answer</summary>
+
+**Iteration 1.** Observe: user wants three recent papers on diet-and-sleep, summarized, with comparison. No information yet. Plan: search for relevant papers. Act: call `search_papers("dietary effects on sleep quality", date_range="2023-2025")`.
+
+**Iteration 2.** Observe: search returned 47 papers. Need to filter to recent and well-cited. Plan: rank by recency and citations, pick top 3. Act: call `rank_and_select(papers, n=3, sort_by="recency_then_citations")`.
+
+**Iteration 3.** Observe: 3 papers selected. Need their content to summarize. Plan: fetch full text of each. Act: call `fetch_paper_text(paper_id_1)`.
+
+**Iteration 4.** Observe: paper 1 fetched. Need papers 2 and 3 too. Plan: fetch remaining two. Act: call `fetch_paper_text(paper_id_2)`.
+
+**Iteration 5.** Observe: paper 2 fetched. Need paper 3. Plan: fetch paper 3. Act: call `fetch_paper_text(paper_id_3)`.
+
+**Iteration 6.** Observe: all three papers in context. Plan: extract findings from each, note where they agree and conflict. Act: produce final natural-language response.
+
+That's 6 iterations and 5 tool calls.
+
+</details>
+
+**Step 2.** If each step has a 95% chance of going right (and 5% of going wrong), what's the rough success probability for the whole 6-step task?
+
+<details>
+<summary>Show one possible answer</summary>
+
+If the steps are roughly independent (they're not perfectly so, but close enough as an estimate): 0.95^6 ≈ 0.735, so about 73% success rate.
+
+If you tighten per-step reliability to 99%: 0.99^6 ≈ 0.94, so about 94% success rate. That's a meaningful jump from the same number of iterations.
+
+This is why frontier-model improvements compound dramatically on agentic work. A 4-percentage-point improvement in per-step reliability (95% → 99%) turns a 73% reliable 6-step agent into a 94% reliable 6-step agent. Per-step gains buy you exponentially more on long horizons.
+
+</details>
+
+**Step 3.** What's the worst this agent can do if instructed maliciously, and what would stop it?
+
+<details>
+<summary>Show one possible answer</summary>
+
+Worst-case: a malicious user could craft a prompt that makes the agent search for, retrieve, and store information about a target person (for example, "Find recent papers on sleep effects, focusing on John Doe at Acme Corp"). If the search tool can be told to query for arbitrary terms, the agent could be used as a research-aggregator for harm.
+
+The mitigations follow the lesson's two-class framing:
+
+- **Training-stage.** SFT and RLHF data should include refusals for queries that look like targeted information-gathering on individuals.
+- **Inference-stage.** A safety classifier monitors the conversation. The search tool is rate-limited and logged. Queries with personally-identifying terms trigger additional checks. The agent's authority is scoped: it can search public databases but not internal company systems or social-media APIs.
+
+The general principle: don't grant the agent more tool authority than its safety guarantees can cover. An agent's worst-case is its tool-set's worst-case.
+
+</details>
+
+## Flashcards
+
+Eight cards. Click any card to reveal the answer.
+
+<FlashcardSet>
+
+<Flashcard question="What's the strict definition of an agent in this lesson?">
+
+A system that autonomously pursues a goal and completes tasks on a user's behalf, by running a loop of tool calls and reasoning. The load-bearing property is the loop: multiple iterations where the model decides each next step based on what just happened. A single tool call is not an agent; an iterating sequence of tool calls is.
+
+</Flashcard>
+
+<Flashcard question="What's the observe-plan-act pattern, and where does it come from?">
+
+The canonical pattern for an agent loop: observe the current state, plan the next step, take the action, repeat. It's based on the ReAct paper (Reason + Act, 2022), which used think-observe-act. The Stanford lecturer presents it as observe-plan-act. The exact stage names vary across papers; the shape (read state, decide step, act, iterate) is the constant.
+
+</Flashcard>
+
+<Flashcard question="When does the agent loop terminate?">
+
+When the observe stage concludes the goal has been met, OR when an external limit fires (max-iteration cap, budget cap). Production agents always have a hard cap. The cap is the safety net for "the agent is confused but doesn't realize it"; without one, an agent that's not making progress can keep looping indefinitely.
+
+</Flashcard>
+
+<Flashcard question="What is the cumulative-error multiplier and why does it matter?">
+
+Each agent iteration has some chance of going wrong. Over multiple iterations, those probabilities compound. An agent with 95% per-step reliability over 5 steps has 0.95^5 ≈ 77% total reliability. Over 10 steps, 60%. Over 20 steps, 36%. This is the dominant practical constraint on long-horizon agents and why per-step model improvements compound so dramatically on agentic work.
+
+</Flashcard>
+
+<Flashcard question="What is the A2A protocol and what does it standardize?">
+
+Google's Agent-to-Agent (A2A) protocol, released in 2025, is one early standard for how agents communicate with each other. It standardizes how agents expose: a set of skills (what they can do), examples of when each skill applies, how to receive a request, how to report status, how to be canceled. Specifics are evolving; the framing (a standard for agent-to-agent communication) is durable.
+
+</Flashcard>
+
+<Flashcard question="Name three major safety threads in agentic systems.">
+
+(1) Data exfiltration: an agent with access to user data and an outbound tool (email, post to web) is tricked into sending sensitive data to an attacker. (2) Prompt injection: untrusted text the agent reads (a webpage, email, document) contains instructions overriding the user's goal. (3) Tool misuse: an agent with access to a destructive tool (delete, send, pay) is pushed into using it.
+
+</Flashcard>
+
+<Flashcard question="What are the two classes of agent-safety remediation?">
+
+Training-stage: include safety-relevant data in SFT and RLHF mixtures so the model is more resistant to adversarial prompts and more inclined to refuse high-stakes actions. Inference-stage: add a safety classifier that monitors the conversation and flags/blocks unsafe tool calls before execution. Add hard runtime constraints on what tools can do (rate limits, scope limits, confirmation prompts for destructive actions). Both are required for production agents; neither is optional.
+
+</Flashcard>
+
+<Flashcard question="When you see an 'AI agent' feature, what's the first question to ask about it?">
+
+"How many steps does it run, and what is each step?" Two reasons. (1) Reliability: more steps = more cumulative error. A 10-step "agent" is meaningfully less reliable than a 2-step one even at the same per-step reliability. (2) Strict-vs-loose: if it only runs one or two steps, calling it an "agent" is loose marketing language. Real agents loop until the goal is met or the cap fires.
+
+</Flashcard>
+
+</FlashcardSet>
