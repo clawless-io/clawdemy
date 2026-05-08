@@ -1,0 +1,156 @@
+---
+title: "Lesson: How we evaluate models, LLM-as-a-Judge"
+description: "Phase 7 opener in our adaptation of Stanford CME 295 Lecture 8. Evaluating an LLM is itself an LLM-shaped problem. This lesson covers the LLM-as-a-Judge pattern, why it works, how it's set up in practice, and the three named biases (position, verbosity, self-enhancement) plus how to mitigate them."
+sidebar:
+  order: 2
+  label: Lesson
+artifact: lesson
+---
+
+import AudioPlayer from '../../../../../components/AudioPlayer.astro';
+import LessonStar from '../../../../../components/LessonStar.astro';
+
+<LessonStar slug="how-we-evaluate-models" />
+
+<AudioPlayer src="https://audio.clawdemy.org/lessons/how-we-evaluate-models-lesson.mp3" approxMinutes={12} />
+
+You have built an LLM. You want to know whether its outputs are good. The hard part is what "good" means.
+
+For coding problems with test cases, you can run the tests. For math problems with ground-truth answers, you can compare. We covered that pattern in the reasoning-models lesson; verifiable rewards are the cleanest signal there is. But most outputs of a real LLM are not math or code. They are summaries, explanations, advice, drafts, conversations. You cannot run a test case against "summarize this article well." There is no single correct answer.
+
+You could ask humans. Human ratings are the gold standard, but they are slow, expensive, and noisy in their own ways. You cannot ask humans to rate every output of every model in every iteration of training.
+
+The pragmatic solution that the field has converged on is to use another LLM as the judge. The model you are evaluating produces a response. A second LLM reads the prompt, the response, and a description of what counts as good, and returns a score plus a written rationale. **LLM-as-a-Judge** (sometimes shortened to LaaJ) is what most modern LLM evaluation actually does, including evaluation pipelines you have likely benefited from without knowing.
+
+This lesson covers what LLM-as-a-Judge is, how it is set up, why it works at all, and the three named biases (position, verbosity, self-enhancement) that production LaaJ systems have to defend against. By the end you will know how to read evaluation claims that mention "LLM-as-a-Judge" and what to ask about them.
+
+## The framework, briefly
+
+Every LLM-as-a-Judge call has three inputs:
+
+1. **The prompt** that produced the response being judged.
+2. **The response** itself.
+3. **The criteria**: a description of what you want the response to satisfy. "Is this answer correct, complete, and concise?" "Does this summary capture the key points?" "Does this response follow the user's instruction?"
+
+The judge produces two outputs:
+
+1. **A rationale**: written-out reasoning explaining why the response is or is not satisfying the criteria.
+2. **A score**: typically a pass/fail or a small ordinal scale (1 to 5).
+
+The rationale is generated *before* the score, deliberately. The intuition is the same as chain-of-thought from Phase 5: writing out the reasoning gives the model more compute (more tokens) to work the problem before committing to an answer. The empirical pattern: rationale-then-score outperforms score-only consistently.
+
+A typical LaaJ prompt looks roughly like:
+
+```
+You are evaluating responses against the following criteria:
+[criteria description]
+
+Prompt that was given to the model:
+[prompt]
+
+Response to evaluate:
+[response]
+
+First write a rationale explaining your evaluation. Then output
+a score: PASS or FAIL.
+```
+
+The model reads, reasons, and answers. The output is parsed and used in whatever evaluation pipeline you are running.
+
+## Pointwise vs pairwise
+
+Two main shapes of LaaJ. The shape depends on what kind of judgment you are asking for.
+
+**Pointwise** (single-response). One prompt, one response, one criteria description. The judge says PASS or FAIL (or assigns a score). This is the right shape when you want absolute judgments: "is this response correct?"
+
+**Pairwise** (preference between two responses). Same prompt, two candidate responses (call them A and B), criteria description. The judge says "A is better" or "B is better" (or "tied"). This is the right shape when you want relative judgments: "which response is better?"
+
+Pairwise is particularly useful for one specific downstream task: generating synthetic preference data for the reward-model training we covered in Phase 4. Run a pairwise LaaJ over many response pairs and you have a preference dataset without needing human raters. The lecturer points out that this is a common loop: preference data tunes the model, the tuned model is used as a judge to generate more preference data, and so on. With care, the loop can produce useful tuning signal.
+
+## Why this works at all
+
+The intuition the lecturer offers is concise. Modern LLMs were pretrained on huge amounts of text and aligned via human preferences (Phase 4). By construction, they contain a lot of human knowledge and a lot of indication of what humans prefer. Asking such a model to evaluate another model's response is asking it to apply the same evaluation it would apply to its own outputs at training time, just to someone else's output.
+
+It does not work perfectly. The judge is itself an imperfect model. Its judgments correlate with human judgments well enough to be useful but not well enough to fully replace human review for high-stakes decisions. The right framing: LaaJ is a fast, cheap, scalable proxy for human evaluation, and it produces useful signal for most of the things you would otherwise have to ask humans to rate.
+
+A second motivating advantage that is worth naming: the rationale. Older evaluation techniques (BLEU, ROUGE, exact-match) gave you a number with no explanation. LaaJ gives you a number plus a written explanation of how it got there. When something is wrong with the score, the rationale tells you what the judge was reacting to. That makes evaluation pipelines far more debuggable than the ones the field had before.
+
+## Structured output, briefly
+
+A practical detail. The probabilistic nature of LLM generation means a LaaJ call that asks for "rationale and score" might return something the runtime cannot parse: extra commentary, missing fields, a score formatted differently than expected. In production this happens.
+
+The fix is **structured output**, also known as constrained decoding. Modern LLM APIs (OpenAI, Anthropic, Google, and others) let you specify a schema (typically JSON) that the model's output must conform to. The decoding process is constrained at each step to only produce tokens consistent with the schema. The output is guaranteed parseable.
+
+Production LaaJ pipelines use structured output. You define a class (or JSON schema) with fields like `rationale: string` and `score: enum["PASS", "FAIL"]`, pass that to the LLM API as the expected output format, and the response comes back with both fields populated and machine-readable. This is small but load-bearing: without it, every LaaJ pipeline has to deal with parser failures.
+
+## The three biases
+
+The lecturer flags three specific biases that production LaaJ systems have to defend against. None of them are theoretical; all of them have been measured and reproduced.
+
+### Position bias
+
+When you ask a judge "is response A better or response B?", the judge has a tendency to prefer whichever response was listed first. The bias is real and measurable: even on tied or B-better cases, A-listed-first wins more often than chance.
+
+The standard mitigation: ask twice with the order swapped. First "A or B?", then "B or A?". If the judge picks the same response both times, the judgment is consistent. If the judge flips when the order flips, the judgment is unreliable for this case and you fall back to either tie or human review.
+
+A more advanced mitigation involves tweaking position embeddings to reduce ordinal effects, but the lecturer flags this as research-stage; the swap-and-verify approach is what most production systems do.
+
+### Verbosity bias
+
+Judges tend to prefer longer responses, even when the longer response is not actually better. The bias has a plausible cause: longer responses contain more tokens, more of which can resemble whatever signals the judge associates with quality. A response that hedges every claim, adds caveats, and elaborates with examples can win against a more concise response that is equally accurate.
+
+Three mitigations the lecturer lists:
+
+- **Explicit instruction**. Tell the judge in the criteria: "Do not prefer longer responses; quality is the only criterion."
+- **In-context examples**. Show the judge a few examples where the shorter response was preferred. The judge picks up on the pattern.
+- **Length penalty**. Score pointwise (rate each response separately), then post-process by penalizing the longer response's score. This is more mechanical but avoids relying on the judge's ability to suppress the bias.
+
+The mitigations stack. Production systems typically use at least two.
+
+### Self-enhancement bias
+
+If the model that generated a response is the same model used to judge it, the judge tends to favor that response. The intuition is mechanical: a model considers its own outputs more probable, and in the noisy domain of "what does a good response look like?", more-probable shades into "more like what a good response would be." Self-enhancement bias is the result.
+
+The mitigation is direct: use a different model for generation and judging. The lecturer is honest about the limits here: most modern frontier models were trained on overlapping data and have similar biases, so the boundary between "same model" and "different model" is fuzzier than it sounds. Still, using a different model is meaningfully better than using the same one, and using a *bigger* model as the judge is better still. Bigger judges have more reasoning capacity to tease out actual quality from surface-level similarity.
+
+## Best practices for setting up LaaJ
+
+The lecturer's guidance, distilled:
+
+- **Crisp guidelines.** The criteria description is the most important part of the prompt. Vague criteria produce noisy judgments. Specific criteria produce stable judgments.
+- **Binary scale.** Judges (and humans) make more reliable judgments on binary scales (PASS or FAIL) than on multi-point scales (1 through 5). Granularity adds noise without adding signal in most cases.
+- **Rationale before score.** Always. The chain-of-thought effect applies: writing out the reasoning improves the score's accuracy.
+- **Calibrate against humans periodically.** LaaJ is a proxy for human evaluation. Without occasional human spot-checks, the proxy can drift. Standard practice: rate a small sample with humans every quarter and compare LaaJ scores against human scores. If correlation is high, trust the proxy. If it has drifted, recalibrate the criteria or change the judge model.
+- **Use a different model for judging than for generation.** Bigger if possible. Reasoning-capable if possible.
+
+## Why this matters when you use AI
+
+Three things to hold onto.
+
+- **Most modern LLM evaluation runs through LaaJ at some stage.** When a paper or model card claims "X% on a quality benchmark," the benchmark may have been judged by another LLM. Knowing this lets you read evaluation claims more carefully. Ask: what was the judge model? Were biases mitigated? Was there human calibration?
+- **The biases are real and asymmetric.** Position bias makes the listed-first response look better. Verbosity bias makes the longer response look better. Self-enhancement bias makes the same-model response look better. None of these are theoretical; production systems must defend against them. When you see "we used LLM-as-a-Judge," look for which mitigations they used.
+- **Synthetic preference data is mostly LaaJ now.** The reward models we covered in Phase 4 are increasingly trained on preference labels generated by judge models, not human raters. This is a tractable approach but introduces its own set of failure modes: a judge with bias produces a biased reward model that produces a biased aligned model, and so on. The "judge quality" question now sits upstream of "model quality" in many production pipelines.
+
+## Common pitfalls
+
+Three mistakes worth dodging.
+
+**Trusting LaaJ scores without calibration.** A judge can drift, especially if you change the criteria or the underlying judge model. Quarterly human spot-checks are not optional; they are the calibration step that keeps the proxy honest.
+
+**Using the same model for generation and judging.** Self-enhancement bias is real. The mitigation is direct: pick a different model. If you have to use the same model (cost or constraint reasons), at least be aware that the judgment is biased upward and discount accordingly.
+
+**Treating granular scales as more informative.** "Rate this 1 through 10" feels like more information than "PASS or FAIL." It is usually less reliable, both with LaaJ and with humans. The middle of the scale is where most ratings cluster, and that range is the noisiest. Binary scales force the judge to commit and produce more useful signal.
+
+## What you should remember
+
+- **LLM-as-a-Judge uses one LLM to evaluate the output of another LLM.** Inputs: prompt, response, criteria. Outputs: rationale, score. Rationale is generated before the score, intentionally.
+- **Two shapes: pointwise (single response, PASS/FAIL) and pairwise (two responses, A vs B).** Pairwise is often used to generate synthetic preference data for downstream tuning.
+- **Three named biases.** Position bias (judge prefers first-listed). Verbosity bias (judge prefers longer). Self-enhancement bias (judge prefers same-model output).
+- **Standard mitigations.** Position: swap order and check consistency. Verbosity: explicit instruction, in-context examples, length penalty. Self-enhancement: use a different (often bigger) model as the judge.
+- **Best practices.** Crisp guidelines, binary scale when possible, rationale before score, periodic human calibration, structured output for reliable parsing.
+
+## If you remember one thing
+
+**Evaluating an LLM is itself an LLM-shaped problem.**\
+**LaaJ scales human-style evaluation by replacing the human with another LLM.**\
+**The three biases (position, verbosity, self-enhancement) are real, measured, and mitigable, but never fully eliminated.**

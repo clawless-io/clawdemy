@@ -461,9 +461,20 @@ export default defineConfig({
 						{
 							label: "Phase 7\nHow we judge models and where they're going",
 							collapsed: true,
-							badge: { text: 'Coming soon', variant: 'note' },
 							items: [
-								{ label: 'Coming soon', slug: 'lessons/ai-foundations/coming-soon' },
+								{
+									label: 'Evaluation: LLM-as-a-Judge',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/ai-foundations/how-we-evaluate-models/brief' },
+										{ label: 'Lesson', slug: 'lessons/ai-foundations/how-we-evaluate-models/lesson' },
+										{ label: 'Practice', slug: 'lessons/ai-foundations/how-we-evaluate-models/practice' },
+										{ label: 'Summary', slug: 'lessons/ai-foundations/how-we-evaluate-models/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/ai-foundations/how-we-evaluate-models/cheatsheet' },
+										{ label: 'References', slug: 'lessons/ai-foundations/how-we-evaluate-models/references' },
+									],
+								},
+								{ label: 'More lessons coming soon', slug: 'lessons/ai-foundations/coming-soon' },
 							],
 						},
 					],
