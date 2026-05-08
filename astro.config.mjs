@@ -336,7 +336,18 @@ export default defineConfig({
 										{ label: 'References', slug: 'lessons/ai-foundations/preferences-into-reward-signals/references' },
 									],
 								},
-								{ label: 'More lessons coming soon', slug: 'lessons/ai-foundations/coming-soon' },
+								{
+									label: 'Aligning models: RLHF and DPO',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/ai-foundations/rlhf-and-dpo/brief' },
+										{ label: 'Lesson', slug: 'lessons/ai-foundations/rlhf-and-dpo/lesson' },
+										{ label: 'Practice', slug: 'lessons/ai-foundations/rlhf-and-dpo/practice' },
+										{ label: 'Summary', slug: 'lessons/ai-foundations/rlhf-and-dpo/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/ai-foundations/rlhf-and-dpo/cheatsheet' },
+										{ label: 'References', slug: 'lessons/ai-foundations/rlhf-and-dpo/references' },
+									],
+								},
 							],
 						},
 						{
