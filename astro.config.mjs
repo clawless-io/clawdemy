@@ -486,6 +486,18 @@ export default defineConfig({
 										{ label: 'References', slug: 'lessons/ai-foundations/why-benchmarks-can-mislead/references' },
 									],
 								},
+								{
+									label: 'Why tool-using models fail',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/ai-foundations/why-tool-using-models-fail/brief' },
+										{ label: 'Lesson', slug: 'lessons/ai-foundations/why-tool-using-models-fail/lesson' },
+										{ label: 'Practice', slug: 'lessons/ai-foundations/why-tool-using-models-fail/practice' },
+										{ label: 'Summary', slug: 'lessons/ai-foundations/why-tool-using-models-fail/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/ai-foundations/why-tool-using-models-fail/cheatsheet' },
+										{ label: 'References', slug: 'lessons/ai-foundations/why-tool-using-models-fail/references' },
+									],
+								},
 								{ label: 'More lessons coming soon', slug: 'lessons/ai-foundations/coming-soon' },
 							],
 						},
