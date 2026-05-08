@@ -409,6 +409,18 @@ export default defineConfig({
 							collapsed: true,
 							items: [
 								{
+									label: 'How reasoning models think',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/ai-foundations/how-reasoning-models-think/brief' },
+										{ label: 'Lesson', slug: 'lessons/ai-foundations/how-reasoning-models-think/lesson' },
+										{ label: 'Practice', slug: 'lessons/ai-foundations/how-reasoning-models-think/practice' },
+										{ label: 'Summary', slug: 'lessons/ai-foundations/how-reasoning-models-think/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/ai-foundations/how-reasoning-models-think/cheatsheet' },
+										{ label: 'References', slug: 'lessons/ai-foundations/how-reasoning-models-think/references' },
+									],
+								},
+								{
 									label: 'RAG',
 									collapsed: true,
 									items: [
