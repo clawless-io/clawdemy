@@ -312,6 +312,18 @@ export default defineConfig({
 										{ label: 'References', slug: 'lessons/ai-foundations/how-models-learn-to-be-helpful/references' },
 									],
 								},
+								{
+									label: 'Preference data, reward models',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/ai-foundations/preferences-into-reward-signals/brief' },
+										{ label: 'Lesson', slug: 'lessons/ai-foundations/preferences-into-reward-signals/lesson' },
+										{ label: 'Practice', slug: 'lessons/ai-foundations/preferences-into-reward-signals/practice' },
+										{ label: 'Summary', slug: 'lessons/ai-foundations/preferences-into-reward-signals/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/ai-foundations/preferences-into-reward-signals/cheatsheet' },
+										{ label: 'References', slug: 'lessons/ai-foundations/preferences-into-reward-signals/references' },
+									],
+								},
 								{ label: 'More lessons coming soon', slug: 'lessons/ai-foundations/coming-soon' },
 							],
 						},

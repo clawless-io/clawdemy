@@ -1,0 +1,133 @@
+---
+title: "Cheatsheet: How preferences become reward signals"
+description: One-page reference. Why SFT leaves a gap, preference pairs and rating formats, the RLHF two-stage structure, reward model mechanics, sparse vs dense supervision, pitfalls, and glossary.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## The one idea that matters
+
+```
+SFT (positive examples only)
+  → no negative signal
+  → model cannot rank valid responses
+
+Preference data (pairwise comparison)
+  → negative signal added
+  → reward model trained from comparisons
+  → reward model used to update LLM (next lesson)
+```
+
+## Why not just add more SFT?
+
+| Reason | What it means |
+| --- | --- |
+| SFT data is hard to write | A labeler asked to write the best response must produce quality from scratch. Showing two options and picking the better one is a much smaller ask. |
+| SFT prompts require balanced distributions | Add too many examples of one type and the model tilts that way. Preference tuning acts on the model's existing behavior rather than rebalancing what prompts it sees. |
+| SFT teaches what, not what-not | Every SFT example is positive. There is no slot for "this response is worse." Preference tuning injects the missing negative signal structurally. |
+
+The lecturer's qualifier: preference tuning is not the answer to everything. If the model's SFT data is genuinely wrong, fix the SFT data. The third stage targets things SFT cannot do by construction.
+
+## Three preference-data formats
+
+| Format | What you collect | Why it is or is not standard |
+| --- | --- | --- |
+| **Pointwise** | A single score per response (e.g., 0.9 for A, 0.2 for B) | Not standard. Humans cannot score consistently across many examples; the scale drifts and labels become noisy. |
+| **Pairwise** | A binary preference: A is better than B | Standard. A simpler judgment humans can make reliably. |
+| **Listwise** | A ranking of N responses | Possible but more cognitively demanding than pairwise; not significantly more useful in practice. |
+
+## How preference data is collected (three steps)
+
+```
+1. Pick a prompt from production logs or a curated
+   distribution that mirrors real users.
+
+2. Generate two responses: feed the same prompt into the
+   SFT model twice with positive temperature (randomness
+   added to sampling so each run produces a different output).
+
+3. Rate the pair: a human labeler reads both and marks
+   which response is better, on a binary scale.
+```
+
+Alternatives to human labelers: LLM-as-a-judge (a separate model assigns the preference), or rule-based metrics (BLEU, ROUGE, less common today). A rarer variant: take a bad response from production logs, have a labeler rewrite it into a good one, then use the original-plus-rewrite as a preference pair.
+
+## RLHF two-stage structure
+
+| Stage | What happens | Output |
+| --- | --- | --- |
+| **Stage 1** (this lesson) | Train a reward model on preference pairs | A scoring function: prompt + response → one number |
+| **Stage 2** (next lesson) | Use the reward model to update the LLM | A preference-aligned LLM |
+
+RLHF vs RLAIF: identical procedure; only the label source differs. Human labels = RLHF. AI model labels = RLAIF.
+
+## Reward model mechanics
+
+| Property | Detail |
+| --- | --- |
+| **Architecture** | A transformer with a classification head (single-number output) instead of a language-modeling head. Decoder-only is typical ("everything is an LM these days"); encoder-only (BERT-style CLS projection) also works. |
+| **Training objective** | Bradley-Terry model (1952): push the winning response's score above the losing response's score on every preference pair, calibrated so the gaps reflect the observed preferences. |
+| **Trained pairwise** | Sees pairs during training; the loss requires a winner and a loser per example. |
+| **Used pointwise** | At inference time, scores one prompt-response input at a time. No comparison needed. |
+| **Score scale** | Arbitrary. High score = good, low score = bad. Typically normalized before use in stage two. |
+| **Data scale** | Roughly tens of thousands of preference pairs or more (the lecturer's qualitative estimate). Smaller than an SFT dataset; much smaller than a pretraining corpus. |
+
+## Dense vs sparse supervision
+
+| Training stage | Supervision signal | Signals per sequence |
+| --- | --- | --- |
+| Pretraining / SFT | Per-token loss: every predicted token contributes | One per token (dense) |
+| Reward model / RLHF stage 2 | Per-completion score: the entire response is generated, then scored once | Roughly one per full response (sparse) |
+
+Sparse supervision is one reason RLHF is harder to stabilize than SFT. Fewer gradient updates per sequence, and each one carries more weight.
+
+## What dimension does the reward model capture?
+
+The reward model learns whatever the labelers were asked to prefer. Different guidelines produce different reward models.
+
+| What labelers were asked | What the reward model learns |
+| --- | --- |
+| "Which response is more helpful?" | Helpfulness |
+| "Which response is safer?" | Safety |
+| "Which response is more concise?" | Conciseness |
+| "Which response is better overall?" | A holistic mix of the labelers' intuitions, with all the ambiguity that implies |
+
+In practice, frontier labs often train one reward model per dimension and combine them in stage two. The lesson covers the one-reward-model case for clarity; knowing the single-reward-model abstraction is a simplification helps when you read about multi-objective alignment.
+
+## Pitfalls to dodge
+
+| Pitfall | Reality |
+| --- | --- |
+| Treating preference data as objective truth | Preferences are subjective, even with good guidelines. The reward model averages over labelers. Scores are not objective measures of quality. |
+| Conflating RLHF with RL in general | RLHF uses RL machinery (stage two), but the *human feedback* part is stage one (reward-model training). "RLHF" without qualification usually means both stages; "RL" alone usually means stage two. |
+| Assuming the reward model needs the original preference pair at inference time | The reward model takes a prompt and a response, nothing else. It does not know which model produced the response, what the reference response was, or what training pair it came from. |
+| Reading "aligned with human preferences" as a universal standard | "Aligned" means "aligned with the specific labelers under the specific guidelines." It is a real distribution, not a universal one. Different labs, different labelers, different directions. |
+
+## Translating model release language
+
+| Claim in a release announcement | What it usually means |
+| --- | --- |
+| "Trained with RLHF" | Preference pairs collected, reward model trained (stage one), LLM updated against it (stage two). |
+| "Trained with RLAIF" | Same procedure; AI-model labels instead of human labels. |
+| "Tuned for helpfulness, harmlessness, and honesty" | These are likely the three dimensions the lab built reward models for. Not all three are equally easy to train; the balance reflects the lab's choices. |
+| "Preference fine-tuned" | Stage one and possibly stage two done, likely with a specific algorithm (RLHF, DPO, or similar; the next lesson covers the algorithm choices). |
+
+## Glossary
+
+- **Preference pair:** one prompt, two responses, and a binary label (which response is preferred). The atomic unit of preference data.
+- **Pairwise comparison:** a judgment of which of two options is better. The standard format for preference data.
+- **Reward model:** a neural network trained to score prompt-response pairs. Takes a single prompt-and-response as input and outputs one number.
+- **Bradley-Terry model:** the statistical model behind the reward-model training objective. Named after a 1952 paper on paired comparisons.
+- **RLHF (Reinforcement Learning from Human Feedback):** a two-stage post-training process. Stage one trains a reward model from human-labeled preference pairs. Stage two updates the LLM using the reward model.
+- **RLAIF (Reinforcement Learning from AI Feedback):** RLHF with AI-model labels instead of human labels. The training procedure is identical.
+- **Sparse supervision:** supervision where the feedback signal arrives once per completion rather than once per token. Characteristic of reward-model training and the RLHF second stage.
+- **Dense supervision:** supervision where the feedback signal arrives once per token. Characteristic of pretraining and SFT.
+- **LLM-as-a-judge:** using a separate language model to assign preference labels instead of human labelers.
+- **Pointwise scoring:** assigning an absolute score to each response independently. Less reliable than pairwise comparison for collecting preference data.
+
+**Supervised fine-tuning teaches the model to answer when someone asks.**\
+**Preference data teaches it which answer to prefer.**\
+**The reward model is how that preference becomes a number a training loop can use.**

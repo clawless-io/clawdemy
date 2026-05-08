@@ -1,0 +1,198 @@
+---
+title: "Practice: How preferences become reward signals"
+description: Self-check on preference pairs, pairwise comparison, reward model mechanics, and RLHF structure. A hands-on exercise inferring reward model training objectives from observed model behavior. Flashcards built for retrieval, not rereading.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+A short retrieval pass. Try to answer each question in your head (or on paper) before opening the collapsible. Active retrieval is where the learning sticks; rereading is comfortable but does much less.
+
+**1. What is a preference pair, and what information does it carry that SFT data structurally cannot?**
+
+<details>
+<summary>Show answer</summary>
+
+A **preference pair** is one prompt, two responses, and a binary label indicating which response is preferred (for example, "A is better"). That is all it contains: no rubric score, no rewrite of the worse response, no per-token annotation.
+
+The information it carries that SFT data cannot is a **negative signal**: a concrete indication that one response is worse than another. Every SFT example is a positive example (here is the response to produce); there is no slot in the data for "here is the response to avoid." A preference pair has both: a response to push toward and a response to push away from. That asymmetry is what makes preference data able to close the gap SFT leaves open.
+
+</details>
+
+**2. Why is pairwise comparison the standard format for collecting preference data rather than asking labelers to score each response on a scale?**
+
+<details>
+<summary>Show answer</summary>
+
+Absolute scoring is unreliable at scale. Asking a labeler "is this response a 0.9 or an 0.85?" is a question humans cannot answer consistently across many examples; the scale drifts across sessions, across labelers, and across different prompt types. The labels become noisy, and noisy labels produce a noisy reward model.
+
+Pairwise comparison sidesteps this. "Is A better than B?" is a simpler judgment humans can make reliably, even on subjective tasks. The standard is the binary scale: one winner per pair, no degrees. The Stanford lecturer's framing: even asking for a "much better, slightly better, slightly worse, much worse" scale introduces noise without buying meaningful calibration. The simpler question produces more consistent labels, which produce a more reliable reward model.
+
+</details>
+
+**3. Walk through the three-step recipe for collecting a preference pair. What is the point of positive temperature in step two?**
+
+<details>
+<summary>Show answer</summary>
+
+**Step one: pick a prompt.** The prompt should reflect what real users actually send, so it typically comes from production logs or a curated set that mirrors the user distribution. A distribution mismatch means you tune the model for situations it does not encounter.
+
+**Step two: generate two responses.** Feed the same prompt into the SFT model twice with positive temperature. Temperature adds randomness to the token-sampling process, so the same prompt produces different outputs each run. The two responses diverge because of sampling variation, not because the model has changed.
+
+**Step three: rate the pair.** A human labeler reads both responses and indicates which one is better on a binary scale. The preference pair is now ready for training.
+
+Positive temperature is necessary because without it (temperature = 0), the model is deterministic and would produce the same output twice. The preference pair needs two distinct responses to be a useful training example.
+
+</details>
+
+**4. The lesson says the reward model is "trained pairwise but used pointwise." What does that mean in practice?**
+
+<details>
+<summary>Show answer</summary>
+
+During training, the reward model sees **pairs** of responses to the same prompt. The training objective pushes the winning response's score above the losing response's score on every pair. The pairwise structure is what gives the loss something to push against.
+
+At **inference time**, the reward model scores **one** prompt-and-response at a time and outputs a single number. It does not need a comparison response. It does not need to know what model produced the response. It does not need the original preference pair. It is just a function: prompt and response in, score out.
+
+The pairwise structure is a training-time artifact that shaped the weights. Once training is done, those weights can score any single input independently. This matters because in the second stage of RLHF, the reward model is called once per completion to score the LLM's output, not once per pair.
+
+</details>
+
+**5. A company trains two separate reward models for their assistant: one for helpfulness, one for safety. A student asks: if both reward models are well trained, why might they sometimes pull in opposite directions during the second stage of RLHF?**
+
+<details>
+<summary>Show answer</summary>
+
+Because the two reward models were trained on different preference dimensions, and those dimensions are not always aligned. The helpfulness reward model was trained to score high responses that completely, directly, and enthusiastically answer the user's question. The safety reward model was trained to score high responses that avoid potentially harmful outputs, which sometimes means being more hedged or refusing outright.
+
+For a prompt that sits on the boundary (detailed instructions on a topic that has both legitimate and harmful uses, for example), the helpfulness reward model and the safety reward model will assign different scores to the same response. The second stage of RLHF has to balance them, and the balancing act is where the "feel" of a model (how helpful versus how cautious) gets set. Two labs can train equally well-calibrated reward models and still produce models with noticeably different refusal behavior and verbosity profiles, because their respective balancing choices differ.
+
+</details>
+
+**6. What is the structural difference between the supervision signal in SFT and the supervision signal in reward-model training?**
+
+<details>
+<summary>Show answer</summary>
+
+**SFT supervision is dense:** every token in the response contributes to the loss. The model receives a training signal at each prediction step.
+
+**Reward-model supervision is sparse:** the model generates the entire response, and then receives a single score for the whole thing. Roughly one signal per full completion rather than one per token. The intermediate tokens get no direct feedback; the reward is assigned only when the response is complete.
+
+The lecturer flags this asymmetry explicitly as one of the structural reasons RLHF is harder to make stable than SFT. With dense per-token supervision, the model has many gradient updates per sequence; with sparse per-completion supervision, it has far fewer. Small noise in the reward model's score has an outsized effect because there are fewer correction opportunities per sequence.
+
+</details>
+
+## Try it yourself: what did the reward model learn?
+
+About 10 minutes. Pen and paper.
+
+**Setup.** Below are four descriptions of an AI assistant's behavior. For each one, infer what the labeling guidelines for the reward model likely asked labelers to optimize for. There is no single right answer, but your reasoning should connect the observed behavior to a specific preference dimension the labelers could have been instructed to judge. The point is to practice reading model behavior as downstream evidence of reward model training choices.
+
+```
+1. The assistant answers almost every question in detail,
+   including questions where a shorter answer would be more
+   useful. When asked "what time is it in Tokyo?" it produces
+   a four-paragraph response about Japanese time zones, daylight
+   saving, and international time zone standards.
+
+2. The assistant refuses to answer a wide range of questions
+   about chemistry, including questions a high-school student
+   would encounter in a standard curriculum (naming the products
+   of a combustion reaction, explaining what a catalyst does).
+
+3. The assistant often produces responses that sound confident
+   and fluent but contain factual errors on topics where the
+   training data was thin. It never hedges or says "I'm not
+   certain."
+
+4. The assistant adapts its vocabulary and explanation depth
+   to cues in the user's message: it uses technical terms with
+   users who seem expert and plain language with users who seem
+   new. Its tone stays consistent.
+```
+
+**Discussion:**
+
+1. **Verbosity reward model, possibly calibrated on "completeness."** If labelers were asked "which response is more complete?", longer responses tend to win even when the additional content is not useful. The reward model learned to score length and coverage highly, and the second-stage RL update pushed the model toward that. Labs call this kind of artifact "reward hacking on verbosity"; the reward model is working exactly as trained, just not as intended.
+
+2. **Safety reward model with an aggressive refusal boundary.** If labelers were asked "which response is safer?" and the labeling guidelines flagged chemistry topics broadly, the reward model learned to assign low scores to any response that discusses chemistry in detail. The model's actual safety is a separate question from whether it refuses in the right places; a poorly calibrated safety reward model produces over-refusal as reliably as a poorly calibrated helpfulness reward model produces over-verbosity.
+
+3. **No strong calibration reward model.** Calibrated uncertainty (hedging, "I'm not certain") requires labelers to prefer hedged responses over confident-wrong ones. If the helpfulness guidelines rewarded confident responses without penalizing wrong ones, or if the preference data lacked examples of confident errors, the reward model never learned to value hedging. The confident-and-wrong behavior is SFT-era behavior that a well-designed reward model would have corrected.
+
+4. **Helpfulness reward model calibrated on audience fit.** This is the behavior of a reward model that was trained on preference data covering interactions with users of varying backgrounds, with labelers instructed to prefer responses that match the apparent expertise level of the user. This kind of calibration is nontrivial to achieve and usually requires intentional dataset construction.
+
+**Sanity check.** The cleanest signal is contrast: when a model is inconsistent (very helpful here, oddly cautious there), the reward model is usually pulling in different directions across prompt types. When a model is consistently wrong in the same direction (always too verbose, always too cautious), the reward model was consistently trained on a guideline that pointed that way. The behavior is evidence; work backward from it.
+
+## Flashcards
+
+Ten cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay out the full set as one card per page, ready to print or save as a PDF for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="What is a preference pair?">
+
+One prompt, two responses, and a binary label indicating which response is preferred. No rubric score, no per-token annotation. The atomic unit of preference data.
+
+</Flashcard>
+
+<Flashcard question="Why is pairwise comparison more reliable than absolute scoring for collecting preference data?">
+
+Absolute scoring drifts: labelers cannot answer "is this a 0.9 or a 0.85?" consistently across many examples. Pairwise comparison ("is A better than B?") is a simpler judgment humans can make reliably, even on subjective tasks. The binary scale produces more consistent labels and a more reliable reward model.
+
+</Flashcard>
+
+<Flashcard question="How are the two candidate responses in a preference pair typically generated?">
+
+The same SFT model is prompted twice with positive temperature. Temperature adds randomness to token sampling, so the same prompt produces different outputs across runs. The variation is sampling noise, not a second model.
+
+</Flashcard>
+
+<Flashcard question="What is RLHF, and what are its two stages?">
+
+Reinforcement Learning from Human Feedback. Stage one: train a reward model from preference pairs labeled by humans. Stage two: use the reward model to update the LLM so it generates responses that score higher. The two stages are conceptually and often technically separable.
+
+</Flashcard>
+
+<Flashcard question="What is RLAIF, and how does it differ from RLHF?">
+
+Reinforcement Learning from AI Feedback. The training procedure is identical to RLHF; the only difference is who labels the preference pairs. In RLAIF, another AI model assigns the preference labels instead of human labelers.
+
+</Flashcard>
+
+<Flashcard question="What is the reward model?">
+
+A neural network trained to score prompt-response pairs. Structurally: a transformer with a classification head (a single-number output) instead of a language-modeling head. Trained on preference pairs to assign higher scores to preferred responses. After training, it is a function: prompt and response in, one number out.
+
+</Flashcard>
+
+<Flashcard question="What is the Bradley-Terry model used for in reward-model training?">
+
+The Bradley-Terry model (named after a 1952 statistics paper on paired comparisons) is the objective used to train the reward model. The intuition: each response has a hidden quality number, and the probability that a human prefers response A over B is a function of the difference between their quality numbers. The reward model learns to output quality numbers whose differences match the observed human preferences.
+
+</Flashcard>
+
+<Flashcard question="The reward model is 'trained pairwise but used pointwise.' What does that mean?">
+
+During training, the reward model sees pairs (one winning and one losing response to the same prompt) and learns from the difference between their scores. At inference time, it scores one prompt-and-response at a time and outputs a single number, with no comparison response needed. The pairwise structure is a training-time artifact; the trained weights score individual inputs.
+
+</Flashcard>
+
+<Flashcard question="Why is reward-model supervision called 'sparse'?">
+
+SFT gives roughly one training signal per token (every token in the response contributes to the loss). The reward model gives roughly one signal per full completion: generate the entire response, then assign a single score. Far fewer gradient updates per sequence, which makes the training harder to stabilize.
+
+</Flashcard>
+
+<Flashcard question="What is the one-sentence takeaway from this lesson?">
+
+Supervised fine-tuning teaches the model to answer when someone asks; preference data teaches it which answer to prefer; the reward model is how that preference becomes a number a training loop can use.
+
+</Flashcard>
+
+</FlashcardSet>
