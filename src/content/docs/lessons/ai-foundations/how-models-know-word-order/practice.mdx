@@ -1,0 +1,188 @@
+---
+title: "Practice: How models know word order"
+description: Self-check on why position info is needed, the two original schemes, the sinusoidal formula walk-through, and flashcards for retrieval.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+A short retrieval pass. Answer in your head (or on paper) before opening the collapsible.
+
+**1. Why does a transformer need an explicit position signal at all?**
+
+<details>
+<summary>Show answer</summary>
+
+Transformers process all tokens in parallel via self-attention. The `Q · K^T` computation compares every token to every other token, but nothing in that computation knows which token came first. The math is permutation-invariant: shuffling the input tokens in any order would produce the same attention weights if no position information were attached. RNNs had position for free because they processed tokens sequentially and carried a hidden state; transformers traded that recurrence for parallelism and lost the positional signal as a side effect.
+
+</details>
+
+**2. What does "added to the token embedding" mean concretely?**
+
+<details>
+<summary>Show answer</summary>
+
+Each token has an embedding vector that encodes what the token is (its meaning). A position embedding provides a second vector that encodes where the token sits in the sequence. The two vectors are added together element-wise before the input reaches the first attention layer. So if the embedding for *cat* is `e_cat` and the position vector for slot 3 is `p_3`, the first attention layer sees `e_cat + p_3`. The same word at position 7 would arrive as `e_cat + p_7`. Position information rides along in the same vector as token meaning.
+
+</details>
+
+**3. What are the two original position-embedding schemes, and what is the main trade-off of each?**
+
+<details>
+<summary>Show answer</summary>
+
+**Learned position embeddings:** one trainable vector per position, initialized as random noise and updated during training. Pro: simple, gradient descent figures it out. Con: can only represent positions seen during training (position 513 has no vector if training capped at 512); can also overfit to positional patterns in the training data.
+
+**Sinusoidal embeddings:** a fixed mathematical formula, no training required. `PE(m, 2i) = sin(m / 10000^(2i / d_model))` and `PE(m, 2i+1) = cos(m / 10000^(2i / d_model))`. Pro: extends to any sequence length; the dot product of two sinusoidal embeddings is a function of relative distance, not absolute positions. Con: indirect (added to the input, not injected into the attention computation; that improvement is in Phase 2). The 2017 paper picked sinusoidal for the extrapolation advantage.
+
+</details>
+
+**4. What trigonometric identity makes the dot product of two sinusoidal embeddings reflect relative distance?**
+
+<details>
+<summary>Show answer</summary>
+
+The identity `cos(a - b) = cos a cos b + sin a sin b`. When you take the dot product of the sinusoidal embedding at position `m` with the embedding at position `n`, the formula collapses into a sum of cosines that depends only on the relative distance `m - n`, not on the absolute values of `m` or `n`. Positions that are close together produce a higher dot product; positions far apart produce a lower one. Nobody had to train this property in; it falls out of the math.
+
+</details>
+
+**5. Why does this lesson stop at sinusoidal embeddings without covering the modern schemes?**
+
+<details>
+<summary>Show answer</summary>
+
+The modern schemes (T5 relative bias, ALiBi, RoPE) inject position information directly into the attention computation rather than adding it to the input embedding. Understanding why that placement is better requires understanding what the attention computation (`Q · K^T`) is doing. Attention is taught in Phase 2. So this lesson covers the original two schemes, which require no attention knowledge, and defers the rest to Phase 2 once the prerequisite is in place.
+
+</details>
+
+## Try it yourself: sinusoidal formula walk-through
+
+This exercise puts the sinusoidal formula into practice. About 10 minutes.
+
+**Side effects:** none. Pen and paper, or a text editor.
+
+**Setup:** use embedding dimension `d_model = 4` (so each position vector has 4 entries). Compute the position vectors for positions `m = 1` and `m = 2` using the formula:
+
+```
+PE(m, 2i)   = sin(m / 10000^(2i / 4))
+PE(m, 2i+1) = cos(m / 10000^(2i / 4))
+```
+
+For dimension index `i = 0`: the exponent is `0/4 = 0`, so `10000^0 = 1`.
+For dimension index `i = 1`: the exponent is `2/4 = 0.5`, so `10000^0.5 = 100`.
+
+**Step 1:** Fill in the four entries for position `m = 1`.
+
+- Dimension 0 (`2i = 0`, `i = 0`): `sin(1 / 1) = sin(1) ≈ ?`
+- Dimension 1 (`2i+1 = 1`, `i = 0`): `cos(1 / 1) = cos(1) ≈ ?`
+- Dimension 2 (`2i = 2`, `i = 1`): `sin(1 / 100) = sin(0.01) ≈ ?`
+- Dimension 3 (`2i+1 = 3`, `i = 1`): `cos(1 / 100) = cos(0.01) ≈ ?`
+
+<details>
+<summary>Show answer</summary>
+
+- Dimension 0: `sin(1) ≈ 0.841`
+- Dimension 1: `cos(1) ≈ 0.540`
+- Dimension 2: `sin(0.01) ≈ 0.010`
+- Dimension 3: `cos(0.01) ≈ 1.000`
+
+Position 1's embedding: approximately `(0.841, 0.540, 0.010, 1.000)`.
+
+</details>
+
+**Step 2:** Fill in the four entries for position `m = 2`.
+
+<details>
+<summary>Show answer</summary>
+
+- Dimension 0: `sin(2) ≈ 0.909`
+- Dimension 1: `cos(2) ≈ -0.416`
+- Dimension 2: `sin(0.02) ≈ 0.020`
+- Dimension 3: `cos(0.02) ≈ 1.000`
+
+Position 2's embedding: approximately `(0.909, -0.416, 0.020, 1.000)`.
+
+</details>
+
+**Step 3:** Compare the two vectors. Which dimensions changed a lot? Which barely changed?
+
+<details>
+<summary>Show answer</summary>
+
+Dimensions 0 and 1 changed substantially from position 1 to position 2 (from 0.841 to 0.909, from 0.540 to -0.416). These are the high-frequency dimensions (small `i`, small exponent, fast oscillation).
+
+Dimensions 2 and 3 barely changed (from 0.010 to 0.020, from 1.000 to 1.000). These are the low-frequency dimensions (large `i`, large exponent, slow oscillation).
+
+The high-frequency dimensions encode fine-grained, short-range position differences. The low-frequency dimensions encode coarse, long-range structure. Together they give the model a rich signal across many scales of position.
+
+</details>
+
+**Sanity check:** both vectors were computed from a formula, no training required. The same formula works for position 5,000 or position 50,000, even if the model was only trained on sequences of length 512.
+
+## Flashcards
+
+Nine cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay out the full set as one card per page.
+
+<FlashcardSet>
+
+<Flashcard question="Why can't a transformer tell 'the cat sat on the mat' apart from 'the mat sat on the cat' without position embeddings?">
+
+Self-attention computes `Q · K^T`, which compares every token to every other token. Nothing in that computation knows which token came first. The math is permutation-invariant: any shuffling of the input tokens produces the same attention weights if no position info is attached. The two sentences use the same tokens, so they look identical to the model without a position signal.
+
+</Flashcard>
+
+<Flashcard question="How do transformers differ from RNNs in how they handle position?">
+
+RNNs process tokens one at a time, in order, carrying a hidden state from step to step. Position is implicit in the order of computation. Transformers process all tokens in parallel, which is faster at training time but loses the implicit position signal. Position has to be added back explicitly via position embeddings.
+
+</Flashcard>
+
+<Flashcard question="What does 'adding the position vector to the token embedding' look like concretely?">
+
+If the embedding for *cat* is the vector `e_cat` and the position vector for slot 3 is `p_3`, the first attention layer sees `e_cat + p_3`. The same word at position 7 would arrive as `e_cat + p_7`. Position information rides along in the same vector as token meaning, baked in before any attention computation.
+
+</Flashcard>
+
+<Flashcard question="What are the two limitations of learned position embeddings?">
+
+First, you can only learn embeddings for positions seen during training. If training maxed at 512, position 513 has no embedding and the model cannot handle inputs that long. Second, the learned vectors can overfit to positional patterns in the training data, carrying faint spurious signals about what the training corpus tended to put at certain positions.
+
+</Flashcard>
+
+<Flashcard question="What is the sinusoidal position embedding formula?">
+
+`PE(m, 2i) = sin(m / 10000^(2i / d_model))` and `PE(m, 2i+1) = cos(m / 10000^(2i / d_model))`. Position `m`'s vector is a fixed pattern of sines and cosines at different frequencies. Low-index dimensions (`i` small) oscillate quickly with position; high-index dimensions oscillate slowly.
+
+</Flashcard>
+
+<Flashcard question="Why does sinusoidal extrapolate to sequence lengths beyond training?">
+
+The formula is well-defined for any position `m` — it does not require a lookup table. Position 5,000 or 50,000 can be computed the same way as position 1, even if the model was only trained on sequences of length 512. No learned parameter is needed.
+
+</Flashcard>
+
+<Flashcard question="What trigonometric identity gives sinusoidal embeddings their relative-distance property?">
+
+`cos(a - b) = cos a cos b + sin a sin b`. The dot product of two sinusoidal embedding vectors at positions `m` and `n` collapses into a sum of cosines that depends only on `m - n`. Closer positions produce higher dot products; distant ones produce lower dot products. The property falls out of the math with no training required.
+
+</Flashcard>
+
+<Flashcard question="Why did the 2017 paper choose sinusoidal over learned embeddings?">
+
+Both performed comparably on translation. The authors picked sinusoidal for the extrapolation advantage: the formula works for any sequence length, not just the lengths seen during training. The relative-distance property was also cleaner by construction than anything a learned scheme would have to approximate.
+
+</Flashcard>
+
+<Flashcard question="What scheme do most modern LLMs use, and why is it covered in Phase 2 instead of here?">
+
+Most modern LLMs use RoPE (rotary position embeddings), which injects position directly into the attention computation rather than adding it to the input embedding. Understanding why that placement is better requires knowing what `Q · K^T` is doing in self-attention — which is the topic of Phase 2. The original two schemes require no attention knowledge and belong in Phase 1.
+
+</Flashcard>
+
+</FlashcardSet>

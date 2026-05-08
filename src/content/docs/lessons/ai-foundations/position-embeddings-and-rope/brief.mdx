@@ -1,24 +1,26 @@
 ---
-title: "How transformers understand word order: sinusoidal embeddings and RoPE"
-description: The first lesson in our adaptation of Stanford CME 295 Lecture 2 (Modern transformer). Self-attention has no notion of order on its own. The transformer paper bolted position information on with sinusoidal embeddings; modern LLMs almost all moved to a different scheme called RoPE that injects position into the attention computation itself. We'll walk the four positional schemes the lecture covers and end on why RoPE won.
+title: "How modern models inject position into attention (RoPE)"
+description: "The Phase 2 lesson on the architectural shift from input-added position embeddings (sinusoidal, learned) to attention-injected ones. Covers the 'closer-tokens-more-similar' intuition that motivates the shift, the two intermediate schemes (T5 relative bias, ALiBi), and the RoPE deep-dive. Phase 1 covered the original 2017 schemes; this lesson covers what modern LLMs do differently."
 track: ai-foundations
-order: 10
-phase: read-text
-phase_order: 3
+order: 11
+phase: architecture
+phase_order: 4
 difficulty: standard
-estimated_read_minutes: 25
+estimated_read_minutes: 20
 estimated_practice_minutes: 15
-prerequisites: []
+prerequisites:
+  - lessons/ai-foundations/how-models-know-word-order
+  - lessons/ai-foundations/how-attention-works
 learning_outcomes:
-  - Explain why self-attention requires an explicit position signal and what would go wrong without one
-  - Describe the original transformer paper's two position-embedding options (learned and sinusoidal) and the trade-off between them
-  - Identify the structural shift between input-added position embeddings and attention-injected position embeddings, and name the two early attention-injected variants (T5 relative bias, ALiBi)
-  - Walk through what RoPE (rotary position embeddings) actually does in plain language, and explain why most modern LLMs use it
+  - Identify the structural shift between input-added position embeddings and attention-injected ones, and explain why the field made it
+  - Describe what T5 relative bias and ALiBi each contribute to the attention softmax, and what each gives up
+  - Walk through what RoPE (rotary position embeddings) actually does in plain language, including the 2D rotation intuition
+  - Explain why most modern LLMs picked RoPE over the alternatives
 authors:
   - clawdemy
 published_at: 2026-05-03
-last_reviewed: 2026-05-03
-status: draft
+last_reviewed: 2026-05-08
+status: published
 artifact: brief
 source_material:
   type: youtube
@@ -42,21 +44,25 @@ import SourceLecture from '../../../../../components/SourceLecture.astro';
 
 ## What you'll learn
 
-This is the first lesson in our adaptation of Stanford CME 295 Lecture 2 (Transformer-based models & tricks). Lecture 1 covered the original transformer paper from 2017. Lecture 2 is about the parts of that architecture that have evolved since then, and which evolutions have actually stuck. The first such part is **position embeddings**: how the model knows that "the cat sat on the mat" is different from "the mat sat on the cat" when the attention mechanism on its own treats the input as a bag of tokens. The original transformer's answer was sinusoidal embeddings added to the input; modern LLMs almost all use a different scheme called **RoPE** (rotary position embeddings). This lesson walks the path from one to the other and explains why the field landed where it did. The full course materials (syllabus, schedule, the Amidi cheatsheets) are at [cme295.stanford.edu](https://cme295.stanford.edu/).
+This is the Phase 2 closer to the position-embeddings story. Phase 1 ended with the 2017 transformer paper's two original schemes (learned and sinusoidal) added to the input embedding. This lesson is about what changed when the field moved position information out of the input and into the attention computation itself. We cover the structural shift first (why "in the attention math" is cleaner than "added to the input and hope the property survives"), then the two intermediate schemes (T5 relative bias and ALiBi, both adding a bias inside the softmax), then the modern winner: **RoPE**, which rotates the query and key vectors by an angle that depends on their position. We build the RoPE intuition from the 2D rotation matrix up. By the end you can read "uses RoPE" on a model card and know exactly what that architectural choice is doing.
+
+## Where this fits
+
+This is the fourth lesson of Phase 2 (*How models think, the transformer architecture*) and the first of three lessons on what genuinely changed between the original 2017 transformer and modern LLMs. The other two are normalization (LayerNorm to RMSNorm and the pre-norm shift) and attention efficiency tricks (sliding windows, KV cache, MQA/GQA). The previous lesson in Phase 2 was *The transformer block*; the next is *Layer norm and RMSNorm*.
 
 ## Before you start
 
-**Prerequisites:** the attention lesson and the transformer block lesson (both in our Lecture 1 adaptation) are required reading. We assume you understand what a query, key, and value vector are, what the dot product `Q · K^T` represents in self-attention, and what it means to "add" a vector to the input embedding. If any of those terms feel unfamiliar, read the corresponding Lecture 1 lesson first.
+**Prerequisites:** the [Phase 1 position lesson](/lessons/ai-foundations/how-models-know-word-order/lesson/) (you need the "why position info is needed" framing and the original sinusoidal/learned schemes); and the [attention lesson](/lessons/ai-foundations/how-attention-works/lesson/) (you need to understand what query, key, and value vectors are, and what `Q · K^T` represents in self-attention). The structural shift only makes sense if you already know what attention is doing.
 
 ## By the end, you'll be able to
 
-- Explain why self-attention requires an explicit position signal and what would go wrong without one
-- Describe the original transformer paper's two position-embedding options (learned and sinusoidal) and the trade-off between them
-- Identify the structural shift between input-added position embeddings and attention-injected position embeddings, and name the two early attention-injected variants (T5 relative bias, ALiBi)
-- Walk through what RoPE (rotary position embeddings) actually does in plain language, and explain why most modern LLMs use it
+- Identify the structural shift between input-added position embeddings and attention-injected ones, and explain why the field made it
+- Describe what T5 relative bias and ALiBi each contribute to the attention softmax, and what each gives up
+- Walk through what RoPE (rotary position embeddings) actually does in plain language, including the 2D rotation intuition
+- Explain why most modern LLMs picked RoPE over the alternatives
 
 ## Time and difficulty
 
-- **Read time:** about 25 minutes
-- **Practice time:** about 15 minutes (a worked sinusoidal-embedding computation, plus a paired-comparison exercise on which scheme would do what on a given input)
+- **Read time:** about 20 minutes
+- **Practice time:** about 15 minutes (a 2D rotation walk-through that shows why dot products of rotated vectors depend on relative position)
 - **Difficulty:** standard

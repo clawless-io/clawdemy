@@ -1,0 +1,124 @@
+---
+title: "Lesson: How models know word order"
+description: "Phase 1 lesson on positional information. Models that process all tokens in parallel cannot tell which token came first by default. The 2017 transformer paper bolted position info on with two schemes (learned and sinusoidal embeddings added to the input). This lesson covers why the position signal is needed and what the original answers were, deliberately stopping before the modern attention-injected schemes (which a Phase 2 lesson covers after attention is taught)."
+sidebar:
+  order: 2
+  label: Lesson
+artifact: lesson
+---
+
+import AudioPlayer from '../../../../../components/AudioPlayer.astro';
+import LessonStar from '../../../../../components/LessonStar.astro';
+
+<LessonStar slug="how-models-know-word-order" />
+
+<AudioPlayer src="https://audio.clawdemy.org/lessons/how-models-know-word-order-lesson.mp3" approxMinutes={12} />
+
+"The cat sat on the mat" and "the mat sat on the cat" use exactly the same tokens. They mean very different things.
+
+The previous two lessons in this phase walked through how a model turns text into the form it actually operates on: tokenization splits the text into discrete chunks, then embeddings turn each token into a dense vector. By the end of the embeddings lesson, you have a sequence of vectors, one per token, ready to be fed into the rest of the model. There is one piece missing.
+
+The vector for *cat* is the same vector whether *cat* shows up at the start of the sentence or in the middle. The vector for *mat* is the same vector at position 1 or at position 6. If the model only looks at the bag of vectors, it cannot tell *the cat sat on the mat* apart from *the mat sat on the cat*. Same vectors, same bag, same meaning to a position-blind reader. That is wrong for almost any task we care about.
+
+The job of a **position embedding** is to fix that: tell the model where each token sits in the sequence, in a form the model can use. This lesson is about why the gap exists and what the original transformer paper did about it.
+
+By the end you will know why position information has to be added explicitly, what the two original schemes were, and why a follow-up lesson in the next phase is needed for the rest of the story.
+
+## Why models need position information at all
+
+Older sequence models (RNNs, the kind of architecture transformers replaced) handled position implicitly. They processed tokens one at a time, in order, carrying a hidden state from one step to the next. Position was free; the *order of computation* gave you the *order of tokens*. The downside: you could not parallelize across the sequence. Each step had to wait for the previous one to finish.
+
+Transformers traded that recurrence for parallelism. Every token can be processed at the same time, in parallel, on different parts of the GPU. That is most of why modern models are as fast as they are at training time. The cost is that you lose the implicit position signal. Process every token in parallel and the model has no built-in notion of which one came first.
+
+You can prove this to yourself without writing any code. Imagine you take the sequence of token vectors for *the cat sat on the mat* and shuffle them: maybe *sat the on cat the mat* in some random order. If the model treats the input as a bag (no position information attached), the only thing it can compute is some function of the multiset of vectors. The shuffled version produces the same multiset. The model's output should not change. That is a problem if the right answer depends on the order, which it almost always does.
+
+So the design constraint is clear: we need to add information that says "this token is at position 1, this one is at position 2, this one is at position 3," in a form the model can read. The transformer paper called the answer **position embeddings** and proposed two ways to do it.
+
+## The original two options: learned and sinusoidal
+
+Both options have the same shape: they produce one vector per position, and that vector gets *added to the token's embedding* before the rest of the model sees the input. So if the embedding for *cat* is some vector `e_cat`, and the position embedding for slot 1 is some vector `p_1`, then what reaches the next layer is `e_cat + p_1`. The same word at position 6 would arrive as `e_cat + p_6`. The position information rides along with the token information, baked into the same vector.
+
+The two options differ in where `p_m` comes from.
+
+**Learned position embeddings.** Allocate one trainable embedding vector per position. Position 1 gets its own vector, position 2 gets its own vector, and so on, up to some maximum sequence length you committed to during training. The vectors start as random noise and get updated by gradient descent during training, just like any other parameter in the model. At inference, look up the position's vector and add it to the token's embedding.
+
+This works. It also has two real limitations.
+
+First, the learned vectors reflect whatever positional patterns showed up during training. If your training data tended to have, say, a question mark at position 17 of every sequence, position 17's learned vector ends up carrying a faint "expect a question mark soon" signal. That sounds harmless until you remember the model can be fooled by patterns it learned but should not generalize.
+
+Second, you can only learn embeddings for positions you actually saw during training. If the model was trained on sequences capped at 512 tokens and a user feeds it a 2,000-token input at inference, positions 513 through 2,000 have no learned embedding. The model has to either truncate, pad, or do something improvised. None of those are good answers.
+
+**Sinusoidal position embeddings.** Skip the learning entirely. Use a fixed mathematical formula instead. For each position `m` and each dimension `i` of the embedding vector, compute the entry as:
+
+```
+PE(m, 2i)   = sin(m / 10000^(2i / d_model))
+PE(m, 2i+1) = cos(m / 10000^(2i / d_model))
+```
+
+You can read that as: position `m`'s embedding vector is a fixed pattern of sines and cosines at different frequencies. Low-index dimensions (small `i`) oscillate quickly with position; high-index dimensions oscillate slowly. The whole vector is added to the token's embedding, just like the learned version.
+
+Two things make this design clever, even though it is just a formula.
+
+First, **it works for any position you can think of, including positions you never trained on**. The formula is well-defined for `m = 1` and for `m = 1,000,000` and for everything in between. The model can extrapolate to sequence lengths it never saw during training, which is exactly the problem the learned scheme could not solve.
+
+Second, **the dot product of two sinusoidal embeddings at different positions ends up being a function of the relative distance between them**, not their absolute positions. The reason is a trigonometric identity: `cos(a - b) = cos a cos b + sin a sin b`. When you take the dot product of position `m`'s embedding with position `n`'s embedding, the formula collapses into a sum of cosines that depends only on `m - n`. Positions that are close together produce a high dot product; positions that are far apart produce a low dot product. Nobody had to train this property in; it falls out of the formula.
+
+Why is "relative distance matters more than absolute position" a property we want? Intuitively, the meaning of *cat* depends on what the words next to it are, not on whether the sentence starts on page 1 or page 100 of a document. A position scheme that naturally encodes "how close are these two tokens" is doing more work than one that just encodes "this is position 7."
+
+The 2017 paper reported that learned and sinusoidal performed comparably on translation. The authors went with sinusoidal, citing the extrapolation advantage.
+
+## A small concrete walk-through
+
+Pretend the embedding dimension is 4 and you want the position vectors for positions 1 and 2. Plug into the formula above (taking `d_model = 4` so the exponent denominators are easy):
+
+- `PE(1, 0) = sin(1 / 10000^0) = sin(1) ≈ 0.841`
+- `PE(1, 1) = cos(1 / 10000^0) = cos(1) ≈ 0.540`
+- `PE(1, 2) = sin(1 / 10000^(0.5)) = sin(1/100) = sin(0.01) ≈ 0.010`
+- `PE(1, 3) = cos(1 / 10000^(0.5)) = cos(1/100) = cos(0.01) ≈ 1.000`
+
+So position 1's embedding is roughly `(0.841, 0.540, 0.010, 1.000)`.
+
+Position 2's embedding (same formula, `m = 2`):
+
+- `PE(2, 0) = sin(2) ≈ 0.909`
+- `PE(2, 1) = cos(2) ≈ -0.416`
+- `PE(2, 2) = sin(2 / 10000^(0.5)) = sin(2/100) = sin(0.02) ≈ 0.020`
+- `PE(2, 3) = cos(2 / 10000^(0.5)) = cos(2/100) = cos(0.02) ≈ 1.000`
+
+So position 2's embedding is roughly `(0.909, -0.416, 0.020, 1.000)`.
+
+Two patterns are visible even from just these two positions. The first two coordinates change a lot from position 1 to position 2 (they are the high-frequency ones); the last two coordinates barely change (they are the low-frequency ones). And neither vector required any training to compute. Plug `m` into the formula and out comes a vector. Position 5,000 works the same way, even if you only trained on sequences of length 512.
+
+## What this lesson deliberately stops short of
+
+The original sinusoidal answer is still in the textbooks. It is no longer what most modern LLMs do. The field made one more structural shift, and the modern answer is called **RoPE** (rotary position embeddings). RoPE injects the position signal directly into the attention computation rather than adding it to the input embedding. The intuition is the same (closer tokens should be more similar than distant tokens), but the implementation depends on understanding what attention is doing, which is the topic of the next phase.
+
+So this lesson stops at the original answer. We covered why the position signal is needed and what the 2017 paper proposed. The modern answer (T5 relative bias, ALiBi, RoPE) is a Phase 2 lesson that comes after attention has been taught. When you get to that lesson you will see the same trigonometric machinery come back, this time inside the attention math, which is the cleaner place for it.
+
+## Why this matters when you use AI
+
+Two consequences worth holding onto.
+
+- **Position information is the third thing the model needs after tokens and embeddings.** When a model card lists "tokenizer," "embeddings," and "position embeddings," you now know exactly what that third item is doing and why it has to exist.
+- **The position-embedding scheme is one of the few places a model's architecture really matters at inference time.** Most architectural choices (which attention variant, which normalization layer) are invisible to the user. Position embedding scheme can be visible: it is what determines whether a model can handle longer input sequences than it was trained on. If you have ever wondered why some models say "supports 128K context" and others top out at 4K, the position-embedding choice is a significant part of the answer.
+
+## Common pitfalls
+
+Two mistakes worth naming.
+
+**Thinking the model "just figures out word order" because it is trained on text.** It does not. Without an explicit position signal, the model genuinely cannot distinguish *the cat sat on the mat* from *the mat sat on the cat*. The position embedding is what makes word order a thing the model can see. Skip it and the model's behavior degrades to bag-of-words level for any task where order matters.
+
+**Confusing "position embedding" with "token embedding."** Token embeddings encode *what the token is* (the meaning of *cat* versus *dog*). Position embeddings encode *where the token sits* (position 3 versus position 7). Both are vectors, both get added together, but they encode completely different information.
+
+## What you should remember
+
+- **Transformers process all tokens in parallel and lose the implicit position signal that older recurrent models had for free.** Position information has to be added explicitly.
+- **The original transformer paper proposed two schemes:** learned (one trainable vector per position) and sinusoidal (a fixed `sin/cos` formula per position and dimension). Both add the position vector to the token embedding before the first layer.
+- **Sinusoidal won the original choice for two reasons.** It extrapolates to positions not seen during training, and the dot product of two sinusoidal embeddings depends on the relative distance between them by construction.
+- **The story is not over.** The original answer is in the textbooks; modern LLMs use a different scheme called RoPE that injects position into the attention computation. You will see it in a Phase 2 lesson once attention has been taught.
+
+## If you remember one thing
+
+**Transformers in parallel lose word order.**\
+**The 2017 paper added a position vector to each token before the first layer.**\
+**Sinusoidal embeddings extend to any length and encode relative distance for free.**
