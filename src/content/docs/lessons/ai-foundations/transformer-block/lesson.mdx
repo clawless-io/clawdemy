@@ -87,20 +87,26 @@ Modern variants: **RMSNorm** (root-mean-square norm) skips the mean-centering st
 
 ## The full block
 
-Putting all four pieces together gives you the block diagram from the original paper.
+Putting all four pieces together gives you the modern transformer block.
 
 <TransformerBlock />
 
-What happens to one token's representation as it passes through one block:
+What happens to one token's representation as it passes through one block (Pre-LN, the modern default):
 
 1. Input vector enters at `d_model`.
-2. Multi-head attention runs (cross-token mixing).
-3. The attention output is added to the input (residual), then passed through LayerNorm.
-4. Feed-forward network runs (per-token transformation).
-5. The FFN output is added to the result of step 3 (residual), then passed through LayerNorm.
+2. The input is passed through LayerNorm, then through multi-head attention (cross-token mixing).
+3. The attention output is added to the original input as a residual: `y = x + Attn(LN(x))`.
+4. `y` is passed through LayerNorm, then through the feed-forward network (per-token transformation).
+5. The FFN output is added to `y` as a residual: `z = y + FFN(LN(y))`.
 6. Output vector exits at `d_model`, the same shape as the input.
 
 That is one block. The shape in equals the shape out, which is what allows the next block to take this output as its input.
+
+**A note on Pre-LN vs Post-LN.** The original 2017 "Attention Is All You Need" paper applied LayerNorm *after* each sub-layer's residual addition, not before the sub-layer's input. That ordering is called **Post-LN**: `y = LN(x + Attn(x))`. The canonical "Add & Norm" box on the original architecture diagram shows this Post-LN pattern. It is what the paper introduced and what most textbook diagrams reproduce.
+
+The trade-off: Post-LN trains unstably at depth without elaborate learning-rate warmup schedules. Practitioners working at scale (starting with GPT-2 in 2019) shifted to **Pre-LN**, which applies LayerNorm to each sub-layer's input rather than to its residual output. Pre-LN trains stably with much simpler optimization recipes. Xiong et al. (2020, "On Layer Normalization in the Transformer Architecture") gave the formal analysis showing why; by then the practical shift was already widespread.
+
+The result: every modern large transformer trained at scale (GPT-2, GPT-3, GPT-4, the LLaMA family, Mistral, and essentially the rest of the frontier) uses Pre-LN. Post-LN survives in older models and in textbook diagrams; Pre-LN is what reading current code or training current models will show you.
 
 ## Stacking blocks
 
@@ -119,7 +125,7 @@ The total compute and parameter count of a transformer is dominated by these sta
 Three direct consequences when you read AI tooling docs or model cards.
 
 - **Architecture diagrams stop being mysterious.** When you see the canonical "Attention Is All You Need" figure or its modern descendants, you can name every box: multi-head attention, add and norm, feed-forward network, add and norm. When a paper says "we replace LayerNorm with RMSNorm," you understand which box was swapped and what changed.
-- **Modern variants compose from these pieces.** Almost every named modern transformer variant is a recombination of choices on each of these axes: which position encoding (sinusoidal, learned, RoPE, ALiBi), which normalization (LayerNorm, RMSNorm, DeepNorm), which FFN activation (ReLU, GELU, SwiGLU), and head-sharing (full multi-head, MQA, GQA from the multi-head attention lesson). One more axis worth knowing: where LayerNorm sits relative to the sub-layer. The original paper applied it after each sub-layer (Post-LN); modern implementations almost always apply it before (Pre-LN), which trains more stably at scale. Once you know the four boxes, every variant is a substitution at one of them.
+- **Modern variants compose from these pieces.** Almost every named modern transformer variant is a recombination of choices on each of these axes: which position encoding (sinusoidal, learned, RoPE, ALiBi), which normalization (LayerNorm, RMSNorm, DeepNorm), which FFN activation (ReLU, GELU, SwiGLU), and head-sharing (full multi-head, MQA, GQA from the multi-head attention lesson). The Pre-LN vs Post-LN axis covered above is the same kind of substitution: where LayerNorm sits relative to each sub-layer. Once you know the four boxes, every variant is a substitution at one of them.
 - **Optimization choices come from the block.** Speed and memory optimizations (FlashAttention, sliding-window attention, MoE feed-forward, head pruning) all target one specific sub-layer of this block. The block is the unit of analysis for every transformer engineering decision you will read about.
 
 ## Common pitfalls
@@ -142,7 +148,7 @@ A few mistakes are common enough to be worth naming.
 - **The four wrapping pieces.** Position encoding (added once before the first block), feed-forward network (per-token nonlinearity), residual connections (gradient flow and information preservation), layer normalization (activation stability).
 - **Each piece fixes a specific gap.** Position encoding gives attention a sense of order. The FFN adds nonlinearity. Residuals enable deep stacks. LayerNorm prevents scale drift. Without all four, attention cannot be scaled into a working transformer.
 - **Stacking is the architecture.** A real transformer is N identical blocks stacked vertically. Layer count, head count per block, `d_model`, and `d_ff` are the four primary architecture knobs.
-- **Modern variants substitute on these axes.** RMSNorm vs LayerNorm, RoPE vs sinusoidal, SwiGLU vs ReLU, Pre-LN vs Post-LN, MQA or GQA vs full multi-head. Once you know the four boxes, the variants are easy to read.
+- **Modern variants substitute on these axes.** RMSNorm vs LayerNorm, RoPE vs sinusoidal, SwiGLU vs ReLU, Pre-LN (modern default) vs Post-LN (original 2017 ordering), MQA or GQA vs full multi-head. Once you know the four boxes, the variants are easy to read.
 
 You are now ready for the practice section, where you will trace one forward pass through a single block by hand and annotate the canonical architecture diagram with the names of every component.
 
