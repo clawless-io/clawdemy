@@ -25,13 +25,15 @@ By the end of this lesson you will know what a complete transformer block looks 
 
 ## What attention does and does not do
 
-Attention is a fundamentally **linear operation in the values** (it is a weighted sum of value vectors, with the weights being a softmax of dot products). Mixed with multi-head and the various projection matrices, it does a lot, but it leaves three structural gaps:
+Attention is **linear in the values once the softmax weights are fixed**: each token's output is a weighted sum of value vectors, with the weights coming from a softmax of dot products. The softmax itself is nonlinear, and the weights are recomputed at every layer from the layer's own activations, so stacked attention is genuinely a nonlinear function of its input. (A common shorthand says "attention is linear" — that shorthand is true only in a narrow technical sense and tends to mislead.)
+
+Even so, attention has structural gaps that mean a stack of pure attention layers is not enough on its own:
 
 1. **No sense of position.** Attention computes the same output regardless of token order; "the cat sat on the mat" and "the mat sat on the cat" yield the same attention computation. Attention is permutation-invariant.
-2. **No nonlinearity per token.** Without something nonlinear in each layer, stacking attention layers would collapse into one big linear transformation. The model would be no more expressive than a single attention.
+2. **No per-token transformation across channels.** Attention mixes information *across tokens* within each head, but it does not transform a single token's representation across the channel (feature) dimension. Without something that transforms each token's vector pointwise, the model has no mechanism to add expressive depth at the per-token level. Worse, Dong, Cordonnier and Loukas (2021, "Attention Is Not All You Need") proved that pure self-attention loses representational rank doubly-exponentially with depth: stacked attention by itself converges toward a low-rank degenerate output. Some pointwise mechanism is structurally required to prevent rank collapse.
 3. **No mechanism for stable deep stacks.** Activations drift in scale layer by layer; gradients shrink through long chains. Deep stacks of any kind hit this problem.
 
-Each of the four wrapping pieces fixes one of those gaps (or in the case of residuals, does double duty). The block design from the original paper is the smallest set of additions that turns attention into something a transformer can actually be built from.
+Each of the four wrapping pieces addresses one of those gaps (or in the case of residuals, does double duty). The block design from the original paper is the smallest set of additions that turns attention into something a transformer can actually be built from.
 
 ## Position encoding
 
@@ -56,12 +58,11 @@ FFN(x) = activation(x · W_1 + b_1) · W_2 + b_2
 
 `W_1` projects the `d_model`-dim vector up to a wider hidden dimension `d_ff` (typically four times `d_model`, so 768 expands to 3072). The activation function (originally ReLU, often GELU or SwiGLU in modern models) adds nonlinearity. `W_2` projects back down to `d_model`. The shape goes in, expands wide, and comes out the same size.
 
-Two reasons the FFN earns its place in every block:
+Three reasons the FFN earns its place in every block:
 
-- **It adds nonlinearity.** This is the gap from the previous section: attention is linear in values, so without nonlinearity, stacking layers compresses into one big linear transformation. The activation function in the FFN breaks the linearity, which is what gives the transformer the power to model complex functions.
-- **It transforms each token independently.** Attention does the cross-token mixing; the FFN does the per-token transformation. The two are deliberately complementary: attention "for each token, who else matters?" and FFN "for each token, what is its updated representation?"
-
-In a typical model, the FFN parameters are roughly two thirds of the per-block parameter count. It is bigger than attention, which surprises most readers who have just learned attention and assume that is where the parameters live. The model is doing real work in both places.
+- **It transforms each token across the channel dimension.** Attention mixes information across tokens (within each head's value-projection structure); the FFN mixes information across the channel dimension within each token. The two are deliberately complementary: attention answers "for each token, who else matters?" and FFN answers "for each token, how do its features combine to produce its updated representation?" Without the FFN, the model has no mechanism for per-token feature mixing.
+- **It adds a pointwise nonlinearity.** The activation function in the FFN (ReLU originally, GELU or SwiGLU in modern models) is the per-token nonlinearity that prevents rank collapse — the failure mode flagged in the previous section, where stacked attention alone converges toward low-rank degenerate output. The combination of FFN nonlinearity and the residual connections that come next is what keeps deep transformer stacks expressive.
+- **It holds most of the per-block parameters.** In a typical model, the FFN holds roughly two-thirds of the per-block parameter count. It is bigger than attention, which surprises most readers who have just learned attention and assume that is where the parameters live. The model is doing real work in both places.
 
 ## Residual connections
 
