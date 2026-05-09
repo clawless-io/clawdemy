@@ -1,0 +1,125 @@
+---
+title: "Lesson: BERT, part two: pretraining objectives and the train-then-fine-tune workflow"
+description: "A walk through BERT's two-stage training process. Pretraining via masked language model (MLM) and next sentence prediction (NSP), the 80/10/10 masking mix and why the mix is not arbitrary, the workflow that turns a pre-trained encoder into a task-specific classifier, and the two common fine-tuning patterns (CLS-head classification and per-token span detection)."
+sidebar:
+  order: 2
+  label: Lesson
+artifact: lesson
+---
+
+import AudioPlayer from '../../../../../components/AudioPlayer.astro';
+import LessonStar from '../../../../../components/LessonStar.astro';
+
+<LessonStar slug="bert-pretraining-and-fine-tuning" />
+
+<AudioPlayer src="https://audio.clawdemy.org/lessons/bert-pretraining-and-fine-tuning-lesson.mp3" approxMinutes={13} />
+
+This lesson picks up directly from the previous one. There we covered BERT's architecture: encoder-only, bidirectional self-attention (no causal mask), structural tokens (CLS at position 0, SEP between sentences), and three additive input embeddings (token + position + segment). What we did not cover was what BERT was trained to *do*. That is this lesson.
+
+The architecture forced new pretraining objectives. Bidirectional self-attention means every token can see every other token, including the future ones. So next-token prediction (the objective decoder-only models use) becomes trivial: the model can already see what comes next. BERT was trained on two different objectives that work *with* bidirectionality rather than against it: **masked language model (MLM)** and **next sentence prediction (NSP)**. Then a second stage, **fine-tuning**, adapts the pre-trained encoder to a specific labeled task.
+
+## Why bidirectionality forces new objectives
+
+Decoder-only models train via next-token prediction. The attention mask hides the future from each position, so predicting the next token from the past is a real task. Apply this to BERT, where there is no causal mask, and the future is in plain sight. The model would just copy. Predicting position 6 from positions 1, 2, 3, 4, 5, 6, 7, 8 (where 6 is in the input) is not learning, it is reading.
+
+So BERT needed objectives where the model still has something to predict despite seeing the whole input. The answer was to *hide* parts of the input on the way in (MLM) and *ask classification questions about pairs of inputs* (NSP). Both work because they create something the model has to figure out from context, even when the context is everything else in the sequence.
+
+## Pre-training objective 1: Masked Language Model (MLM)
+
+MLM is the load-bearing pre-training objective. It teaches the model to use bidirectional context to predict missing words.
+
+The mechanism: take an input sentence, randomly select a fraction of the tokens (the BERT paper specifies 15%), and replace them according to a specific 80/10/10 mix:
+
+- **80% of the time:** replace the selected token with a special `[MASK]` token. The model has to predict what the original token was.
+- **10% of the time:** replace it with a random token from the vocabulary. The model still has to predict the original.
+- **10% of the time:** keep the original token unchanged. The model still has to predict it.
+
+The 80/10/10 mix is not arbitrary. If we always replaced selected tokens with `[MASK]`, the model would learn that `[MASK]` is the only place it needs to predict. That's a bad inductive bias because at fine-tuning and inference time there are no `[MASK]` tokens. Mixing in random replacements and unchanged-but-still-predicted tokens forces the model to maintain useful representations for every token, not just `[MASK]`-marked positions.
+
+The intuition the lecturer gives: *"when you want to predict what a token is, you need to know about its context. So you're going to force the model to learn about what surrounds it left and right."* The bidirectionality of the encoder makes this possible (the model can use both past and future tokens to predict the masked one), and MLM is the training task that exercises that bidirectionality.
+
+## Pre-training objective 2: Next Sentence Prediction (NSP)
+
+NSP is a sentence-level task that complements MLM's token-level focus.
+
+The mechanism: pair two sentences (sentence A followed by sentence B). 50% of the time, B genuinely follows A in the source corpus (positive example). 50% of the time, B is a random sentence pulled from elsewhere (negative example). The model's job: classify whether B truly comes after A.
+
+The classification happens via a small head on top of the CLS token's output embedding. Because CLS sits at the front and integrates information from both sentences (through bidirectional self-attention plus the segment encoding telling the model which tokens belong to which sentence), its output is a sentence-pair-level representation. A linear layer on that output produces a binary "is consecutive" prediction.
+
+The intuition: NSP teaches the model sentence-level coherence. MLM gets the model good at token-level context; NSP gets it good at relating one chunk of text to another. The combination, the lecturer notes, *"the authors assume to be helpful for learning general embeddings of high quality."* (NSP's actual contribution has been challenged in later work; the BERT-derivatives lesson covers RoBERTa's finding that dropping NSP changes very little.)
+
+## Pre-training and fine-tuning, together
+
+BERT is trained in two distinct stages, and that two-stage workflow is part of what defines the model.
+
+**Pre-training** runs both MLM and NSP simultaneously on a very large corpus of unlabeled text. The output is a set of pre-trained weights for the encoder: token embeddings, position embeddings, segment embeddings, and the parameters of every encoder block. This stage is expensive and only happens once per model release.
+
+**Fine-tuning** takes the pre-trained encoder and adapts it to a specific downstream task. The pattern: keep the encoder, attach a small task-specific head (typically a linear layer), and train on a labeled dataset for that task. Training can either freeze the pre-trained weights and only train the new head, or train everything end-to-end (the lecturer notes both schemes exist; the choice depends on how different the target task is from pre-training and how much labeled data you have).
+
+The lecturer flags the practical payoff: pre-training uses unlabeled data (which is essentially free at scale), and the resulting embeddings are useful enough that fine-tuning typically needs very little labeled data to hit strong performance.
+
+## The two fine-tuning patterns to know
+
+Two common fine-tuning shapes account for most of what people do with BERT in practice.
+
+**Sentence-level classification** (e.g., sentiment extraction). Plug a linear classification layer on top of the CLS token's output embedding. Train on labeled (sentence, label) pairs. The CLS embedding's job is to summarize the whole input; the classifier reads it and decides. This is the right pattern whenever the question is "what is the label for this input as a whole?" Document classification, intent detection, paraphrase detection (using the sentence-pair input shape) all follow this pattern.
+
+**Per-token classification** (e.g., question answering with span detection, named-entity recognition). Plug a linear layer on top of every token's output embedding instead of just the CLS. Train on labeled position annotations (e.g., the start and end positions of an answer span inside a passage, or the entity label per token). Each token's output embedding is rich enough that a small linear layer can learn to predict per-token labels.
+
+The rule of thumb is straightforward: *classify the whole input → use CLS; classify per-token → use per-token outputs.* Once you have that, the fine-tuning shape for any new task follows the same pattern: pre-trained encoder + task-specific head + labeled examples.
+
+## Walked example: pretraining and fine-tuning on the same input
+
+To ground the workflow concretely, walk one example through both stages. Input: *"this teddy bear is so cute."*
+
+**Pretraining-side example.** During MLM training, we might mask one token: *"this teddy [MASK] is so cute."* The model is trained to produce *"bear"* from the bidirectional context (the surrounding tokens, plus its own learned representations). Across millions of such masked examples, the model learns rich token-level representations.
+
+If this example were part of a sentence pair *"this teddy bear is so cute. she carries it everywhere."*, the NSP head would also be trained on whether the second sentence is the genuine next sentence (it is, here) or a random one (50% of the time the second sentence would have been swapped for an unrelated one).
+
+**Fine-tuning-side example.** Once pre-training is done, we take the pre-trained encoder and adapt it to sentiment extraction. Now the input is plain text again (no `[MASK]`):
+
+```
+[CLS] this teddy bear is so cute . [SEP]
+```
+
+The encoder produces context-aware embeddings for every token. A linear classification head on top of the CLS output reads its embedding and produces a label, *"positive"*. Training the classifier needs only a small labeled dataset of sentences and their sentiment labels because the pre-trained encoder already knows how to read text.
+
+For a per-token task like span detection, the same pre-trained encoder is reused; the only difference is where the head attaches. Two small linear heads on every token's output embedding (one for "is this the start of the answer span" and one for "is this the end") are enough.
+
+## Why this matters when you use AI
+
+Three consequences worth holding onto when you read AI tooling docs or model cards.
+
+- **The train-then-fine-tune pattern outlives BERT.** Even decoder-only LLMs use a variant of it (pre-training on broad text, then fine-tuning on instruction data, then RLHF; covered in Phase 4). BERT was one of the early demonstrations that pre-training on unlabeled data and fine-tuning per-task is the right shape for transformer-based NLP. The pattern stuck.
+- **Fine-tuning is much cheaper than people often expect.** Once a pre-trained encoder is available, fine-tuning typically needs hundreds to thousands of labeled examples, not millions. This is the "free lunch" of pre-training: the expensive part has been amortized across the whole field, and downstream practitioners pay only for the cheap stage.
+- **Output shape follows head shape.** Whether you get a single label or a per-token label depends entirely on which output of the encoder you read. Same encoder, same input, different head, different task. When a model card says BERT plus a CLS head, expect a single label; per-token head, expect labels per position.
+
+## Common pitfalls
+
+A few mistakes are common enough to be worth naming.
+
+**Thinking the `[MASK]` token shows up at inference.** It does not. `[MASK]` is a pre-training artifact; at fine-tuning and inference, the input is just real text plus the structural tokens (CLS, SEP). The 80/10/10 masking mix exists precisely because the model needs to handle inputs without `[MASK]` tokens at inference time.
+
+**Assuming all encoder-only models use NSP.** BERT used both MLM and NSP. Later work (RoBERTa, covered in the next lesson) showed that dropping NSP and training MLM on more data hurts nothing; NSP turned out to be less load-bearing than the original BERT paper assumed.
+
+**Confusing pre-training with fine-tuning costs.** Pre-training is the expensive stage that produces the pre-trained encoder weights and happens once per model release. Fine-tuning is the cheap stage that adapts the encoder to a specific task and happens many times. When people complain about "the cost of training BERT" they usually mean pre-training; when they talk about "training a BERT classifier for sentiment" they mean fine-tuning, which is a different cost profile entirely.
+
+**Picking the wrong head for the task.** A common mistake is plugging a CLS-head classifier on a task that is fundamentally per-token (like span detection), or plugging per-token heads on a whole-input classification task. The rule of thumb is the lever to pull: classify the whole input, use CLS; classify per-token, use per-token outputs.
+
+## What you should remember
+
+- **Bidirectionality forced new objectives.** Next-token prediction is trivial when the model can see the future. MLM hides parts of the input; NSP asks classification questions about sentence pairs. Both work because they leave something for the model to figure out.
+- **MLM with the 80/10/10 mix.** Mask 15% of tokens; for each, 80% replace with `[MASK]`, 10% replace with a random token, 10% keep unchanged. Predict the original in all three cases. The mix exists so the model handles real input without `[MASK]` tokens at inference time.
+- **NSP at the sentence-pair level.** Pair two sentences; 50% real consecutive, 50% random. Classification head on the CLS output predicts whether B follows A. Teaches sentence-level relationships.
+- **Pre-training plus fine-tuning is the workflow.** Pre-training is expensive and happens once. Fine-tuning attaches a small task-specific head and trains on labeled data; cheap, happens per task.
+- **Two fine-tuning shapes cover most uses.** Whole-input classification → head on CLS output. Per-token tasks (span detection, NER) → heads on every token's output.
+
+## What's next
+
+The original BERT works. The field then made it smaller (DistilBERT) and trained it better (RoBERTa). The next lesson closes Phase 2 by walking through both follow-up papers: how knowledge distillation compresses a model to ~40% the size at almost the same quality, and how a better pretraining recipe (drop NSP, dynamic masking, more data) produces a better-trained model from the same architecture.
+
+## If you remember one thing
+
+**Bidirectionality forced MLM and NSP. The 80/10/10 mix is not arbitrary.**\
+**Pre-train once, fine-tune many times.**\
+**CLS for whole-input classification, per-token outputs for span detection.**

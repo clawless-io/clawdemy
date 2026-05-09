@@ -1,0 +1,119 @@
+---
+title: "Cheatsheet: BERT, part two: pretraining objectives and the train-then-fine-tune workflow"
+description: "One-page reference for BERT's training: MLM with the 80/10/10 mix, NSP, the two-stage workflow, and the two common fine-tuning patterns. Architecture is in the previous lesson's cheatsheet."
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## The one idea that matters
+
+```
+Bidirectionality forced new objectives.
+Train with MLM + NSP. Fine-tune with a small head on top.
+
+Pre-train once (expensive, on unlabeled data).
+Fine-tune many times (cheap, per task, on labeled data).
+```
+
+## Why bidirectionality forced new objectives
+
+| Setting | Why next-token prediction works | Why next-token prediction breaks |
+| --- | --- | --- |
+| **Decoder-only (GPT-style)** | Causal mask hides the future; predicting the next token from the past is a real task | Not applicable; this is the design they use |
+| **Encoder-only (BERT)** | Not applicable; bidirectional self-attention exposes the future | Bidirectional means the model can see the answer; predicting it is reading, not learning |
+
+So BERT used objectives that leave something to figure out *despite* seeing the whole input: hide parts of it (MLM), or ask classification questions about pairs (NSP).
+
+## Pre-training objective 1: MLM (Masked Language Model)
+
+```
+Step 1: select a fraction of tokens (BERT paper: 15%)
+Step 2: per selected token, apply the 80/10/10 mix:
+
+  80%  →  replace with [MASK]
+  10%  →  replace with a random vocabulary token
+  10%  →  leave unchanged
+
+Step 3: train the model to predict the ORIGINAL token in all three cases
+```
+
+| Why the mix? | The model needs to maintain useful representations for every token, not just `[MASK]` positions, because `[MASK]` does not appear at inference time. |
+
+## Pre-training objective 2: NSP (Next Sentence Prediction)
+
+```
+Step 1: pair two sentences from the corpus
+Step 2: 50% real consecutive pairs, 50% random pairs
+Step 3: classify via a head on the CLS token's output embedding:
+        "B truly follows A"  vs  "B is random"
+```
+
+| Why? | Teaches the model sentence-level relationships. Complements MLM's per-token focus. (Later work, e.g., RoBERTa, showed NSP is less load-bearing than the original BERT paper assumed.) |
+
+## Pre-training and fine-tuning, two stages
+
+| Stage | Data | Cost | Output |
+| --- | --- | --- | --- |
+| **Pre-training** | Large unlabeled text corpus | Expensive (one-time per release) | Pre-trained encoder weights |
+| **Fine-tuning** | Small labeled dataset for target task | Cheap | Task-specific head on top of pre-trained encoder |
+
+## Fine-tuning patterns
+
+| Task | Head placement | Examples |
+| --- | --- | --- |
+| **Sentence-level classification** | Linear classifier on CLS output embedding | Sentiment, intent, document classification |
+| **Sentence-pair classification** | Linear classifier on CLS output embedding | Entailment, paraphrase detection |
+| **Per-token classification** | Linear classifier on every token's output embedding | Named-entity recognition, part-of-speech tagging |
+| **Span detection** | Two linear heads (start, end) on every token's output embedding | Question answering |
+
+**Rule of thumb:** classify the whole input → use CLS; classify per-token → use per-token outputs.
+
+## Walked example (training side)
+
+```
+Pre-training (MLM):
+  Input shaped:  [CLS] this teddy [MASK] is so cute . [SEP]
+  Target:        predict "bear" at the masked position
+  Loss:          cross-entropy on the original token
+
+Fine-tuning (sentiment):
+  Input:         [CLS] this teddy bear is so cute . [SEP]   (no [MASK])
+  Encoder pass:  produces output embeddings, one per position
+  Head:          linear classifier on CLS output → "positive"
+  Other tokens:  discarded for this task
+```
+
+## What you see in the wild
+
+| Phrase | What it means |
+| --- | --- |
+| **MLM head** | The pre-training head that predicts the original token at masked positions |
+| **NSP head** | The pre-training head that predicts whether sentence B follows sentence A |
+| **Fine-tuning** | Adapting a pre-trained encoder to a specific labeled task by attaching a small head |
+| **Frozen encoder** | A fine-tuning recipe that does not update the pre-trained weights, only the new head |
+| **End-to-end fine-tuning** | A fine-tuning recipe that trains the encoder weights along with the new head |
+
+## Pitfalls to dodge
+
+| Pitfall | Reality |
+| --- | --- |
+| `[MASK]` appears at inference time | No. `[MASK]` is a pre-training-only artifact. The 80/10/10 mix exists so the model handles real input without `[MASK]` tokens. |
+| All encoder-only models use NSP | No. RoBERTa (next lesson) drops NSP entirely without losing performance. |
+| Pre-training and fine-tuning have the same cost profile | No. Pre-training is the expensive one-time stage. Fine-tuning is cheap and happens per task. |
+| Pick any head for any task | No. Whole-input classification → CLS; per-token tasks → per-token outputs. Wrong head, wrong task shape. |
+
+## Glossary
+
+- **MLM (Masked Language Model):** pre-training objective. Mask a fraction of tokens (BERT paper: 15%) with the 80/10/10 mix; predict the original.
+- **NSP (Next Sentence Prediction):** pre-training objective. Pair two sentences; predict whether B genuinely follows A via a CLS-head classifier.
+- **Pre-training:** large-scale training on unlabeled data via MLM + NSP; produces the pre-trained encoder weights.
+- **Fine-tuning:** task-specific adaptation of the pre-trained encoder by adding a small head and training on labeled data.
+- **CLS-head fine-tuning:** the most common pattern; a linear classifier reads the CLS output for whole-input classification.
+- **Per-token fine-tuning:** classifier heads on every token's output for token-level tasks (NER, span detection).
+
+**Bidirectionality forced MLM and NSP. The 80/10/10 mix is not arbitrary.**\
+**Pre-train once, fine-tune many times.**\
+**CLS for whole-input classification, per-token outputs for span detection.**

@@ -1,6 +1,6 @@
 ---
-title: "Practice: How transformers learn language understanding: BERT, MLM, and NSP"
-description: "Self-check on the BERT architecture and pretraining, an applied walk-through of the input pipeline plus a fine-tuning pattern matching exercise across sentiment, question-answering, and token-classification tasks, and flashcards for retrieval."
+title: "Practice: BERT, part two: pretraining objectives and the train-then-fine-tune workflow"
+description: "Self-check on MLM with the 80/10/10 mix and NSP, an applied fine-tuning pattern matching exercise across sentiment, question-answering, and token-classification tasks, and flashcards for retrieval."
 artifact: practice
 sidebar:
   order: 3
@@ -14,51 +14,16 @@ import FlashcardSet from '../../../../../components/FlashcardSet.astro';
 
 Answer in your head (or on paper) before opening the collapsible.
 
-**1. What does BERT stand for, and what is the architectural move?**
+**1. Why couldn't BERT just train via next-token prediction the way decoder-only models do?**
 
 <details>
 <summary>Show answer</summary>
 
-**BERT** = Bidirectional Encoder Representations from Transformers. The architectural move is to drop the decoder entirely from the original transformer and keep only the encoder. The encoder's self-attention is computed without a causal mask, so every token attends to every other token in one pass. The output is a stack of context-aware token representations that have integrated information from the entire surrounding context (in both directions).
+Bidirectional self-attention means every token can see every other token, including the ones that would otherwise be the prediction target. Predicting position 6 from positions 1, 2, 3, 4, 5, 6, 7, 8 (where 6 is in the input) is not learning, it is reading. Next-token prediction needs the future to be hidden; BERT's no-causal-mask design hides nothing. So BERT needed objectives that leave something for the model to figure out *despite* seeing the whole input.
 
 </details>
 
-**2. What's different between BERT's bidirectional self-attention and a decoder-only model's causal self-attention?**
-
-<details>
-<summary>Show answer</summary>
-
-**Decoder-only (causal):** token N can only attend to tokens 1 through N-1. The mask prevents looking at the future. This is what makes next-token prediction sensible.
-
-**BERT (bidirectional):** no mask. Token at position 5 attends to tokens 1, 2, 3, 4 AND tokens 6, 7, 8 in the same pass. This integrates context from both directions but makes next-token prediction trivial during training (the model can see what comes next, so predicting it is meaningless). That is why BERT was trained on different objectives (MLM and NSP) instead.
-
-</details>
-
-**3. What are CLS and SEP, and what do they do?**
-
-<details>
-<summary>Show answer</summary>
-
-**CLS** stands for classification. It is added at position 0 of every input sequence. Its output embedding integrates information from every token in the sequence (because of bidirectional self-attention) and serves as a sentence-level (or sentence-pair-level) representation. Classification heads attach on top of the CLS output.
-
-**SEP** stands for separator. It marks sentence boundaries when the input contains more than one sentence (BERT was designed for one- or two-sentence inputs). The two-sentence input shape is what enables the NSP pre-training objective.
-
-</details>
-
-**4. Walk through the three additive input embeddings in BERT.**
-
-<details>
-<summary>Show answer</summary>
-
-For each token in the input, BERT computes three embeddings and adds them component-wise to produce the input vector for the encoder:
-
-- **Token embedding.** A learned vector per token in the vocabulary, looked up by token ID. Vocabulary size is around 30,000 (using the WordPiece tokenizer).
-- **Position embedding.** A learned vector per absolute position in the sequence (different from the original transformer, which used hard-coded sinusoidal positions).
-- **Segment embedding.** A learned vector that tells the model which sentence a token belongs to. Two possible values: Segment A (for tokens in the first sentence) and Segment B (for tokens in the second sentence). New in BERT; the original transformer did not need it.
-
-</details>
-
-**5. Walk through MLM with the 80/10/10 mix.**
+**2. Walk through MLM with the 80/10/10 mix.**
 
 <details>
 <summary>Show answer</summary>
@@ -78,7 +43,7 @@ MLM (Masked Language Model) is BERT's primary pre-training objective.
 
 </details>
 
-**6. Walk through NSP.**
+**3. Walk through NSP.**
 
 <details>
 <summary>Show answer</summary>
@@ -95,7 +60,7 @@ NSP (Next Sentence Prediction) is BERT's secondary pre-training objective; it co
 
 </details>
 
-**7. What are the two stages in BERT's training workflow, and what happens in each?**
+**4. What are the two stages in BERT's training workflow, and what happens in each?**
 
 <details>
 <summary>Show answer</summary>
@@ -108,54 +73,33 @@ The big win: pre-training uses unlabeled data (free at scale); fine-tuning typic
 
 </details>
 
-## Try it yourself: tokenize, embed, fine-tune
-
-This exercise puts the BERT pipeline into practice. About 18 minutes.
-
-**Side effects:** none. Pen and paper, or a text editor.
-
-### Part one: build the input
-
-Input sentence: *"the small dog barks at the mailman."*
-
-**a)** Pre-process for the uncased BERT variant.
+**5. The same input *"this teddy bear is so cute."* shows up in pre-training and in fine-tuning. What is different about how the model sees it in each stage?**
 
 <details>
 <summary>Show answer</summary>
 
-Lowercase everything: *"the small dog barks at the mailman."* (For uncased BERT; the cased variant would preserve capitalization. Most lowercase, the dot stays.)
+**During pre-training (MLM).** Some token in the input may be replaced according to the 80/10/10 mix: maybe `[MASK]`, maybe a random vocabulary token, maybe left unchanged. The model is trained to predict the original token at the selected position. Across millions of such examples, it learns rich token-level representations.
+
+**During fine-tuning.** The input is plain text plus the structural tokens. No `[MASK]`. The encoder produces context-aware output embeddings; a small task-specific head reads them. For sentiment, a linear classifier on the CLS output. For per-token tasks, heads on every token's output.
+
+The same encoder weights run in both stages; what changes is what the model is being asked to predict and which output is being read.
 
 </details>
 
-**b)** Add the structural tokens.
+**6. CLS-head versus per-token outputs: how do you decide?**
 
 <details>
 <summary>Show answer</summary>
 
-Prepend CLS and append SEP. For one sentence input:
+**CLS-head** is for whole-input classification: the question is "what is the label for this input as a whole?" Sentiment extraction, intent detection, document classification, sentence-pair classification (entailment, paraphrase detection) all follow this pattern.
 
-```
-[CLS] the small dog barks at the mailman . [SEP]
-```
+**Per-token heads** are for token-level tasks: the question is "what is the label at each position?" Named-entity recognition (label per token), question answering with span detection (start position and end position of the answer span), part-of-speech tagging.
 
-</details>
-
-**c)** What three embeddings get added for each token, and what determines each one's value?
-
-<details>
-<summary>Show answer</summary>
-
-**Token embedding** for each token: looked up from the WordPiece vocabulary by the token's integer ID. Same `the` produces the same token embedding wherever it appears.
-
-**Position embedding** for each position: learned vector per absolute position. Position 0 (CLS) gets one embedding; position 1 (the) gets another; etc. These are NOT the same across positions even for the same token.
-
-**Segment embedding** for each token: Segment A for everything in this single-sentence input. (If we had two sentences separated by SEP, tokens before the SEP would be Segment A and tokens after would be Segment B.)
-
-The three embeddings are summed component-wise to produce the final input vector for each token.
+The rule of thumb is exactly that: classify the whole input, use CLS; classify per-token, use per-token outputs.
 
 </details>
 
-### Part two: pick the right fine-tuning head
+## Try it yourself: pick the right fine-tuning head
 
 For each task below, decide whether to attach the classification head on the **CLS token's output embedding** or on **per-token output embeddings**.
 
@@ -195,7 +139,49 @@ For each task below, decide whether to attach the classification head on the **C
 
 </details>
 
+**e)** Paraphrase detection: input is two sentences; output is "paraphrase" or "not paraphrase."
+
+<details>
+<summary>Show answer</summary>
+
+**CLS token's output embedding.** The two sentences are formatted with `[CLS] A [SEP] B [SEP]`, segment embeddings split A and B, and the CLS output embedding integrates both via bidirectional self-attention. A binary classifier on the CLS output reads it and decides. This is structurally the same shape as NSP, but applied to a different sentence-pair labeling task.
+
+</details>
+
 **Sanity check:** the rule of thumb is "classify the whole input → use CLS; classify per-token → use per-token outputs." Once you have that, the fine-tuning shape for any new task follows the same pattern: pre-trained encoder + task-specific head + labeled examples.
+
+## Try it yourself: trace the training loop
+
+About 10 minutes with a pen.
+
+For the input *"the small dog barks at the mailman."*:
+
+**a)** Show one possible MLM masking pattern at the 15% rate. Pick which token gets masked; pick what happens to it under the 80/10/10 mix.
+
+<details>
+<summary>Show example</summary>
+
+15% of, say, 9 tokens (including the structural tokens) is roughly 1 token to mask. Suppose we pick *"barks"*.
+
+Apply the 80/10/10 mix:
+- **80% case:** replace it with `[MASK]`. Input becomes `[CLS] the small dog [MASK] at the mailman . [SEP]`. Train the model to predict *"barks"* at that position.
+- **10% case:** replace it with a random vocabulary token (say, *"telescope"*). Input becomes `[CLS] the small dog telescope at the mailman . [SEP]`. Train the model to predict *"barks"* at that position (despite the misleading random token).
+- **10% case:** leave it unchanged. Input stays `[CLS] the small dog barks at the mailman . [SEP]`. Train the model to predict *"barks"* at that position anyway.
+
+In all three cases, the loss is computed at the selected position only, against the original token *"barks"*.
+
+</details>
+
+**b)** Now imagine pre-training has finished. Set up a sentiment fine-tuning task on this same input. Where does the head attach, and what does it produce?
+
+<details>
+<summary>Show answer</summary>
+
+The encoder runs on the plain input `[CLS] the small dog barks at the mailman . [SEP]` (no `[MASK]`). It produces output embeddings, one per input position. A linear classification head reads the CLS output (position 0) and produces a sentiment label (e.g., "neutral" for this slightly hostile-sounding mailman scenario). The other token outputs are discarded for this task.
+
+If you reused the same encoder for a per-token task (e.g., named-entity recognition), the head would attach to every token's output instead of just CLS. Same encoder, same input, different head, different task.
+
+</details>
 
 ## Flashcards
 
@@ -203,33 +189,9 @@ Twelve cards. Click any card to reveal the answer. Use the **Print flashcards** 
 
 <FlashcardSet>
 
-<Flashcard question="What does BERT stand for?">
+<Flashcard question="Why couldn't BERT train via next-token prediction?">
 
-Bidirectional Encoder Representations from Transformers. Encoder-only architecture; self-attention without a causal mask, so every token attends to every other token in one pass.
-
-</Flashcard>
-
-<Flashcard question="Why is BERT bidirectional?">
-
-The encoder's self-attention is computed without a causal mask. Token at position 5 can attend to tokens 1, 2, 3, 4 (past) AND tokens 6, 7, 8 (future) in the same pass. This integrates context from both directions, which makes the resulting token representations strong for classification and span-detection tasks.
-
-</Flashcard>
-
-<Flashcard question="What is the CLS token, and what is it for?">
-
-A special token added at position 0 of every input. Its output embedding integrates information from every token in the sequence (via bidirectional self-attention). Classification heads attach on top of the CLS embedding for sentence-level (or sentence-pair-level) tasks.
-
-</Flashcard>
-
-<Flashcard question="What is the SEP token, and what is it for?">
-
-A special token that marks sentence boundaries when the input contains more than one sentence (BERT was designed for one- or two-sentence inputs). The two-sentence input shape is what enables NSP pre-training.
-
-</Flashcard>
-
-<Flashcard question="What three embeddings are added together to form BERT's input vector for each token?">
-
-Token embedding (learned per vocabulary entry; ~30k WordPiece vocab) + position embedding (learned per absolute position) + segment embedding (Segment A or Segment B, new in BERT). Summed component-wise.
+Bidirectional self-attention means every token can see every other token, including the future ones. Next-token prediction collapses (the answer is in the input). BERT needed objectives that leave something for the model to figure out *despite* seeing the whole sequence.
 
 </Flashcard>
 
@@ -257,9 +219,15 @@ Next Sentence Prediction. Pair two sentences (50% real consecutive, 50% random).
 
 </Flashcard>
 
+<Flashcard question="Why is the train-then-fine-tune workflow such a practical win?">
+
+Pre-training uses unlabeled data, which is essentially free at scale. The pre-trained encoder is reusable across many downstream tasks. Fine-tuning typically needs only hundreds to thousands of labeled examples because the pre-trained representations already know how to read text.
+
+</Flashcard>
+
 <Flashcard question="When do you use a classification head on CLS vs per-token outputs?">
 
-CLS for whole-input classification (sentiment, intent, document classification). Per-token for token-level tasks (named-entity recognition, question-answering with span detection). Rule of thumb: classify the whole input → CLS; classify per-token → per-token outputs.
+CLS for whole-input classification (sentiment, intent, document classification, sentence-pair classification). Per-token for token-level tasks (named-entity recognition, question-answering with span detection, part-of-speech tagging). Rule of thumb: classify the whole input → CLS; classify per-token → per-token outputs.
 
 </Flashcard>
 
@@ -269,9 +237,27 @@ No. `[MASK]` is a pre-training-only artifact. At fine-tuning and inference, the 
 
 </Flashcard>
 
+<Flashcard question="Common pitfall: do all encoder-only models use NSP?">
+
+No. BERT used both MLM and NSP. RoBERTa (next lesson) showed that dropping NSP and training MLM longer on more data hurts nothing; NSP turned out to be less load-bearing than the original BERT paper assumed.
+
+</Flashcard>
+
+<Flashcard question="Common pitfall: pre-training cost vs fine-tuning cost?">
+
+Different cost profiles. Pre-training is the expensive one-time stage that produces the pre-trained encoder weights. Fine-tuning is cheap and happens many times, once per downstream task. When people complain about "the cost of training BERT" they usually mean pre-training; when they talk about "training a BERT classifier for sentiment" they mean fine-tuning.
+
+</Flashcard>
+
+<Flashcard question="What does the head decide?">
+
+The task. Same encoder, same input, different head, different task. Whether you get a single label or per-token labels depends entirely on which output of the encoder you read.
+
+</Flashcard>
+
 <Flashcard question="What is the one-sentence takeaway?">
 
-BERT drops the decoder. MLM and NSP train it bidirectionally. A CLS-head does the rest.
+Bidirectionality forced MLM and NSP. The 80/10/10 mix is not arbitrary. Pre-train once, fine-tune many times. CLS for whole-input classification, per-token outputs for span detection.
 
 </Flashcard>
 

@@ -1,0 +1,134 @@
+---
+title: "Lesson: BERT, part one: the bidirectional encoder and its structural tokens"
+description: "A walk through BERT's architectural choices. The encoder-only branch, why bidirectional self-attention (no causal mask) is the move, the structural tokens (CLS, SEP) that shape what the model can do, the three additive input embeddings (token + position + segment), and a walked example from raw text to context-aware token representations. The next lesson covers how BERT is trained."
+sidebar:
+  order: 2
+  label: Lesson
+artifact: lesson
+---
+
+import AudioPlayer from '../../../../../components/AudioPlayer.astro';
+import LessonStar from '../../../../../components/LessonStar.astro';
+
+<LessonStar slug="bert-architecture" />
+
+<AudioPlayer src="https://audio.clawdemy.org/lessons/bert-architecture-lesson.mp3" approxMinutes={13} />
+
+The previous lesson set up three architectural branches: encoder-decoder (T5 family), encoder-only (BERT family), and decoder-only (most modern LLMs). BERT is the centerpiece of the encoder-only branch and one of the more influential transformer-based models the field has produced. The lecturer notes its paper has been cited around 170,000 times.
+
+BERT is a single mental object split across two lessons. This lesson is the architecture: what BERT looks like as a stack of transformer blocks, why bidirectionality is the load-bearing choice, what the structural tokens (CLS, SEP) do, and how the input gets shaped before any encoder block sees it. The next lesson covers how this architecture is trained: the two pretraining objectives (MLM and NSP), the two-stage train-then-fine-tune workflow, and the fine-tuning patterns that turn a pre-trained encoder into a task-specific classifier.
+
+## The architectural move
+
+The architectural move is small in description and consequential in effect. **Drop the decoder.** Keep the encoder. The encoder's self-attention is naturally bidirectional, since there's no causal mask making it look only at past tokens. Every token attends to every other token in the sequence, in both directions, in one pass. The output is a stack of context-aware representations, one per input token, that have integrated information from the entire surrounding context.
+
+That bidirectionality is what BERT's name foregrounds. **BERT** stands for **Bidirectional Encoder Representations from Transformers**, and the lecturer walks through each piece of the acronym on its own. The encoder part is the easiest: just drop the decoder. The bidirectional part is the more interesting claim, because it depends on what the model is being asked to do.
+
+A model with bidirectional self-attention cannot do next-token prediction the same way a decoder-only model can. If the model can see the future tokens during training, predicting them is trivial. So BERT was trained on different objectives, which the next lesson covers. This lesson stays inside the architecture: what BERT is, before training even begins.
+
+## Bidirectional, made concrete
+
+In a decoder-only model, the attention layer is masked: token N can attend to tokens 1 through N-1, but not to N+1, N+2, and so on. The mask makes attention causal, and causal attention is what makes next-token prediction sensible (you can't peek at the future when you're trying to predict it).
+
+In BERT's encoder, that mask is gone. Self-attention is computed without restriction. Token at position 5 can attend to tokens 1, 2, 3, 4 (the past) and tokens 6, 7, 8 (the future). One forward pass through the encoder produces, for each token, an embedding that has integrated information from every other token in the sequence.
+
+The lecturer flags this contrast directly: GPT-style decoder-only models are not truly bidirectional (causal masking prevents it), while BERT's encoder representations used for classification truly are. The encoder-only architecture's bidirectionality is what makes it a strong choice for tasks where you need a representation of the whole input (classification, embeddings, span detection) rather than a continuation of it.
+
+There was a concurrent paper, **ELMo** (Embeddings from Language Models), that also pursued bidirectional representations. ELMo was based on bidirectional LSTMs and had similar insights, but lost steam against BERT because LSTMs are harder to scale than transformers. (Both are Sesame Street characters, which is the joke.)
+
+## The structural tokens: CLS and SEP
+
+BERT's input is not just tokenized text. Two special tokens get added that determine what the model can do.
+
+**CLS** stands for **classification**. It is added at the beginning of every input sequence, before any of the actual content tokens. Its job is to carry the bidirectional representation of the whole input. When you fine-tune BERT for a classification task (covered in the next lesson), you typically attach a classification head on top of the CLS token's output embedding; that embedding has integrated context from every token in the input, so it serves as a sentence-level (or document-level) representation.
+
+**SEP** stands for **separator**. It marks the boundary between sentences when BERT's input contains more than one sentence. (BERT was designed to handle one or two sentences as input; the SEP token tells the model where one ends and the next begins.) The two-sentence input shape is what enables one of the next lesson's pretraining objectives.
+
+A typical BERT input looks like:
+
+```
+[CLS] this teddy bear is so cute . [SEP]
+```
+
+Or, for two sentences:
+
+```
+[CLS] this teddy bear is so cute . [SEP] she carries it everywhere . [SEP]
+```
+
+The CLS sits at position 0; SEPs mark sentence boundaries; padding tokens (omitted above) fill out the rest of a fixed-length training batch.
+
+## The input embedding: token + position + segment
+
+Every token in BERT's input gets transformed into a vector by adding three different embeddings together (a small shift from the original transformer, which only added two: token + position).
+
+**Token embedding.** A learned vector per token in the vocabulary, looked up by token ID. Vocabulary size in BERT is around 30,000 (using a tokenizer called WordPiece), in the same order of magnitude as most modern LLM tokenizers.
+
+**Position embedding.** A vector that tells the model where each token sits in the sequence. BERT used **learned** position embeddings, one per absolute position up to the model's maximum sequence length. (The original transformer used hard-coded sinusoidal positions; both shapes produce similar results in practice.)
+
+**Segment embedding.** A learned vector that tells the model which sentence a token belongs to. There are exactly two possible values: Segment A (for tokens in the first sentence) and Segment B (for tokens in the second sentence). Every token in a given sentence shares the same segment embedding. This is new in BERT; the original transformer did not need it because it processed one sequence at a time.
+
+These three embeddings are added together (component-wise) to produce the final input vector for each token. The encoder takes that combined vector through its stack of bidirectional self-attention plus feed-forward blocks.
+
+## WordPiece, briefly
+
+BERT uses a tokenizer called **WordPiece**, an early subword tokenization algorithm. The mechanic is similar in spirit to byte-pair encoding from the Phase 1 lesson: build a vocabulary from a training corpus by iteratively merging frequent character pairs, until the vocabulary reaches the target size (around 30,000 for BERT). At inference time, each input string is split into the longest matching tokens from that learned vocabulary.
+
+Two practical points worth knowing. WordPiece distinguishes the start of a new word from a continuation of one (with a `##` prefix on continuation pieces in BERT's variant). And cased and uncased BERT variants exist. The cased variant preserves capitalization; the uncased variant lowercases the input first. Which one to use depends on whether casing carries meaning for your task (e.g., named-entity recognition usually wants cased; sentiment classification often does fine with uncased).
+
+## The walked example: input through the encoder
+
+To ground the architecture concretely, walk one example end-to-end on the architecture side. Input: *"this teddy bear is so cute."*
+
+**Step 1: Pre-process.** In the uncased BERT variant, lowercase everything: *"this teddy bear is so cute."* (Cased variants would skip this.)
+
+**Step 2: Tokenize with WordPiece.** The tokenizer breaks the input into the tokens it has in its vocabulary. *"teddy"* might tokenize as one token, or as two if WordPiece breaks it on a learned boundary; either way the result is a sequence of integer IDs.
+
+**Step 3: Add structural tokens.** Prepend `[CLS]` and append `[SEP]`:
+
+```
+[CLS] this teddy bear is so cute . [SEP]
+```
+
+**Step 4: Compute the three input embeddings.** For each token: token embedding + position embedding + segment embedding (all Segment A here since there's only one sentence). Sum them component-wise.
+
+**Step 5: Run through the encoder.** Every token's input vector flows through the stack of bidirectional self-attention plus feed-forward blocks. At the end, every input position has a corresponding output embedding that integrates context from the entire sequence.
+
+That is where this lesson stops. We have an architecture and a sequence of context-aware token representations coming out of it. Notably, we have not yet asked the model to *do* anything with those representations. The next lesson covers what we ask of them: which pretraining objectives turn the architecture into a model that has learned something, and which fine-tuning patterns plug a small task-specific head on top of the encoder to turn it into a classifier or span-detector for a specific job.
+
+## Why this matters when you use AI
+
+Two consequences worth holding onto when you read AI tooling docs or model cards.
+
+- **BERT-family models are still everywhere for classification tasks.** When a stack uses an off-the-shelf encoder model from Hugging Face for sentiment, intent, named-entity recognition, or any other classification-flavored task, the model is almost certainly some BERT variant. Knowing the architecture (encoder-only, bidirectional, CLS-as-classification-head) lets you read the documentation and reason about what the model can and cannot do.
+- **The architectural choice constrains the use case.** An encoder-only model produces representations of input; it does not generate text. If a model card says "encoder-only" or "BERT-like," you immediately know what shape of task it is good for and what shape it is not. The next lesson covers how that representation actually gets trained and steered.
+
+## Common pitfalls
+
+A few mistakes are common enough to be worth naming, even before we get to training.
+
+**Conflating BERT's architecture with GPT's.** Different shape (encoder-only vs decoder-only), different attention masking (bidirectional vs causal), different uses (classification and embedding vs generation). The transformer block itself is similar in both, but the design choices around it diverge.
+
+**Thinking BERT can do text generation.** It cannot, at least not naturally. The encoder-only architecture has no decoder, no cross-attention, no autoregressive loop. You can pull tricks (use the model's masked-prediction capability iteratively to "unmask" tokens), but generation is not what BERT is built for.
+
+**Thinking "bidirectional" means two passes.** It does not. One forward pass through the encoder produces all the bidirectional context. The bidirectionality comes from the absence of a causal mask, not from running attention twice.
+
+**Forgetting that the segment embedding is BERT-specific.** It is one of the small, easy-to-miss differences between BERT and the original 2017 transformer. It exists because BERT's input shape can include two sentences and the model needs to know which is which.
+
+## What you should remember
+
+- **BERT is the encoder-only branch's defining model.** Drop the decoder, keep the encoder. Self-attention without a causal mask is bidirectional: every token attends to every other token in one pass.
+- **Two structural tokens shape the input.** CLS at position 0 carries the sentence-level (or sentence-pair-level) representation used for classification heads. SEP marks sentence boundaries when there are multiple sentences.
+- **Three additive embeddings.** Token + position (learned, one per absolute position) + segment (new in BERT; Segment A vs Segment B for the two-sentence case). All added component-wise to produce the input vector.
+- **WordPiece tokenizer, ~30k vocabulary.** Cased and uncased variants of the model exist depending on whether casing matters for the task.
+- **The architecture produces context-aware token representations.** What you do with them (classification, span detection, similarity) is a separate question, covered in the next lesson.
+
+## What's next
+
+Now that you have seen BERT's architecture, the next lesson covers how BERT is trained: the two pretraining objectives (MLM and NSP), why bidirectionality forced new objectives, and the fine-tuning patterns that make BERT useful for downstream tasks.
+
+## If you remember one thing
+
+**BERT drops the decoder and removes the causal mask.**\
+**That is what makes the encoder bidirectional.**\
+**CLS, SEP, and three additive embeddings shape the input. The next lesson trains it.**
