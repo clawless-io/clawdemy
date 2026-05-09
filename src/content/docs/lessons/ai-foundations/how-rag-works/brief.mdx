@@ -1,6 +1,6 @@
 ---
 title: "How RAG works: feeding the model what it does not already know"
-description: "A lesson in Phase 6 (How models reason and act) in Track 5. The earlier lessons covered how the model works and how to talk to it. This one covers how to give it knowledge it does not already have. We'll walk through the retrieval-augmented generation pipeline (chunking, embedding, vector search, prompt construction, grounded generation), name where each stage breaks down, and close on the indirect-prompt-injection surface that RAG creates."
+description: "A lesson in Phase 6 (How models reason and act) in Track 5. The earlier lessons covered how the model works and how to talk to it. This one covers how to give it knowledge it does not already have. The lesson walks the retrieval-augmented generation pipeline (chunking, embedding, retrieval, prompt construction, grounded generation), explains the bi-encoder + cross-encoder two-stage retrieval pattern that production systems use (bi-encoder for fast recall over millions of chunks, cross-encoder for precision over a few hundred), names HyDE (hypothetical document embeddings) as the standard fix for the question-vs-answer shape mismatch, frames how 1M-2M-token context windows complement rather than displace RAG in 2026, and closes on indirect prompt injection as the structural security issue RAG creates and why it is harder to defend against than direct injection."
 track: ai-foundations
 order: 9
 phase: reasoning-and-agents
@@ -13,13 +13,14 @@ prerequisites:
   - lessons/ai-foundations/how-words-become-vectors
 learning_outcomes:
   - Explain what RAG is and the three problems it solves (knowledge cutoff, private data, hallucination grounding)
-  - Walk through the canonical RAG pipeline (chunking, embedding, retrieval, prompt construction, generation) and identify the role of each stage
-  - Name the failure modes specific to each stage (bad chunk boundaries, weak embeddings, retrieval misses, prompt overflow, ungrounded generation)
-  - Recognize indirect prompt injection as the structural security issue RAG introduces, and explain why it is harder to defend against than direct injection
+  - Trace the canonical RAG pipeline (chunking, embedding, retrieval, prompt construction, generation) and identify the role of each stage
+  - Distinguish bi-encoder retrieval (fast recall over millions of chunks) from cross-encoder rerankers (slow precision over the bi-encoder's top candidates), and recognize HyDE (hypothetical document embeddings) as the standard fix for the question-vs-answer shape mismatch in dense retrieval
+  - Identify indirect prompt injection as the structural security issue RAG introduces and explain why it is harder to defend against than direct injection
+  - Compare RAG with long-context prompting in 2026 (1M-2M-token windows mainstream, Llama 4 Scout reaches 10M; long context complements RAG rather than displacing it; choose between them based on per-query cost, latency, traceability, freshness, and corpus scale)
 authors:
   - clawdemy
 published_at: 2026-05-03
-last_reviewed: 2026-05-08
+last_reviewed: 2026-05-09
 status: draft
 artifact: brief
 source_material:
@@ -44,22 +45,25 @@ import SourceLecture from '../../../../../components/SourceLecture.astro';
 
 ## What you'll learn
 
-This is a lesson in Phase 6, *How models reason and act*, in Track 5 (AI Foundations). The earlier lessons covered how the transformer works (Phase 2), how it generates text and how to prompt it (Phase 5), and how it was trained to follow instructions (Phase 4). This lesson covers how to give the trained model knowledge it does not already have, in the right shape, at the right moment. We'll walk through **retrieval-augmented generation** (RAG), the canonical pattern for grounding a language model in fresh, private, or domain-specific information without retraining it. The lesson walks through the pipeline stage by stage (chunking, embedding, vector search, prompt construction, grounded generation), names the failure mode for each stage, and closes on **indirect prompt injection**, the structural security issue RAG introduces. Course materials are at [cme295.stanford.edu](https://cme295.stanford.edu/).
+This is a lesson in Phase 6 (*How models reason and act*) in Track 5 (AI Foundations). The earlier lessons covered how the transformer works (Phase 2), how it generates text and how to prompt it (Phase 5), and how it was trained to follow instructions (Phase 4). Course materials are at [cme295.stanford.edu](https://cme295.stanford.edu/).
+
+This lesson covers how to give the trained model knowledge it does not already have, in the right shape, at the right moment. **Retrieval-augmented generation** (RAG) is the canonical pattern for grounding a language model in fresh, private, or domain-specific information without retraining it. The lesson walks the pipeline stage by stage (chunking documents into 200-800-token pieces, embedding each chunk via a bi-encoder, vector-searching for the chunks closest to the query embedding, constructing a prompt that includes the retrieved chunks as context, generating a grounded response). It explains the **bi-encoder + cross-encoder two-stage retrieval pattern** that production systems use (bi-encoder for fast recall over millions of chunks, cross-encoder for precision rescoring over a few hundred candidates), names **HyDE** (hypothetical document embeddings) as the standard fix for the question-vs-answer shape mismatch in dense retrieval, frames how 1M-2M-token context windows in 2026 (with Llama 4 Scout's 10M as the exception) **complement** rather than displace RAG, and closes on **indirect prompt injection** as the structural security issue RAG creates: an attacker poisons content that the application later retrieves on a benign user's behalf, the operator never sees the attack land.
 
 ## Where this fits
 
-This is a lesson in Phase 6, *How models reason and act*. Phase 5 covered inference-time steering (generation loop, prompting). This lesson adds retrieval: how to augment a prompt with fresh or private information the model was not trained on. It builds directly on the prompting lesson and the embeddings lesson (vector search is embedding lookup with a retrieval step on top).
+This is a lesson in Phase 6, *How models reason and act*. Phase 5 covered inference-time steering (generation loop, prompting mechanics, few-shot, chain-of-thought). This lesson adds retrieval: how to augment a prompt with fresh or private information the model was not trained on. It builds directly on the prompting lesson (RAG is prompting plus retrieval) and the embeddings lesson (vector search is embedding lookup with a similarity step on top). The other Phase 6 lessons cover reasoning models, function calling, and agent loops; together they trace what happens when a single LLM call gets supplemented with thinking time, retrieval, tools, or chained tool sequences.
 
 ## Before you start
 
-**Prerequisites:** the [prompting lesson](/lessons/ai-foundations/how-prompting-works/lesson/) and the [embeddings lesson](/lessons/ai-foundations/how-words-become-vectors/lesson/) are required. RAG is prompting plus retrieval; if you cannot read a prompt and identify what is doing the work in it, the RAG flow will not make sense. Vector search uses the same embedding mechanics covered in the embeddings lesson. Phase 4 (fine-tuning and RLHF) is helpful background for understanding why RAG is often the right alternative to fine-tuning, but is not required.
+**Prerequisites:** the [prompting lesson](/lessons/ai-foundations/how-prompting-works/lesson/) and the [embeddings lesson](/lessons/ai-foundations/how-words-become-vectors/lesson/) are required. RAG is prompting plus retrieval; if you cannot read a prompt and identify what is doing the work in it, the RAG flow will not make sense. Vector search uses the same embedding mechanics covered in the embeddings lesson. Phase 4 (SFT and RLHF) is helpful background for understanding why RAG is often the right alternative to fine-tuning, but is not required.
 
 ## By the end, you'll be able to
 
 - Explain what RAG is and the three problems it solves (knowledge cutoff, private data, hallucination grounding)
-- Walk through the canonical RAG pipeline (chunking, embedding, retrieval, prompt construction, generation) and identify the role of each stage
-- Name the failure modes specific to each stage (bad chunk boundaries, weak embeddings, retrieval misses, prompt overflow, ungrounded generation)
-- Recognize indirect prompt injection as the structural security issue RAG introduces, and explain why it is harder to defend against than direct injection
+- Trace the canonical RAG pipeline (chunking, embedding, retrieval, prompt construction, generation) and identify the role of each stage
+- Distinguish bi-encoder retrieval (fast recall over millions of chunks) from cross-encoder rerankers (slow precision over the bi-encoder's top candidates), and recognize HyDE (hypothetical document embeddings) as the standard fix for the question-vs-answer shape mismatch in dense retrieval
+- Identify indirect prompt injection as the structural security issue RAG introduces and explain why it is harder to defend against than direct injection
+- Compare RAG with long-context prompting in 2026 (1M-2M-token windows mainstream, Llama 4 Scout reaches 10M; long context complements RAG rather than displacing it; choose between them based on per-query cost, latency, traceability, freshness, and corpus scale)
 
 ## Time and difficulty
 
