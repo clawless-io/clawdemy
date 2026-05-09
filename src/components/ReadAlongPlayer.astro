@@ -1,0 +1,220 @@
+---
+// Read-along trial component. Plays an MP3 alongside word-level timing JSON
+// produced by WhisperX forced alignment. Highlights the current word and
+// auto-scrolls it into view.
+//
+// Usage:
+//   <ReadAlongPlayer
+//     audioSrc="https://audio.clawdemy.org/lessons/<slug>-lesson.mp3"
+//     timingSrc="/read-along/<slug>.timing.json"
+//   />
+//
+// Trial only. Renders nothing if either source is unreachable.
+export interface Props {
+  audioSrc: string;
+  timingSrc: string;
+}
+
+const { audioSrc, timingSrc } = Astro.props;
+const playerId = `read-along-${Math.random().toString(36).slice(2, 10)}`;
+---
+
+<div class="read-along-trial" data-player-id={playerId}>
+  <div class="read-along-controls">
+    <audio controls preload="metadata" data-role="audio">
+      <source src={audioSrc} type="audio/mpeg" />
+      Your browser does not support the audio element.
+    </audio>
+    <div class="read-along-meta">
+      <span data-role="status">Loading word-level timing…</span>
+    </div>
+  </div>
+
+  <div class="read-along-text" data-role="text" aria-live="off">
+    <p class="read-along-loading">Loading text…</p>
+  </div>
+</div>
+
+<script define:vars={{ playerId, timingSrc }}>
+  (async function initReadAlong() {
+    const root = document.querySelector(`[data-player-id="${playerId}"]`);
+    if (!root) return;
+    const audio = root.querySelector('[data-role="audio"]');
+    const textEl = root.querySelector('[data-role="text"]');
+    const statusEl = root.querySelector('[data-role="status"]');
+
+    let timing;
+    try {
+      const res = await fetch(timingSrc);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      timing = await res.json();
+    } catch (err) {
+      statusEl.textContent = 'Could not load timing JSON.';
+      textEl.innerHTML = '<p class="read-along-error">Word-level timing unavailable.</p>';
+      console.error('[read-along] timing fetch failed:', err);
+      return;
+    }
+
+    const words = [];
+    for (const segment of timing.segments) {
+      for (const w of segment.words) {
+        if (typeof w.start === 'number' && typeof w.end === 'number') {
+          words.push(w);
+        }
+      }
+    }
+    if (words.length === 0) {
+      statusEl.textContent = 'Timing JSON had no aligned words.';
+      return;
+    }
+
+    statusEl.textContent = `${words.length} aligned words ready. Press play.`;
+
+    textEl.innerHTML = '';
+    const para = document.createElement('p');
+    para.className = 'read-along-paragraph';
+    words.forEach((w, idx) => {
+      const span = document.createElement('span');
+      span.className = 'read-along-word';
+      span.dataset.wordIdx = String(idx);
+      span.textContent = w.word;
+      para.appendChild(span);
+      para.appendChild(document.createTextNode(' '));
+    });
+    textEl.appendChild(para);
+
+    const wordSpans = Array.from(textEl.querySelectorAll('.read-along-word'));
+
+    function findActiveIndex(t) {
+      let lo = 0;
+      let hi = words.length - 1;
+      let active = -1;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (words[mid].start <= t) {
+          if (words[mid].end >= t) {
+            return mid;
+          }
+          active = mid;
+          lo = mid + 1;
+        } else {
+          hi = mid - 1;
+        }
+      }
+      return active;
+    }
+
+    let lastActive = -1;
+    let lastScrollAt = 0;
+
+    function update() {
+      const idx = findActiveIndex(audio.currentTime);
+      if (idx === lastActive) return;
+      if (lastActive >= 0 && wordSpans[lastActive]) {
+        wordSpans[lastActive].classList.remove('is-active');
+      }
+      if (idx >= 0 && wordSpans[idx]) {
+        wordSpans[idx].classList.add('is-active');
+        const now = performance.now();
+        if (now - lastScrollAt > 700) {
+          wordSpans[idx].scrollIntoView({ block: 'center', behavior: 'smooth' });
+          lastScrollAt = now;
+        }
+      }
+      lastActive = idx;
+    }
+
+    audio.addEventListener('timeupdate', update);
+    audio.addEventListener('seeked', update);
+    audio.addEventListener('play', update);
+
+    textEl.addEventListener('click', (e) => {
+      const span = e.target.closest('.read-along-word');
+      if (!span) return;
+      const idx = Number(span.dataset.wordIdx);
+      if (Number.isFinite(idx) && words[idx]) {
+        audio.currentTime = words[idx].start;
+        if (audio.paused) audio.play();
+      }
+    });
+  })();
+</script>
+
+<style>
+  .read-along-trial {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+    max-width: 70ch;
+    margin: 0 auto;
+    padding: 1rem;
+  }
+
+  .read-along-controls {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: var(--sl-color-bg, #ffffff);
+    padding: 0.75rem 0;
+    border-bottom: 1px solid var(--sl-color-gray-5, #e5e7eb);
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .read-along-controls audio {
+    width: 100%;
+  }
+
+  .read-along-meta {
+    font-size: 0.85rem;
+    color: var(--sl-color-gray-3, #6b7280);
+  }
+
+  .read-along-text {
+    font-size: 1.125rem;
+    line-height: 1.85;
+    padding-bottom: 60vh;
+  }
+
+  .read-along-paragraph {
+    margin: 0;
+  }
+
+  .read-along-word {
+    display: inline;
+    cursor: pointer;
+    border-radius: 3px;
+    padding: 1px 2px;
+    transition: background-color 120ms ease, color 120ms ease;
+  }
+
+  .read-along-word:hover {
+    background-color: rgba(34, 211, 238, 0.15);
+  }
+
+  .read-along-word.is-active {
+    background-color: rgb(34, 211, 238);
+    color: #0a0a0a;
+    font-weight: 600;
+  }
+
+  .read-along-loading,
+  .read-along-error {
+    color: var(--sl-color-gray-3, #6b7280);
+    font-style: italic;
+  }
+
+  @media (max-width: 640px) {
+    .read-along-text {
+      font-size: 1rem;
+      line-height: 1.7;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .read-along-word {
+      transition: none;
+    }
+  }
+</style>
