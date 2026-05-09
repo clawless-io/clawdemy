@@ -1,6 +1,6 @@
 ---
 title: "Token by token: how a transformer generates text"
-description: "Lesson 1 of Phase 5 (How we steer models at inference) in Track 5. This one shows what a trained transformer actually does at runtime: predict the next token, sample from a distribution, append, then repeat. We'll walk the autoregressive prediction loop, show how decoding strategies shape what the model says, and explain why generation gets faster after the first token."
+description: "Lesson 1 of Phase 5 (How we steer models at inference) in Track 5. This one shows what a trained transformer actually does at runtime: predict the next token, sample from a distribution, append, then repeat. The lesson walks the autoregressive prediction loop end-to-end (forward pass, logits, softmax, sample, append), compares the decoding strategies that shape the sample step (greedy, pure sampling, top-k, top-p, plus temperature as a separate dial), explains KV caching honestly (it removes the recompute cost that would have made naive generation grow quadratically with output length, so per-token cost grows linearly with cache length, not constant; the dominant constant per-token model cost is what makes streaming feel steady until contexts get long), and closes on speculative decoding as the production layer on top (TensorRT-LLM, vLLM, SGLang ship it natively in 2026)."
 track: ai-foundations
 order: 6
 phase: inference
@@ -11,14 +11,15 @@ estimated_practice_minutes: 15
 prerequisites:
   - lessons/ai-foundations/transformer-block
 learning_outcomes:
-  - Explain how a transformer produces text autoregressively (one token at a time) and trace the prediction loop end to end
+  - Explain how a transformer produces text autoregressively (one token at a time) and trace the prediction loop end to end (forward pass, logits, softmax, sample, append)
   - Compare the most common decoding strategies (greedy, sampling, top-k, top-p) and name the trade-off each one makes
   - Explain what temperature does to the probability distribution and how it shapes the model's output style
-  - Explain what KV caching is and why generation gets faster after the first token
+  - Explain KV caching honestly (it removes the recompute cost that would have made generation quadratic, so per-token cost is linear in cache length, not constant) and recognize speculative decoding as the production speedup layered on top
+  - Predict how output cost scales with output length and which API parameters matter most for cost (max_tokens, stop sequences, prompting that produces shorter outputs)
 authors:
   - clawdemy
 published_at: 2026-04-29
-last_reviewed: 2026-05-08
+last_reviewed: 2026-05-09
 status: published
 artifact: brief
 source_material:
@@ -43,11 +44,13 @@ import SourceLecture from '../../../../../components/SourceLecture.astro';
 
 ## What you'll learn
 
-This is lesson 1 of Phase 5, *How we steer models at inference*, in Track 5 (AI Foundations). Phase 2 built the transformer architecture (tokens, embeddings, attention, the full block). This lesson picks up at what that trained architecture actually does at runtime. The model does not produce text in one shot. It produces text one token at a time, in a loop: forward pass through every block, softmax over the vocabulary, sample one token, append it to the input, run the forward pass again. Decoding strategies (greedy, sampling, top-k, top-p, temperature) shape that sampling step in different ways and often produce noticeably different output styles. We'll walk the loop, compare the strategies, and explain what temperature does. The full course materials are at [cme295.stanford.edu](https://cme295.stanford.edu/).
+This is lesson 1 of Phase 5 (*How we steer models at inference*) in Track 5 (AI Foundations). Phase 2 built the transformer architecture (tokens, embeddings, attention, the full block). This lesson picks up at what that trained architecture actually *does* at runtime. The full course materials are at [cme295.stanford.edu](https://cme295.stanford.edu/).
+
+The model does not produce text in one shot. It produces text one token at a time, in a loop: forward pass through every block, softmax over the vocabulary, sample one token, append it to the input, run the forward pass again. The lesson walks that prediction loop, compares decoding strategies (greedy, pure sampling, top-k, top-p, plus temperature as a separate dial that reshapes the distribution before any of those), explains KV caching honestly (per the FC-2-001/002 audit fix: KV caching removes the recompute cost that would have made naive generation grow quadratically with output length, so per-token cost is linear in cache length, not constant; the dominant constant per-token model cost is what makes streaming feel steady until contexts get long), and closes on speculative decoding as the 2026 production speedup (TensorRT-LLM, vLLM, SGLang ship it natively).
 
 ## Where this fits
 
-This is lesson 1 of Phase 5, *How we steer models at inference*, and the phase opener. Phase 2 gave you the transformer block; this lesson shows that block in action at inference time. The next lesson, *How prompting works: zero-shot, few-shot, and chain-of-thought*, covers how to write inputs that steer the generation loop you learn here.
+This is lesson 1 of Phase 5, *How we steer models at inference*, and the phase opener. Phase 2 gave you the transformer block; this lesson shows that block in action at inference time. The next three Phase 5 lessons cover *How prompting works* (mechanics, system prompts, prompt injection), *How few-shot examples teach in context*, and *How chain of thought makes models think out loud*. Together those four lessons cover the full inference-time steering toolbox.
 
 ## Before you start
 
@@ -55,10 +58,11 @@ This is lesson 1 of Phase 5, *How we steer models at inference*, and the phase o
 
 ## By the end, you'll be able to
 
-- Explain how a transformer produces text autoregressively (one token at a time) and trace the prediction loop end to end
+- Explain how a transformer produces text autoregressively (one token at a time) and trace the prediction loop end to end (forward pass, logits, softmax, sample, append)
 - Compare the most common decoding strategies (greedy, sampling, top-k, top-p) and name the trade-off each one makes
 - Explain what temperature does to the probability distribution and how it shapes the model's output style
-- Explain what KV caching is and why generation gets faster after the first token
+- Explain KV caching honestly (it removes the recompute cost that would have made generation quadratic, so per-token cost is linear in cache length, not constant) and recognize speculative decoding as the production speedup layered on top
+- Predict how output cost scales with output length and which API parameters matter most for cost (`max_tokens`, stop sequences, prompting that produces shorter outputs)
 
 ## Time and difficulty
 

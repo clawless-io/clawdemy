@@ -1,6 +1,6 @@
 ---
 title: "How prompting works: mechanics, system prompts, and prompt injection"
-description: "Lesson 2 of Phase 5 (How we steer models at inference) in Track 5. Modern AI assistants follow instructions because they were post-trained to. This lesson covers what to do with that: what a prompt actually is at the token level, what a system prompt does, and why every instruction-tuned model is structurally vulnerable to prompt injection. Few-shot prompting and chain-of-thought get their own dedicated lessons next."
+description: "Lesson 2 of Phase 5 (How we steer models at inference) in Track 5. Modern AI assistants follow instructions because they were post-trained to. This lesson covers what to do with that: what a prompt actually is at the token level (just input tokens conditioning the next-token prediction loop), what a system prompt is (a high-priority hint backed by an API contract plus a training-time bias, not a hard sandbox), and why every instruction-tuned model is structurally vulnerable to prompt injection (the same property that makes the model useful, instruction-following over input tokens, is what makes it follow injected instructions). Few-shot prompting and chain-of-thought get their own dedicated lessons next."
 track: ai-foundations
 order: 8
 phase: inference
@@ -11,14 +11,15 @@ estimated_practice_minutes: 12
 prerequisites:
   - lessons/ai-foundations/how-text-is-generated
 learning_outcomes:
-  - Distinguish zero-shot, few-shot, and chain-of-thought prompting and identify which pattern a given prompt uses
-  - Explain why few-shot prompting works (in-context learning) and where it stops scaling
-  - Recognize task types where chain-of-thought helps versus task types where it adds noise without improving accuracy
-  - Identify a prompt-injection attempt and explain why instruction-tuned models are structurally vulnerable to it
+  - Explain what a prompt actually is at the token level (the input tokens you control, conditioning the model's next-token prediction loop) and why that mental model is more useful than treating prompting as "magic words"
+  - Describe what a system prompt does and what makes it different from a user message (an API-contract-plus-training-time-bias, not a hard execution boundary)
+  - Distinguish direct prompt injection (the user is the attacker) from indirect prompt injection (a third party hides instructions in retrieved content the application later concatenates into a prompt)
+  - Distinguish prompt injection from jailbreaks (different threat models, same family of failures)
+  - Recognize where mitigations actually live (at the application layer, not in the prompt) and what each common mitigation does and does not do
 authors:
   - clawdemy
 published_at: 2026-05-03
-last_reviewed: 2026-05-08
+last_reviewed: 2026-05-09
 status: draft
 artifact: brief
 source_material:
@@ -43,11 +44,13 @@ import SourceLecture from '../../../../../components/SourceLecture.astro';
 
 ## What you'll learn
 
-This is lesson 2 of Phase 5, *How we steer models at inference*, in Track 5 (AI Foundations). Modern chat assistants follow instructions because they were post-trained to. The full mechanics of that post-training (supervised fine-tuning, RLHF, and the reward-modeling step) are covered in Phase 4. For this lesson you only need the working assumption that the assistant in front of you wants to follow instructions. This lesson is about how to write the instructions. We'll cover the three prompting patterns that show up everywhere (zero-shot, few-shot, and chain-of-thought), when each one earns its place, when it adds noise, and the structural reason that any instruction-tuned model is vulnerable to prompt injection. Course materials are at [cme295.stanford.edu](https://cme295.stanford.edu/).
+This is lesson 2 of Phase 5 (*How we steer models at inference*) in Track 5 (AI Foundations). Modern chat assistants follow instructions because they were post-trained to. The full mechanics of that post-training (supervised fine-tuning, reward modeling, RLHF) are covered in Phase 4. For this lesson the working assumption is that the assistant in front of you wants to follow instructions. Course materials are at [cme295.stanford.edu](https://cme295.stanford.edu/).
+
+This lesson covers the foundation that all prompting patterns sit on top of: **what a prompt actually is at the token level** (just input tokens conditioning the next-token prediction loop from the previous lesson), **what a system prompt does** (a high-priority hint backed by an API contract plus a training-time bias toward weighting system over user, not a hard execution boundary), and **why every instruction-tuned model is structurally vulnerable to prompt injection** (the same property that makes the model useful, instruction-following over input tokens, is what makes it follow injected instructions). The lesson distinguishes direct injection (the user is the attacker) from indirect injection (a third party hides instructions in retrieved content the application later concatenates into a prompt) and from jailbreaks (different threat model, same family of failures). It closes by naming where mitigations actually live (at the application layer, not in the prompt) and what each common mitigation does and does not do. Few-shot prompting and chain-of-thought get their own dedicated lessons next.
 
 ## Where this fits
 
-This is lesson 2 of Phase 5, *How we steer models at inference*. The previous lesson ([Token by token: how a transformer generates text](/lessons/ai-foundations/how-text-is-generated/lesson/)) showed how the generation loop works. This lesson covers how to shape what goes into that loop. The next lesson in Phase 6 is *How RAG works: feeding the model what it does not already know*, which builds on prompting by adding retrieval.
+This is lesson 2 of Phase 5, *How we steer models at inference*. The previous lesson ([Token by token: how a transformer generates text](/lessons/ai-foundations/how-text-is-generated/lesson/)) showed how the generation loop works. This lesson covers the mechanics-and-trust-boundaries layer that all prompting patterns sit on top of. The next two Phase 5 lessons, *How few-shot examples teach in context* and *How chain of thought makes models think out loud*, cover the deep teaching of the two prompting patterns this lesson only names. Phase 6 then opens the reasoning-and-agents arc, starting with reasoning models (where chain-of-thought is trained into the model rather than prompted in).
 
 ## Before you start
 
@@ -55,13 +58,14 @@ This is lesson 2 of Phase 5, *How we steer models at inference*. The previous le
 
 ## By the end, you'll be able to
 
-- Distinguish zero-shot, few-shot, and chain-of-thought prompting and identify which pattern a given prompt uses
-- Explain why few-shot prompting works (in-context learning) and where it stops scaling
-- Recognize task types where chain-of-thought helps versus task types where it adds noise without improving accuracy
-- Identify a prompt-injection attempt and explain why instruction-tuned models are structurally vulnerable to it
+- Explain what a prompt actually is at the token level (the input tokens you control, conditioning the model's next-token prediction loop) and why that mental model is more useful than treating prompting as "magic words"
+- Describe what a system prompt does and what makes it different from a user message (an API-contract-plus-training-time-bias, not a hard execution boundary)
+- Distinguish direct prompt injection (the user is the attacker) from indirect prompt injection (a third party hides instructions in retrieved content the application later concatenates into a prompt)
+- Distinguish prompt injection from jailbreaks (different threat models, same family of failures)
+- Recognize where mitigations actually live (at the application layer, not in the prompt) and what each common mitigation does and does not do
 
 ## Time and difficulty
 
-- **Read time:** about 22 minutes
-- **Practice time:** about 15 minutes (a pattern-recognition exercise: classify a small set of prompts by strategy, then redesign two of them)
+- **Read time:** about 14 minutes
+- **Practice time:** about 12 minutes (a trust-boundary spotting exercise on three small prompt-application designs, plus a redesign exercise)
 - **Difficulty:** standard

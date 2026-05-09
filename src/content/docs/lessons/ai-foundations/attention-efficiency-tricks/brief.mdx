@@ -1,6 +1,6 @@
 ---
 title: "How transformers scale to real-world data: sliding windows and KV-cache savings"
-description: "Lesson 6 of Phase 2 (How models think) in Track 5. Two efficiency problems, two distinct fixes. Sliding window attention solves the O(n^2) compute problem during training and prefill; MHA, MQA, and GQA solve the KV-cache memory problem during decoding. The lesson keeps the two cleanly separate so you know what each one is doing."
+description: "Lesson 6 of Phase 2 (How models think) in Track 5. Two efficiency problems, two distinct fixes. The compute problem (standard self-attention is O(n^2) in sequence length) is solved by sliding window attention, where each token attends to a local neighborhood and the receptive field grows with layer stacking the same way it does in CNNs. The memory problem (the KV cache that speeds up decoding gets large fast) is solved by sharing key and value projections across attention heads, in the MHA -> MQA -> GQA progression. The lesson keeps the two problems cleanly separate so you know what each fix targets, and closes with the 2026 context-window mainstream framing (1M-2M tokens normal, Llama 4 Scout's 10M as the exception)."
 track: ai-foundations
 order: 13
 phase: architecture
@@ -13,13 +13,14 @@ prerequisites:
   - lessons/ai-foundations/transformer-block
 learning_outcomes:
   - Explain why standard self-attention is O(n^2) in compute and where that becomes a real bottleneck
-  - Describe sliding window attention and the receptive-field analogy that explains how local layers still see distant tokens through stacking
+  - Describe sliding window attention and the receptive-field-grows-with-depth analogy from CNNs that explains how local layers still see distant tokens through stacking
   - Distinguish the compute problem (attention complexity) from the memory problem (KV cache size during decoding); explain why they need different fixes
-  - Walk through the MHA -> MQA -> GQA progression and explain why most modern LLMs land on GQA
+  - Walk through the MHA -> MQA -> GQA progression and explain why most modern LLMs land on GQA (and where DeepSeek's MLA fits in)
+  - Recognize 2026 context-window claims correctly (1M-2M is mainstream, 10M is the Llama 4 Scout exception, sub-256K is short)
 authors:
   - clawdemy
 published_at: 2026-05-03
-last_reviewed: 2026-05-08
+last_reviewed: 2026-05-09
 status: draft
 artifact: brief
 source_material:
@@ -44,11 +45,13 @@ import SourceLecture from '../../../../../components/SourceLecture.astro';
 
 ## What you'll learn
 
-This is lesson 6 of Phase 2, *How models think: the transformer architecture*, in Track 5 (AI Foundations). Previous lessons covered the architectural changes the field made after 2017: normalization schemes and their placement. This lesson covers the third area of change: attention efficiency. Specifically, two distinct problems with two distinct fixes. The first is the **compute problem**: standard self-attention is O(n^2) in sequence length, which becomes a bottleneck at the long contexts modern LLMs run on. The fix is **sliding window attention**: each token attends only to its local neighborhood. The second is the **memory problem**: the KV cache that makes decoding fast also gets large fast. The fix is **sharing key and value projections across attention heads**, in a progression from multi-head attention (MHA) through multi-query attention (MQA) to group-query attention (GQA). The lecture treats these as two orthogonal efficiency moves; this lesson keeps them cleanly separate. Course materials are at [cme295.stanford.edu](https://cme295.stanford.edu/).
+This is lesson 6 of Phase 2 (*How models think: the transformer architecture*) in Track 5 (AI Foundations). The previous lessons covered the architectural changes the field made after 2017: position embeddings (RoPE) and normalization (pre-norm and RMSNorm). This lesson covers the third area of change: **attention efficiency**. Course materials are at [cme295.stanford.edu](https://cme295.stanford.edu/).
+
+The lesson keeps two distinct problems cleanly separated. The first is the **compute problem**: standard self-attention is `O(n^2)` in sequence length, which becomes a real bottleneck at the long contexts modern LLMs run on. The fix is **sliding window attention**: each token attends only to its local neighborhood, with the receptive field growing through layer stacking the same way it does in convolutional networks. The second is the **memory problem**: the KV cache that makes decoding fast also gets large fast as sequence length, head count, and layer depth grow. The fix is **sharing key and value projections across attention heads**, in the MHA -> MQA -> GQA progression (with DeepSeek's MLA as a fourth point in 2026 production). The lecture treats the two as orthogonal efficiency moves, often combined in the same model. The lesson closes with how the 2026 context-window mainstream (1M-2M tokens normal, Llama 4 Scout's 10M as the exception) hangs on these tricks together.
 
 ## Where this fits
 
-This is lesson 6 of Phase 2, *How models think: the transformer architecture*. The previous lesson covered normalization (LayerNorm, pre-norm, RMSNorm). This lesson covers attention efficiency. The next lesson, *How transformers turn input into output: encoder-decoder and T5's span corruption*, opens the architectural variants arc: what different kinds of transformer have been built and why.
+This is lesson 6 of Phase 2, *How models think: the transformer architecture*. The previous lesson covered normalization (LayerNorm, pre-norm, RMSNorm). This lesson covers attention efficiency, closing the three-lesson "post-2017 changes that stuck" arc (position embeddings, normalization, attention efficiency). The next lesson, *How transformers turn input into output: encoder-decoder and T5's span corruption*, opens the architectural-variants arc: what different kinds of transformer have been built and why.
 
 ## Before you start
 
@@ -56,10 +59,11 @@ This is lesson 6 of Phase 2, *How models think: the transformer architecture*. T
 
 ## By the end, you'll be able to
 
-- Explain why standard self-attention is O(n^2) in compute and where that becomes a real bottleneck
-- Describe sliding window attention and the receptive-field analogy that explains how local layers still see distant tokens through stacking
+- Explain why standard self-attention is `O(n^2)` in compute and where that becomes a real bottleneck
+- Describe sliding window attention and the receptive-field-grows-with-depth analogy from CNNs that explains how local layers still see distant tokens through stacking
 - Distinguish the compute problem (attention complexity) from the memory problem (KV cache size during decoding); explain why they need different fixes
-- Walk through the MHA -> MQA -> GQA progression and explain why most modern LLMs land on GQA
+- Walk through the MHA -> MQA -> GQA progression and explain why most modern LLMs land on GQA (and where DeepSeek's MLA fits in)
+- Recognize 2026 context-window claims correctly (1M-2M is mainstream, 10M is the Llama 4 Scout exception, sub-256K is short)
 
 ## Time and difficulty
 
