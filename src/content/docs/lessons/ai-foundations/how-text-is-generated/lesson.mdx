@@ -89,9 +89,9 @@ The naive prediction loop runs the entire architecture from scratch on the full 
 
 The optimization: **KV caching**. The K and V vectors that attention computes for each previous token do not change between steps. Each new step needs to compute K and V for one new token; everything before it is identical to last time. So the cache stores K and V for every position seen so far, and each new step only computes K and V for the one new token.
 
-The first forward pass (over the full prompt) is slow. Every subsequent pass is roughly constant-time per new token, because the per-position work for prior tokens is reused.
+The first forward pass (over the full prompt) is the expensive one. Each subsequent pass is much cheaper because the per-position K and V for prior tokens are read from the cache instead of recomputed.
 
-This is why streaming responses appear at a roughly constant rate after a brief initial delay. The first-token wait is the model "processing your prompt"; the subsequent tokens stream because each one is now cheap.
+A subtlety worth getting right: **KV caching does not make per-token decoding constant-time.** The new query still has to attend over every cached position, so each new token's attention cost still grows linearly with the cache length (the number of tokens generated so far). What caching removes is the *recomputation* of past K and V — a large constant factor and the work that would have made naive generation grow *quadratically* with output length. With caching, generation is linear per token in cache length, not constant. In practice the linear-in-context-length cost is usually dominated by the constant per-token model cost until contexts get long, which is why streaming responses appear at a roughly steady rate after a brief initial delay; on very long contexts the per-token cost does eventually grow.
 
 ## Why this matters when you use AI
 
@@ -120,7 +120,7 @@ A few mistakes are common enough to be worth naming.
 - **Generation is a loop.** Forward pass → logits → softmax → sample → append → repeat. Until a stop condition fires.
 - **Decoding strategies shape the sample step.** Greedy (always top), pure sampling (raw distribution), top-k (top N), top-p (nucleus). Temperature rescales the distribution before any of these.
 - **Most modern APIs default to top-p sampling with temperature near 0.7.** Lower temperature for structure; higher for creativity. Top-p around 0.9 is the common default.
-- **KV caching makes generation roughly constant-time per token after the first forward pass.** Without it, generation would be quadratic in sequence length.
+- **KV caching makes generation much cheaper per token by reusing past K and V vectors instead of recomputing them.** Without it, generation would scale quadratically with output length. With it, the per-token cost still grows linearly with cache length (the new query attends over the whole cache), but the dominant constant factor of recomputation is eliminated. Linear, not quadratic; not constant.
 - **Output cost scales linearly with output length.** Every output token is its own forward pass; APIs price accordingly.
 
 You are now ready for the practice section, where you will run the sample step by hand on a tiny logits vector and compare what greedy, top-k, and top-p decoding produce from the same starting point.
