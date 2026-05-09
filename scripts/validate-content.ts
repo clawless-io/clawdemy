@@ -47,6 +47,7 @@ const BLOOM_VERBS = [
 	'recall',
 	'define',
 	'read',
+	'state',
 	// Understand
 	'explain',
 	'describe',
@@ -60,6 +61,8 @@ const BLOOM_VERBS = [
 	'recognize',
 	'connect',
 	'demonstrate',
+	'articulate',
+	'interpret',
 	// Apply
 	'use',
 	'apply',
@@ -69,6 +72,7 @@ const BLOOM_VERBS = [
 	'modify',
 	// Analyze
 	'distinguish',
+	'differentiate',
 	'debug',
 	'decompose',
 	'analyze',

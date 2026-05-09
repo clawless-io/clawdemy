@@ -54,6 +54,40 @@ when "what to put" is buried in documents the model has never seen.
 | **K (top-K)** | Often 5 or 10. Larger K = more recall but more tokens in the prompt and more noise. |
 | **Reranking** | An optional second-stage model rescores the top-K from retrieval before passing them to generation. Often cheap, often a clear win. |
 
+## Bi-encoder vs cross-encoder
+
+| | Bi-encoder | Cross-encoder |
+| --- | --- | --- |
+| **Architecture** | Query and chunk encoded *separately* | Query and chunk encoded *together* with self-attention across both |
+| **Output** | Two vectors, compared via cosine similarity | Single relevance score |
+| **Speed** | Fast (chunk vectors precomputed at index time) | Slow (full encoder per query-chunk pair) |
+| **Accuracy** | Recall-heavy (good first pass) | Precision-heavy (good final ranking) |
+| **Used for** | Stage 1: candidate retrieval (millions of chunks → ~100) | Stage 2: reranking (~100 candidates → top 5-10) |
+| **Canonical model** | Sentence-BERT | Often a smaller transformer trained for relevance scoring |
+
+**Production RAG uses both.** Bi-encoder pulls a wide net; cross-encoder rescores for precision.
+
+## HyDE: closing the query-vs-document shape gap
+
+```
+Problem: queries are short questions; documents are longer answers.
+Their embeddings often live in different regions of vector space
+even when the underlying topic matches.
+
+HyDE solution:
+1. Take the user's query
+2. Make one extra LLM call: "write a plausible answer document for this query"
+3. Embed the HYPOTHETICAL DOCUMENT (not the original query)
+4. Use that embedding for retrieval
+
+Why it works: the hypothetical document is shaped like real documents,
+so its embedding lands in the right region of vector space.
+
+Costs: one extra LLM call per query.
+Wins: ambiguous or short queries against diverse corpora.
+Doesn't always win: well-formed queries see no improvement.
+```
+
 ## The prompt template
 
 ```
@@ -142,6 +176,9 @@ Indirect injection:  attacker plants attack inside a document
 - **Hybrid search:** combining vector similarity with lexical (keyword) search and merging the rankings.
 - **BM25:** the most common lexical-search ranking function; used as the lexical half of hybrid search.
 - **Reranking:** an optional second pass that uses a more expensive model to rescore the top-K before they reach the language model.
+- **Bi-encoder:** retrieval architecture where the query and each chunk pass through the embedding model *separately*; comparison happens after via cosine similarity. Fast, recall-heavy. Sentence-BERT is the canonical example.
+- **Cross-encoder:** reranking architecture where the query and chunk pass through the encoder *together* with self-attention across both. Slow, precision-heavy. Used for the second stage of two-stage retrieval.
+- **HyDE (Hypothetical Document Embeddings):** retrieval technique that addresses query-vs-document shape mismatch by generating a hypothetical answer document with an LLM call and embedding *that* document instead of the user's query.
 - **Grounding instruction:** the part of the prompt template that tells the model to use only the provided context and refuse otherwise.
 - **Ungrounded generation:** the model producing an answer using its pretraining knowledge instead of, or in addition to, the retrieved context.
 - **Indirect prompt injection:** prompt-injection attacks delivered via documents in the retrieval index rather than via the user's direct input.
