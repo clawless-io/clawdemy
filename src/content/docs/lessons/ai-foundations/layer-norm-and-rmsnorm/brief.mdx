@@ -1,6 +1,6 @@
 ---
 title: "Why transformers need stability to learn: LayerNorm, pre-norm, and RMSNorm"
-description: "Lesson 5 of Phase 2 (How models think) in Track 5. Two changes the field made to the original transformer's normalization. Where the normalization sits (post-norm to pre-norm) and what the normalization actually computes (LayerNorm to RMSNorm). Both show up in modern model cards and both have a clean why."
+description: "Lesson 5 of Phase 2 (How models think) in Track 5. Two changes the field made to the original transformer's normalization. The first is where the LayerNorm sits relative to the sub-layer (post-norm 2017 -> pre-norm modern). The second is what the normalization computes (LayerNorm -> RMSNorm, which skips the mean subtraction and the learned shift). Both show up explicitly in modern model cards. The lesson also corrects the historical motivation: the original BatchNorm internal-covariate-shift framing did not survive scrutiny (Santurkar et al. 2018); the currently accepted explanation is that normalization smooths the loss landscape, not that it reduces ICS."
 track: ai-foundations
 order: 12
 phase: architecture
@@ -12,14 +12,14 @@ prerequisites:
   - lessons/ai-foundations/transformer-block
   - lessons/ai-foundations/position-embeddings-and-rope
 learning_outcomes:
-  - Explain in plain language what layer normalization does to a vector and why it helps training
-  - Distinguish LayerNorm from BatchNorm and explain why transformers use the former
-  - Identify the structural shift from post-norm to pre-norm and the reason modern transformers use pre-norm
-  - Describe how RMSNorm differs from LayerNorm and why most modern LLMs use it
+  - Explain in plain language what layer normalization does to a vector and why it helps training, including the corrected modern framing (loss-landscape smoothing) versus the original internal-covariate-shift story that did not hold up empirically
+  - Distinguish LayerNorm from BatchNorm and explain why transformers use the former (per-token, no batch dependence)
+  - Identify the structural shift from post-norm to pre-norm and the reason modern transformers use pre-norm (stable training at depth)
+  - Describe how RMSNorm differs from LayerNorm (skip mean subtraction, drop the learned shift) and why most modern LLMs use it
 authors:
   - clawdemy
 published_at: 2026-05-03
-last_reviewed: 2026-05-08
+last_reviewed: 2026-05-09
 status: draft
 artifact: brief
 source_material:
@@ -44,11 +44,13 @@ import SourceLecture from '../../../../../components/SourceLecture.astro';
 
 ## What you'll learn
 
-This is lesson 5 of Phase 2, *How models think: the transformer architecture*, in Track 5 (AI Foundations). The previous lesson assembled everything into a complete transformer block, including the "Add & Norm" boxes that appear in the original architecture diagram. This lesson zooms in on those boxes: what normalization actually does, and the two ways the field has changed how it works since 2017. The first change is **where** the normalization sits relative to the sub-layer (post-norm to pre-norm). The second change is **what** the normalization computes (LayerNorm to RMSNorm). Both show up in modern model cards. Course materials are at [cme295.stanford.edu](https://cme295.stanford.edu/).
+This is lesson 5 of Phase 2 (*How models think: the transformer architecture*) in Track 5 (AI Foundations). The previous lesson assembled everything into a complete transformer block, including the "Add & Norm" boxes that appear in the original architecture diagram. Course materials are at [cme295.stanford.edu](https://cme295.stanford.edu/).
+
+This lesson zooms in on those boxes. It explains what normalization actually does (and corrects the historical internal-covariate-shift story that did not hold up empirically; the currently accepted explanation per Santurkar et al. 2018 is that normalization smooths the loss landscape). It then walks the two ways the field has changed normalization since 2017. The first change is **where** the LayerNorm sits relative to the sub-layer: post-norm in the 2017 paper, pre-norm in modern LLMs. The second change is **what** the normalization computes: full LayerNorm with mean-and-std plus a learned scale-and-shift, or **RMSNorm** which skips the mean subtraction and the learned shift entirely. Both show up in modern model cards (you'll see "Pre-LayerNorm" or "Pre-RMSNorm" listed as architecture features).
 
 ## Where this fits
 
-This is lesson 5 of Phase 2, *How models think: the transformer architecture*. The previous lesson ([How modern models inject position into attention (RoPE)](/lessons/ai-foundations/position-embeddings-and-rope/lesson/)) covered the structural shift from input-added to attention-injected position embeddings. This lesson gives normalization its full treatment. The next lesson, *How transformers scale to real-world data: sliding windows and KV-cache savings*, covers the attention efficiency improvements that make long-context inference tractable.
+This is lesson 5 of Phase 2, *How models think: the transformer architecture*. The previous lesson ([How modern models inject position into attention (RoPE)](/lessons/ai-foundations/position-embeddings-and-rope/lesson/)) covered the structural shift from input-added to attention-injected position embeddings. This lesson gives normalization its full treatment. The next lesson, *How transformers scale to real-world data: sliding windows and KV-cache savings*, covers the attention-efficiency improvements that make long-context inference tractable. Position, normalization, and attention efficiency are the three places where modern transformers genuinely diverge from the 2017 architecture; everything else is mostly intact.
 
 ## Before you start
 
@@ -56,10 +58,10 @@ This is lesson 5 of Phase 2, *How models think: the transformer architecture*. T
 
 ## By the end, you'll be able to
 
-- Explain in plain language what layer normalization does to a vector and why it helps training
-- Distinguish LayerNorm from BatchNorm and explain why transformers use the former
-- Identify the structural shift from post-norm to pre-norm and the reason modern transformers use pre-norm
-- Describe how RMSNorm differs from LayerNorm and why most modern LLMs use it
+- Explain in plain language what layer normalization does to a vector and why it helps training, including the corrected modern framing (loss-landscape smoothing) versus the original internal-covariate-shift story that did not hold up empirically
+- Distinguish LayerNorm from BatchNorm and explain why transformers use the former (per-token, no batch dependence)
+- Identify the structural shift from post-norm to pre-norm and the reason modern transformers use pre-norm (stable training at depth)
+- Describe how RMSNorm differs from LayerNorm (skip mean subtraction, drop the learned shift) and why most modern LLMs use it
 
 ## Time and difficulty
 
