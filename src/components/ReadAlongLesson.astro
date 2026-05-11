@@ -119,11 +119,16 @@ const playerId = `ral-${slug}-${Math.random().toString(36).slice(2, 8)}`;
 		</button>
 	</div>
 	<div class="cw-readalong-footer">
-		<a href={src} download class="cw-readalong-download">
+		<a
+			href={src}
+			download
+			class="cw-readalong-download"
+			data-role="download"
+		>
 			Download for offline listening
 		</a>
 		<span class="cw-readalong-note">
-			AI-narrated. Press play; the highlight follows the audio.
+			AI-narrated. Press play to begin. Spacebar pauses once playing.
 		</span>
 	</div>
 </aside>
@@ -141,6 +146,44 @@ const playerId = `ral-${slug}-${Math.random().toString(36).slice(2, 8)}`;
 		if (restartBtn) {
 			restartBtn.addEventListener('click', () => {
 				window.location.reload();
+			});
+		}
+
+		// Download: the native `download` attribute is ignored by browsers for
+		// cross-origin URLs (the MP3 is served from audio.clawdemy.org, the
+		// page is on clawdemy.org). Without intervention, clicking the link
+		// opens the MP3 in a new tab instead of saving it. Fix: fetch the MP3
+		// as a same-origin Blob, then trigger a programmatic download. CORS
+		// on audio.clawdemy.org allows clawdemy.org as an origin so the fetch
+		// succeeds. On any failure (CORS, network, parse) we fall back to the
+		// default new-tab behavior, which is exactly what the page used to do.
+		const dlLink = root.querySelector('[data-role="download"]');
+		if (dlLink) {
+			dlLink.addEventListener('click', async (e) => {
+				const url = dlLink.getAttribute('href');
+				if (!url) return;
+				e.preventDefault();
+				const originalText = dlLink.textContent;
+				try {
+					dlLink.textContent = 'Preparing download…';
+					const res = await fetch(url);
+					if (!res.ok) throw new Error(`download HTTP ${res.status}`);
+					const blob = await res.blob();
+					const blobUrl = URL.createObjectURL(blob);
+					const filename = url.split('/').pop() || 'lesson.mp3';
+					const a = document.createElement('a');
+					a.href = blobUrl;
+					a.download = filename;
+					document.body.appendChild(a);
+					a.click();
+					document.body.removeChild(a);
+					setTimeout(() => URL.revokeObjectURL(blobUrl), 1500);
+				} catch (err) {
+					console.warn('[read-along] blob download failed; opening MP3 in new tab.', err);
+					window.open(url, '_blank', 'noopener,noreferrer');
+				} finally {
+					dlLink.textContent = originalText;
+				}
 			});
 		}
 
