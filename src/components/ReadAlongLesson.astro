@@ -1,0 +1,442 @@
+---
+/**
+ * ReadAlongLesson — premium AI-narrated audio for a lesson, with the spoken
+ * word highlighted in the lesson body as it plays.
+ *
+ * Drop-in replacement for `<AudioPlayer />`. Visually matches the AudioPlayer
+ * card so the "Listen to this lesson" surface is unchanged for listeners who
+ * just want to press play and look away. The read-along enhancement is
+ * passive: it activates once the audio plays, and the highlight follows the
+ * narrator through the lesson body.
+ *
+ * How the highlight works:
+ *   1. The component fetches `public/read-along/<slug>.timing.json`, which
+ *      has one entry per prose word in the MDX in render order.
+ *   2. On load it walks the rendered lesson body (siblings after itself in
+ *      the Starlight markdown container), tokenizing text nodes and wrapping
+ *      each prose word in a span indexed against the timing array.
+ *   3. The `audio.timeupdate` handler binary-searches the timing array for
+ *      the current word and applies the active / past classes.
+ *
+ * Skip rules in the DOM walk (must mirror scripts/build-readalong-timing.py):
+ *   - `<pre>` and `<code>` subtrees
+ *   - `<script>`, `<style>`, `<svg>`, `<img>`, `<picture>`
+ *   - Any element with `data-readalong-skip`
+ *
+ * If the timing JSON 404s or is malformed the component falls back to the
+ * audio player by itself, exactly equivalent to the existing AudioPlayer.
+ *
+ * No click-to-seek. Per the simple-over-browser-fragile rule we locked
+ * 2026-05-09, click-to-seek on a paused HTMLAudioElement is too dependent
+ * on browser-internal seek-on-paused behavior. The restart icon does a
+ * full reload, which is bulletproof.
+ *
+ * Usage in MDX:
+ *   <ReadAlongLesson
+ *     src="https://audio.clawdemy.org/lessons/<slug>-lesson.mp3"
+ *     slug="<slug>"
+ *     approxMinutes={12}
+ *   />
+ */
+
+interface Props {
+	src: string;
+	slug: string;
+	title?: string;
+	approxMinutes?: number;
+}
+
+const {
+	src,
+	slug,
+	title = 'Listen to this lesson',
+	approxMinutes,
+} = Astro.props;
+
+const timingSrc = `/read-along/${slug}.timing.json`;
+const playerId = `ral-${slug}-${Math.random().toString(36).slice(2, 8)}`;
+---
+
+<aside
+	class="cw-readalong"
+	data-player-id={playerId}
+	data-timing-src={timingSrc}
+>
+	<div class="cw-readalong-header">
+		<span class="cw-readalong-label">
+			<svg
+				width="14"
+				height="14"
+				viewBox="0 0 24 24"
+				fill="none"
+				stroke="currentColor"
+				stroke-width="2"
+				stroke-linecap="round"
+				stroke-linejoin="round"
+				aria-hidden="true"
+			>
+				<path d="M3 18v-6a9 9 0 0 1 18 0v6"></path>
+				<path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3z"></path>
+				<path d="M3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"></path>
+			</svg>
+			<strong>{title}</strong>
+			{approxMinutes && (
+				<span class="cw-readalong-duration">about {approxMinutes} min</span>
+			)}
+		</span>
+	</div>
+	<div class="cw-readalong-controls">
+		<audio controls preload="metadata" src={src} data-role="audio">
+			<a href={src}>Download the MP3</a>
+		</audio>
+		<button
+			type="button"
+			class="cw-readalong-restart"
+			data-role="restart"
+			aria-label="Restart"
+			title="Restart from the beginning"
+		>
+			<svg
+				viewBox="0 0 24 24"
+				width="20"
+				height="20"
+				fill="none"
+				stroke="currentColor"
+				stroke-width="2"
+				stroke-linecap="round"
+				stroke-linejoin="round"
+				aria-hidden="true"
+				focusable="false"
+			>
+				<path d="M20 12a8 8 0 1 1-2.34-5.66" />
+				<polyline points="20 4 20 9 15 9" />
+				<polygon
+					points="10 9 10 15 15 12"
+					fill="currentColor"
+					stroke="none"
+				/>
+			</svg>
+		</button>
+	</div>
+	<div class="cw-readalong-footer">
+		<a href={src} download class="cw-readalong-download">
+			Download for offline listening
+		</a>
+		<span class="cw-readalong-note">
+			AI-narrated. Press play; the highlight follows the audio.
+		</span>
+	</div>
+</aside>
+
+<script define:vars={{ playerId, timingSrc }}>
+	(async function initReadAlong() {
+		const root = document.querySelector(`[data-player-id="${playerId}"]`);
+		if (!root) return;
+		const audio = root.querySelector('[data-role="audio"]');
+		if (!audio) return;
+
+		// Restart: hard reload. Bulletproof per the simple-over-browser-fragile
+		// rule; zero programmatic seek calls.
+		const restartBtn = root.querySelector('[data-role="restart"]');
+		if (restartBtn) {
+			restartBtn.addEventListener('click', () => {
+				window.location.reload();
+			});
+		}
+
+		// Fetch timing JSON. If it 404s, log and bail — the audio player still
+		// works on its own, the page just won't highlight words.
+		let timing;
+		try {
+			const res = await fetch(timingSrc);
+			if (!res.ok) throw new Error(`timing HTTP ${res.status}`);
+			timing = await res.json();
+		} catch (err) {
+			console.warn('[read-along] no timing JSON; audio-only fallback.', err);
+			return;
+		}
+		const words = Array.isArray(timing && timing.words) ? timing.words : [];
+		if (words.length === 0) return;
+
+		// Walk the rendered lesson body (siblings of this aside that come after
+		// it in the Starlight markdown container) and wrap prose words in spans.
+		const container = root.parentElement;
+		if (!container) return;
+		const siblings = Array.from(container.children);
+		const startIdx = siblings.indexOf(root);
+		if (startIdx < 0) return;
+
+		const SKIP_TAGS = new Set([
+			'pre',
+			'code',
+			'script',
+			'style',
+			'svg',
+			'img',
+			'picture',
+		]);
+		// Starlight injects sr-only "Section titled ..." spans inside heading
+		// anchor links. Skip those (and any other screen-reader-only or
+		// aria-hidden content) so the visible word count matches what Python
+		// extracted from the MDX. data-pagefind-ignore is the cleanest single
+		// signal Starlight emits on its injected anchor span; sl-anchor-link
+		// is the parent anchor; sr-only and aria-hidden cover general
+		// visually-hidden text from any source.
+		const SKIP_CLASSES = ['sr-only', 'sl-anchor-link'];
+		function isSkippableElement(el) {
+			if (SKIP_TAGS.has(el.tagName.toLowerCase())) return true;
+			if (el.getAttribute && el.getAttribute('aria-hidden') === 'true') return true;
+			if (el.dataset && el.dataset.readalongSkip !== undefined) return true;
+			if (el.dataset && el.dataset.pagefindIgnore !== undefined) return true;
+			if (el.classList) {
+				for (const cls of SKIP_CLASSES) {
+					if (el.classList.contains(cls)) return true;
+				}
+			}
+			return false;
+		}
+		const wordSpans = [];
+		const WORD_REGEX = /\S+/g;
+		const HAS_ALNUM = /[A-Za-z0-9]/;
+
+		function wrapTextNode(textNode) {
+			const text = textNode.textContent || '';
+			if (!text) return;
+			const fragment = document.createDocumentFragment();
+			let lastEnd = 0;
+			let match;
+			WORD_REGEX.lastIndex = 0;
+			while ((match = WORD_REGEX.exec(text)) !== null) {
+				if (match.index > lastEnd) {
+					fragment.appendChild(
+						document.createTextNode(text.slice(lastEnd, match.index))
+					);
+				}
+				const token = match[0];
+				lastEnd = match.index + token.length;
+				if (!HAS_ALNUM.test(token)) {
+					// Non-word punctuation token: keep as plain text.
+					fragment.appendChild(document.createTextNode(token));
+					continue;
+				}
+				const span = document.createElement('span');
+				span.className = 'ra-word';
+				span.dataset.idx = String(wordSpans.length);
+				span.textContent = token;
+				fragment.appendChild(span);
+				wordSpans.push(span);
+			}
+			if (lastEnd < text.length) {
+				fragment.appendChild(document.createTextNode(text.slice(lastEnd)));
+			}
+			if (textNode.parentNode) {
+				textNode.parentNode.replaceChild(fragment, textNode);
+			}
+		}
+
+		function walk(node) {
+			if (node.nodeType === Node.TEXT_NODE) {
+				wrapTextNode(node);
+				return;
+			}
+			if (node.nodeType !== Node.ELEMENT_NODE) return;
+			const el = node;
+			if (isSkippableElement(el)) return;
+			// Recurse into a static snapshot of childNodes because we mutate.
+			const kids = Array.from(el.childNodes);
+			for (const k of kids) walk(k);
+		}
+
+		for (let i = startIdx + 1; i < siblings.length; i++) {
+			walk(siblings[i]);
+		}
+
+		if (wordSpans.length === 0) return;
+
+		// Build a sparse timing array aligned by index to wordSpans.
+		// Words with null start/end stay unhighlighted; the cursor passes them.
+		const timed = wordSpans.map((_, i) => {
+			const t = words[i];
+			if (!t || typeof t.start !== 'number' || typeof t.end !== 'number') {
+				return null;
+			}
+			return { start: t.start, end: t.end };
+		});
+
+		// For the search, build a compact array of (idx, start, end) for matched
+		// words only. Binary search on this; map back to wordSpans index.
+		const matched = [];
+		for (let i = 0; i < timed.length; i++) {
+			if (timed[i]) matched.push({ idx: i, start: timed[i].start, end: timed[i].end });
+		}
+		if (matched.length === 0) return;
+
+		function findActiveSpanIdx(t) {
+			let lo = 0;
+			let hi = matched.length - 1;
+			let candidate = -1;
+			while (lo <= hi) {
+				const mid = (lo + hi) >> 1;
+				if (matched[mid].start <= t) {
+					if (matched[mid].end >= t) return matched[mid].idx;
+					candidate = matched[mid].idx;
+					lo = mid + 1;
+				} else {
+					hi = mid - 1;
+				}
+			}
+			return candidate;
+		}
+
+		let lastActive = -1;
+		let lastScrollAt = 0;
+
+		function update() {
+			const idx = findActiveSpanIdx(audio.currentTime);
+			if (idx === lastActive) return;
+			if (lastActive >= 0 && wordSpans[lastActive]) {
+				wordSpans[lastActive].classList.remove('is-active');
+				wordSpans[lastActive].classList.add('is-past');
+			}
+			if (idx >= 0 && wordSpans[idx]) {
+				wordSpans[idx].classList.add('is-active');
+				wordSpans[idx].classList.remove('is-past');
+				if (idx > lastActive + 1) {
+					for (let i = 0; i < idx; i++) {
+						wordSpans[i].classList.add('is-past');
+						wordSpans[i].classList.remove('is-active');
+					}
+				}
+				if (idx < lastActive) {
+					for (let i = idx + 1; i < wordSpans.length; i++) {
+						wordSpans[i].classList.remove('is-past');
+					}
+				}
+				const now = performance.now();
+				if (now - lastScrollAt > 700) {
+					wordSpans[idx].scrollIntoView({
+						block: 'center',
+						behavior: 'smooth',
+					});
+					lastScrollAt = now;
+				}
+			}
+			lastActive = idx;
+		}
+
+		audio.addEventListener('timeupdate', update);
+		audio.addEventListener('seeked', update);
+		audio.addEventListener('play', update);
+	})();
+</script>
+
+<style>
+	.cw-readalong {
+		border: 1px solid var(--sl-color-gray-5, rgba(127, 127, 127, 0.25));
+		border-radius: 10px;
+		padding: 1rem 1.125rem;
+		margin: 1.5rem 0;
+		background: var(--sl-color-bg-sidebar, transparent);
+	}
+	.cw-readalong-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		margin-bottom: 0.625rem;
+	}
+	.cw-readalong-label {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.5rem;
+		font-size: 0.95rem;
+		color: var(--sl-color-text);
+	}
+	.cw-readalong-label svg {
+		color: var(--sl-color-accent, #7c3aed);
+		flex-shrink: 0;
+	}
+	.cw-readalong-duration {
+		opacity: 0.6;
+		font-size: 0.85rem;
+		font-weight: 400;
+		margin-left: 0.5rem;
+	}
+	.cw-readalong-controls {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+	.cw-readalong-controls audio {
+		flex: 1;
+		min-width: 0;
+		display: block;
+	}
+	.cw-readalong-restart {
+		flex-shrink: 0;
+		appearance: none;
+		background: transparent;
+		border: 1px solid var(--sl-color-gray-5, rgba(127, 127, 127, 0.35));
+		color: var(--sl-color-text, currentColor);
+		border-radius: 8px;
+		padding: 0.45rem;
+		cursor: pointer;
+		line-height: 0;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+	}
+	.cw-readalong-restart svg {
+		display: block;
+	}
+	.cw-readalong-restart:hover {
+		background: rgba(124, 58, 237, 0.08);
+		border-color: rgba(124, 58, 237, 0.4);
+		color: var(--sl-color-accent, #7c3aed);
+	}
+	.cw-readalong-restart:focus-visible {
+		outline: 2px solid var(--sl-color-accent, #7c3aed);
+		outline-offset: 2px;
+	}
+	.cw-readalong-footer {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		gap: 1rem;
+		margin-top: 0.625rem;
+		font-size: 0.78rem;
+		opacity: 0.75;
+		flex-wrap: wrap;
+	}
+	.cw-readalong-download {
+		color: var(--sl-color-accent, #7c3aed);
+		text-decoration: none;
+		font-weight: 500;
+	}
+	.cw-readalong-download:hover {
+		text-decoration: underline;
+	}
+	.cw-readalong-note {
+		font-style: italic;
+	}
+</style>
+
+<style is:global>
+	.ra-word {
+		border-radius: 4px;
+		padding: 1px 2px;
+		margin: 0 -1px;
+		transition: background-color 0.12s ease, opacity 0.18s ease;
+	}
+	.ra-word.is-active {
+		background-color: rgba(34, 211, 238, 0.32);
+		font-weight: 600;
+	}
+	.ra-word.is-past {
+		opacity: 0.55;
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.ra-word {
+			transition: none;
+		}
+	}
+</style>
