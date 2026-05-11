@@ -370,6 +370,61 @@ const playerId = `ral-${slug}-${Math.random().toString(36).slice(2, 8)}`;
 		audio.addEventListener('timeupdate', update);
 		audio.addEventListener('seeked', update);
 		audio.addEventListener('play', update);
+
+		// Page-level spacebar toggle. The native <audio> element only
+		// responds to spacebar while it retains keyboard focus, which the
+		// user loses the moment they click anywhere on the page. After that
+		// spacebar falls back to the browser default (page-down), and the
+		// listener can't pause without scrolling back up to the player.
+		//
+		// Fix: install a document-level keydown listener that, once
+		// playback has been engaged, intercepts spacebar and toggles
+		// audio.paused. Three guards keep the handler from being annoying:
+		//
+		//   1. Skip until the first `play` event fires. Before the user
+		//      starts audio manually, spacebar should fall through to its
+		//      normal page-down default (matches the footer note: "Press
+		//      play to begin. Spacebar pauses once playing.")
+		//   2. Skip when the user is typing in an input/textarea/select
+		//      or any contenteditable surface, so we don't hijack typing
+		//      that legitimately includes spaces.
+		//   3. Skip when the spacebar target is inside the player widget
+		//      itself (audio element, restart button, download link), so
+		//      native button activation and the audio element's own focus
+		//      handling work as users expect.
+		//
+		// Guarded against view-transition rebinding via a dataset flag on
+		// the audio element.
+		let playbackEngaged = false;
+		audio.addEventListener('play', () => {
+			playbackEngaged = true;
+		});
+
+		function isTypingTarget(el) {
+			if (!el) return false;
+			const tag = el.tagName;
+			if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
+				return true;
+			}
+			if (el.isContentEditable) return true;
+			return false;
+		}
+
+		if (audio.dataset.spaceHandlerBound !== '1') {
+			audio.dataset.spaceHandlerBound = '1';
+			document.addEventListener('keydown', (e) => {
+				if (e.code !== 'Space' && e.key !== ' ') return;
+				if (!playbackEngaged) return;
+				if (isTypingTarget(e.target)) return;
+				if (root.contains(e.target)) return;
+				e.preventDefault();
+				if (audio.paused) {
+					audio.play().catch(() => {});
+				} else {
+					audio.pause();
+				}
+			});
+		}
 	})();
 </script>
 
