@@ -75,6 +75,54 @@ def find_mdx(slug: str) -> Path | None:
     return matches[0]
 
 
+def revert_one(slug: str) -> tuple[bool, str]:
+    """Reverse migration: swap <ReadAlongLesson .../> back to <AudioPlayer .../>.
+
+    Used as a production kill-switch: every lesson goes back to the plain
+    AudioPlayer card. Read-along code, timing JSONs, alignment scripts all
+    remain on disk for dev iteration; just no production page surfaces
+    them anymore. Re-enabling is `migrate_one(slug)` again.
+    """
+    mdx_path = find_mdx(slug)
+    if mdx_path is None:
+        return False, "no lesson.mdx found"
+
+    text = mdx_path.read_text()
+
+    if "ReadAlongLesson" not in text:
+        return False, "not migrated"
+
+    new_text, n_imports = re.subn(
+        r"import\s+ReadAlongLesson\s+from\s+'([^']+)/ReadAlongLesson\.astro';",
+        r"import AudioPlayer from '\1/AudioPlayer.astro';",
+        text,
+    )
+    if n_imports != 1:
+        return False, f"expected 1 ReadAlongLesson import, found {n_imports}"
+
+    pattern = re.compile(r"<ReadAlongLesson\b([\s\S]*?)/>", re.DOTALL)
+    match = pattern.search(new_text)
+    if not match:
+        return False, "no <ReadAlongLesson .../> invocation"
+
+    attrs_raw = match.group(1)
+    # Drop the slug attribute we added during migration.
+    attrs_raw = re.sub(r'\s*slug="[^"]*"', "", attrs_raw)
+    # Drop any cache-buster query string from src so the audio URL is back
+    # to the bare canonical form. Listeners hit the regular CF-cached MP3.
+    attrs_raw = re.sub(
+        r'(src="[^"]*\.mp3)\?[^"]*"',
+        r'\1"',
+        attrs_raw,
+    )
+    attrs_raw = attrs_raw.strip()
+    new_invocation = f"<AudioPlayer {attrs_raw} />"
+    new_text = new_text[: match.start()] + new_invocation + new_text[match.end():]
+
+    mdx_path.write_text(new_text)
+    return True, "reverted"
+
+
 def migrate_one(slug: str) -> tuple[bool, str]:
     mdx_path = find_mdx(slug)
     if mdx_path is None:
@@ -130,27 +178,59 @@ def migrate_one(slug: str) -> tuple[bool, str]:
     return True, "migrated"
 
 
+ALL_MIGRATED_SLUGS = EASY_SLUGS + [
+    "bert-architecture",
+    "bert-pretraining-and-fine-tuning",
+    "bert-derivatives-distilbert-roberta",
+    "how-models-learn-to-be-helpful",
+    "how-rag-works",
+    "preferences-into-reward-signals",
+    "how-models-know-word-order",
+]
+
+
 def main() -> int:
     args = sys.argv[1:]
     if not args:
-        print("usage: migrate-lesson-mdx.py <slug> [<slug> ...] | --all", file=sys.stderr)
+        print(
+            "usage:\n"
+            "  migrate-lesson-mdx.py <slug> [<slug> ...]   # migrate\n"
+            "  migrate-lesson-mdx.py --all                  # migrate the easy set\n"
+            "  migrate-lesson-mdx.py --revert <slug> ...    # revert per slug\n"
+            "  migrate-lesson-mdx.py --revert --all         # revert every migrated lesson",
+            file=sys.stderr,
+        )
         return 2
-    slugs = EASY_SLUGS if args == ["--all"] else args
+
+    revert_mode = "--revert" in args
+    if revert_mode:
+        args = [a for a in args if a != "--revert"]
+
+    if revert_mode:
+        slugs = ALL_MIGRATED_SLUGS if args == ["--all"] else args
+        action = revert_one
+        action_label = "reverted"
+        already_label = "not migrated"
+    else:
+        slugs = EASY_SLUGS if args == ["--all"] else args
+        action = migrate_one
+        action_label = "migrated"
+        already_label = "already migrated"
 
     ok = 0
     skipped = 0
     failed = 0
     for slug in slugs:
-        success, msg = migrate_one(slug)
-        flag = "ok " if success else "skip" if msg in ("already migrated",) else "FAIL"
+        success, msg = action(slug)
+        flag = "ok " if success else "skip" if msg in ("already migrated", "not migrated") else "FAIL"
         print(f"  [{flag}] {slug:42s}  {msg}")
         if success:
             ok += 1
-        elif msg == "already migrated":
+        elif msg in ("already migrated", "not migrated"):
             skipped += 1
         else:
             failed += 1
-    print(f"\n{ok} migrated, {skipped} skipped, {failed} failed")
+    print(f"\n{ok} {action_label}, {skipped} skipped, {failed} failed")
     return 0 if failed == 0 else 1
 
 
