@@ -380,6 +380,37 @@ const playerId = `ral-${slug}-${Math.random().toString(36).slice(2, 8)}`;
 		audio.addEventListener('seeked', update);
 		audio.addEventListener('play', update);
 
+		// Browser events around audio resumption are inconsistent after a
+		// long pause (buffer eviction, tab backgrounding, sleep / wake).
+		// `timeupdate` may not fire promptly, `seeked` may be skipped, and
+		// `audio.currentTime` returned from `play` can be stale by a few
+		// hundred ms relative to where the audio actually starts playing.
+		// Relying solely on events leaves the highlight frozen at the
+		// pause position while the audio plays elsewhere on the timeline.
+		//
+		// Robust fix: poll `audio.currentTime` directly while the audio
+		// is playing. 250ms interval is the same cadence YouTube and
+		// Spotify use; the cursor visibly tracks within a quarter-second
+		// of the audio regardless of which events fired or didn't fire.
+		// Polling stops on pause / ended so we don't tick forever.
+		let pollHandle = null;
+		function startPolling() {
+			if (pollHandle !== null) return;
+			pollHandle = setInterval(update, 250);
+		}
+		function stopPolling() {
+			if (pollHandle !== null) {
+				clearInterval(pollHandle);
+				pollHandle = null;
+			}
+			// One final update to catch the position the audio settled on.
+			update();
+		}
+		audio.addEventListener('play', startPolling);
+		audio.addEventListener('playing', startPolling);
+		audio.addEventListener('pause', stopPolling);
+		audio.addEventListener('ended', stopPolling);
+
 		// Page-level spacebar toggle. The native <audio> element only
 		// responds to spacebar while it retains keyboard focus, which the
 		// user loses the moment they click anywhere on the page. After that
