@@ -1,0 +1,444 @@
+---
+/**
+ * ReadAlongDim — paragraph-level dim-as-you-read prototype.
+ *
+ * Goal: as the audio narrates, paragraphs that have already been read
+ * fade to ~55% opacity. The unread remainder stays at normal weight.
+ * The boundary between dim and bright text shows the listener where
+ * the narrator is, without needing per-word precision.
+ *
+ * Design decisions, all driven by the simple-over-browser-fragile rule
+ * (CLAUDE.md §3.5) and the architect's Option C review:
+ *
+ *   1. Paragraph-level granularity, not per-word. Coarser than the
+ *      previous read-along, but immune to a class of bugs the per-word
+ *      version had (cursor stuck on heading before a diagram, cursor
+ *      stuck on the last matched word during narration of skipped
+ *      content). At paragraph granularity those gaps fall inside a
+ *      single block; nothing to release.
+ *
+ *   2. Self-managed wallclock, not audio.currentTime. After the first
+ *      `play` event, the component captures `t0 = performance.now() -
+ *      audio.currentTime * 1000` as the wallclock origin, then NEVER
+ *      reads `audio.currentTime` again. On pause it captures
+ *      `pausedAt`; on resume it shifts `t0` forward by the paused
+ *      duration. This removes the only browser-fragile dependency the
+ *      previous design had: Chrome's `audio.currentTime` after buffer
+ *      eviction can be stale or lying, and the 250ms poll attempt to
+ *      fix it (commit df77070) failed real-browser testing. The
+ *      wallclock cannot lie because we own it.
+ *
+ *      Trade-off: if the user manually scrubs the audio backward, the
+ *      dim cursor doesn't follow (it keeps its wallclock pace). The
+ *      visible dim state stays internally consistent with how long the
+ *      listener has been listening. We accept that trade.
+ *
+ *   3. Query-string gated. The dim behavior only activates when the
+ *      URL has `?readalong=paragraph`. Without the flag the component
+ *      is visually and behaviorally identical to AudioPlayer (the
+ *      kill-switch state). Lets us prototype on one lesson without
+ *      shipping anything to regular visitors.
+ *
+ *   4. No per-word DOM manipulation. The component never wraps words
+ *      in spans. The only DOM change is adding the `ra-past` class to
+ *      block elements that the narrator has already passed.
+ *
+ * Block walker: `<p>`, `<li>`, `<h2>`, `<h3>`, `<h4>`, `<blockquote>`.
+ * Skip the same elements the previous walker skipped (pre, code, svg,
+ * script, style, img, picture, sr-only, sl-anchor-link, aria-hidden,
+ * data-readalong-skip, data-pagefind-ignore).
+ *
+ * Block start times come from the existing per-MDX-word timing JSON
+ * at `/read-along/<slug>.timing.json` (one entry per MDX prose word
+ * in render order). At init we walk the DOM, count words per block,
+ * and look up the first matched word's `start` time inside each block.
+ *
+ * Usage in MDX:
+ *   <ReadAlongDim
+ *     src="https://audio.clawdemy.org/lessons/<slug>-lesson.mp3"
+ *     slug="<slug>"
+ *     approxMinutes={N}
+ *   />
+ */
+
+interface Props {
+	src: string;
+	slug: string;
+	title?: string;
+	approxMinutes?: number;
+}
+
+const {
+	src,
+	slug,
+	title = 'Listen to this lesson',
+	approxMinutes,
+} = Astro.props;
+
+const timingSrc = `/read-along/${slug}.timing.json`;
+const playerId = `rad-${slug}-${Math.random().toString(36).slice(2, 8)}`;
+---
+
+<aside class="cw-readalong" data-player-id={playerId} data-timing-src={timingSrc}>
+	<div class="cw-readalong-header">
+		<span class="cw-readalong-label">
+			<svg
+				width="14"
+				height="14"
+				viewBox="0 0 24 24"
+				fill="none"
+				stroke="currentColor"
+				stroke-width="2"
+				stroke-linecap="round"
+				stroke-linejoin="round"
+				aria-hidden="true"
+			>
+				<path d="M3 18v-6a9 9 0 0 1 18 0v6"></path>
+				<path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3z"></path>
+				<path d="M3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"></path>
+			</svg>
+			<strong>{title}</strong>
+			{approxMinutes && (
+				<span class="cw-readalong-duration">about {approxMinutes} min</span>
+			)}
+		</span>
+	</div>
+	<audio controls preload="metadata" src={src} data-role="audio">
+		<a href={src}>Download the MP3</a>
+	</audio>
+	<div class="cw-readalong-footer">
+		<a href={src} download class="cw-readalong-download" data-role="download">
+			Download for offline listening
+		</a>
+		<span class="cw-readalong-note">
+			AI-narrated. Voice may pronounce technical terms differently than you do.
+		</span>
+	</div>
+</aside>
+
+<script define:vars={{ playerId, timingSrc }}>
+	(async function initReadAlongDim() {
+		const root = document.querySelector(`[data-player-id="${playerId}"]`);
+		if (!root) return;
+		const audio = root.querySelector('[data-role="audio"]');
+		if (!audio) return;
+
+		// Query-string gate. Without `?readalong=paragraph` on the URL,
+		// the component is functionally identical to AudioPlayer: just
+		// the audio card, no dim behavior, no DOM mutations.
+		const params = new URLSearchParams(window.location.search);
+		const mode = params.get('readalong');
+		if (mode !== 'paragraph') return;
+
+		// JS-driven Blob download (cross-origin `<a download>` is ignored).
+		// Mirrors the implementation from ReadAlongLesson.
+		const dlLink = root.querySelector('[data-role="download"]');
+		if (dlLink) {
+			dlLink.addEventListener('click', async (e) => {
+				const url = dlLink.getAttribute('href');
+				if (!url) return;
+				e.preventDefault();
+				const originalText = dlLink.textContent || 'Download for offline listening';
+				try {
+					dlLink.textContent = 'Preparing download…';
+					const res = await fetch(url);
+					if (!res.ok) throw new Error(`download HTTP ${res.status}`);
+					const blob = await res.blob();
+					const blobUrl = URL.createObjectURL(blob);
+					const filename = url.split('/').pop() || 'lesson.mp3';
+					const a = document.createElement('a');
+					a.href = blobUrl;
+					a.download = filename;
+					document.body.appendChild(a);
+					a.click();
+					document.body.removeChild(a);
+					setTimeout(() => URL.revokeObjectURL(blobUrl), 1500);
+				} catch (err) {
+					console.warn('[read-along-dim] blob download failed; opening MP3 in new tab.', err);
+					window.open(url, '_blank', 'noopener,noreferrer');
+				} finally {
+					dlLink.textContent = originalText;
+				}
+			});
+		}
+
+		// Load per-word timing JSON. Used only to compute paragraph start
+		// times. After init we never touch this array again.
+		let words = [];
+		try {
+			const res = await fetch(timingSrc);
+			if (!res.ok) throw new Error(`timing HTTP ${res.status}`);
+			const timing = await res.json();
+			if (Array.isArray(timing && timing.words)) words = timing.words;
+		} catch (err) {
+			console.warn('[read-along-dim] no timing JSON; falling back to audio-only.', err);
+			return;
+		}
+		if (words.length === 0) return;
+
+		// Find the markdown content container; walk siblings after the
+		// component. Collect block elements with their first-word index.
+		const container = root.parentElement;
+		if (!container) return;
+		const siblings = Array.from(container.children);
+		const startIdx = siblings.indexOf(root);
+		if (startIdx < 0) return;
+
+		const BLOCK_TAGS = new Set([
+			'P', 'LI', 'H2', 'H3', 'H4', 'H5', 'H6', 'BLOCKQUOTE',
+		]);
+		const SKIP_TAGS = new Set([
+			'PRE', 'CODE', 'SCRIPT', 'STYLE', 'SVG', 'IMG', 'PICTURE',
+		]);
+		const SKIP_CLASSES = ['sr-only', 'sl-anchor-link'];
+
+		function isSkippable(el) {
+			if (SKIP_TAGS.has(el.tagName)) return true;
+			if (el.getAttribute && el.getAttribute('aria-hidden') === 'true') return true;
+			if (el.dataset && el.dataset.readalongSkip !== undefined) return true;
+			if (el.dataset && el.dataset.pagefindIgnore !== undefined) return true;
+			if (el.classList) {
+				for (const cls of SKIP_CLASSES) {
+					if (el.classList.contains(cls)) return true;
+				}
+			}
+			return false;
+		}
+
+		const WORD_REGEX = /\S+/g;
+		const HAS_ALNUM = /[A-Za-z0-9]/;
+
+		// Single tree walk: count words in the same way build-readalong-
+		// timing.py extracts them, AND mark block-element start positions.
+		// `wordCount` after each block records the cumulative word index
+		// at which that block ENDS, so the next block's first word is
+		// `previousEnd`.
+		const blocks = [];
+		let wordCount = 0;
+
+		function countWordsInTextNode(node) {
+			const text = node.textContent || '';
+			WORD_REGEX.lastIndex = 0;
+			let m;
+			while ((m = WORD_REGEX.exec(text)) !== null) {
+				if (HAS_ALNUM.test(m[0])) wordCount++;
+			}
+		}
+
+		function walk(node, currentBlock) {
+			if (node.nodeType === Node.TEXT_NODE) {
+				countWordsInTextNode(node);
+				return;
+			}
+			if (node.nodeType !== Node.ELEMENT_NODE) return;
+			const el = node;
+			if (isSkippable(el)) return;
+			let myBlock = currentBlock;
+			if (BLOCK_TAGS.has(el.tagName) && currentBlock === null) {
+				// Entering a top-level block. Record the first word index.
+				myBlock = { el, firstWordIdx: wordCount, startTime: null };
+				blocks.push(myBlock);
+			}
+			for (const child of Array.from(el.childNodes)) {
+				walk(child, myBlock);
+			}
+		}
+
+		for (let i = startIdx + 1; i < siblings.length; i++) {
+			walk(siblings[i], null);
+		}
+
+		if (blocks.length === 0) return;
+
+		// Resolve each block's startTime: scan from its firstWordIdx forward
+		// until we hit a matched word (one with a numeric start) or we cross
+		// into the next block's first word range.
+		for (let i = 0; i < blocks.length; i++) {
+			const nextFirst = i + 1 < blocks.length ? blocks[i + 1].firstWordIdx : words.length;
+			for (let w = blocks[i].firstWordIdx; w < nextFirst && w < words.length; w++) {
+				const t = words[w];
+				if (t && typeof t.start === 'number') {
+					blocks[i].startTime = t.start;
+					break;
+				}
+			}
+		}
+
+		// If the very first block didn't pick up a start time, default to 0
+		// so it starts dimmed-state at audio t=0 instead of staying bright
+		// forever.
+		if (blocks[0].startTime === null) blocks[0].startTime = 0;
+
+		// Wallclock. Anchored at first `play`. NEVER reads audio.currentTime
+		// after init except on first play. On pause, we capture the pause
+		// timestamp; on resume, we shift t0 forward by the paused duration
+		// so the elapsed clock keeps the same starting reference.
+		let t0 = null;
+		let pausedAt = null;
+		let tickHandle = null;
+		let lastActiveBlockIdx = -1;
+		let lastScrollAt = 0;
+
+		function tick() {
+			if (t0 === null) return;
+			const elapsed = (performance.now() - t0) / 1000;
+			let idx = -1;
+			for (let i = 0; i < blocks.length; i++) {
+				if (blocks[i].startTime !== null && blocks[i].startTime <= elapsed) {
+					idx = i;
+				}
+			}
+			if (idx === lastActiveBlockIdx) return;
+			// Apply ra-past to every block strictly before idx; clear from idx onward.
+			for (let i = 0; i < blocks.length; i++) {
+				if (i < idx) {
+					blocks[i].el.classList.add('ra-past');
+				} else {
+					blocks[i].el.classList.remove('ra-past');
+				}
+			}
+			// Scroll the boundary into view if we just advanced.
+			if (idx > lastActiveBlockIdx && idx >= 0) {
+				const now = performance.now();
+				if (now - lastScrollAt > 700) {
+					blocks[idx].el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+					lastScrollAt = now;
+				}
+			}
+			lastActiveBlockIdx = idx;
+		}
+
+		function startTick() {
+			if (tickHandle !== null) return;
+			tickHandle = setInterval(tick, 500);
+			tick();
+		}
+		function stopTick() {
+			if (tickHandle !== null) {
+				clearInterval(tickHandle);
+				tickHandle = null;
+			}
+		}
+
+		audio.addEventListener('play', () => {
+			if (t0 === null) {
+				// First play of the session. Anchor wallclock to audio's
+				// current position (typically 0, but might be non-zero if
+				// the browser preserved progress across a soft reload).
+				t0 = performance.now() - audio.currentTime * 1000;
+			} else if (pausedAt !== null) {
+				// Resume from pause. Shift t0 forward by the paused duration
+				// so the elapsed wallclock continues from where it was, not
+				// from where audio is.
+				t0 += performance.now() - pausedAt;
+				pausedAt = null;
+			}
+			startTick();
+		});
+
+		audio.addEventListener('pause', () => {
+			if (t0 === null) return;
+			pausedAt = performance.now();
+			stopTick();
+			tick();
+		});
+
+		// Page-level spacebar pause, mirrors the ReadAlongLesson behavior.
+		let playbackEngaged = false;
+		audio.addEventListener('play', () => {
+			playbackEngaged = true;
+		});
+		function isTypingTarget(el) {
+			if (!el) return false;
+			const tag = el.tagName;
+			if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+			if (el.isContentEditable) return true;
+			return false;
+		}
+		if (audio.dataset.spaceHandlerBound !== '1') {
+			audio.dataset.spaceHandlerBound = '1';
+			document.addEventListener('keydown', (e) => {
+				if (e.code !== 'Space' && e.key !== ' ') return;
+				if (!playbackEngaged) return;
+				if (isTypingTarget(e.target)) return;
+				if (root.contains(e.target)) return;
+				e.preventDefault();
+				if (audio.paused) {
+					audio.play().catch(() => {});
+				} else {
+					audio.pause();
+				}
+			});
+		}
+	})();
+</script>
+
+<style>
+	.cw-readalong {
+		border: 1px solid var(--sl-color-gray-5, rgba(127, 127, 127, 0.25));
+		border-radius: 10px;
+		padding: 1rem 1.125rem;
+		margin: 1.5rem 0;
+		background: var(--sl-color-bg-sidebar, transparent);
+	}
+	.cw-readalong-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		margin-bottom: 0.625rem;
+	}
+	.cw-readalong-label {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.5rem;
+		font-size: 0.95rem;
+		color: var(--sl-color-text);
+	}
+	.cw-readalong-label svg {
+		color: var(--sl-color-accent, #7c3aed);
+		flex-shrink: 0;
+	}
+	.cw-readalong-duration {
+		opacity: 0.6;
+		font-size: 0.85rem;
+		font-weight: 400;
+		margin-left: 0.5rem;
+	}
+	.cw-readalong audio {
+		width: 100%;
+		display: block;
+	}
+	.cw-readalong-footer {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		gap: 1rem;
+		margin-top: 0.625rem;
+		font-size: 0.78rem;
+		opacity: 0.75;
+		flex-wrap: wrap;
+	}
+	.cw-readalong-download {
+		color: var(--sl-color-accent, #7c3aed);
+		text-decoration: none;
+		font-weight: 500;
+	}
+	.cw-readalong-download:hover {
+		text-decoration: underline;
+	}
+	.cw-readalong-note {
+		font-style: italic;
+	}
+</style>
+
+<style is:global>
+	.ra-past {
+		opacity: 0.55;
+		transition: opacity 0.35s ease;
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.ra-past {
+			transition: none;
+		}
+	}
+</style>
