@@ -129,6 +129,15 @@ const playerId = `rad-${slug}-${Math.random().toString(36).slice(2, 8)}`;
 		<a href={audioSrc}>Download the MP3</a>
 	</audio>
 	<div class="cw-readalong-footer">
+		<div class="cw-readalong-mode" role="group" aria-label="Read-along style">
+			<span class="cw-readalong-mode-label">Style:</span>
+			<button type="button" class="cw-readalong-mode-btn" data-mode-btn="word" aria-pressed="true">
+				Word
+			</button>
+			<button type="button" class="cw-readalong-mode-btn" data-mode-btn="paragraph" aria-pressed="false">
+				Paragraph
+			</button>
+		</div>
 		<a href={audioSrc} download class="cw-readalong-download" data-role="download">
 			Download for offline listening
 		</a>
@@ -295,6 +304,41 @@ const playerId = `rad-${slug}-${Math.random().toString(36).slice(2, 8)}`;
 		// on the 35 retro-rendered lessons; non-zero is a regression signal.
 		const N = Math.min(words.length, wordSpans.length);
 
+		// Build a deduplicated list of block elements in render order, plus
+		// a per-word index pointing into it. Used by paragraph mode (and by
+		// the block-change scroll trigger in both modes).
+		const blockEls = [];
+		const wordBlockIdx = new Array(wordSpans.length);
+		{
+			let prev = null;
+			for (let i = 0; i < wordSpans.length; i++) {
+				const b = wordBlocks[i];
+				if (b !== prev) {
+					blockEls.push(b);
+					prev = b;
+				}
+				wordBlockIdx[i] = blockEls.length - 1;
+			}
+		}
+
+		// Persisted user preference — applies across lessons. New visitors
+		// land on word mode (the more granular default); paragraph mode is
+		// available for readers who find word-level too visually busy.
+		const STORAGE_KEY = 'cw-readalong-mode';
+		function loadMode() {
+			try {
+				const v = window.localStorage.getItem(STORAGE_KEY);
+				return v === 'paragraph' ? 'paragraph' : 'word';
+			} catch (_) {
+				return 'word';
+			}
+		}
+		function saveMode(m) {
+			try { window.localStorage.setItem(STORAGE_KEY, m); } catch (_) {}
+		}
+		let mode = loadMode();
+		root.dataset.raMode = mode;
+
 		// Binary search for the last index i in [0..N-1] where
 		// words[i].start <= elapsed. Returns -1 if no word has started yet.
 		function findCurrentWordIdx(elapsed) {
@@ -313,43 +357,108 @@ const playerId = `rad-${slug}-${Math.random().toString(36).slice(2, 8)}`;
 			return ans;
 		}
 
-		// `lastPastIdx` = index of the latest word currently marked .ra-past
-		// (-1 if none). The currently-narrated word is lastPastIdx + 1 — it
-		// is NOT dimmed; the dim/bright boundary IS its implicit cursor.
+		// Mode-specific dim cursors. Each tracks the highest index currently
+		// marked .ra-past in its own collection (wordSpans or blockEls).
 		let tickHandle = null;
-		let lastPastIdx = -1;
-		let lastBlockEl = null;
+		let lastPastWordIdx = -1;
+		let lastPastBlockIdx = -1;
+		let lastScrollBlockIdx = -1;
 		let lastScrollAt = 0;
+
+		function applyWordDelta(target) {
+			if (target === lastPastWordIdx) return;
+			if (target > lastPastWordIdx) {
+				for (let i = lastPastWordIdx + 1; i <= target; i++) {
+					wordSpans[i].classList.add('ra-past');
+				}
+			} else {
+				for (let i = target + 1; i <= lastPastWordIdx; i++) {
+					wordSpans[i].classList.remove('ra-past');
+				}
+			}
+			lastPastWordIdx = target;
+		}
+
+		function applyBlockDelta(targetBlockIdx) {
+			if (targetBlockIdx === lastPastBlockIdx) return;
+			if (targetBlockIdx > lastPastBlockIdx) {
+				for (let i = lastPastBlockIdx + 1; i <= targetBlockIdx; i++) {
+					blockEls[i].classList.add('ra-past');
+				}
+			} else {
+				for (let i = targetBlockIdx + 1; i <= lastPastBlockIdx; i++) {
+					blockEls[i].classList.remove('ra-past');
+				}
+			}
+			lastPastBlockIdx = targetBlockIdx;
+		}
 
 		function tick() {
 			const elapsed = audio.currentTime;
 			const currentIdx = findCurrentWordIdx(elapsed);
-			const target = currentIdx - 1;
-			if (target !== lastPastIdx) {
-				if (target > lastPastIdx) {
-					for (let i = lastPastIdx + 1; i <= target; i++) {
-						wordSpans[i].classList.add('ra-past');
-					}
-				} else {
-					for (let i = target + 1; i <= lastPastIdx; i++) {
-						wordSpans[i].classList.remove('ra-past');
-					}
-				}
-				lastPastIdx = target;
+			if (mode === 'word') {
+				applyWordDelta(currentIdx - 1);
+			} else {
+				// Paragraph mode: dim every block strictly before the one
+				// containing the current word. The current word's block
+				// stays bright (matches word-mode's "current word bright"
+				// semantic at a coarser grain).
+				const currentBlockIdx = currentIdx >= 0 && currentIdx < N
+					? wordBlockIdx[currentIdx]
+					: -1;
+				applyBlockDelta(currentBlockIdx - 1);
 			}
-			// Scroll only when the narrator crosses a block boundary,
-			// not on every word — throttled to once per 700ms.
+			// Block-change scroll-into-view, throttled to once per 700ms.
 			if (currentIdx >= 0 && currentIdx < N) {
-				const currentBlock = wordBlocks[currentIdx];
-				if (currentBlock && currentBlock !== lastBlockEl) {
+				const blockIdx = wordBlockIdx[currentIdx];
+				if (blockIdx !== lastScrollBlockIdx) {
 					const now = performance.now();
 					if (now - lastScrollAt > 700) {
-						currentBlock.scrollIntoView({ block: 'center', behavior: 'smooth' });
+						blockEls[blockIdx].scrollIntoView({ block: 'center', behavior: 'smooth' });
 						lastScrollAt = now;
 					}
-					lastBlockEl = currentBlock;
+					lastScrollBlockIdx = blockIdx;
 				}
 			}
+		}
+
+		function clearAllDim() {
+			// Pull both class sets in case mode just flipped. Cheap relative
+			// to a typical lesson size.
+			for (let i = 0; i <= lastPastWordIdx; i++) {
+				wordSpans[i].classList.remove('ra-past');
+			}
+			for (let i = 0; i <= lastPastBlockIdx; i++) {
+				blockEls[i].classList.remove('ra-past');
+			}
+			lastPastWordIdx = -1;
+			lastPastBlockIdx = -1;
+		}
+
+		function setMode(newMode) {
+			if (newMode !== 'word' && newMode !== 'paragraph') return;
+			if (newMode === mode) return;
+			mode = newMode;
+			root.dataset.raMode = mode;
+			saveMode(mode);
+			// Refresh the toggle button pressed-state.
+			const btns = root.querySelectorAll('[data-mode-btn]');
+			btns.forEach((b) => {
+				b.setAttribute('aria-pressed', b.dataset.modeBtn === mode ? 'true' : 'false');
+			});
+			clearAllDim();
+			tick();
+		}
+
+		// Wire up the toggle buttons and reflect the persisted state on
+		// first paint (component renders with word as the default press-
+		// state, so update if the persisted choice differs).
+		{
+			const btns = root.querySelectorAll('[data-mode-btn]');
+			btns.forEach((b) => {
+				b.setAttribute('aria-pressed', b.dataset.modeBtn === mode ? 'true' : 'false');
+				b.addEventListener('click', () => setMode(b.dataset.modeBtn));
+			});
 		}
 
 		function startTick() {
@@ -453,19 +562,55 @@ const playerId = `rad-${slug}-${Math.random().toString(36).slice(2, 8)}`;
 		gap: 1rem;
 		margin-top: 0.625rem;
 		font-size: 0.78rem;
-		opacity: 0.75;
 		flex-wrap: wrap;
 	}
 	.cw-readalong-download {
 		color: var(--sl-color-accent, #7c3aed);
 		text-decoration: none;
 		font-weight: 500;
+		opacity: 0.85;
 	}
 	.cw-readalong-download:hover {
 		text-decoration: underline;
+		opacity: 1;
 	}
 	.cw-readalong-note {
 		font-style: italic;
+		opacity: 0.75;
+	}
+	.cw-readalong-mode {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.4rem;
+		border: 1px solid var(--sl-color-gray-5, rgba(127, 127, 127, 0.3));
+		border-radius: 6px;
+		padding: 0.15rem;
+		background: var(--sl-color-bg, transparent);
+	}
+	.cw-readalong-mode-label {
+		font-size: 0.72rem;
+		opacity: 0.7;
+		padding-left: 0.35rem;
+	}
+	.cw-readalong-mode-btn {
+		font: inherit;
+		font-size: 0.72rem;
+		background: transparent;
+		border: 0;
+		border-radius: 4px;
+		padding: 0.2rem 0.55rem;
+		cursor: pointer;
+		color: var(--sl-color-text);
+		opacity: 0.7;
+		transition: background-color 0.15s ease, opacity 0.15s ease;
+	}
+	.cw-readalong-mode-btn:hover {
+		opacity: 1;
+	}
+	.cw-readalong-mode-btn[aria-pressed='true'] {
+		background: var(--sl-color-accent, #7c3aed);
+		color: var(--sl-color-white, #fff);
+		opacity: 1;
 	}
 </style>
 
