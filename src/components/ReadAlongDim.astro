@@ -85,15 +85,6 @@ interface Props {
 	 * appends `?v=<cacheVersion>` to both URLs.
 	 */
 	cacheVersion?: string;
-	/**
-	 * Render the Word/Paragraph style toggle inside the player card.
-	 * Off by default — opt-in per lesson while the feature is being
-	 * trialled. When false, the lesson is always word-mode and the
-	 * shared localStorage preference is ignored (so a setting on the
-	 * trial lesson doesn't bleed silently into lessons without a UI
-	 * affordance).
-	 */
-	showStyleToggle?: boolean;
 }
 
 const {
@@ -102,8 +93,19 @@ const {
 	title = 'Listen to this lesson',
 	approxMinutes,
 	cacheVersion,
-	showStyleToggle = false,
 } = Astro.props;
+
+/**
+ * Single global flag controlling whether the Word/Paragraph style
+ * toggle appears site-wide. Flip to false to disable the toggle on
+ * every lesson at once (e.g. emergency rollback if a future browser
+ * version regresses on it). No MDX edits required for kill-switch.
+ *
+ * When false: the toggle UI is not rendered, localStorage is not
+ * consulted, and every lesson behaves as word-mode regardless of any
+ * previously-saved user preference.
+ */
+const STYLE_TOGGLE_ENABLED = true;
 
 const cacheQuery = cacheVersion ? `?v=${cacheVersion}` : '';
 const audioSrc = `${src}${cacheQuery}`;
@@ -146,7 +148,7 @@ const playerId = `rad-${slug}-${Math.random().toString(36).slice(2, 8)}`;
 			AI-narrated. Voice may pronounce technical terms differently than you do.
 		</span>
 	</div>
-	{showStyleToggle && (
+	{STYLE_TOGGLE_ENABLED && (
 		<div class="cw-readalong-mode-row">
 			<span class="cw-readalong-mode-label">Read-along style</span>
 			<div class="cw-readalong-mode" role="group" aria-label="Read-along style">
@@ -157,7 +159,7 @@ const playerId = `rad-${slug}-${Math.random().toString(36).slice(2, 8)}`;
 	)}
 </aside>
 
-<script define:vars={{ playerId, timingSrc, showStyleToggle }}>
+<script define:vars={{ playerId, timingSrc, styleToggleEnabled: STYLE_TOGGLE_ENABLED }}>
 	(async function initReadAlongDim() {
 		const root = document.querySelector(`[data-player-id="${playerId}"]`);
 		if (!root) return;
@@ -331,14 +333,15 @@ const playerId = `rad-${slug}-${Math.random().toString(36).slice(2, 8)}`;
 			}
 		}
 
-		// When the lesson opts into the style toggle, the user's choice is
-		// persisted across reloads via localStorage. When the toggle is
-		// hidden (the default), we force word mode and skip storage so a
-		// setting on the trial lesson doesn't silently change behavior on
-		// lessons that lack the affordance.
+		// User's choice is persisted across reloads via localStorage when
+		// the toggle is enabled site-wide (STYLE_TOGGLE_ENABLED constant
+		// at the top of the component). When the toggle is disabled, we
+		// force word mode and skip storage so a flipped kill-switch
+		// silently reverts every visitor to the safer default regardless
+		// of their previously-saved preference.
 		const STORAGE_KEY = 'cw-readalong-mode';
 		function loadMode() {
-			if (!showStyleToggle) return 'word';
+			if (!styleToggleEnabled) return 'word';
 			try {
 				const v = window.localStorage.getItem(STORAGE_KEY);
 				return v === 'paragraph' ? 'paragraph' : 'word';
@@ -347,7 +350,7 @@ const playerId = `rad-${slug}-${Math.random().toString(36).slice(2, 8)}`;
 			}
 		}
 		function saveMode(m) {
-			if (!showStyleToggle) return;
+			if (!styleToggleEnabled) return;
 			try { window.localStorage.setItem(STORAGE_KEY, m); } catch (_) {}
 		}
 		let mode = loadMode();
