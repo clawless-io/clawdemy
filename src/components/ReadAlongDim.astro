@@ -1,21 +1,22 @@
 ---
 /**
- * ReadAlongDim — paragraph-level dim-as-you-read prototype.
+ * ReadAlongDim — word-level dim-as-you-read.
  *
- * Goal: as the audio narrates, paragraphs that have already been read
+ * Goal: as the audio narrates, words that have already been read
  * fade to ~55% opacity. The unread remainder stays at normal weight.
- * The boundary between dim and bright text shows the listener where
- * the narrator is, without needing per-word precision.
+ * The boundary between dim and bright is the narrator's implicit
+ * cursor — no separate colored highlight on the current word.
  *
  * Design decisions, all driven by the simple-over-browser-fragile rule
- * (CLAUDE.md §3.5) and the architect's Option C review:
+ * (CLAUDE.md §3.5):
  *
- *   1. Paragraph-level granularity, not per-word. Coarser than the
- *      previous read-along, but immune to a class of bugs the per-word
- *      version had (cursor stuck on heading before a diagram, cursor
- *      stuck on the last matched word during narration of skipped
- *      content). At paragraph granularity those gaps fall inside a
- *      single block; nothing to release.
+ *   1. Word-level granularity (revised 2026-05-13 after the Flash v2.5
+ *      pipeline gave us 100% match rate across all 35 lessons; the
+ *      paragraph-level coarsening that protected against WhisperX drift
+ *      is no longer needed). The earlier paragraph-only mode hid the
+ *      cursor-stuck-on-heading bug class; with the new pipeline those
+ *      gaps are vanishingly small, so we surface the word-level cursor
+ *      visitors actually want to follow.
  *
  *   2. Self-managed wallclock, not audio.currentTime. After the first
  *      `play` event, the component captures `t0 = performance.now() -
@@ -40,19 +41,25 @@
  *      by default. Kill-switch is now a 1-line git revert + redeploy,
  *      not a query-string flag.
  *
- *   4. No per-word DOM manipulation. The component never wraps words
- *      in spans. The only DOM change is adding the `ra-past` class to
- *      block elements that the narrator has already passed.
+ *   4. Per-word DOM wrapping at init, delta-only updates per tick.
+ *      The walker wraps each visible word in a <span class="ra-word">
+ *      once at startup. The tick function tracks lastPastIdx and on
+ *      each advance only mutates the 0-3 spans that crossed the
+ *      boundary since last tick (delta, not full sweep). Scrub
+ *      backward un-dims symmetrically. Total per-tick work: one
+ *      binary search + delta DOM mutations.
  *
  * Block walker: `<p>`, `<li>`, `<h2>`, `<h3>`, `<h4>`, `<blockquote>`.
- * Skip the same elements the previous walker skipped (pre, code, svg,
- * script, style, img, picture, sr-only, sl-anchor-link, aria-hidden,
- * data-readalong-skip, data-pagefind-ignore).
+ * Skip subtrees: pre, code, svg, script, style, img, picture, figure,
+ * figcaption, sr-only, sl-anchor-link, aria-hidden, data-readalong-skip,
+ * data-pagefind-ignore.
  *
- * Block start times come from the existing per-MDX-word timing JSON
+ * Per-word start times come from the existing per-MDX-word timing JSON
  * at `/read-along/<slug>.timing.json` (one entry per MDX prose word
- * in render order). At init we walk the DOM, count words per block,
- * and look up the first matched word's `start` time inside each block.
+ * in render order). DOM-word index N maps to timing.words[N] 1:1
+ * because mdxToProse strips exactly the same subtrees the DOM walker
+ * skips (verified by the 100% match rate on all 35 retro-rendered
+ * lessons, commit ac43f5c).
  *
  * Usage in MDX:
  *   <ReadAlongDim
@@ -170,8 +177,8 @@ const playerId = `rad-${slug}-${Math.random().toString(36).slice(2, 8)}`;
 			});
 		}
 
-		// Load per-word timing JSON. Used only to compute paragraph start
-		// times. After init we never touch this array again.
+		// Load per-word timing JSON. timing.words is a flat array of
+		// { word, start, end } objects in MDX render order.
 		let words = [];
 		try {
 			const res = await fetch(timingSrc);
@@ -185,7 +192,8 @@ const playerId = `rad-${slug}-${Math.random().toString(36).slice(2, 8)}`;
 		if (words.length === 0) return;
 
 		// Find the markdown content container; walk siblings after the
-		// component. Collect block elements with their first-word index.
+		// component. Wrap each visible word in a <span class="ra-word">
+		// so we can dim them individually as the narrator advances.
 		const container = root.parentElement;
 		if (!container) return;
 		const siblings = Array.from(container.children);
@@ -197,16 +205,11 @@ const playerId = `rad-${slug}-${Math.random().toString(36).slice(2, 8)}`;
 		]);
 		const SKIP_TAGS = new Set([
 			'PRE', 'CODE', 'SCRIPT', 'STYLE', 'SVG', 'IMG', 'PICTURE',
-			// Illustration components (e.g. <PredictionLoop />) render to
-			// <figure class="cw-illus">[SVG]<figcaption>…</figcaption></figure>.
-			// mdxToProse strips the whole self-closing JSX tag from the
-			// narrated prose, so the figcaption text is NOT in the timing
-			// JSON — but the DOM walker would otherwise count those words,
-			// inflating every subsequent block's firstWordIdx and pushing
-			// each block's startTime ~10-15s later than the audio actually
-			// reaches it. The cursor lags audio by a section. Skip the
-			// entire figure subtree so DOM and timing-JSON word counts
-			// stay aligned.
+			// mdxToProse strips inline code content and component-rendered
+			// figures from the narrated prose. The DOM walker mirrors those
+			// skips so DOM-word index N matches timing.words[N] exactly.
+			// The 2026-05-13 retro-batch verified this alignment at 100%
+			// match rate across all 35 lessons.
 			'FIGURE', 'FIGCAPTION',
 		]);
 		const SKIP_CLASSES = ['sr-only', 'sl-anchor-link'];
@@ -227,37 +230,55 @@ const playerId = `rad-${slug}-${Math.random().toString(36).slice(2, 8)}`;
 		const WORD_REGEX = /\S+/g;
 		const HAS_ALNUM = /[A-Za-z0-9]/;
 
-		// Single tree walk: count words in the same way build-readalong-
-		// timing.py extracts them, AND mark block-element start positions.
-		// `wordCount` after each block records the cumulative word index
-		// at which that block ENDS, so the next block's first word is
-		// `previousEnd`.
-		const blocks = [];
-		let wordCount = 0;
+		// Parallel arrays: wordSpans[i] is the DOM <span> for word i;
+		// wordBlocks[i] is the top-level block element that contains it
+		// (used for block-change scroll-into-view).
+		const wordSpans = [];
+		const wordBlocks = [];
 
-		function countWordsInTextNode(node) {
+		function wrapWordsInTextNode(node, currentBlockEl) {
 			const text = node.textContent || '';
 			WORD_REGEX.lastIndex = 0;
+			const matches = [];
 			let m;
 			while ((m = WORD_REGEX.exec(text)) !== null) {
-				if (HAS_ALNUM.test(m[0])) wordCount++;
+				if (HAS_ALNUM.test(m[0])) {
+					matches.push({ idx: m.index, length: m[0].length, text: m[0] });
+				}
 			}
+			if (matches.length === 0) return;
+			const frag = document.createDocumentFragment();
+			let cursor = 0;
+			for (const match of matches) {
+				if (match.idx > cursor) {
+					frag.appendChild(document.createTextNode(text.slice(cursor, match.idx)));
+				}
+				const span = document.createElement('span');
+				span.className = 'ra-word';
+				span.textContent = match.text;
+				frag.appendChild(span);
+				wordSpans.push(span);
+				wordBlocks.push(currentBlockEl);
+				cursor = match.idx + match.length;
+			}
+			if (cursor < text.length) {
+				frag.appendChild(document.createTextNode(text.slice(cursor)));
+			}
+			if (node.parentNode) node.parentNode.replaceChild(frag, node);
 		}
 
-		function walk(node, currentBlock) {
+		function walk(node, currentBlockEl) {
 			if (node.nodeType === Node.TEXT_NODE) {
-				countWordsInTextNode(node);
+				if (currentBlockEl) wrapWordsInTextNode(node, currentBlockEl);
 				return;
 			}
 			if (node.nodeType !== Node.ELEMENT_NODE) return;
 			const el = node;
 			if (isSkippable(el)) return;
-			let myBlock = currentBlock;
-			if (BLOCK_TAGS.has(el.tagName) && currentBlock === null) {
-				// Entering a top-level block. Record the first word index.
-				myBlock = { el, firstWordIdx: wordCount, startTime: null };
-				blocks.push(myBlock);
-			}
+			let myBlock = currentBlockEl;
+			if (BLOCK_TAGS.has(el.tagName) && currentBlockEl === null) myBlock = el;
+			// Snapshot children before walking — wrapWordsInTextNode
+			// replaces text nodes in the live tree as it goes.
 			for (const child of Array.from(el.childNodes)) {
 				walk(child, myBlock);
 			}
@@ -267,73 +288,76 @@ const playerId = `rad-${slug}-${Math.random().toString(36).slice(2, 8)}`;
 			walk(siblings[i], null);
 		}
 
-		if (blocks.length === 0) return;
+		if (wordSpans.length === 0) return;
 
-		// Resolve each block's startTime: scan from its firstWordIdx forward
-		// until we hit a matched word (one with a numeric start) or we cross
-		// into the next block's first word range.
-		for (let i = 0; i < blocks.length; i++) {
-			const nextFirst = i + 1 < blocks.length ? blocks[i + 1].firstWordIdx : words.length;
-			for (let w = blocks[i].firstWordIdx; w < nextFirst && w < words.length; w++) {
-				const t = words[w];
-				if (t && typeof t.start === 'number') {
-					blocks[i].startTime = t.start;
-					break;
+		// Belt-and-suspenders: if timing JSON and DOM word counts disagree,
+		// only operate on the prefix where they line up. Should be 0 drift
+		// on the 35 retro-rendered lessons; non-zero is a regression signal.
+		const N = Math.min(words.length, wordSpans.length);
+
+		// Binary search for the last index i in [0..N-1] where
+		// words[i].start <= elapsed. Returns -1 if no word has started yet.
+		function findCurrentWordIdx(elapsed) {
+			let lo = 0, hi = N - 1, ans = -1;
+			while (lo <= hi) {
+				const mid = (lo + hi) >> 1;
+				const t = words[mid];
+				const start = t && typeof t.start === 'number' ? t.start : null;
+				if (start !== null && start <= elapsed) {
+					ans = mid;
+					lo = mid + 1;
+				} else {
+					hi = mid - 1;
 				}
 			}
+			return ans;
 		}
 
-		// If the very first block didn't pick up a start time, default to 0
-		// so it starts dimmed-state at audio t=0 instead of staying bright
-		// forever.
-		if (blocks[0].startTime === null) blocks[0].startTime = 0;
-
-		// Cursor driven directly by audio.currentTime. The previous design
-		// used a self-managed wallclock (performance.now() - t0) to avoid
-		// reading audio.currentTime after init, as defense against Chrome's
-		// pre-Xing-fix eviction-reseek bug that made currentTime unreliable.
-		// After the 2026-05-13 pipeline rewrite to Flash v2.5 + correct Xing
-		// header, audio.currentTime is fully reliable across pause-resume and
-		// eviction recovery — the wallclock workaround is no longer needed
-		// and was accumulating drift over long continuous playback (1× audio
-		// vs performance.now() rate-mismatch). Reading currentTime directly
-		// keeps cursor and audio locked by construction.
+		// `lastPastIdx` = index of the latest word currently marked .ra-past
+		// (-1 if none). The currently-narrated word is lastPastIdx + 1 — it
+		// is NOT dimmed; the dim/bright boundary IS its implicit cursor.
 		let tickHandle = null;
-		let lastActiveBlockIdx = -1;
+		let lastPastIdx = -1;
+		let lastBlockEl = null;
 		let lastScrollAt = 0;
 
 		function tick() {
-			if (blocks.length === 0) return;
 			const elapsed = audio.currentTime;
-			let idx = -1;
-			for (let i = 0; i < blocks.length; i++) {
-				if (blocks[i].startTime !== null && blocks[i].startTime <= elapsed) {
-					idx = i;
-				}
-			}
-			if (idx === lastActiveBlockIdx) return;
-			// Apply ra-past to every block strictly before idx; clear from idx onward.
-			for (let i = 0; i < blocks.length; i++) {
-				if (i < idx) {
-					blocks[i].el.classList.add('ra-past');
+			const currentIdx = findCurrentWordIdx(elapsed);
+			const target = currentIdx - 1;
+			if (target !== lastPastIdx) {
+				if (target > lastPastIdx) {
+					for (let i = lastPastIdx + 1; i <= target; i++) {
+						wordSpans[i].classList.add('ra-past');
+					}
 				} else {
-					blocks[i].el.classList.remove('ra-past');
+					for (let i = target + 1; i <= lastPastIdx; i++) {
+						wordSpans[i].classList.remove('ra-past');
+					}
+				}
+				lastPastIdx = target;
+			}
+			// Scroll only when the narrator crosses a block boundary,
+			// not on every word — throttled to once per 700ms.
+			if (currentIdx >= 0 && currentIdx < N) {
+				const currentBlock = wordBlocks[currentIdx];
+				if (currentBlock && currentBlock !== lastBlockEl) {
+					const now = performance.now();
+					if (now - lastScrollAt > 700) {
+						currentBlock.scrollIntoView({ block: 'center', behavior: 'smooth' });
+						lastScrollAt = now;
+					}
+					lastBlockEl = currentBlock;
 				}
 			}
-			// Scroll the boundary into view if we just advanced.
-			if (idx > lastActiveBlockIdx && idx >= 0) {
-				const now = performance.now();
-				if (now - lastScrollAt > 700) {
-					blocks[idx].el.scrollIntoView({ block: 'center', behavior: 'smooth' });
-					lastScrollAt = now;
-				}
-			}
-			lastActiveBlockIdx = idx;
 		}
 
 		function startTick() {
 			if (tickHandle !== null) return;
-			tickHandle = setInterval(tick, 500);
+			// 250ms tick: at typical narration ~3 words/sec, the dim
+			// boundary advances ~0-1 words per tick. Cheap because of
+			// the delta-only update.
+			tickHandle = setInterval(tick, 250);
 			tick();
 		}
 		function stopTick() {
