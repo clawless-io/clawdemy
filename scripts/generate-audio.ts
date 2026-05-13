@@ -38,23 +38,43 @@
  * $3.60 at full re-render. Hash caching means most runs cost $0.
  */
 
-import { mkdir, readFile, writeFile, readdir, stat } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, readdir, stat, copyFile, rename } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { createHash } from 'node:crypto';
+import { spawn } from 'node:child_process';
 import { S3Client, PutObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
 
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
 const VOICE_ID = process.env.ELEVENLABS_VOICE_ID || 'GuflK5NRKwVLKwEeBYTy';
-const MODEL_ID = 'eleven_multilingual_v2';
 
-// ElevenLabs limits per-request character counts depending on plan.
-// 2,500 is a safe ceiling that works on every paid tier; chunks above
-// this size are split at paragraph boundaries.
-const MAX_CHARS_PER_REQUEST = 2500;
+// Flash v2.5 with-timestamps pipeline (Experiment 2, 2026-05-13). Replaces
+// the prior Multilingual v2 plain-text-to-speech + WhisperX post-alignment
+// path. Flash v2.5 supports the native /with-timestamps endpoint and the
+// custom PVC voice, costs half what Multilingual v2 did, and allows 40K
+// chars per request so a typical Clawdemy lesson fits in a single call
+// (eliminating the multi-chunk concatenation that broke Chrome's MP3 seek
+// table). See reference_elevenlabs_with_timestamps_pipeline.md.
+const MODEL_ID = 'eleven_flash_v2_5';
+
+// 500-char headroom below Flash's 40K limit for safe paragraph-boundary
+// splits. Almost every Clawdemy lesson lands as one chunk at this cap.
+const MAX_CHARS_PER_REQUEST = 39500;
+
+// Flash v2.5 pricing as of 2026-05-12 (triangulated across our and the
+// advisor's research): $0.05 per 1,000 characters. with-timestamps has
+// no premium over standard text-to-speech on the same model.
+const COST_PER_1K_CHARS = 0.05;
+
+// ffmpeg lives at /opt/homebrew/bin on this Mac. Used to rewrite the MP3
+// Xing/Info seek header after concat so Chrome can seek correctly even
+// on a multi-chunk file. Defensive on single-chunk output too.
+const FFMPEG = '/opt/homebrew/bin/ffmpeg';
 
 const LESSONS_ROOT = 'src/content/docs/lessons';
 const AUDIO_OUT = 'public/audio';
+const TIMING_OUT = 'public/read-along';
+const BACKUP_DIR = 'public/audio/.backup';
 
 // Cloudflare R2 (S3-compatible) for syncing rendered MP3s to the
 // clawdemy-audio bucket served at audio.clawdemy.org.
@@ -200,8 +220,14 @@ export function mdxToProse(mdx: string): string {
 	// nested components ever ship in lesson bodies we'll need a real parser.
 	text = text.replace(/<\/?[A-Z][a-zA-Z0-9]*[^<>]*>/g, '');
 
-	// Inline code: keep content
-	text = text.replace(/`([^`]+)`/g, '$1');
+	// Inline code: drop entirely (content included). The DOM walker in
+	// <ReadAlongDim /> skips <code> elements, so for the prose-to-DOM word
+	// indices to align, we must also skip inline code from the narrated
+	// prose. Removed-content trade-off: variable names like `e_cat` no
+	// longer get pronounced, which is acceptable because the narrator
+	// previously stumbled on them anyway (the same fix we applied for
+	// inline-formula bullets on how-models-know-word-order).
+	text = text.replace(/`[^`]+`/g, '');
 
 	// Markdown links: [label](url) -> label
 	text = text.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
@@ -296,17 +322,37 @@ function chunkProse(prose: string, maxChars = MAX_CHARS_PER_REQUEST): string[] {
 }
 
 // ---------------------------------------------------------------------------
-// ElevenLabs API
+// ElevenLabs API — with-timestamps endpoint
 // ---------------------------------------------------------------------------
 
-async function ttsRequest(text: string): Promise<Buffer> {
-	const url = `https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}`;
+interface TimestampsResponse {
+	audio: Buffer;
+	characters: string[];
+	charStarts: number[];
+	charEnds: number[];
+}
+
+/**
+ * Single call to /v1/text-to-speech/{voice}/with-timestamps. Returns the
+ * MP3 audio AND character-level alignment in the SAME response object
+ * (per advisor's guidance — splitting into two requests would drift
+ * because TTS is non-deterministic).
+ *
+ * Error path: non-200 throws (caller exits non-zero, never writes partial
+ * output). 429 with Retry-After triggers a single retry after the
+ * recommended delay before giving up — avoids losing a render to a
+ * transient rate limit mid-batch.
+ */
+async function ttsRequestWithTimestamps(
+	text: string,
+	attempt: number = 0,
+): Promise<TimestampsResponse> {
+	const url = `https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}/with-timestamps`;
 	const response = await fetch(url, {
 		method: 'POST',
 		headers: {
 			'xi-api-key': ELEVENLABS_API_KEY!,
 			'Content-Type': 'application/json',
-			Accept: 'audio/mpeg',
 		},
 		body: JSON.stringify({
 			text,
@@ -320,14 +366,169 @@ async function ttsRequest(text: string): Promise<Buffer> {
 		}),
 	});
 
+	if (response.status === 429 && attempt === 0) {
+		const retryAfter = parseInt(response.headers.get('retry-after') || '5', 10);
+		console.warn(
+			`  ! 429 rate-limited; sleeping ${retryAfter}s then retrying once`,
+		);
+		await new Promise((r) => setTimeout(r, retryAfter * 1000));
+		return ttsRequestWithTimestamps(text, attempt + 1);
+	}
+
 	if (!response.ok) {
 		const body = await response.text();
 		throw new Error(
-			`ElevenLabs API ${response.status} ${response.statusText}: ${body}`,
+			`ElevenLabs API ${response.status} ${response.statusText}: ${body.slice(0, 500)}`,
 		);
 	}
 
-	return Buffer.from(await response.arrayBuffer());
+	const json = (await response.json()) as {
+		audio_base64: string;
+		alignment: {
+			characters: string[];
+			character_start_times_seconds: number[];
+			character_end_times_seconds: number[];
+		};
+	};
+
+	if (!json.audio_base64 || !json.alignment) {
+		throw new Error(
+			`ElevenLabs response missing audio_base64 or alignment: ${JSON.stringify(json).slice(0, 200)}`,
+		);
+	}
+
+	return {
+		audio: Buffer.from(json.audio_base64, 'base64'),
+		characters: json.alignment.characters,
+		charStarts: json.alignment.character_start_times_seconds,
+		charEnds: json.alignment.character_end_times_seconds,
+	};
+}
+
+// ---------------------------------------------------------------------------
+// Character → word conversion
+// ---------------------------------------------------------------------------
+
+interface WordTiming {
+	text: string;
+	start: number;
+	end: number;
+}
+
+/**
+ * Group ElevenLabs character-level alignment into word-level timings,
+ * with a cumulative offset for the rare case of multi-chunk lessons.
+ *
+ * Word boundaries: any whitespace character (`\s`). Punctuation stays
+ * attached to the word it touches (matches how the DOM walker tokenizes).
+ *
+ * Whitespace chars themselves get no entry — their timestamps from the
+ * API may be zero / undefined since they're not pronounced. We skip
+ * them entirely; the next non-whitespace char becomes the next word's
+ * start.
+ *
+ * NFC normalization applied to the word text so MDX-side curly quotes
+ * (U+2019) and ElevenLabs-returned straight quotes (U+0027) don't
+ * spuriously fail equality checks downstream.
+ */
+function charactersToWords(
+	chars: string[],
+	starts: number[],
+	ends: number[],
+	offset: number = 0,
+): WordTiming[] {
+	const out: WordTiming[] = [];
+	let buf = '';
+	let bufStart: number | null = null;
+	let bufEnd = 0;
+	for (let i = 0; i < chars.length; i++) {
+		const c = chars[i];
+		if (/\s/.test(c)) {
+			if (buf) {
+				out.push({
+					text: buf.normalize('NFC'),
+					start: (bufStart ?? 0) + offset,
+					end: bufEnd + offset,
+				});
+				buf = '';
+				bufStart = null;
+			}
+			continue;
+		}
+		if (buf === '') {
+			bufStart = starts[i];
+		}
+		buf += c;
+		bufEnd = ends[i];
+	}
+	if (buf) {
+		out.push({
+			text: buf.normalize('NFC'),
+			start: (bufStart ?? 0) + offset,
+			end: bufEnd + offset,
+		});
+	}
+	return out;
+}
+
+// ---------------------------------------------------------------------------
+// ffmpeg Xing-header rewrite + backup helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Rewrite the MP3 Xing/Info VBR seek header at the start of the file to
+ * reflect the entire file's frame count and duration. Critical when we
+ * Buffer.concat multiple ElevenLabs MP3 chunks: each chunk arrives as a
+ * complete MP3 with its own Xing header, and a naive concat would leave
+ * Chrome consulting only chunk 1's header on seek (the documented cause
+ * of the t=25.6s eviction-reseek bug). Defensive even for single-chunk
+ * output — same code path, same guarantee.
+ *
+ * `-c:a copy` means no re-encode: zero quality loss, fast. The whole
+ * pass runs in well under a second on a typical lesson.
+ */
+async function rewriteXingHeader(mp3Path: string): Promise<void> {
+	const tmp = mp3Path + '.tmp.mp3';
+	await new Promise<void>((resolve, reject) => {
+		const ff = spawn(FFMPEG, [
+			'-y',
+			'-i', mp3Path,
+			'-c:a', 'copy',
+			'-write_xing', '1',
+			'-map_metadata', '0',
+			tmp,
+		]);
+		let stderr = '';
+		ff.stderr.on('data', (d) => {
+			stderr += d.toString();
+		});
+		ff.on('error', reject);
+		ff.on('exit', (code) => {
+			if (code === 0) resolve();
+			else reject(new Error(`ffmpeg exit ${code}: ${stderr.slice(-500)}`));
+		});
+	});
+	await rename(tmp, mp3Path);
+}
+
+/**
+ * Copy the existing MP3 + timing JSON to public/audio/.backup/ with a
+ * timestamp suffix BEFORE an --force overwrite. Cheap rollback insurance
+ * if the freshly-rendered audio sounds noticeably worse than the prior
+ * version. Cleaned up manually when no longer needed.
+ */
+async function backupExistingArtifacts(slug: string): Promise<void> {
+	const mp3 = join(AUDIO_OUT, `${slug}-lesson.mp3`);
+	const timing = join(TIMING_OUT, `${slug}.timing.json`);
+	if (!existsSync(mp3) && !existsSync(timing)) return;
+	await mkdir(BACKUP_DIR, { recursive: true });
+	const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+	if (existsSync(mp3)) {
+		await copyFile(mp3, join(BACKUP_DIR, `${slug}-lesson.${stamp}.mp3`));
+	}
+	if (existsSync(timing)) {
+		await copyFile(timing, join(BACKUP_DIR, `${slug}.timing.${stamp}.json`));
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -407,15 +608,17 @@ async function generateOne(
 
 	const outMp3 = join(AUDIO_OUT, `${lesson.slug}-lesson.mp3`);
 	const outHash = join(AUDIO_OUT, `${lesson.slug}-lesson.hash`);
+	const outTiming = join(TIMING_OUT, `${lesson.slug}.timing.json`);
 
 	const cached =
 		!opts.force &&
 		existsSync(outMp3) &&
 		existsSync(outHash) &&
+		existsSync(outTiming) &&
 		(await readFile(outHash, 'utf-8')).trim() === hash;
 
 	const chunks = chunkProse(prose);
-	const estCost = (prose.length / 1000) * 0.3; // ~$0.30 per 1k chars at consumer tier
+	const estCost = (prose.length / 1000) * COST_PER_1K_CHARS;
 
 	const meta = {
 		slug: lesson.slug,
@@ -447,22 +650,95 @@ async function generateOne(
 		);
 	}
 
+	// Backup existing artifacts before --force overwrite (advisor's
+	// rollback-insurance ask). No-op if nothing existed yet.
+	if (opts.force) {
+		await backupExistingArtifacts(lesson.slug);
+	}
+
 	process.stdout.write(`> render  ${lesson.slug.padEnd(30)} ${chunks.length} chunk(s)...`);
 	await mkdir(AUDIO_OUT, { recursive: true });
+	await mkdir(TIMING_OUT, { recursive: true });
 
-	const buffers: Buffer[] = [];
+	const audioBuffers: Buffer[] = [];
+	const allWords: WordTiming[] = [];
+	let cumulativeOffset = 0;
+
 	for (let i = 0; i < chunks.length; i++) {
-		const buf = await ttsRequest(chunks[i]);
-		buffers.push(buf);
+		const result = await ttsRequestWithTimestamps(chunks[i]);
+		audioBuffers.push(result.audio);
+		const words = charactersToWords(
+			result.characters,
+			result.charStarts,
+			result.charEnds,
+			cumulativeOffset,
+		);
+		allWords.push(...words);
+		// Advance the cumulative offset by this chunk's last-character
+		// end time. Per advisor's call: use the alignment's own duration
+		// (in seconds), not byte length or character count.
+		if (result.charEnds.length > 0) {
+			cumulativeOffset += result.charEnds[result.charEnds.length - 1];
+		}
 		process.stdout.write(` ${i + 1}/${chunks.length}`);
 	}
 
-	const merged = Buffer.concat(buffers);
+	// Concat audio and write to disk before the ffmpeg pass.
+	const merged = Buffer.concat(audioBuffers);
 	await writeFile(outMp3, merged);
 	await writeFile(outHash, hash);
 
+	// Defensive Xing-header rewrite. Single-chunk output gets it too
+	// (cheap, ensures Chrome's seek table is always correct regardless
+	// of chunk count).
+	await rewriteXingHeader(outMp3);
+
+	// Compute match-rate sanity. Compares the count of ElevenLabs-aligned
+	// words to the count of words in the source prose (whitespace split,
+	// filter empties, NFC normalize). On Flash v2.5 this should be very
+	// near 100% on every run; a dip below 95% is signal of a chunking
+	// or character-grouping bug, not normal drift.
+	const proseWords = prose
+		.split(/\s+/)
+		.filter(Boolean)
+		.map((w) => w.normalize('NFC'));
+	const matched = allWords.length;
+	const matchRate = proseWords.length > 0 ? matched / proseWords.length : 0;
+	const matchPct = (matchRate * 100).toFixed(1);
+
+	await writeFile(
+		outTiming,
+		JSON.stringify(
+			{
+				schema_version: 2,
+				slug: lesson.slug,
+				audio_url: `${R2_PUBLIC_BASE}lessons/${lesson.slug}-lesson.mp3`,
+				model_id: MODEL_ID,
+				generated_at: new Date().toISOString(),
+				stats: {
+					prose_chars: prose.length,
+					prose_words: proseWords.length,
+					matched_words: matched,
+					match_rate: Math.round(matchRate * 10000) / 10000,
+					chunks: chunks.length,
+				},
+				words: allWords,
+			},
+			null,
+			2,
+		) + '\n',
+	);
+
 	const sizeMb = (merged.length / 1024 / 1024).toFixed(2);
-	console.log(` ok ${sizeMb} MB, ${meta.estCost}`);
+	console.log(
+		` ok ${sizeMb} MB | ${prose.length} chars | ${matched} words | match ${matchPct}% | ${meta.estCost}`,
+	);
+
+	if (matchRate < 0.95) {
+		console.warn(
+			`  ! match rate ${matchPct}% is below 95% threshold. Inspect ${outTiming} before shipping.`,
+		);
+	}
 
 	if (opts.upload) {
 		await ensureUploadedToR2(lesson.slug, { force: opts.force });
