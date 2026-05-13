@@ -283,19 +283,23 @@ const playerId = `rad-${slug}-${Math.random().toString(36).slice(2, 8)}`;
 		// forever.
 		if (blocks[0].startTime === null) blocks[0].startTime = 0;
 
-		// Wallclock. Anchored at first `play`. NEVER reads audio.currentTime
-		// after init except on first play. On pause, we capture the pause
-		// timestamp; on resume, we shift t0 forward by the paused duration
-		// so the elapsed clock keeps the same starting reference.
-		let t0 = null;
-		let pausedAt = null;
+		// Cursor driven directly by audio.currentTime. The previous design
+		// used a self-managed wallclock (performance.now() - t0) to avoid
+		// reading audio.currentTime after init, as defense against Chrome's
+		// pre-Xing-fix eviction-reseek bug that made currentTime unreliable.
+		// After the 2026-05-13 pipeline rewrite to Flash v2.5 + correct Xing
+		// header, audio.currentTime is fully reliable across pause-resume and
+		// eviction recovery — the wallclock workaround is no longer needed
+		// and was accumulating drift over long continuous playback (1× audio
+		// vs performance.now() rate-mismatch). Reading currentTime directly
+		// keeps cursor and audio locked by construction.
 		let tickHandle = null;
 		let lastActiveBlockIdx = -1;
 		let lastScrollAt = 0;
 
 		function tick() {
-			if (t0 === null) return;
-			const elapsed = (performance.now() - t0) / 1000;
+			if (blocks.length === 0) return;
+			const elapsed = audio.currentTime;
 			let idx = -1;
 			for (let i = 0; i < blocks.length; i++) {
 				if (blocks[i].startTime !== null && blocks[i].startTime <= elapsed) {
@@ -334,28 +338,19 @@ const playerId = `rad-${slug}-${Math.random().toString(36).slice(2, 8)}`;
 			}
 		}
 
-		audio.addEventListener('play', () => {
-			if (t0 === null) {
-				// First play of the session. Anchor wallclock to audio's
-				// current position (typically 0, but might be non-zero if
-				// the browser preserved progress across a soft reload).
-				t0 = performance.now() - audio.currentTime * 1000;
-			} else if (pausedAt !== null) {
-				// Resume from pause. Shift t0 forward by the paused duration
-				// so the elapsed wallclock continues from where it was, not
-				// from where audio is.
-				t0 += performance.now() - pausedAt;
-				pausedAt = null;
-			}
-			startTick();
-		});
-
+		audio.addEventListener('play', startTick);
+		audio.addEventListener('playing', startTick);
 		audio.addEventListener('pause', () => {
-			if (t0 === null) return;
-			pausedAt = performance.now();
 			stopTick();
 			tick();
 		});
+		audio.addEventListener('ended', () => {
+			stopTick();
+			tick();
+		});
+		// User scrub via native audio controls (rare, but should re-anchor
+		// the cursor immediately rather than waiting for the next tick).
+		audio.addEventListener('seeked', tick);
 
 		// Page-level spacebar pause, mirrors the ReadAlongLesson behavior.
 		let playbackEngaged = false;
