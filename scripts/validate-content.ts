@@ -90,7 +90,7 @@ const BLOOM_VERBS = [
 	'create',
 ];
 
-const PHASE_SLUGS = [
+const TRACK_5_PHASE_SLUGS = [
 	'read-text',
 	'architecture',
 	'training',
@@ -99,6 +99,17 @@ const PHASE_SLUGS = [
 	'reasoning-and-agents',
 	'evaluation-and-frontier',
 ] as const;
+
+const TRACK_6_PHASE_SLUGS = [
+	'orientation',
+	'data-flow',
+	'threat-models',
+	'vendor-policies',
+	'local-first',
+	'rights-hygiene',
+] as const;
+
+const PHASE_SLUGS = [...TRACK_5_PHASE_SLUGS, ...TRACK_6_PHASE_SLUGS] as const;
 
 const BriefSchema = z.object({
 	title: z.string().min(1),
@@ -141,7 +152,9 @@ async function main(): Promise<number> {
 
 	// Tracks (phase, phase_order) tuples seen across Track 5 lessons so we can
 	// report duplicates. Key: `${phase}/${phase_order}`. Value: list of brief paths.
-	const phaseSlots = new Map<string, string[]>();
+	const phaseSlotsTrack5 = new Map<string, string[]>();
+	// Same per-track tracking for Track 6 (Privacy & Local-First AI).
+	const phaseSlotsTrack6 = new Map<string, string[]>();
 
 	if (!existsSync(LESSONS_ROOT)) {
 		console.log(
@@ -205,7 +218,12 @@ async function main(): Promise<number> {
 						if (parsed.data.phase === undefined) {
 							errors.push({
 								path: relative(ROOT, briefPath),
-								message: `Track 5 lesson missing required field: phase (one of ${PHASE_SLUGS.join(', ')})`,
+								message: `Track 5 lesson missing required field: phase (one of ${TRACK_5_PHASE_SLUGS.join(', ')})`,
+							});
+						} else if (!TRACK_5_PHASE_SLUGS.includes(parsed.data.phase as any)) {
+							errors.push({
+								path: relative(ROOT, briefPath),
+								message: `Track 5 lesson has phase "${parsed.data.phase}" but Track 5 phases are: ${TRACK_5_PHASE_SLUGS.join(', ')}. Looks like a Track 6 phase slug used on a Track 5 lesson.`,
 							});
 						}
 						if (parsed.data.phase_order === undefined) {
@@ -216,9 +234,38 @@ async function main(): Promise<number> {
 						}
 						if (parsed.data.phase !== undefined && parsed.data.phase_order !== undefined) {
 							const key = `${parsed.data.phase}/${parsed.data.phase_order}`;
-							const seen = phaseSlots.get(key) ?? [];
+							const seen = phaseSlotsTrack5.get(key) ?? [];
 							seen.push(relative(ROOT, briefPath));
-							phaseSlots.set(key, seen);
+							phaseSlotsTrack5.set(key, seen);
+						}
+					}
+
+					// Track-6 phase context: required when track is privacy-local-first.
+					// See Doc/curriculum/track-6/mental-model-phases.md and
+					// Doc/curriculum/track-6/source-to-phase-mapping.md.
+					if (parsed.data.track === 'privacy-local-first') {
+						if (parsed.data.phase === undefined) {
+							errors.push({
+								path: relative(ROOT, briefPath),
+								message: `Track 6 lesson missing required field: phase (one of ${TRACK_6_PHASE_SLUGS.join(', ')})`,
+							});
+						} else if (!TRACK_6_PHASE_SLUGS.includes(parsed.data.phase as any)) {
+							errors.push({
+								path: relative(ROOT, briefPath),
+								message: `Track 6 lesson has phase "${parsed.data.phase}" but Track 6 phases are: ${TRACK_6_PHASE_SLUGS.join(', ')}. Looks like a Track 5 phase slug used on a Track 6 lesson.`,
+							});
+						}
+						if (parsed.data.phase_order === undefined) {
+							errors.push({
+								path: relative(ROOT, briefPath),
+								message: `Track 6 lesson missing required field: phase_order`,
+							});
+						}
+						if (parsed.data.phase !== undefined && parsed.data.phase_order !== undefined) {
+							const key = `${parsed.data.phase}/${parsed.data.phase_order}`;
+							const seen = phaseSlotsTrack6.get(key) ?? [];
+							seen.push(relative(ROOT, briefPath));
+							phaseSlotsTrack6.set(key, seen);
 						}
 					}
 				}
@@ -226,13 +273,27 @@ async function main(): Promise<number> {
 		}
 	}
 
-	// Report any duplicate (phase, phase_order) tuples across Track 5.
-	for (const [key, paths] of phaseSlots) {
+	// Report any duplicate (phase, phase_order) tuples within Track 5 or
+	// within Track 6. Duplicates are per-track: Track 5 phase "training"
+	// and Track 6 phase "orientation" never collide because they're
+	// different slug namespaces; the duplicate check fires only when two
+	// lessons within the same track claim the same slot.
+	for (const [key, paths] of phaseSlotsTrack5) {
 		if (paths.length > 1) {
 			for (const p of paths) {
 				errors.push({
 					path: p,
-					message: `Duplicate (phase, phase_order) pair "${key}"; also used by: ${paths.filter((q) => q !== p).join(', ')}`,
+					message: `Track 5: duplicate (phase, phase_order) pair "${key}"; also used by: ${paths.filter((q) => q !== p).join(', ')}`,
+				});
+			}
+		}
+	}
+	for (const [key, paths] of phaseSlotsTrack6) {
+		if (paths.length > 1) {
+			for (const p of paths) {
+				errors.push({
+					path: p,
+					message: `Track 6: duplicate (phase, phase_order) pair "${key}"; also used by: ${paths.filter((q) => q !== p).join(', ')}`,
 				});
 			}
 		}

@@ -36,14 +36,19 @@ export const collections = {
 				course: z.string().optional(),
 				order: z.number().int().optional(),
 
-				// Phase grouping for Track 5 (AI Foundations) per the mental-model
-				// curriculum. Optional at the schema level; the validator
-				// (scripts/validate-content.ts) requires both fields when
-				// track === 'ai-foundations' and checks (phase, phase_order)
-				// uniqueness. Phase slugs are stable identifiers; sidebar group
-				// labels are derived in astro.config.mjs.
+				// Phase grouping for Track 5 (AI Foundations) and Track 6 (Privacy &
+				// Local-First AI), per their mental-model curricula. Optional at the
+				// schema level; the validator (scripts/validate-content.ts) requires
+				// both fields when track ∈ {'ai-foundations', 'privacy-local-first'}
+				// and checks (phase, phase_order) uniqueness per-track. Phase slugs
+				// are stable identifiers; sidebar group labels derive in
+				// astro.config.mjs. Track 5 phases per Doc/curriculum/mental-model-
+				// phases.md; Track 6 phases per Doc/curriculum/track-6/mental-model-
+				// phases.md (6 phases: orientation → data-flow → threat-models →
+				// vendor-policies → local-first → rights-hygiene).
 				phase: z
 					.enum([
+						// Track 5 (AI Foundations)
 						'read-text',
 						'architecture',
 						'training',
@@ -51,9 +56,26 @@ export const collections = {
 						'inference',
 						'reasoning-and-agents',
 						'evaluation-and-frontier',
+						// Track 6 (Privacy & Local-First AI)
+						'orientation',
+						'data-flow',
+						'threat-models',
+						'vendor-policies',
+						'local-first',
+						'rights-hygiene',
 					])
 					.optional(),
 				phase_order: z.number().int().positive().optional(),
+
+				// Track 6 (Privacy & Local-First AI) stale-claim review cadence
+				// in months, per Doc/curriculum/track-6/philosophy.md governance
+				// addendum 2. Vendor-policy-citing lessons: 3 (quarterly). Mixed
+				// vendor + framework lessons: 6 (semi-annual). Regulatory and
+				// foundational primer lessons: 12 (annual). The build-time
+				// staleness gate (scripts/check-track6-citations.ts, planned)
+				// reads last_reviewed + review_cadence_months and flags lessons
+				// past the window.
+				review_cadence_months: z.number().int().positive().optional(),
 
 				// Reader orientation
 				difficulty: z.enum(['intro', 'standard', 'deep']).optional(),
