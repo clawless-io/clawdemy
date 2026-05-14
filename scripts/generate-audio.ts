@@ -48,6 +48,38 @@ import { S3Client, PutObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
 const VOICE_ID = process.env.ELEVENLABS_VOICE_ID || 'GuflK5NRKwVLKwEeBYTy';
 
+// Per-track voice casting (per Doc/brand.md "Audio narration — per-track
+// casting", locked 2026-05-13). Voice is cast once at a track's Phase 0 and
+// locked across the track's lifetime. Listeners get a consistent narrator
+// per track; new tracks may use new voices.
+//
+// The map routes by lesson directory slug (the first segment under
+// src/content/docs/lessons/<track>/<slug>/). The script-level VOICE_ID
+// above is the fallback for any track not listed, which keeps the existing
+// Track 5 default intact even if the map is empty.
+//
+// Per CLAUDE.md §3.5 global-flags rule: voice is per-track config, not per-
+// lesson prop. Per-lesson voice overrides are deliberately NOT supported.
+// Adding a track is one line here; never per-lesson MDX.
+const TRACK_VOICE_MAP: Record<string, string> = {
+	// Track 5 (AI Foundations) — custom PVC voice, locked 2026-04-19.
+	'ai-foundations': 'GuflK5NRKwVLKwEeBYTy',
+	// Track 6 (Privacy & Local-First AI) — "Peter" ElevenLabs stock voice,
+	// locked 2026-05-13. Directory slug below is the proposed value pending
+	// Track 6 Phase E equivalent ratification ('privacy-local-first');
+	// founder may pick a different slug, in which case update the key here.
+	'privacy-local-first': 'ZthjuvLPty3kTMaNKVKb',
+};
+
+/**
+ * Resolve the voice ID for a given track. Falls back to the script-level
+ * VOICE_ID default if the track is not explicitly mapped, so unknown tracks
+ * fail gracefully (render with the default voice rather than throwing).
+ */
+function resolveVoiceId(track: string): string {
+	return TRACK_VOICE_MAP[track] ?? VOICE_ID;
+}
+
 // Flash v2.5 with-timestamps pipeline (Experiment 2, 2026-05-13). Replaces
 // the prior Multilingual v2 plain-text-to-speech + WhisperX post-alignment
 // path. Flash v2.5 supports the native /with-timestamps endpoint and the
@@ -345,9 +377,10 @@ interface TimestampsResponse {
  */
 async function ttsRequestWithTimestamps(
 	text: string,
+	voiceId: string,
 	attempt: number = 0,
 ): Promise<TimestampsResponse> {
-	const url = `https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}/with-timestamps`;
+	const url = `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/with-timestamps`;
 	const response = await fetch(url, {
 		method: 'POST',
 		headers: {
@@ -372,7 +405,7 @@ async function ttsRequestWithTimestamps(
 			`  ! 429 rate-limited; sleeping ${retryAfter}s then retrying once`,
 		);
 		await new Promise((r) => setTimeout(r, retryAfter * 1000));
-		return ttsRequestWithTimestamps(text, attempt + 1);
+		return ttsRequestWithTimestamps(text, voiceId, attempt + 1);
 	}
 
 	if (!response.ok) {
@@ -656,7 +689,8 @@ async function generateOne(
 		await backupExistingArtifacts(lesson.slug);
 	}
 
-	process.stdout.write(`> render  ${lesson.slug.padEnd(30)} ${chunks.length} chunk(s)...`);
+	const voiceId = resolveVoiceId(lesson.track);
+	process.stdout.write(`> render  ${lesson.slug.padEnd(30)} ${chunks.length} chunk(s), voice ${voiceId} (track: ${lesson.track})...`);
 	await mkdir(AUDIO_OUT, { recursive: true });
 	await mkdir(TIMING_OUT, { recursive: true });
 
@@ -665,7 +699,7 @@ async function generateOne(
 	let cumulativeOffset = 0;
 
 	for (let i = 0; i < chunks.length; i++) {
-		const result = await ttsRequestWithTimestamps(chunks[i]);
+		const result = await ttsRequestWithTimestamps(chunks[i], voiceId);
 		audioBuffers.push(result.audio);
 		const words = charactersToWords(
 			result.characters,
