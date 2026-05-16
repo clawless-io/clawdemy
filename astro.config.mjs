@@ -565,7 +565,7 @@ export default defineConfig({
 									label: 'Why your worry is rational',
 									collapsed: true,
 									items: [
-										{ label: 'Brief', slug: 'lessons/privacy-local-first/why-your-worry-is-rational/brief' },
+										{ label: 'Overview', slug: 'lessons/privacy-local-first/why-your-worry-is-rational/brief' },
 										{ label: 'Lesson', slug: 'lessons/privacy-local-first/why-your-worry-is-rational/lesson' },
 										{ label: 'Practice', slug: 'lessons/privacy-local-first/why-your-worry-is-rational/practice' },
 										{ label: 'Summary', slug: 'lessons/privacy-local-first/why-your-worry-is-rational/summary' },
@@ -577,7 +577,7 @@ export default defineConfig({
 									label: 'Your starting point',
 									collapsed: true,
 									items: [
-										{ label: 'Brief', slug: 'lessons/privacy-local-first/your-starting-point/brief' },
+										{ label: 'Overview', slug: 'lessons/privacy-local-first/your-starting-point/brief' },
 										{ label: 'Lesson', slug: 'lessons/privacy-local-first/your-starting-point/lesson' },
 										{ label: 'Practice', slug: 'lessons/privacy-local-first/your-starting-point/practice' },
 										{ label: 'Summary', slug: 'lessons/privacy-local-first/your-starting-point/summary' },
@@ -595,7 +595,7 @@ export default defineConfig({
 									label: 'What happens in three seconds',
 									collapsed: true,
 									items: [
-										{ label: 'Brief', slug: 'lessons/privacy-local-first/what-happens-in-three-seconds-the-path-your-prompt-takes/brief' },
+										{ label: 'Overview', slug: 'lessons/privacy-local-first/what-happens-in-three-seconds-the-path-your-prompt-takes/brief' },
 										{ label: 'Lesson', slug: 'lessons/privacy-local-first/what-happens-in-three-seconds-the-path-your-prompt-takes/lesson' },
 										{ label: 'Practice', slug: 'lessons/privacy-local-first/what-happens-in-three-seconds-the-path-your-prompt-takes/practice' },
 										{ label: 'Summary', slug: 'lessons/privacy-local-first/what-happens-in-three-seconds-the-path-your-prompt-takes/summary' },
