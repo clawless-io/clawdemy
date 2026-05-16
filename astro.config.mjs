@@ -603,6 +603,18 @@ export default defineConfig({
 										{ label: 'References', slug: 'lessons/privacy-local-first/what-happens-in-three-seconds-the-path-your-prompt-takes/references' },
 									],
 								},
+								{
+									label: 'Who sees what along the way',
+									collapsed: true,
+									items: [
+										{ label: 'Overview', slug: 'lessons/privacy-local-first/who-sees-what-along-the-way/brief' },
+										{ label: 'Lesson', slug: 'lessons/privacy-local-first/who-sees-what-along-the-way/lesson' },
+										{ label: 'Practice', slug: 'lessons/privacy-local-first/who-sees-what-along-the-way/practice' },
+										{ label: 'Summary', slug: 'lessons/privacy-local-first/who-sees-what-along-the-way/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/privacy-local-first/who-sees-what-along-the-way/cheatsheet' },
+										{ label: 'References', slug: 'lessons/privacy-local-first/who-sees-what-along-the-way/references' },
+									],
+								},
 							],
 						},
 					],
