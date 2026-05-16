@@ -550,6 +550,45 @@ export default defineConfig({
 						},
 					],
 				},
+				{
+					// Track 6 is grouped by mental-model phase, matching the Track 5
+					// pattern. See Doc/curriculum/track-6/mental-model-phases.md for
+					// the six-phase arc and Doc/curriculum/track-6/source-to-phase-mapping.md
+					// for the phase / phase_order assignment of each lesson.
+					label: 'Track 6: Privacy & Local-First AI',
+					items: [
+						{
+							label: 'Phase 1\nWhy your privacy matters when you use AI',
+							collapsed: true,
+							items: [
+								{
+									label: 'Why your worry is rational',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/privacy-local-first/why-your-worry-is-rational/brief' },
+										{ label: 'Lesson', slug: 'lessons/privacy-local-first/why-your-worry-is-rational/lesson' },
+										{ label: 'Practice', slug: 'lessons/privacy-local-first/why-your-worry-is-rational/practice' },
+										{ label: 'Summary', slug: 'lessons/privacy-local-first/why-your-worry-is-rational/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/privacy-local-first/why-your-worry-is-rational/cheatsheet' },
+										{ label: 'References', slug: 'lessons/privacy-local-first/why-your-worry-is-rational/references' },
+									],
+								},
+								{
+									label: 'Your starting point',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/privacy-local-first/your-starting-point/brief' },
+										{ label: 'Lesson', slug: 'lessons/privacy-local-first/your-starting-point/lesson' },
+										{ label: 'Practice', slug: 'lessons/privacy-local-first/your-starting-point/practice' },
+										{ label: 'Summary', slug: 'lessons/privacy-local-first/your-starting-point/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/privacy-local-first/your-starting-point/cheatsheet' },
+										{ label: 'References', slug: 'lessons/privacy-local-first/your-starting-point/references' },
+									],
+								},
+							],
+						},
+					],
+				},
 			],
 			components: {
 				// Adds og:image and twitter:image to every page; Starlight 0.38
