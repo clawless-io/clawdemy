@@ -587,6 +587,24 @@ export default defineConfig({
 								},
 							],
 						},
+						{
+							label: 'Phase 2\nWhat an AI tool sees when you use it',
+							collapsed: true,
+							items: [
+								{
+									label: 'What happens in three seconds',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/privacy-local-first/what-happens-in-three-seconds-the-path-your-prompt-takes/brief' },
+										{ label: 'Lesson', slug: 'lessons/privacy-local-first/what-happens-in-three-seconds-the-path-your-prompt-takes/lesson' },
+										{ label: 'Practice', slug: 'lessons/privacy-local-first/what-happens-in-three-seconds-the-path-your-prompt-takes/practice' },
+										{ label: 'Summary', slug: 'lessons/privacy-local-first/what-happens-in-three-seconds-the-path-your-prompt-takes/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/privacy-local-first/what-happens-in-three-seconds-the-path-your-prompt-takes/cheatsheet' },
+										{ label: 'References', slug: 'lessons/privacy-local-first/what-happens-in-three-seconds-the-path-your-prompt-takes/references' },
+									],
+								},
+							],
+						},
 					],
 				},
 			],
