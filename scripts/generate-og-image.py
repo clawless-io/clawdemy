@@ -59,17 +59,21 @@ BG = (255, 255, 255)
 # Teal reads as "growth / learning / wisdom" and stays in the cool-color
 # half of the family without overlapping clawless's cyan or whisprdesk's
 # royal blue.
-TITLE_COLOR = (15, 118, 110)   # #0F766E
+TITLE_COLOR = (30, 64, 175)    # #1E40AF blue-700 (founder feedback 2026-05-16: "bluish, match Clawless")
 
 # Family DNA text colors. Do not vary per product.
 TAGLINE_COLOR = (31, 41, 55)   # slate-800 #1f2937
 DETAIL_COLOR = (71, 85, 105)   # slate-600 #475569
 
-# Fonts. SF Pro Rounded for the wordmark matches whisprdesk and clawless.
-# Clawdemy's site uses Inter sans-serif as primary, so a rounded sans for
-# the wordmark stays in the family typographic register.
+# Fonts. Georgia Bold for the wordmark per founder feedback 2026-05-16:
+# "Your design should match the way you build RBJ Global. RBJ Global is
+# the parent, and the rest of them are siblings, so they should have
+# resemblances to RBJ Global." Clawdemy adopts the same heavy serif
+# treatment as RBJ Global and Clawless — family-DNA-typography across
+# the three RBJ Global products + the parent. WhisprDesk shipped its
+# own SF Pro Rounded treatment earlier and stands separately.
 SF_REGULAR = "/System/Library/Fonts/SFNS.ttf"
-SF_ROUNDED = "/System/Library/Fonts/SFNSRounded.ttf"
+GEORGIA_BOLD = "/Library/Fonts/Supplemental/Georgia Bold.ttf"
 
 
 def load_font(path: str, size: int) -> ImageFont.FreeTypeFont:
@@ -85,7 +89,7 @@ def main() -> None:
     img = Image.new("RGB", (RENDER_W, RENDER_H), BG)
     draw = ImageDraw.Draw(img)
 
-    title_font = load_font(SF_ROUNDED, 168 * SCALE)
+    title_font = load_font(GEORGIA_BOLD, 168 * SCALE)
     tagline_font = load_font(SF_REGULAR, 68 * SCALE)
     detail_font = load_font(SF_REGULAR, 46 * SCALE)
 
