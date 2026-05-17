@@ -32,12 +32,15 @@ export default defineConfig({
 		},
 	},
 	integrations: [
-		// Sitemap with /legal/ pages excluded. Starlight registers @astrojs/sitemap
-		// internally; this explicit registration runs after Starlight's build:done
-		// hook so its filter is the one that lands on disk. Legal pages also carry
-		// noindex meta — sitemap exclusion is hygiene, noindex is enforcement.
+		// Sitemap with utility pages excluded (RBJ Global family rule: legal +
+		// utility pages get noindex,follow AND are omitted from sitemap; footer
+		// links remain). Starlight registers @astrojs/sitemap internally; this
+		// explicit registration runs after Starlight's build:done hook so its
+		// filter is the one that lands on disk. Utility pages also carry noindex
+		// meta in their frontmatter head: block; sitemap exclusion is hygiene,
+		// noindex is enforcement.
 		sitemap({
-			filter: (page) => !page.includes('/legal/'),
+			filter: (page) => !page.includes('/legal/') && !page.includes('/trust/'),
 		}),
 		starlight({
 			title: 'Clawdemy',
