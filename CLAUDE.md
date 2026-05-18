@@ -146,15 +146,19 @@ Full reasoning, fleet-wide rollout plan, savings projections, and per-agent vari
 
 ---
 
-## 5. Single-terminal mode (Clawdemy Developer Opus)
+## 5. Orchestration model (parallel-terminal era, locked 2026-05-18)
 
-Clawdemy runs on one terminal: `Clawdemy Developer Opus` (Opus 4.7). Founder-set 2026-05-08.
+Clawdemy operates with one canonical lead and a variable pool of parallel executor terminals.
 
-The dual-terminal Opus/Sonnet routing experiment ran 2026-05-07 to 2026-05-08 and was rolled back. The pipeline-tiered model policy (§4) still applies inside the writer/editor/critic/product-owner stages, that runs at the API layer inside this terminal's pipeline and is unaffected by the rollback.
+**Lead.** `Clawdemy Developer Opus` (Opus 4.7). Sole owner of canonical Clawdemy memory, vendor naming policy, A1 verbatim discipline, Group A constitution, `HANDOVER.md`, cross-track decisions, and policy triage. Does NOT execute lesson drafting unless founder explicitly assigns.
 
-All ClaudeLink Clawdemy work is addressed to `Clawdemy Developer Opus`. Sibling agents (advisor, parent-site developer) message this terminal directly; do not delegate Clawdemy pipeline work to a second terminal.
+**Executors.** `clawdemy-dev-01` through `clawdemy-dev-NN` (kebab-case, two-digit zero-padded suffix). Each executor owns one track end-to-end and works lesson-by-lesson. Briefed by `clawless-advisor`. Identifier is stable across session restarts.
 
-Executors `clawdemy-dev-01` through `clawdemy-dev-10` (briefed by `clawless-advisor`) handle lesson drafting under dispatch. The Clawdemy Developer terminal stays as canonical lead: memory, vendor naming policy, Group A constitution, A1 verbatim discipline, cross-track decisions, policy questions.
+**Escalation.** Executors ping `clawless-advisor` for assignments and completion confirmation. The advisor reviews commits and dispatches the next lesson. The advisor escalates to `Clawdemy Developer Opus` for cross-track, policy, or vendor-naming triage. Founder pings whoever directly.
+
+**Reference.** The master track inventory at `/Users/junaidsiddiqi/Projects/clawless-v1/clawless/advisor/clawdemy-master-track-inventory-2026-05-18.md` is the canonical source for track assignments and orchestration waves.
+
+**Single-terminal mode (prior policy, superseded 2026-05-18).** Locked 2026-05-07 after the dual-terminal Opus+Sonnet experiment was rolled back same-day. That policy was about avoiding multi-terminal-per-agent routing (dispatch friction). The current parallel-terminal model is structurally different: each executor owns an independent track with no shared state and no routing decisions. The friction model from 2026-05-07 does not apply here.
 
 ---
 
