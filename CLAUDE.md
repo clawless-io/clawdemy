@@ -150,11 +150,11 @@ Full reasoning, fleet-wide rollout plan, savings projections, and per-agent vari
 
 Clawdemy operates with one canonical lead and a variable pool of parallel executor terminals.
 
-**Lead.** `Clawdemy Developer Opus` (Opus 4.7). Sole owner of canonical Clawdemy memory, vendor naming policy, A1 verbatim discipline, Group A constitution, `HANDOVER.md`, cross-track decisions, and policy triage. Does NOT execute lesson drafting unless founder explicitly assigns.
+**Lead.** `clawdemy-lead` (Opus 4.7; ClaudeLink role `clawdemy-lead`). Sole owner of canonical Clawdemy memory, vendor naming policy, A1 verbatim discipline, Group A constitution, `HANDOVER.md`, cross-track decisions, and policy triage. Does NOT execute lesson drafting unless founder explicitly assigns. (Prior name `Clawdemy Developer Opus` retired 2026-05-21; the role is now identified solely by the `clawdemy-lead` ClaudeLink handle.)
 
 **Executors.** `clawdemy-dev-01` through `clawdemy-dev-NN` (kebab-case, two-digit zero-padded suffix). Each executor owns one track end-to-end and works lesson-by-lesson. Briefed by `clawless-advisor`. Identifier is stable across session restarts.
 
-**Escalation.** Executors ping `clawless-advisor` for assignments and completion confirmation. The advisor reviews commits and dispatches the next lesson. The advisor escalates to `Clawdemy Developer Opus` for cross-track, policy, or vendor-naming triage. Founder pings whoever directly.
+**Escalation.** Executors ping `clawless-advisor` for assignments and completion confirmation. The advisor reviews commits and dispatches the next lesson. The advisor escalates to `clawdemy-lead` for cross-track, policy, or vendor-naming triage. Founder pings whoever directly.
 
 **Reference.** The master track inventory at `/Users/junaidsiddiqi/Projects/clawless-v1/clawless/advisor/clawdemy-master-track-inventory-2026-05-18.md` is the canonical source for track assignments and orchestration waves.
 
