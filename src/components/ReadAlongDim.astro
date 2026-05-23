@@ -1,0 +1,675 @@
+---
+/**
+ * ReadAlongDim — word-level dim-as-you-read.
+ *
+ * Goal: as the audio narrates, words that have already been read
+ * fade to ~55% opacity. The unread remainder stays at normal weight.
+ * The boundary between dim and bright is the narrator's implicit
+ * cursor — no separate colored highlight on the current word.
+ *
+ * Design decisions, all driven by the simple-over-browser-fragile rule
+ * (CLAUDE.md §3.5):
+ *
+ *   1. Word-level granularity (revised 2026-05-13 after the Flash v2.5
+ *      pipeline gave us 100% match rate across all 35 lessons; the
+ *      paragraph-level coarsening that protected against WhisperX drift
+ *      is no longer needed). The earlier paragraph-only mode hid the
+ *      cursor-stuck-on-heading bug class; with the new pipeline those
+ *      gaps are vanishingly small, so we surface the word-level cursor
+ *      visitors actually want to follow.
+ *
+ *   2. Self-managed wallclock, not audio.currentTime. After the first
+ *      `play` event, the component captures `t0 = performance.now() -
+ *      audio.currentTime * 1000` as the wallclock origin, then NEVER
+ *      reads `audio.currentTime` again. On pause it captures
+ *      `pausedAt`; on resume it shifts `t0` forward by the paused
+ *      duration. This removes the only browser-fragile dependency the
+ *      previous design had: Chrome's `audio.currentTime` after buffer
+ *      eviction can be stale or lying, and the 250ms poll attempt to
+ *      fix it (commit df77070) failed real-browser testing. The
+ *      wallclock cannot lie because we own it.
+ *
+ *      Trade-off: if the user manually scrubs the audio backward, the
+ *      dim cursor doesn't follow (it keeps its wallclock pace). The
+ *      visible dim state stays internally consistent with how long the
+ *      listener has been listening. We accept that trade.
+ *
+ *   3. Always-on as of 2026-05-13. The component used to be gated on
+ *      `?readalong=paragraph` during the prototype phase. After the
+ *      two-pilot acceptance test passed and the 33-lesson retro-batch
+ *      shipped, the gate was removed so visitors see the dim behavior
+ *      by default. Kill-switch is now a 1-line git revert + redeploy,
+ *      not a query-string flag.
+ *
+ *   4. Per-word DOM wrapping at init, delta-only updates per tick.
+ *      The walker wraps each visible word in a <span class="ra-word">
+ *      once at startup. The tick function tracks lastPastIdx and on
+ *      each advance only mutates the 0-3 spans that crossed the
+ *      boundary since last tick (delta, not full sweep). Scrub
+ *      backward un-dims symmetrically. Total per-tick work: one
+ *      binary search + delta DOM mutations.
+ *
+ * Block walker: `<p>`, `<li>`, `<h2>`, `<h3>`, `<h4>`, `<blockquote>`.
+ * Skip subtrees: pre, code, svg, script, style, img, picture, figure,
+ * figcaption, sr-only, sl-anchor-link, aria-hidden, data-readalong-skip,
+ * data-pagefind-ignore.
+ *
+ * Per-word start times come from the existing per-MDX-word timing JSON
+ * at `/read-along/<slug>.timing.json` (one entry per MDX prose word
+ * in render order). DOM-word index N maps to timing.words[N] 1:1
+ * because mdxToProse strips exactly the same subtrees the DOM walker
+ * skips (verified by the 100% match rate on all 35 retro-rendered
+ * lessons, commit ac43f5c).
+ *
+ * Usage in MDX:
+ *   <ReadAlongDim
+ *     src="https://audio.clawdemy.org/lessons/<slug>-lesson.mp3"
+ *     slug="<slug>"
+ *     approxMinutes={N}
+ *   />
+ */
+
+interface Props {
+	src: string;
+	slug: string;
+	title?: string;
+	approxMinutes?: number;
+	/**
+	 * Cache-buster string applied to BOTH the audio src AND the timing
+	 * JSON fetch URL. Required when the audio is re-rendered (otherwise
+	 * Cloudflare can serve a stale audio file paired with a fresh
+	 * timing JSON, or vice versa). Both must move together; using one
+	 * version string for both keeps them aligned by construction.
+	 *
+	 * Format: a plain date string like "20260513". The component
+	 * appends `?v=<cacheVersion>` to both URLs.
+	 */
+	cacheVersion?: string;
+}
+
+const {
+	src,
+	slug,
+	title = 'Listen to this lesson',
+	approxMinutes,
+	cacheVersion,
+} = Astro.props;
+
+/**
+ * Single global flag controlling whether the Word/Paragraph style
+ * toggle appears site-wide. Flip to false to disable the toggle on
+ * every lesson at once (e.g. emergency rollback if a future browser
+ * version regresses on it). No MDX edits required for kill-switch.
+ *
+ * When false: the toggle UI is not rendered, localStorage is not
+ * consulted, and every lesson behaves as word-mode regardless of any
+ * previously-saved user preference.
+ */
+const STYLE_TOGGLE_ENABLED = true;
+
+const cacheQuery = cacheVersion ? `?v=${cacheVersion}` : '';
+const audioSrc = `${src}${cacheQuery}`;
+const timingSrc = `/read-along/${slug}.timing.json${cacheQuery}`;
+const playerId = `rad-${slug}-${Math.random().toString(36).slice(2, 8)}`;
+---
+
+<aside class="cw-readalong" data-player-id={playerId} data-timing-src={timingSrc}>
+	<div class="cw-readalong-header">
+		<span class="cw-readalong-label">
+			<svg
+				width="14"
+				height="14"
+				viewBox="0 0 24 24"
+				fill="none"
+				stroke="currentColor"
+				stroke-width="2"
+				stroke-linecap="round"
+				stroke-linejoin="round"
+				aria-hidden="true"
+			>
+				<path d="M3 18v-6a9 9 0 0 1 18 0v6"></path>
+				<path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3z"></path>
+				<path d="M3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"></path>
+			</svg>
+			<strong>{title}</strong>
+			{approxMinutes && (
+				<span class="cw-readalong-duration">about {approxMinutes} min</span>
+			)}
+		</span>
+	</div>
+	<audio controls preload="metadata" src={audioSrc} data-role="audio">
+		<a href={audioSrc}>Download the MP3</a>
+	</audio>
+	<div class="cw-readalong-footer">
+		<a href={audioSrc} download class="cw-readalong-download" data-role="download">
+			Download for offline listening
+		</a>
+		<span class="cw-readalong-note">
+			AI-narrated. Voice may pronounce technical terms differently than you do.
+		</span>
+	</div>
+	{STYLE_TOGGLE_ENABLED && (
+		<div class="cw-readalong-mode-row">
+			<span class="cw-readalong-mode-label">Read-along style</span>
+			<div class="cw-readalong-mode" role="group" aria-label="Read-along style">
+				<button type="button" class="cw-readalong-mode-btn" data-mode-btn="word" aria-pressed="true"><span>Word</span></button>
+				<button type="button" class="cw-readalong-mode-btn" data-mode-btn="paragraph" aria-pressed="false"><span>Paragraph</span></button>
+			</div>
+		</div>
+	)}
+</aside>
+
+<script define:vars={{ playerId, timingSrc, styleToggleEnabled: STYLE_TOGGLE_ENABLED }}>
+	(async function initReadAlongDim() {
+		const root = document.querySelector(`[data-player-id="${playerId}"]`);
+		if (!root) return;
+		const audio = root.querySelector('[data-role="audio"]');
+		if (!audio) return;
+
+		// JS-driven Blob download (cross-origin `<a download>` is ignored).
+		// Mirrors the implementation from ReadAlongLesson.
+		const dlLink = root.querySelector('[data-role="download"]');
+		if (dlLink) {
+			dlLink.addEventListener('click', async (e) => {
+				const url = dlLink.getAttribute('href');
+				if (!url) return;
+				e.preventDefault();
+				const originalText = dlLink.textContent || 'Download for offline listening';
+				try {
+					dlLink.textContent = 'Preparing download…';
+					const res = await fetch(url);
+					if (!res.ok) throw new Error(`download HTTP ${res.status}`);
+					const blob = await res.blob();
+					const blobUrl = URL.createObjectURL(blob);
+					const filename = url.split('/').pop() || 'lesson.mp3';
+					const a = document.createElement('a');
+					a.href = blobUrl;
+					a.download = filename;
+					document.body.appendChild(a);
+					a.click();
+					document.body.removeChild(a);
+					setTimeout(() => URL.revokeObjectURL(blobUrl), 1500);
+				} catch (err) {
+					console.warn('[read-along-dim] blob download failed; opening MP3 in new tab.', err);
+					window.open(url, '_blank', 'noopener,noreferrer');
+				} finally {
+					dlLink.textContent = originalText;
+				}
+			});
+		}
+
+		// Load per-word timing JSON. timing.words is a flat array of
+		// { word, start, end } objects in MDX render order.
+		let words = [];
+		try {
+			const res = await fetch(timingSrc);
+			if (!res.ok) throw new Error(`timing HTTP ${res.status}`);
+			const timing = await res.json();
+			if (Array.isArray(timing && timing.words)) words = timing.words;
+		} catch (err) {
+			console.warn('[read-along-dim] no timing JSON; falling back to audio-only.', err);
+			return;
+		}
+		if (words.length === 0) return;
+
+		// Find the markdown content container; walk siblings after the
+		// component. Wrap each visible word in a <span class="ra-word">
+		// so we can dim them individually as the narrator advances.
+		const container = root.parentElement;
+		if (!container) return;
+		const siblings = Array.from(container.children);
+		const startIdx = siblings.indexOf(root);
+		if (startIdx < 0) return;
+
+		const BLOCK_TAGS = new Set([
+			'P', 'LI', 'H2', 'H3', 'H4', 'H5', 'H6', 'BLOCKQUOTE',
+		]);
+		const SKIP_TAGS = new Set([
+			'PRE', 'CODE', 'SCRIPT', 'STYLE', 'SVG', 'IMG', 'PICTURE',
+			// mdxToProse strips inline code content and component-rendered
+			// figures from the narrated prose. The DOM walker mirrors those
+			// skips so DOM-word index N matches timing.words[N] exactly.
+			// The 2026-05-13 retro-batch verified this alignment at 100%
+			// match rate across all 35 lessons.
+			'FIGURE', 'FIGCAPTION',
+		]);
+		const SKIP_CLASSES = ['sr-only', 'sl-anchor-link'];
+
+		function isSkippable(el) {
+			if (SKIP_TAGS.has(el.tagName)) return true;
+			if (el.getAttribute && el.getAttribute('aria-hidden') === 'true') return true;
+			if (el.dataset && el.dataset.readalongSkip !== undefined) return true;
+			if (el.dataset && el.dataset.pagefindIgnore !== undefined) return true;
+			if (el.classList) {
+				for (const cls of SKIP_CLASSES) {
+					if (el.classList.contains(cls)) return true;
+				}
+			}
+			return false;
+		}
+
+		const WORD_REGEX = /\S+/g;
+		const HAS_ALNUM = /[A-Za-z0-9]/;
+
+		// Parallel arrays: wordSpans[i] is the DOM <span> for word i;
+		// wordBlocks[i] is the top-level block element that contains it
+		// (used for block-change scroll-into-view).
+		const wordSpans = [];
+		const wordBlocks = [];
+
+		function wrapWordsInTextNode(node, currentBlockEl) {
+			const text = node.textContent || '';
+			WORD_REGEX.lastIndex = 0;
+			const matches = [];
+			let m;
+			while ((m = WORD_REGEX.exec(text)) !== null) {
+				if (HAS_ALNUM.test(m[0])) {
+					matches.push({ idx: m.index, length: m[0].length, text: m[0] });
+				}
+			}
+			if (matches.length === 0) return;
+			const frag = document.createDocumentFragment();
+			let cursor = 0;
+			for (const match of matches) {
+				if (match.idx > cursor) {
+					frag.appendChild(document.createTextNode(text.slice(cursor, match.idx)));
+				}
+				const span = document.createElement('span');
+				span.className = 'ra-word';
+				span.textContent = match.text;
+				frag.appendChild(span);
+				wordSpans.push(span);
+				wordBlocks.push(currentBlockEl);
+				cursor = match.idx + match.length;
+			}
+			if (cursor < text.length) {
+				frag.appendChild(document.createTextNode(text.slice(cursor)));
+			}
+			if (node.parentNode) node.parentNode.replaceChild(frag, node);
+		}
+
+		function walk(node, currentBlockEl) {
+			if (node.nodeType === Node.TEXT_NODE) {
+				if (currentBlockEl) wrapWordsInTextNode(node, currentBlockEl);
+				return;
+			}
+			if (node.nodeType !== Node.ELEMENT_NODE) return;
+			const el = node;
+			if (isSkippable(el)) return;
+			let myBlock = currentBlockEl;
+			if (BLOCK_TAGS.has(el.tagName) && currentBlockEl === null) myBlock = el;
+			// Snapshot children before walking — wrapWordsInTextNode
+			// replaces text nodes in the live tree as it goes.
+			for (const child of Array.from(el.childNodes)) {
+				walk(child, myBlock);
+			}
+		}
+
+		for (let i = startIdx + 1; i < siblings.length; i++) {
+			walk(siblings[i], null);
+		}
+
+		if (wordSpans.length === 0) return;
+
+		// Belt-and-suspenders: if timing JSON and DOM word counts disagree,
+		// only operate on the prefix where they line up. Should be 0 drift
+		// on the 35 retro-rendered lessons; non-zero is a regression signal.
+		const N = Math.min(words.length, wordSpans.length);
+
+		// Build a deduplicated list of block elements in render order, plus
+		// a per-word index pointing into it. Used by paragraph mode (and by
+		// the block-change scroll trigger in both modes).
+		const blockEls = [];
+		const wordBlockIdx = new Array(wordSpans.length);
+		{
+			let prev = null;
+			for (let i = 0; i < wordSpans.length; i++) {
+				const b = wordBlocks[i];
+				if (b !== prev) {
+					blockEls.push(b);
+					prev = b;
+				}
+				wordBlockIdx[i] = blockEls.length - 1;
+			}
+		}
+
+		// User's choice is persisted across reloads via localStorage when
+		// the toggle is enabled site-wide (STYLE_TOGGLE_ENABLED constant
+		// at the top of the component). When the toggle is disabled, we
+		// force word mode and skip storage so a flipped kill-switch
+		// silently reverts every visitor to the safer default regardless
+		// of their previously-saved preference.
+		const STORAGE_KEY = 'cw-readalong-mode';
+		function loadMode() {
+			if (!styleToggleEnabled) return 'word';
+			try {
+				const v = window.localStorage.getItem(STORAGE_KEY);
+				return v === 'paragraph' ? 'paragraph' : 'word';
+			} catch (_) {
+				return 'word';
+			}
+		}
+		function saveMode(m) {
+			if (!styleToggleEnabled) return;
+			try { window.localStorage.setItem(STORAGE_KEY, m); } catch (_) {}
+		}
+		let mode = loadMode();
+		root.dataset.raMode = mode;
+
+		// Binary search for the last index i in [0..N-1] where
+		// words[i].start <= elapsed. Returns -1 if no word has started yet.
+		function findCurrentWordIdx(elapsed) {
+			let lo = 0, hi = N - 1, ans = -1;
+			while (lo <= hi) {
+				const mid = (lo + hi) >> 1;
+				const t = words[mid];
+				const start = t && typeof t.start === 'number' ? t.start : null;
+				if (start !== null && start <= elapsed) {
+					ans = mid;
+					lo = mid + 1;
+				} else {
+					hi = mid - 1;
+				}
+			}
+			return ans;
+		}
+
+		// Mode-specific dim cursors. Each tracks the highest index currently
+		// marked .ra-past in its own collection (wordSpans or blockEls).
+		let tickHandle = null;
+		let lastPastWordIdx = -1;
+		let lastPastBlockIdx = -1;
+		let lastScrollBlockIdx = -1;
+		let lastScrollAt = 0;
+
+		function applyWordDelta(target) {
+			if (target === lastPastWordIdx) return;
+			if (target > lastPastWordIdx) {
+				for (let i = lastPastWordIdx + 1; i <= target; i++) {
+					wordSpans[i].classList.add('ra-past');
+				}
+			} else {
+				for (let i = target + 1; i <= lastPastWordIdx; i++) {
+					wordSpans[i].classList.remove('ra-past');
+				}
+			}
+			lastPastWordIdx = target;
+		}
+
+		function applyBlockDelta(targetBlockIdx) {
+			if (targetBlockIdx === lastPastBlockIdx) return;
+			if (targetBlockIdx > lastPastBlockIdx) {
+				for (let i = lastPastBlockIdx + 1; i <= targetBlockIdx; i++) {
+					blockEls[i].classList.add('ra-past');
+				}
+			} else {
+				for (let i = targetBlockIdx + 1; i <= lastPastBlockIdx; i++) {
+					blockEls[i].classList.remove('ra-past');
+				}
+			}
+			lastPastBlockIdx = targetBlockIdx;
+		}
+
+		function tick() {
+			const elapsed = audio.currentTime;
+			const currentIdx = findCurrentWordIdx(elapsed);
+			if (mode === 'word') {
+				applyWordDelta(currentIdx - 1);
+			} else {
+				// Paragraph mode: dim every block strictly before the one
+				// containing the current word. The current word's block
+				// stays bright (matches word-mode's "current word bright"
+				// semantic at a coarser grain).
+				const currentBlockIdx = currentIdx >= 0 && currentIdx < N
+					? wordBlockIdx[currentIdx]
+					: -1;
+				applyBlockDelta(currentBlockIdx - 1);
+			}
+			// Block-change scroll-into-view, throttled to once per 700ms.
+			if (currentIdx >= 0 && currentIdx < N) {
+				const blockIdx = wordBlockIdx[currentIdx];
+				if (blockIdx !== lastScrollBlockIdx) {
+					const now = performance.now();
+					if (now - lastScrollAt > 700) {
+						blockEls[blockIdx].scrollIntoView({ block: 'center', behavior: 'smooth' });
+						lastScrollAt = now;
+					}
+					lastScrollBlockIdx = blockIdx;
+				}
+			}
+		}
+
+		function clearAllDim() {
+			// Pull both class sets in case mode just flipped. Cheap relative
+			// to a typical lesson size.
+			for (let i = 0; i <= lastPastWordIdx; i++) {
+				wordSpans[i].classList.remove('ra-past');
+			}
+			for (let i = 0; i <= lastPastBlockIdx; i++) {
+				blockEls[i].classList.remove('ra-past');
+			}
+			lastPastWordIdx = -1;
+			lastPastBlockIdx = -1;
+		}
+
+		function setMode(newMode) {
+			if (newMode !== 'word' && newMode !== 'paragraph') return;
+			if (newMode === mode) return;
+			mode = newMode;
+			root.dataset.raMode = mode;
+			saveMode(mode);
+			// Refresh the toggle button pressed-state.
+			const btns = root.querySelectorAll('[data-mode-btn]');
+			btns.forEach((b) => {
+				b.setAttribute('aria-pressed', b.dataset.modeBtn === mode ? 'true' : 'false');
+			});
+			clearAllDim();
+			tick();
+		}
+
+		// Wire up the toggle buttons and reflect the persisted state on
+		// first paint (component renders with word as the default press-
+		// state, so update if the persisted choice differs).
+		{
+			const btns = root.querySelectorAll('[data-mode-btn]');
+			btns.forEach((b) => {
+				b.setAttribute('aria-pressed', b.dataset.modeBtn === mode ? 'true' : 'false');
+				b.addEventListener('click', () => setMode(b.dataset.modeBtn));
+			});
+		}
+
+		function startTick() {
+			if (tickHandle !== null) return;
+			// 250ms tick: at typical narration ~3 words/sec, the dim
+			// boundary advances ~0-1 words per tick. Cheap because of
+			// the delta-only update.
+			tickHandle = setInterval(tick, 250);
+			tick();
+		}
+		function stopTick() {
+			if (tickHandle !== null) {
+				clearInterval(tickHandle);
+				tickHandle = null;
+			}
+		}
+
+		audio.addEventListener('play', startTick);
+		audio.addEventListener('playing', startTick);
+		audio.addEventListener('pause', () => {
+			stopTick();
+			tick();
+		});
+		audio.addEventListener('ended', () => {
+			stopTick();
+			tick();
+		});
+		// User scrub via native audio controls (rare, but should re-anchor
+		// the cursor immediately rather than waiting for the next tick).
+		audio.addEventListener('seeked', tick);
+
+		// Page-level spacebar pause, mirrors the ReadAlongLesson behavior.
+		let playbackEngaged = false;
+		audio.addEventListener('play', () => {
+			playbackEngaged = true;
+		});
+		function isTypingTarget(el) {
+			if (!el) return false;
+			const tag = el.tagName;
+			if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+			if (el.isContentEditable) return true;
+			return false;
+		}
+		if (audio.dataset.spaceHandlerBound !== '1') {
+			audio.dataset.spaceHandlerBound = '1';
+			document.addEventListener('keydown', (e) => {
+				if (e.code !== 'Space' && e.key !== ' ') return;
+				if (!playbackEngaged) return;
+				if (isTypingTarget(e.target)) return;
+				if (root.contains(e.target)) return;
+				e.preventDefault();
+				if (audio.paused) {
+					audio.play().catch(() => {});
+				} else {
+					audio.pause();
+				}
+			});
+		}
+	})();
+</script>
+
+<style>
+	.cw-readalong {
+		border: 1px solid var(--sl-color-gray-5, rgba(127, 127, 127, 0.25));
+		border-radius: 10px;
+		padding: 1rem 1.125rem;
+		margin: 1.5rem 0;
+		background: var(--sl-color-bg-sidebar, transparent);
+	}
+	.cw-readalong-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		margin-bottom: 0.625rem;
+	}
+	.cw-readalong-label {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.5rem;
+		font-size: 0.95rem;
+		color: var(--sl-color-text);
+	}
+	.cw-readalong-label svg {
+		color: var(--sl-color-accent, #7c3aed);
+		flex-shrink: 0;
+	}
+	.cw-readalong-duration {
+		opacity: 0.6;
+		font-size: 0.85rem;
+		font-weight: 400;
+		margin-left: 0.5rem;
+	}
+	.cw-readalong audio {
+		width: 100%;
+		display: block;
+	}
+	.cw-readalong-footer {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		gap: 1rem;
+		margin-top: 0.625rem;
+		font-size: 0.78rem;
+		flex-wrap: wrap;
+	}
+	.cw-readalong-download {
+		color: var(--sl-color-accent, #7c3aed);
+		text-decoration: none;
+		font-weight: 500;
+		opacity: 0.85;
+	}
+	.cw-readalong-download:hover {
+		text-decoration: underline;
+		opacity: 1;
+	}
+	.cw-readalong-note {
+		font-style: italic;
+		opacity: 0.75;
+	}
+	.cw-readalong-mode-row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.75rem;
+		margin-top: 0.875rem;
+		padding-top: 0.875rem;
+		border-top: 1px solid var(--sl-color-gray-5, rgba(127, 127, 127, 0.15));
+		font-size: 0.8rem;
+	}
+	.cw-readalong-mode-label {
+		opacity: 0.7;
+		letter-spacing: 0.01em;
+	}
+	.cw-readalong-mode {
+		display: inline-flex;
+		align-items: center;
+		gap: 2px;
+		height: 34px;
+		padding: 3px;
+		box-sizing: border-box;
+		border-radius: 999px;
+		background: var(--sl-color-gray-6, rgba(127, 127, 127, 0.12));
+		line-height: 1;
+	}
+	.cw-readalong-mode-btn {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		align-self: center;
+		font: inherit;
+		font-size: 0.78rem;
+		font-weight: 500;
+		line-height: 1;
+		height: 28px;
+		min-height: 0;
+		box-sizing: border-box;
+		background: transparent;
+		border: 0;
+		border-radius: 999px;
+		padding: 0 0.95rem;
+		margin: 0;
+		cursor: pointer;
+		color: var(--sl-color-text);
+		opacity: 0.65;
+		white-space: nowrap;
+		transition: background-color 0.18s ease, opacity 0.18s ease, box-shadow 0.18s ease, color 0.18s ease;
+	}
+	.cw-readalong-mode-btn:hover {
+		opacity: 1;
+	}
+	.cw-readalong-mode-btn:focus-visible {
+		outline: 2px solid var(--sl-color-accent, #7c3aed);
+		outline-offset: 2px;
+	}
+	.cw-readalong-mode-btn[aria-pressed='true'] {
+		background: var(--sl-color-bg, #fff);
+		color: var(--sl-color-text);
+		opacity: 1;
+		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.06);
+	}
+	[data-theme='dark'] .cw-readalong-mode-btn[aria-pressed='true'] {
+		background: var(--sl-color-gray-4, rgba(255, 255, 255, 0.08));
+		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+	}
+</style>
+
+<style is:global>
+	.ra-past {
+		opacity: 0.55;
+		transition: opacity 0.35s ease;
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.ra-past {
+			transition: none;
+		}
+	}
+</style>

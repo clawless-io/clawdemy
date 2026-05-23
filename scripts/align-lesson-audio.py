@@ -1,23 +1,29 @@
 #!/usr/bin/env python3
-"""Forced-alignment helper for the read-along trial.
+"""Forced-alignment helper: WhisperX on a lesson MP3.
 
-Runs WhisperX on a lesson MP3 and writes a word-level timing JSON to
-public/read-along/<slug>.timing.json. The trial preview page reads that JSON
-to highlight words synchronously with the audio.
+Runs WhisperX and writes a raw alignment JSON to
+`.read-along-trial/<slug>.json`. That raw output is the input to
+`scripts/build-readalong-timing.py`, which produces the MDX-aligned
+production timing JSON consumed by `<ReadAlongLesson>`.
+
+Pipeline:
+    audio:generate -> mp3 in public/audio/
+    cp public/audio/<slug>-lesson.mp3 .read-along-trial/<slug>.mp3
+    align-lesson-audio.py <slug>             # this script
+    build-readalong-timing.py <slug>         # produces public/read-along/*.timing.json
 
 Usage:
     python3 scripts/align-lesson-audio.py <slug>
 
 The script expects:
-- An MP3 at .read-along-trial/<slug>.mp3 (download manually from R2 first).
+- An MP3 at .read-along-trial/<slug>.mp3 (copy from public/audio/ after
+  audio:generate runs).
 - WhisperX installed (pip install whisperx) and ffmpeg on PATH.
+- WhisperX CLI on PATH. On macOS with pip --user installs, that means:
+  export PATH="$HOME/Library/Python/3.9/bin:$PATH"
 
-It uses --vad_method silero to avoid the pyannote PyTorch 2.6 weights_only
+Uses --vad_method silero to avoid the pyannote PyTorch 2.6 weights_only
 incompatibility that surfaces with the default pyannote VAD.
-
-Trial only. The full feature build will move alignment into the audio:generate
-pipeline (likely via ElevenLabs with-timestamps for new renders) so this
-script does not need to be production-grade.
 """
 
 from __future__ import annotations
@@ -72,13 +78,11 @@ def main() -> int:
         print(f"expected output not found: {raw_json}", file=sys.stderr)
         return 1
 
-    target = PUBLIC_DIR / f"{slug}.timing.json"
-    shutil.copy(raw_json, target)
-
-    with target.open() as f:
+    with raw_json.open() as f:
         timing = json.load(f)
     word_count = sum(len(seg.get("words", [])) for seg in timing.get("segments", []))
-    print(f"wrote {target} ({word_count} aligned words across {len(timing.get('segments', []))} segments)")
+    print(f"wrote {raw_json} ({word_count} aligned words across {len(timing.get('segments', []))} segments)")
+    print(f"next: python3 scripts/build-readalong-timing.py {slug}")
     return 0
 
 

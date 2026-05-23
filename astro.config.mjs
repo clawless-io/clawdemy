@@ -32,12 +32,15 @@ export default defineConfig({
 		},
 	},
 	integrations: [
-		// Sitemap with /legal/ pages excluded. Starlight registers @astrojs/sitemap
-		// internally; this explicit registration runs after Starlight's build:done
-		// hook so its filter is the one that lands on disk. Legal pages also carry
-		// noindex meta — sitemap exclusion is hygiene, noindex is enforcement.
+		// Sitemap with utility pages excluded (RBJ Global family rule: legal +
+		// utility pages get noindex,follow AND are omitted from sitemap; footer
+		// links remain). Starlight registers @astrojs/sitemap internally; this
+		// explicit registration runs after Starlight's build:done hook so its
+		// filter is the one that lands on disk. Utility pages also carry noindex
+		// meta in their frontmatter head: block; sitemap exclusion is hygiene,
+		// noindex is enforcement.
 		sitemap({
-			filter: (page) => !page.includes('/legal/'),
+			filter: (page) => !page.includes('/legal/') && !page.includes('/trust/'),
 		}),
 		starlight({
 			title: 'Clawdemy',
@@ -544,6 +547,63 @@ export default defineConfig({
 										{ label: 'Summary', slug: 'lessons/ai-foundations/where-to-be-careful/summary' },
 										{ label: 'Cheatsheet', slug: 'lessons/ai-foundations/where-to-be-careful/cheatsheet' },
 										{ label: 'References', slug: 'lessons/ai-foundations/where-to-be-careful/references' },
+									],
+								},
+							],
+						},
+					],
+				},
+				{
+					// Track 6 is grouped by mental-model phase, matching the Track 5
+					// pattern. See Doc/curriculum/track-6/mental-model-phases.md for
+					// the six-phase arc and Doc/curriculum/track-6/source-to-phase-mapping.md
+					// for the phase / phase_order assignment of each lesson.
+					label: 'Track 6: Privacy & Local-First AI',
+					items: [
+						{
+							label: 'Phase 1\nWhy your privacy matters when you use AI',
+							collapsed: true,
+							items: [
+								{
+									label: 'Why your worry is rational',
+									collapsed: true,
+									items: [
+										{ label: 'Overview', slug: 'lessons/privacy-local-first/why-your-worry-is-rational/brief' },
+										{ label: 'Lesson', slug: 'lessons/privacy-local-first/why-your-worry-is-rational/lesson' },
+										{ label: 'Practice', slug: 'lessons/privacy-local-first/why-your-worry-is-rational/practice' },
+										{ label: 'Summary', slug: 'lessons/privacy-local-first/why-your-worry-is-rational/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/privacy-local-first/why-your-worry-is-rational/cheatsheet' },
+										{ label: 'References', slug: 'lessons/privacy-local-first/why-your-worry-is-rational/references' },
+									],
+								},
+								{
+									label: 'Your starting point',
+									collapsed: true,
+									items: [
+										{ label: 'Overview', slug: 'lessons/privacy-local-first/your-starting-point/brief' },
+										{ label: 'Lesson', slug: 'lessons/privacy-local-first/your-starting-point/lesson' },
+										{ label: 'Practice', slug: 'lessons/privacy-local-first/your-starting-point/practice' },
+										{ label: 'Summary', slug: 'lessons/privacy-local-first/your-starting-point/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/privacy-local-first/your-starting-point/cheatsheet' },
+										{ label: 'References', slug: 'lessons/privacy-local-first/your-starting-point/references' },
+									],
+								},
+							],
+						},
+						{
+							label: 'Phase 2\nWhat an AI tool sees when you use it',
+							collapsed: true,
+							items: [
+								{
+									label: 'What happens in three seconds',
+									collapsed: true,
+									items: [
+										{ label: 'Overview', slug: 'lessons/privacy-local-first/what-happens-in-three-seconds-the-path-your-prompt-takes/brief' },
+										{ label: 'Lesson', slug: 'lessons/privacy-local-first/what-happens-in-three-seconds-the-path-your-prompt-takes/lesson' },
+										{ label: 'Practice', slug: 'lessons/privacy-local-first/what-happens-in-three-seconds-the-path-your-prompt-takes/practice' },
+										{ label: 'Summary', slug: 'lessons/privacy-local-first/what-happens-in-three-seconds-the-path-your-prompt-takes/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/privacy-local-first/what-happens-in-three-seconds-the-path-your-prompt-takes/cheatsheet' },
+										{ label: 'References', slug: 'lessons/privacy-local-first/what-happens-in-three-seconds-the-path-your-prompt-takes/references' },
 									],
 								},
 							],
