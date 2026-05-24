@@ -1,0 +1,104 @@
+---
+title: "Becoming a backprop ninja: gradients by hand"
+description: So far the autograd engine computed every gradient for you. This lesson removes the safety net and backpropagates by hand through the most important piece of any classifier or language model, softmax followed by cross-entropy, and lands on the elegant result that the gradient on the logits is just the predicted probabilities minus the true label. Owning this derivation is what turns gradient flow from a library's trick into something you can compute and debug yourself.
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+Every gradient so far came from the autograd engine. You called `backward()`, the gradients appeared, and you trusted them. That trust was earned, you built the engine, but trusting a tool and *understanding* it are different things. This lesson removes the safety net and has you backpropagate by hand, the way Karpathy frames it as "becoming a backprop ninja." The goal is not to abandon the engine; it is to make sure that when gradients flow, you know exactly what they are doing, so you can reason about training and debug it when something goes wrong.
+
+The contract holds, in its sharpest form yet: nothing inside is a mystery, not even the backward pass you have been letting the engine handle.
+
+## What "by hand" actually means
+
+Backpropagating by hand is not a new technique. It is the exact chain rule from the autograd lesson, each operation has a local derivative, and you multiply the incoming gradient by it as you walk backward, applied to the real layers of a network instead of toy `+` and `*` nodes. The engine automated this so you could build big expressions without bookkeeping. Doing it by hand for the key pieces is how you turn "the gradient appeared" into "I know precisely why the gradient is this number."
+
+You could, in principle, backpropagate the whole network this way. We will do the single most valuable piece, the one every classifier and every language model shares, and the practice will have you do another yourself.
+
+## The piece that matters most: softmax and cross-entropy
+
+Look at how almost every model ends. The network produces **logits** (raw output scores, one per class), softmax turns them into **probabilities**, and the **cross-entropy** loss (the negative log likelihood you have used since the bigram model) compares those probabilities to the true answer. For a single example whose correct class is `y`:
+
+```
+probabilities:  p_i = softmax(logits)_i = exp(z_i) / sum_j exp(z_j)
+loss:           L = -log(p_y)        (cross-entropy / negative log likelihood)
+```
+
+The gradient we want is `dL/dz_i`: how the loss responds to each logit. This is the most useful gradient in all of deep learning to know by heart, because it is the signal that flows back from the loss into the entire rest of the network, on every training step of every classifier and language model.
+
+## The result is beautifully simple
+
+After you push the loss back through the log, through the softmax, and onto the logits, almost everything cancels, and you are left with one of the cleanest results in the field:
+
+```
+dL/dz_i = p_i - y_i
+```
+
+That is: the gradient on each logit is the **predicted probability minus the true label** (where `y_i` is `1` for the correct class and `0` for every other).
+
+Where does that come from? Changing one logit `z_i` has two effects on the loss. Raising `z_i` directly raises its own probability `p_i` through the `exp(z_i)` in the softmax numerator. But it also raises the denominator (the sum of all the exponentials), which drags *every* probability down a little, including the correct class's `p_y`. For a wrong class, only the second effect touches `p_y`, so raising that logit can only hurt, giving a positive gradient of `p_i`. For the correct class, the helpful direct effect and the harmful denominator effect combine, and they net out to exactly `p_y - 1`. Put the two cases together and you get the single formula `p_i - y_i`. Read what it is telling the network to do:
+
+- For the **correct** class, `p_i - 1` is negative, so the gradient is negative. Gradient descent steps opposite the gradient, so it pushes that logit *up*, making the right answer more probable.
+- For every **wrong** class, `p_i - 0` is positive, so the gradient is positive, and gradient descent pushes that logit *down*, making the wrong answers less probable.
+- The size of each nudge is proportional to how much probability the model currently puts there. The more confidently wrong it is, the harder it is corrected.
+
+"Make the right one more likely and the wrong ones less likely, in proportion to how wrong you were." The famous result is just common sense, made exact.
+
+## A full derivation by hand, with numbers
+
+Take three classes with logits `z = [2.0, 1.0, 0.0]`, where the correct class is the first one, so the true label is `y = [1, 0, 0]`.
+
+First the forward pass. Exponentiate the logits and normalize (softmax):
+
+```
+exp(2.0) = 7.389    exp(1.0) = 2.718    exp(0.0) = 1.000
+sum = 11.107
+p = [7.389/11.107, 2.718/11.107, 1.000/11.107] = [0.665, 0.245, 0.090]
+loss = -log(p_0) = -log(0.665) = 0.41
+```
+
+For context, the uniform-guess baseline for three classes is `-log(1/3) = log(3) = 1.10`, so this example's loss of `0.41` already beats chance: the model puts more than a third of its probability on the correct class. Now the gradient on the logits, straight from the result:
+
+```
+dL/dz = p - y = [0.665 - 1, 0.245 - 0, 0.090 - 0] = [-0.335, 0.245, 0.090]
+```
+
+Read it back: the correct logit (index 0) has a negative gradient of `-0.335`, so training will push it up; the two wrong logits have positive gradients, so training will push them down, and the more probable wrong class (`0.245`) gets pushed harder than the less probable one (`0.090`). 
+
+One satisfying sanity check: the three gradients sum to zero (`-0.335 + 0.245 + 0.090 = 0`). That is not a coincidence. Softmax probabilities always sum to 1, so adding the same amount to every logit changes nothing, which means the gradients along the "raise everything equally" direction must cancel. If you ever derive these gradients and they do not sum to zero, you have a bug, exactly the kind of check a backprop ninja uses.
+
+Prove to yourself the gradient is right by taking one gradient-descent step with it. Step the logits opposite the gradient (here with a learning rate of `1.0`):
+
+```
+z_new = z - grad = [2 - (-0.335), 1 - 0.245, 0 - 0.090] = [2.335, 0.755, -0.090]
+new probabilities = softmax(z_new) = [0.773, 0.159, 0.068]
+new loss = -log(0.773) = 0.26
+```
+
+The loss fell from `0.41` to `0.26`, and the correct class's probability rose from `0.665` to `0.773`, in one step, using a gradient you computed by hand. That is the whole point: a gradient you derived yourself, and verified by watching it lower the loss, is a gradient you understand.
+
+## Why this matters when you use AI
+
+This is not an academic exercise. The gradient `p - y` is the precise signal that trains every classifier and every large language model. A language model's training step is softmax-plus-cross-entropy over the whole vocabulary: it predicts a probability for every possible next token, compares to the one token that actually came next, and the gradient that flows back to start improving billions of parameters is exactly "predicted probabilities minus the one-hot true token." When GPT-style models train, this is the number at the very top of the backward pass, repeated for trillions of tokens.
+
+Knowing it by hand changes your relationship with these systems. You can sanity-check a training setup (does the starting loss and its gradient make sense?), you can reason about what the loss is actually pushing the model toward (more mass on the truth, less on everything else), and you can debug, because a wrong gradient is the most common silent bug in a model, and the only way to catch it is to know what the right one should be. That is what "ninja" means here: not dependence on a black box, but the ability to open it.
+
+## Common pitfalls
+
+**Thinking by-hand backprop is a different algorithm.** It is the same chain rule the engine runs, local derivative times incoming gradient, walked backward. Doing it yourself reveals the engine, it does not replace it with something new.
+
+**Forgetting the gradient is "predicted minus true," not "true minus predicted."** The sign matters: `p - y` gives a negative gradient on the correct class (so descent raises it). Flip it and you would train the model to be confidently wrong.
+
+**Misreading a saturated or zero gradient as "done."** A near-zero gradient on a logit means the model already puts about the right probability there, not that the model is finished. Read gradients per-component, not as a single verdict.
+
+**Skipping the sum-to-zero check.** Softmax-plus-cross-entropy gradients on the logits always sum to zero. It is a free, instant sanity check, and skipping it lets sign errors and bookkeeping mistakes slip through.
+
+## What you should remember
+
+- **Backpropagating by hand is the chain rule from lesson 1, applied to a real network's layers.** Each operation contributes its local derivative; you multiply the incoming gradient by it and walk backward. The autograd engine automates exactly this, and doing it yourself for the key pieces is how you truly understand and debug gradient flow.
+- **The most important gradient to know is softmax-plus-cross-entropy: `dL/dz_i = p_i - y_i`.** The gradient on each logit is the predicted probability minus the true label, push the correct logit up, the wrong ones down, in proportion to the probability mass that is misplaced. Worked once: logits `[2, 1, 0]` with class 0 correct give probabilities `[0.665, 0.245, 0.090]`, loss `0.41`, and gradient `[-0.335, 0.245, 0.090]`, which sums to zero.
+- **This is the exact signal that trains every classifier and language model.** Next-token prediction is softmax-plus-cross-entropy over the vocabulary, so "predicted minus true" is the number at the top of the backward pass on every training step of a model like GPT. Knowing it by hand turns the engine from a black box into something you can reason about and fix.
+
+You can now compute, not just trust, the gradients that train a network, starting from the most important one and (in the practice) extending to others by the same method. With the engine fully demystified, the next lesson returns to the architecture itself and restructures the flat MLP into a deeper, hierarchical model in the style of WaveNet, so the network can build up understanding in stages rather than all at once.

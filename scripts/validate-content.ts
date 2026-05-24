@@ -98,6 +98,7 @@ const BLOOM_VERBS = [
 	'compute',
 	'assemble',
 	'choose',
+	'walk',
 ];
 
 const TRACK_5_PHASE_SLUGS = [

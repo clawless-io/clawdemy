@@ -1,0 +1,144 @@
+---
+title: "Practice: Building an autograd engine: micrograd"
+description: Check your understanding of the autograd engine, then run a full backward pass by hand and confirm it against micrograd's own visualizer.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+import Flashcard from '../../../../../components/Flashcard.astro';
+
+## Self-check
+
+Five short questions. Try to answer each in your head (or on paper) before opening the collapsible. Active retrieval is where the learning sticks; rereading is comfortable but does much less.
+
+**1. What four things does a `Value` object carry, and which one is filled in during the backward pass?**
+
+<details>
+<summary>Show answer</summary>
+
+Its **data** (the number, computed forward), the **operation** that produced it, its **children** (the input Values it came from), and its **grad**. The grad is the one filled in during the backward pass; it ends up holding the derivative of the loss with respect to that value. The other three are set as the graph is built forward.
+
+</details>
+
+**2. For `e = a * b`, the gradient handed to `a` uses which value, and why?**
+
+<details>
+<summary>Show answer</summary>
+
+It uses `b`, the other factor. Nudging `a` changes `e` at the rate `b`, so the local derivative of the product with respect to `a` is `b`. Backprop then multiplies that local derivative by the gradient arriving from above. The most common mistake is reaching for `a` itself; anchor on "a product's local derivative with respect to one input is the other input."
+
+</details>
+
+**3. Addition has a local derivative of 1 for each input. What does that mean for how gradients flow through a `+` node?**
+
+<details>
+<summary>Show answer</summary>
+
+A `+` node passes the incoming gradient straight through to both of its children, unchanged. If `d = e + c` and the gradient arriving at `d` is `-2`, then both `e` and `c` receive `-2`. Addition is the routing operation of backprop: it copies the gradient down each branch.
+
+</details>
+
+**4. Why must backprop process nodes in reverse topological order?**
+
+<details>
+<summary>Show answer</summary>
+
+Because a node has to collect all the gradient flowing into it from above before it can pass anything to its children. Reverse topological order guarantees that by the time you reach a node, every path that feeds into it from the output side has already been accounted for. Process a node too early and it hands its children an incomplete gradient.
+
+</details>
+
+**5. Is autograd doing symbolic calculus (deriving a formula for the gradient)?**
+
+<details>
+<summary>Show answer</summary>
+
+No. It computes a *number* for each node by propagating numbers backward through the recorded graph, multiplying local derivatives by incoming gradients. No algebraic formula is derived or simplified; it is arithmetic chained through the graph. That is exactly why it scales to millions of parameters where deriving formulas by hand would be hopeless.
+
+</details>
+
+## Try it yourself
+
+Run a full backward pass by hand on a fresh expression, then confirm your gradients against a real autograd engine.
+
+**Setup.** Take the leaf values `a = 3`, `b = -2`, `c = 4`, `f = 5`, and the expression `L = (a * b + c) * f`. You will compute the forward values first, then the gradient of `L` with respect to every value.
+
+**Steps.**
+
+1. Forward pass. Compute `e = a * b`, then `d = e + c`, then `L = d * f`. Write down each intermediate value.
+2. Seed the output gradient: `grad of L = 1`.
+3. Back through `L = d * f`: `grad of d = grad of L · f` and `grad of f = grad of L · d`.
+4. Back through `d = e + c`: addition passes the gradient through, so `grad of e` and `grad of c` each equal `grad of d`.
+5. Back through `e = a * b`: `grad of a = grad of e · b` and `grad of b = grad of e · a`.
+6. Read one gradient aloud as a rate: "nudging `a` up a hair changes `L` at the rate ___."
+
+**Expected outcome.** Your forward values should be `e = -6`, `d = -2`, `L = -10`. Your gradients should be:
+
+```
+grad L = 1
+grad d = 1 · 5  =  5        grad f = 1 · (-2) = -2
+grad e = 5                  grad c = 5
+grad a = 5 · (-2) = -10     grad b = 5 · 3  = 15
+```
+
+So `dL/da = -10`: nudging `a` up moves `L` down at ten times the rate. If your numbers match, you just ran the same procedure PyTorch runs on a billion-parameter model, on four numbers.
+
+**Confirm it against the real thing (optional).** Andrej Karpathy's [micrograd repo](https://github.com/karpathy/micrograd) is the actual engine, around 150 lines, with a small graph visualizer. Build the same expression with its `Value` objects, call `L.backward()`, and read each node's `.grad`. The visualizer draws the graph with the data and grad on every node, so you can watch your by-hand gradients appear in the boxes. Seeing your own arithmetic match the engine's is the moment "the framework computes the gradients" stops being magic.
+
+## Flashcards
+
+Eight cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay out the full set as one card per page, ready to print or save as a PDF for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="What is an autograd engine, in one sentence?">
+
+A machine that records a computation as a graph and automatically computes the derivative of the output with respect to every input, by knowing each operation's local derivative and walking the chain rule backward through the graph.
+
+</Flashcard>
+
+<Flashcard question="What is the forward pass?">
+
+Running the expression to compute the output. As a side effect it builds the computational graph: each resulting `Value` remembers its data, the operation that made it, and its input children.
+
+</Flashcard>
+
+<Flashcard question="Local derivative of addition (`d = e + c`)?">
+
+`1` for each input. A `+` node passes the incoming gradient straight through, unchanged, to both children.
+
+</Flashcard>
+
+<Flashcard question="Local derivative of multiplication (`e = a * b`)?">
+
+With respect to one input it is the value of the other input: grad to `a` uses `b`, grad to `b` uses `a`. (The product rule on a single product.)
+
+</Flashcard>
+
+<Flashcard question="Local derivative of `tanh(x)`?">
+
+`1 - tanh(x)^2`. `tanh` is the nonlinear squashing function that turns a weighted sum into a neuron; backprop flows through it using this local derivative like any other op.
+
+</Flashcard>
+
+<Flashcard question="State the backpropagation recipe.">
+
+Seed grad of the output `L` as `dL/dL = 1`. Walk the graph backward in reverse topological order. At each node, grad of child = grad of node times local derivative. Sum gradients where a node feeds two places. When done, every node holds `dL/d(itself)`.
+
+</Flashcard>
+
+<Flashcard question="How does micrograd relate to PyTorch?">
+
+Same procedure: a recorded graph, a local derivative per operation, the chain rule walked backward until every parameter holds its gradient. micrograd is ~150 lines on single numbers; PyTorch is millions of lines on tensors for speed. The idea is identical.
+
+</Flashcard>
+
+<Flashcard question="Is backprop deriving a gradient formula symbolically?">
+
+No. It propagates numbers backward through the graph, multiplying local derivatives by incoming gradients. It computes a numeric gradient per node, not an algebraic formula.
+
+</Flashcard>
+
+</FlashcardSet>

@@ -1,0 +1,147 @@
+---
+title: "Practice: activations, gradients, and BatchNorm"
+description: Check your understanding of what makes deep nets fail to train, then diagnose a bad initialization and a saturated neuron by hand.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+import Flashcard from '../../../../../components/Flashcard.astro';
+
+## Self-check
+
+Five short questions. Try to answer each in your head (or on paper) before opening the collapsible. Active retrieval is where the learning sticks; rereading is comfortable but does much less.
+
+**1. Why does a naive network's loss start so much higher than it should?**
+
+<details>
+<summary>Show answer</summary>
+
+At initialization the weights are random, which makes the output logits large and spread out, and softmax turns large, spread logits into a confident distribution. So the untrained network is *confidently wrong*, which is the most expensive thing under negative log likelihood. A model that knew nothing should instead guess uniformly and start at the baseline loss `-log(1/27) = log(27) = 3.30`. Starting far above that is an initialization problem.
+
+</details>
+
+**2. What does it mean for a `tanh` neuron to "saturate," and why is that fatal for learning?**
+
+<details>
+<summary>Show answer</summary>
+
+Saturated means its input is large enough that the output sits in `tanh`'s flat tail, near `+1` or `-1`. There the local derivative `1 - tanh^2` is nearly zero. Backprop multiplies the incoming gradient by that local derivative, so a saturated neuron passes almost no gradient to the weights feeding it, and they stop updating. A neuron saturated for every example is effectively dead: it produces an output but learns nothing.
+
+</details>
+
+**3. What is the single best diagnostic for saturation, and what do you look for?**
+
+<details>
+<summary>Show answer</summary>
+
+A histogram of a layer's activations during training. If the values pile up against `-1` and `+1`, the layer is saturated and in trouble; if they spread across the responsive middle range, it is healthy. The histogram turns an invisible failure (no gradient flowing) into a picture you can read at a glance.
+
+</details>
+
+**4. What problem does scaling weights by `1 / sqrt(number of inputs)` solve?**
+
+<details>
+<summary>Show answer</summary>
+
+Each neuron sums many weighted inputs, and summing many numbers grows the result, so more inputs (larger fan-in) means larger pre-activations and more saturation. Scaling the initial weights down by `1 / sqrt(fan-in)` counteracts that growth, keeping pre-activations at a healthy, roughly unit spread layer to layer, so signals neither explode into saturation nor vanish toward zero through depth.
+
+</details>
+
+**5. What does batch normalization do, and what are its two main caveats?**
+
+<details>
+<summary>Show answer</summary>
+
+It normalizes a layer's pre-activations to zero mean and unit variance across the current minibatch, then applies a learned gain and bias so the network can still represent any spread it needs, keeping activations healthy regardless of initialization. Caveats: (1) it couples the examples in a batch (each output depends on its batchmates), a mild regularizer but a common source of bugs; (2) at inference there is no batch, so it uses a running average of mean and variance collected during training.
+
+</details>
+
+## Try it yourself
+
+Diagnose two networks the way the lesson does: from the numbers alone.
+
+**Setup.** You will judge an initialization from the starting loss, and judge a neuron from its pre-activation.
+
+**Steps.**
+
+1. A character model over 27 characters reports a starting loss of `13.5`. Compute the uniform baseline `-log(1/27)` and decide: is the initialization healthy, and if not, what is the fix?
+2. A token model over `50` possible tokens is well initialized. What starting loss should you expect? (Compute `-log(1/50)`.)
+3. A `tanh` neuron has a pre-activation of `2`. Its output is `tanh(2) = 0.964`. Compute its local derivative `1 - tanh^2` and say roughly what fraction of the gradient it passes back.
+
+**Expected outcome.**
+
+```
+1.  baseline = -log(1/27) = log(27) = 3.30
+    13.5 is far above 3.30 -> initialization is bad (over-confident logits).
+    Fix: shrink the output-layer weights so initial logits are near zero.
+
+2.  expected start = -log(1/50) = log(50) = 3.91
+    (the baseline rises with vocabulary size: more options, higher uniform loss)
+
+3.  1 - tanh(2)^2 = 1 - 0.964^2 = 1 - 0.93 = 0.07
+    the neuron passes back only about 7% of the gradient -> nearly numb,
+    on its way to saturated.
+```
+
+Both diagnoses came from a single number each, no training run required. That is the whole point of the lesson: the failures are invisible until you know what number to look at, and then they are obvious.
+
+**Confirm it against the real thing (optional).** In Andrej Karpathy's [makemore repo](https://github.com/karpathy/makemore), the Part 3 notebook prints the starting loss and plots activation histograms before and after fixing the initialization. Run it, check that the fixed starting loss lands near `3.30`, and compare the saturated histogram (piled at the tails) to the healthy one (spread across the middle). Seeing the numbers and pictures match makes the diagnostics concrete.
+
+## Flashcards
+
+Eight cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay out the full set as one card per page, ready to print or save as a PDF for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="What is the uniform-guess baseline loss, and why does it matter?">
+
+`-log(1/V) = log(V)` for a vocabulary of `V` options (`3.30` for 27 characters). A well-initialized model should start training near it. A much higher starting loss signals over-confident logits, an initialization problem, not an architecture problem.
+
+</Flashcard>
+
+<Flashcard question="Why does a naive network start with a huge loss?">
+
+Random initial weights produce large, spread-out logits; softmax turns those into a confident distribution, so the untrained network is confidently wrong, which is maximally expensive under negative log likelihood.
+
+</Flashcard>
+
+<Flashcard question="What is tanh saturation and why does it stop learning?">
+
+A large pre-activation pushes `tanh` into its flat tails (near `+1` or `-1`), where the local derivative `1 - tanh^2` is near zero. Backprop multiplies the incoming gradient by it, so almost no gradient reaches the neuron's weights and they stop updating. Saturated for every example = a dead neuron.
+
+</Flashcard>
+
+<Flashcard question="What is the best diagnostic for saturation?">
+
+A histogram of a layer's activations during training. Piled at `-1`/`+1` = saturated and in trouble; spread across the middle = healthy. It turns "no gradient is flowing" into a visible picture.
+
+</Flashcard>
+
+<Flashcard question="What does scaling weights by 1/sqrt(fan-in) achieve?">
+
+It counteracts the growth from summing many inputs, keeping pre-activations at a healthy, roughly unit spread layer to layer, so signals neither explode into saturation nor vanish through depth. This is Kaiming/He initialization.
+
+</Flashcard>
+
+<Flashcard question="What does batch normalization do?">
+
+Normalizes a layer's pre-activations to zero mean and unit variance across the minibatch, then applies a learned gain and bias. Keeps activations well-behaved during training regardless of initialization.
+
+</Flashcard>
+
+<Flashcard question="Two caveats of batch normalization?">
+
+(1) It couples the examples in a batch, each output depends on its batchmates (a mild regularizer, but a common bug source). (2) At inference there is no batch, so it uses a running average of mean/variance collected during training.
+
+</Flashcard>
+
+<Flashcard question="How do these techniques connect to real large language models?">
+
+No deep network trains without them. Sane initialization is standard, and normalization layers are everywhere, every transformer has them (layer normalization), placed to keep activations and gradients alive across many layers. "Training was unstable / diverged" is this territory.
+
+</Flashcard>
+
+</FlashcardSet>

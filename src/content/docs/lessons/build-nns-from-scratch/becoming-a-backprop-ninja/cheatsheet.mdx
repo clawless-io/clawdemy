@@ -1,0 +1,65 @@
+---
+title: "Cheatsheet: becoming a backprop ninja"
+description: One-page reference. What by-hand backprop is, the softmax-plus-cross-entropy gradient, a worked derivation, the sanity checks, and the local derivatives you need.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## What by-hand backprop is
+
+The same chain rule as the autograd engine, local derivative times incoming gradient, walked backward, done by hand instead of by `backward()`. The point is understanding and debugging gradient flow, not replacing the engine.
+
+## The gradient to know by heart
+
+Every classifier and language model ends the same way: logits -> softmax -> probabilities -> cross-entropy (negative log likelihood) loss. The gradient on the logits is:
+
+```
+dL/dz_i = p_i - y_i        (predicted probability minus the true label)
+```
+
+- Correct class: `p_y - 1` is negative -> descent pushes that logit up (right answer more likely).
+- Wrong classes: `p_i` is positive -> descent pushes those logits down.
+- Size is proportional to misplaced probability mass: confidently-wrong is corrected hardest.
+
+## Why it is p - y (intuition)
+
+Raising a logit `z_i` boosts its own `p_i` (numerator) but also inflates the denominator, dragging all probabilities down. Wrong class: only the denominator effect hits `p_y`, net `+p_i`. Correct class: the two effects net to `p_y - 1`. Together: `p_i - y_i`.
+
+## Worked derivation
+
+Logits `z = [2, 1, 0]`, correct class 0:
+
+```
+exp: 7.389, 2.718, 1.000   sum = 11.107
+p   = [0.665, 0.245, 0.090]      loss = -log(0.665) = 0.41
+grad = p - y = [0.665-1, 0.245, 0.090] = [-0.335, 0.245, 0.090]
+one step (lr 1): z_new = z - grad = [2.335, 0.755, -0.090]
+  -> p_new = [0.773, 0.159, 0.068]   new loss = 0.26   (fell from 0.41)
+```
+
+## Sanity checks a ninja uses
+
+- **Softmax+cross-entropy gradients sum to zero.** `-0.335 + 0.245 + 0.090 = 0`. If not, you have a bug.
+- **A gradient step should lower the loss.** Compute it, step opposite the gradient, confirm the loss drops.
+- **Starting loss near the uniform baseline** `-log(1/V) = log(V)` (e.g. `log(3) = 1.10` for 3 classes), not far above it.
+
+## Local derivatives to chain (from lesson 1)
+
+```
+add  (d = a + b):   passes gradient through unchanged (local derivative 1)
+mul  (c = a * b):   each input gets the other input's value
+tanh (h = tanh(z)): local derivative 1 - h^2
+```
+
+By-hand backprop = walk these (and softmax+cross-entropy) backward, multiplying incoming gradient by each local derivative.
+
+## Why it matters for AI
+
+`p - y` is the exact signal that trains every classifier and large language model: next-token prediction is softmax+cross-entropy over the vocabulary, so "predicted probabilities minus the one-hot true token" is the number at the top of the backward pass on every training step of a model like GPT. Knowing it by hand lets you reason about and debug training, a wrong gradient is the most common silent bug, and the only way to catch it is to know the right answer.
+
+## The one-line version
+
+By-hand backprop is the chain rule applied to a real network; the gradient you must know is softmax+cross-entropy's `dL/dz = p - y` (predicted minus true), the exact signal that trains every model from this toy to GPT.

@@ -611,6 +611,149 @@ export default defineConfig({
 					],
 				},
 				{
+					label: 'Track 13: Build Neural Networks from Scratch',
+					items: [
+						{
+							label: 'Phase 1\nThe autograd engine',
+							collapsed: true,
+							items: [
+								{
+									label: 'Building an autograd engine',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/build-nns-from-scratch/micrograd-the-autograd-engine/brief' },
+										{ label: 'Lesson', slug: 'lessons/build-nns-from-scratch/micrograd-the-autograd-engine/lesson' },
+										{ label: 'Practice', slug: 'lessons/build-nns-from-scratch/micrograd-the-autograd-engine/practice' },
+										{ label: 'Summary', slug: 'lessons/build-nns-from-scratch/micrograd-the-autograd-engine/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/build-nns-from-scratch/micrograd-the-autograd-engine/cheatsheet' },
+										{ label: 'References', slug: 'lessons/build-nns-from-scratch/micrograd-the-autograd-engine/references' },
+									],
+								},
+								{
+									label: 'Training a neural net',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/build-nns-from-scratch/building-and-training-a-net/brief' },
+										{ label: 'Lesson', slug: 'lessons/build-nns-from-scratch/building-and-training-a-net/lesson' },
+										{ label: 'Practice', slug: 'lessons/build-nns-from-scratch/building-and-training-a-net/practice' },
+										{ label: 'Summary', slug: 'lessons/build-nns-from-scratch/building-and-training-a-net/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/build-nns-from-scratch/building-and-training-a-net/cheatsheet' },
+										{ label: 'References', slug: 'lessons/build-nns-from-scratch/building-and-training-a-net/references' },
+									],
+								},
+							],
+						},
+						{
+							label: 'Phase 2\nBuilding a language model',
+							collapsed: true,
+							items: [
+								{
+									label: 'The bigram model',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/build-nns-from-scratch/makemore-the-bigram-model/brief' },
+										{ label: 'Lesson', slug: 'lessons/build-nns-from-scratch/makemore-the-bigram-model/lesson' },
+										{ label: 'Practice', slug: 'lessons/build-nns-from-scratch/makemore-the-bigram-model/practice' },
+										{ label: 'Summary', slug: 'lessons/build-nns-from-scratch/makemore-the-bigram-model/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/build-nns-from-scratch/makemore-the-bigram-model/cheatsheet' },
+										{ label: 'References', slug: 'lessons/build-nns-from-scratch/makemore-the-bigram-model/references' },
+									],
+								},
+								{
+									label: 'An MLP language model',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/build-nns-from-scratch/makemore-mlp-language-model/brief' },
+										{ label: 'Lesson', slug: 'lessons/build-nns-from-scratch/makemore-mlp-language-model/lesson' },
+										{ label: 'Practice', slug: 'lessons/build-nns-from-scratch/makemore-mlp-language-model/practice' },
+										{ label: 'Summary', slug: 'lessons/build-nns-from-scratch/makemore-mlp-language-model/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/build-nns-from-scratch/makemore-mlp-language-model/cheatsheet' },
+										{ label: 'References', slug: 'lessons/build-nns-from-scratch/makemore-mlp-language-model/references' },
+									],
+								},
+								{
+									label: 'Activations and gradients',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/build-nns-from-scratch/stabilize-training-activations-gradients-batchnorm/brief' },
+										{ label: 'Lesson', slug: 'lessons/build-nns-from-scratch/stabilize-training-activations-gradients-batchnorm/lesson' },
+										{ label: 'Practice', slug: 'lessons/build-nns-from-scratch/stabilize-training-activations-gradients-batchnorm/practice' },
+										{ label: 'Summary', slug: 'lessons/build-nns-from-scratch/stabilize-training-activations-gradients-batchnorm/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/build-nns-from-scratch/stabilize-training-activations-gradients-batchnorm/cheatsheet' },
+										{ label: 'References', slug: 'lessons/build-nns-from-scratch/stabilize-training-activations-gradients-batchnorm/references' },
+									],
+								},
+								{
+									label: 'Backprop by hand',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/build-nns-from-scratch/becoming-a-backprop-ninja/brief' },
+										{ label: 'Lesson', slug: 'lessons/build-nns-from-scratch/becoming-a-backprop-ninja/lesson' },
+										{ label: 'Practice', slug: 'lessons/build-nns-from-scratch/becoming-a-backprop-ninja/practice' },
+										{ label: 'Summary', slug: 'lessons/build-nns-from-scratch/becoming-a-backprop-ninja/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/build-nns-from-scratch/becoming-a-backprop-ninja/cheatsheet' },
+										{ label: 'References', slug: 'lessons/build-nns-from-scratch/becoming-a-backprop-ninja/references' },
+									],
+								},
+								{
+									label: 'A hierarchical (WaveNet) model',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/build-nns-from-scratch/wavenet-hierarchical-model/brief' },
+										{ label: 'Lesson', slug: 'lessons/build-nns-from-scratch/wavenet-hierarchical-model/lesson' },
+										{ label: 'Practice', slug: 'lessons/build-nns-from-scratch/wavenet-hierarchical-model/practice' },
+										{ label: 'Summary', slug: 'lessons/build-nns-from-scratch/wavenet-hierarchical-model/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/build-nns-from-scratch/wavenet-hierarchical-model/cheatsheet' },
+										{ label: 'References', slug: 'lessons/build-nns-from-scratch/wavenet-hierarchical-model/references' },
+									],
+								},
+							],
+						},
+						{
+							label: 'Phase 3\nBuilding a transformer',
+							collapsed: true,
+							items: [
+								{
+									label: 'Self-attention from scratch',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/build-nns-from-scratch/building-gpt-self-attention/brief' },
+										{ label: 'Lesson', slug: 'lessons/build-nns-from-scratch/building-gpt-self-attention/lesson' },
+										{ label: 'Practice', slug: 'lessons/build-nns-from-scratch/building-gpt-self-attention/practice' },
+										{ label: 'Summary', slug: 'lessons/build-nns-from-scratch/building-gpt-self-attention/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/build-nns-from-scratch/building-gpt-self-attention/cheatsheet' },
+										{ label: 'References', slug: 'lessons/build-nns-from-scratch/building-gpt-self-attention/references' },
+									],
+								},
+								{
+									label: 'Assembling the full GPT',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/build-nns-from-scratch/assembling-and-training-gpt/brief' },
+										{ label: 'Lesson', slug: 'lessons/build-nns-from-scratch/assembling-and-training-gpt/lesson' },
+										{ label: 'Practice', slug: 'lessons/build-nns-from-scratch/assembling-and-training-gpt/practice' },
+										{ label: 'Summary', slug: 'lessons/build-nns-from-scratch/assembling-and-training-gpt/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/build-nns-from-scratch/assembling-and-training-gpt/cheatsheet' },
+										{ label: 'References', slug: 'lessons/build-nns-from-scratch/assembling-and-training-gpt/references' },
+									],
+								},
+								{
+									label: 'Building the tokenizer',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/build-nns-from-scratch/building-the-gpt-tokenizer/brief' },
+										{ label: 'Lesson', slug: 'lessons/build-nns-from-scratch/building-the-gpt-tokenizer/lesson' },
+										{ label: 'Practice', slug: 'lessons/build-nns-from-scratch/building-the-gpt-tokenizer/practice' },
+										{ label: 'Summary', slug: 'lessons/build-nns-from-scratch/building-the-gpt-tokenizer/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/build-nns-from-scratch/building-the-gpt-tokenizer/cheatsheet' },
+										{ label: 'References', slug: 'lessons/build-nns-from-scratch/building-the-gpt-tokenizer/references' },
+									],
+								},
+							],
+						},
+					],
+				},
+				{
 					label: 'Track 12: Intro to Deep Learning',
 					items: [
 						{

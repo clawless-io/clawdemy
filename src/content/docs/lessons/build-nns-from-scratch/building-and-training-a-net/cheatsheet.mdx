@@ -1,0 +1,66 @@
+---
+title: "Cheatsheet: Building and training a net: micrograd"
+description: One-page reference. The neuron/layer/MLP structure, the loss, the gradient-descent update, the four-step training loop, and a worked step.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## The structure
+
+| Piece | What it is |
+| --- | --- |
+| Neuron | `tanh(w1*x1 + ... + wn*xn + b)`; the `w`s and `b` are its trainable parameters (leaf Values) |
+| Layer | several neurons run on the same inputs, each producing one output |
+| MLP | layers stacked, each layer's outputs feeding the next; e.g. `[3, 4, 4, 1]` |
+| Forward pass | run an input through the MLP; records the whole network as one computational graph |
+
+## The loss (mean squared error)
+
+```
+loss = (pred1 - target1)^2 + (pred2 - target2)^2 + ...
+```
+
+One number at the top of the graph. Squaring makes any miss positive and punishes big misses more. Because `loss` is a `Value`, `loss.backward()` gives every parameter `dLoss/d(itself)`.
+
+## Gradient descent update
+
+```
+parameter = parameter - learning_rate * gradient
+```
+
+Step each parameter opposite its gradient (downhill on the loss) by a small `learning_rate` (e.g. `0.1`). The minus sign is load-bearing: adding the gradient would climb the loss.
+
+## The training loop (order matters)
+
+1. **Forward pass** -> predictions + loss (builds the graph).
+2. **Zero the gradients** -> reset every parameter's `grad` to `0`.
+3. **Backward pass** -> `loss.backward()`; every parameter gets its gradient.
+4. **Update** -> `p.data -= learning_rate * p.grad`.
+
+Repeat until the loss is small. Step 2 is the one beginners forget.
+
+## Worked step (single weight)
+
+`w = 1`, `x = 2`, target `y = 6`, `learning_rate = 0.1`:
+
+```
+pred = w*x = 2          loss = (2-6)^2 = 16
+grad w = 2*(pred-y) * x = (-8)(2) = -16
+w = 1 - 0.1*(-16) = 2.6      new loss = (5.2-6)^2 = 0.64
+next step:  w = 2.92         new loss = 0.0256   (converging toward w=3)
+```
+
+## Why the gradients must be zeroed
+
+Backprop accumulates into `grad` with `+=` (so a parameter feeding two places sums its gradients correctly). Across iterations that means old gradients pile onto new ones unless you reset to `0` first. Forgetting is a silent bug that destabilizes training.
+
+## Why it matters for AI
+
+Forward, loss, backward, update is exactly how every network trains, GPT included. At scale the loss is cross-entropy, the optimizer is Adam (adaptive step size), the forward pass is a transformer on tensors across many GPUs, but the heartbeat is identical. A trained model is just its parameters: the numbers left after the loop nudged them downhill many times.
+
+## The one-line version
+
+Wire neurons into an MLP, score it with a single loss, and repeat the forward/zero/backward/update loop so gradient descent nudges every parameter downhill until the loss is small. That is training.

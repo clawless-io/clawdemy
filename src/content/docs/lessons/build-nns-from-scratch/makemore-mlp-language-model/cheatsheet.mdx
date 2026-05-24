@@ -1,0 +1,67 @@
+---
+title: "Cheatsheet: the MLP language model"
+description: One-page reference. Why counting fails on context, learned embeddings, the MLP architecture end to end, the training wrinkles, and a worked parameter count.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## Why counting cannot scale with context
+
+Each extra character of context multiplies the count table by 27 and makes it emptier:
+
+```
+1 char of context:  27 x 27       =        729 entries
+3 chars of context: 27 x 27 x 27 x 27 = 531,441 entries (mostly empty)
+```
+
+Most long contexts never appear in training, so their rows are blank. A representation that generalizes is needed instead.
+
+## Learned embeddings (the key idea)
+
+Give each character a short vector (say 2 numbers), stored in a lookup table, one row per character. The vectors are **parameters**, learned by gradient descent. Similar characters can land near each other, so what the model learns about one context transfers to nearby ones. This is what the count table lacked.
+
+## The architecture (Bengio-style MLP)
+
+1. **Look up** the embedding of each context character (e.g. the previous 3).
+2. **Concatenate** them into one input vector.
+3. **Hidden layer:** linear + `tanh`.
+4. **Output layer:** 27 logits.
+5. **Softmax** -> probabilities; train on negative log likelihood.
+
+Steps 3-5 are the Phase 1 network; steps 1-2 are the only new structure.
+
+## Worked example: embed + concatenate, and parameter count
+
+Context `e, m, m` with `e -> [0.2,-0.5]`, `m -> [0.9,0.1]`:
+
+```
+concatenated input: [0.2, -0.5, 0.9, 0.1, 0.9, 0.1]   (3 x 2 = 6 numbers)
+```
+
+Params (3 chars context, 2-dim embedding, 100 hidden, 27 out):
+
+```
+embedding table:  27 x 2          =    54
+hidden layer:     6 x 100 + 100   =   700
+output layer:     100 x 27 + 27   = 2,727
+total:                            ~ 3,481 parameters
+```
+
+About 3,481 learnable, generalizing parameters versus 531,441 mostly-empty count entries.
+
+## Training wrinkles
+
+- **Minibatches:** each step uses a small random batch (noisier gradient, far more steps per second).
+- **Learning rate:** no single right value; sweep a range, keep the one that drops the loss fastest without blowing up.
+- **Train / dev / test split:** train on one, tune on another, measure final quality on a held-out third, to catch overfitting (memorizing instead of generalizing).
+
+## Why it matters for AI
+
+Embeddings are the front end of every large language model: each token is looked up in a giant learned embedding table and turned into a vector, and the network processes those. Swap this lesson's single `tanh` hidden layer for a transformer and 3 characters of context for thousands of tokens, and the makemore MLP becomes, in outline, a frontier model. The embedding table is where text first becomes numbers a network can reason with.
+
+## The one-line version
+
+Replace the count table with learned per-character embedding vectors, concatenate the context's embeddings, run them through a `tanh` hidden layer and a softmax, and train on negative log likelihood: a model with real context that generalizes, and the front end of every modern language model.

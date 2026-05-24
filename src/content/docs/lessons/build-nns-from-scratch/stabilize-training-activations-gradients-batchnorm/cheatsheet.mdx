@@ -1,0 +1,68 @@
+---
+title: "Cheatsheet: activations, gradients, and BatchNorm"
+description: One-page reference. The two ways naive deep nets fail, the initialization fix, batch normalization, and the diagnostics that make the failures visible.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## Two ways a naive deep net fails
+
+| Symptom | Cause | Tell |
+| --- | --- | --- |
+| Loss starts absurdly high | Random weights make large, spread logits -> over-confident softmax | First loss far above the uniform baseline |
+| Network barely learns | `tanh` neurons saturated -> near-zero gradient | Activation histogram piled at -1 / +1 |
+
+## The right starting loss
+
+A model that knows nothing should guess uniformly: `1/27` per character. Its loss is the baseline:
+
+```
+-log(1/27) = log(27) = 3.30   (natural log)
+```
+
+Start there, not at 20+. A much higher start = an initialization problem, not an architecture problem.
+
+## tanh saturation (why neurons go numb)
+
+`tanh`'s local derivative is `1 - tanh(x)^2`, and it collapses as the input grows:
+
+```
+x = 0:  deriv = 1.00   (responsive)
+x = 1:  deriv = 0.42
+x = 2:  deriv = 0.07
+x = 3:  deriv = 0.01   (numb)
+```
+
+Backprop multiplies the incoming gradient by this, so a neuron in the flat tails passes almost no gradient and stops learning. Saturated for every example = a dead neuron.
+
+## Fix 1: initialization (Kaiming / He)
+
+Pre-activation size grows with the weight scale and the **fan-in** (number of inputs summed). Counteract it:
+
+```
+scale each layer's initial weights by about 1 / sqrt(number of inputs)
+```
+
+Keeps activations at a healthy, roughly unit spread layer to layer, neither exploding into saturation nor vanishing. Also: start the output weights small so the loss begins at 3.30.
+
+## Fix 2: batch normalization
+
+Before `tanh`, normalize the layer's pre-activations across the minibatch to zero mean and unit variance, then apply a **learned gain and bias** so the network can still represent any spread it needs. Keeps activations well-behaved during training regardless of initialization.
+
+- **Couples examples in a batch** (each output depends on its batchmates): mild regularizer, common source of bugs.
+- **Inference:** uses a running average of mean/variance from training, since there is no batch.
+
+## Best diagnostic
+
+A **histogram of each layer's activations** (and of the gradients) during training. Piled at the tails = saturation; spread across the middle = healthy. Turns an invisible failure into a picture.
+
+## Why it matters for AI
+
+No deep network, including every large language model, trains without solving these two problems. Sane initialization is standard, and normalization layers are everywhere, every transformer has them (a cousin called **layer normalization**) to keep activations and gradients alive across many layers. "Training diverged / was unstable" is this territory.
+
+## The one-line version
+
+Naive deep nets start over-confident and saturate their neurons; fix the start with small output weights, fix saturation by scaling weights as `1/sqrt(fan-in)`, and make it automatic with batch normalization, the same init-plus-normalization recipe that makes every deep network trainable.

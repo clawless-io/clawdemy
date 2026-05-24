@@ -1,0 +1,87 @@
+---
+title: "Assembling and training the full GPT"
+description: "One self-attention computation is not a transformer. This lesson assembles it into the real thing: multiple attention heads in parallel, wrapped with a feed-forward layer into a block, made trainable by residual connections and layer normalization, given a sense of order by positional embeddings, and stacked into the full GPT, then trained on next-token prediction. By the end you will have built, in outline, the exact architecture behind every modern chatbot."
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+Last lesson you built a single self-attention computation: one set of query, key, and value projections letting each token gather causally from the past. That is the heart of the transformer, but a heart is not a body. This lesson assembles the whole GPT around it, the multiple heads, the feed-forward layer, the connections that make a deep stack trainable, and the trick that gives the model a sense of word order, then trains it to generate text. This is the last build of the track.
+
+The contract holds one final time: nothing inside is a mystery. When you finish this lesson, the architecture behind every chatbot will be a list of parts you have built.
+
+## Many heads, not one
+
+A single attention head learns one kind of relationship, one notion of "what should I look back at." But language has many at once: a token might need to track the subject of the sentence, the open bracket it must close, and the tense, all simultaneously. So a transformer runs several attention heads **in parallel**, each with its own query, key, and value projections, and concatenates their outputs.
+
+The split is clean. If each token's representation is 64 numbers wide and you want 8 heads, each head works in `64 / 8 = 8` dimensions, and the 8 heads' outputs concatenate back to `8 x 8 = 64`. A final linear layer then mixes the concatenated result, letting the heads' findings combine. Same total width, but now eight independent attention patterns instead of one. This is **multi-head attention**: several relationships attended to at once, then combined. Splitting the budget across heads costs no more computation than one big head, you have simply divided the same 64 dimensions into eight smaller, specialized views.
+
+## The transformer block: communication, then computation
+
+Attention lets tokens *gather* information from each other, but it does not give each token much room to *process* what it gathered. So a transformer block pairs two steps:
+
+1. **Multi-head self-attention**, the communication step: every token pulls in a blend of the others (causally). Tokens talk.
+2. A **feed-forward network**, the computation step: a small MLP applied to each token independently, the kind you built in Phase 1. It typically expands the representation to a few times its width (a common choice is four times), applies a nonlinearity, and projects back, giving each token room to think on its own about what it just heard.
+
+Talk, then think. That pairing, attention followed by a per-token feed-forward, is the **transformer block**, and it is the unit that gets repeated to make the model deep. The two heads of the metaphor split cleanly: one head of attention might learn to connect a pronoun to its noun while another tracks how far back the sentence began, and the feed-forward then digests both signals for each position.
+
+## Two tricks that make a deep stack trainable
+
+Stacking many blocks runs straight into the problem from the activations-and-gradients lesson: in a deep network, gradients can vanish before they reach the early layers, and the network stops learning. Two devices fix it, and every transformer uses both.
+
+- **Residual connections.** Instead of replacing a token's representation, each sublayer *adds* to it: `output = x + sublayer(x)`. Recall from the autograd lesson that addition passes the gradient straight through to both inputs, unchanged. So the `x +` part is a clean highway: the gradient can flow all the way back to the earliest blocks along the chain of additions without being shrunk at every step, which is exactly what prevents the vanishing-gradient death from the activations lesson. Each block then only has to learn a small *adjustment* to the representation rather than rebuild it from scratch, which is easier to train. The representation accumulates contributions, something added by attention, then something added by the feed-forward, again and again up the stack.
+- **Layer normalization.** Before each sublayer, the token's representation is normalized to a healthy mean and variance, the per-token cousin of the batch normalization from the earlier lesson. It keeps the activations in a trainable range no matter how deep the stack.
+
+With residual connections and layer normalization in place, you can stack dozens of blocks, exactly the "build understanding in stages through depth" idea from the WaveNet lesson, now with attention as the per-layer operation.
+
+## Giving the model a sense of order
+
+Self-attention has a surprising blind spot: it does not know the order of the tokens. Because a token's output is a weighted *sum* over the others, shuffling the input would (causal masking aside) give the same result, attention sees a set, not a sequence. But word order obviously matters: "dog bites man" is not "man bites dog."
+
+The fix is **positional embeddings**. Alongside the token embedding (which says *what* each token is), the model adds a learned **position embedding** (which says *where* it sits: position 0, 1, 2, ...). The two vectors are simply added together element-wise, so each token's input becomes a single vector meaning "this character, at this position," and now the model can use order. It is the same learned-lookup-table idea as the character embeddings from the MLP lesson, applied to positions: one table is indexed by which character, the other by which slot in the sequence.
+
+## The whole GPT, end to end
+
+Now assemble the parts. A GPT is, in full:
+
+```
+token embedding + position embedding        (what each token is, and where)
+        |
+   a stack of N transformer blocks           (each: multi-head attention + feed-forward,
+        |                                      wrapped in residuals and layer norm)
+        |
+   final layer normalization
+        |
+   a linear layer to vocabulary-sized logits
+        |
+   softmax  ->  probability for each next token
+```
+
+Trace the shapes to see why the stack holds together. Take a window of `T` tokens with a representation width of `64`, and a vocabulary of 27 characters. The token and position embeddings turn the window into a `(T, 64)` array (each of the `T` tokens is a 64-number vector). Every block maps `(T, 64)` to `(T, 64)`, the attention and feed-forward both preserve the width, and the residual addition requires it, so the shape is unchanged from one block to the next. That constant shape is precisely what lets you stack blocks freely. Only at the very end does the width change: the final linear layer maps each token's 64 numbers to `27` logits, giving `(T, 27)`, and softmax turns each row into next-character probabilities.
+
+Train it exactly as before: run text through, compute the **cross-entropy** (negative log likelihood) loss against the actual next tokens, backpropagate (the `p - y` gradient from the backprop-ninja lesson sits right at the top), and step downhill. To **generate**, sample the next token from the output probabilities, append it, and feed the sequence back in, the predict-sample-append loop from the bigram lesson, now driven by a transformer. Stack enough blocks, use enough heads, train on enough text, and the character-level GPT produces fluent, Shakespeare-flavored prose.
+
+## Why this matters when you use AI
+
+This is not a sketch of a GPT; it is the architecture. Every large language model in use today is exactly this: token and position embeddings, a deep stack of transformer blocks (multi-head attention plus a feed-forward, each wrapped in residual connections and layer normalization), a final projection to vocabulary logits, and a softmax, trained on next-token cross-entropy. The differences between the model you just assembled and the one behind a commercial chatbot are scale and finishing, not kind: many more blocks and heads, a vastly larger vocabulary of tokens (not single characters), training on a large fraction of the internet, and a fine-tuning stage that shapes it into an assistant. The skeleton is identical.
+
+That is the payoff of the whole track. "A large language model" is no longer a black box. It is an autograd engine computing gradients, a training loop nudging parameters downhill, embeddings turning symbols into vectors, attention routing information between them, residuals and normalization keeping a deep stack trainable, and a softmax predicting the next token, every piece of which you have now built from nothing.
+
+## Common pitfalls
+
+**Thinking multi-head means a deeper network.** The heads run in *parallel*, not in sequence; they split one attention step into several independent ones and concatenate. Depth comes from stacking blocks, not from adding heads.
+
+**Forgetting positional embeddings.** Without them the model is order-blind, since attention is a weighted sum. The position embedding is what lets a transformer tell "dog bites man" from "man bites dog."
+
+**Underrating residuals and normalization.** They are not optional polish; without the residual highways and layer normalization, a deep transformer simply will not train. They are what make the depth usable.
+
+**Believing the architecture alone makes ChatGPT.** This architecture trained on next-token prediction gives you a base model that continues text. Turning it into a helpful, instruction-following assistant takes an additional fine-tuning stage on top, which this track does not build.
+
+## What you should remember
+
+- **A transformer block is communication then computation:** multi-head self-attention (several attention heads in parallel, each tracking a different relationship, then concatenated) lets tokens gather context, and a per-token feed-forward MLP lets each token process it. With an embedding width of 64 and 8 heads, each head works in 8 dimensions and they concatenate back to 64.
+- **Residual connections, layer normalization, and positional embeddings are what make it work.** Residuals (`x + sublayer(x)`) give gradients a highway so deep stacks train; layer norm keeps activations healthy; position embeddings give the otherwise order-blind attention a sense of sequence.
+- **The full GPT is token + position embeddings, a deep stack of blocks, a final norm, and a softmax head, trained on next-token cross-entropy.** This is the exact architecture behind every modern large language model; commercial models differ only in scale, vocabulary, training data, and a fine-tuning stage, not in kind.
+
+You have now built a GPT, the whole architecture, from the autograd engine up. One piece has been quietly assumed throughout: that text arrives already split into tokens. The final lesson builds the last missing component, the **tokenizer**, the piece that turns raw text into the token IDs the model consumes and back again.

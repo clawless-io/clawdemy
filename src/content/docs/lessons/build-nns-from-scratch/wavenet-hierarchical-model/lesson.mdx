@@ -1,0 +1,83 @@
+---
+title: "Building understanding in layers: a WaveNet-style model"
+description: "The flat MLP crammed all of its context into one hidden layer, fusing every character at once. This lesson restructures it into a hierarchy, in the style of DeepMind's WaveNet, that fuses context gradually, two groups at a time, so the span it can see doubles with every layer. It is the principle behind depth itself: stack simple layers and let the network build understanding in stages, the same idea that makes transformers work."
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+The MLP language model worked, but look closely at how it used its context: it took all the previous characters, concatenated their embeddings into one long vector, and crushed them through a single hidden layer. Everything got mixed together in one step. That is fine for three characters, but it is a crude way to combine information, and it does not scale: to see more context you just make the input wider, and the network never builds any intermediate structure. This lesson restructures the model into a **hierarchy** that fuses context gradually, the way deep networks are meant to work, and it is the architectural idea that carries all the way to transformers.
+
+The contract holds: nothing inside is a mystery, including the word "deep." Depth is about to become concrete: layers that each do something simple, stacked so the whole does something rich.
+
+## The flat model's crude fusion
+
+The MLP's hidden layer is a single fat step. Concatenate the embeddings of all the context characters, multiply by one big weight matrix, apply `tanh`. Every position is smashed into every other position at once, with no notion that the characters have an order or that nearby ones might combine before distant ones. If you want more context, your only move is to widen that one layer's input, which grows the parameters and still fuses everything in a single undifferentiated step. The model has depth on paper but does all its real combining in one place.
+
+## The WaveNet idea: fuse gradually, in a tree
+
+WaveNet, from DeepMind, was built to generate raw audio one sample at a time, and it needed to look back over a great many samples without an enormous flat layer. Its answer was a **tree** of small fusions, and the same idea reshapes our character model.
+
+Instead of fusing all the context at once, fuse it two groups at a time, in levels. The first level combines adjacent **pairs** of characters. The next level combines adjacent pairs of *those* results. The next combines pairs of those, and so on up the tree. Every level performs the same simple operation, fuse two neighboring groups, but the span of context each output covers **doubles** at every level. Information flows up the tree, merging gradually, instead of being dumped into one layer.
+
+What does "fuse two groups" actually do? Each fusion is itself a tiny version of the MLP layer you already built: take the two neighboring vectors (two character embeddings at the bottom, or two summaries coming up from the level below), concatenate them, and pass the result through a small linear layer and a `tanh`. Out comes a single vector that summarizes the pair. The entire tree is nothing but this one operation repeated, with the outputs of each level serving as the inputs to the next. The original WaveNet implemented the same pattern with what are called dilated causal convolutions, but the essence is just this: a stack of small fusing layers, each combining neighbors from the level beneath it.
+
+{/* DIAGRAM PLACEHOLDER: a binary tree over 8 context characters at the bottom; level 1 fuses them into 4 nodes (each spanning 2 chars), level 2 into 2 nodes (each spanning 4), level 3 into 1 node (spanning all 8), with a note that the receptive field doubles per level */}
+
+## Why doubling changes everything
+
+Put numbers on the doubling. Suppose the model has a context of eight characters:
+
+```
+8 characters at the bottom
+level 1: fuse adjacent pairs  -> 4 groups, each covering 2 characters
+level 2: fuse adjacent pairs  -> 2 groups, each covering 4 characters
+level 3: fuse adjacent pairs  -> 1 group,  covering all 8 characters
+```
+
+Three levels, each doing nothing more complicated than combining two neighbors, and the top of the tree sees all eight characters. In general, after `k` levels each output covers `2^k` characters: one more layer **doubles** the context. The growth is explosive:
+
+```
+depth (levels)   context the top sees
+1                2 characters
+2                4
+3                8
+4                16
+...
+10               1024
+```
+
+Ten layers of simple pairwise fusion reach back over a thousand characters. Compare that to the flat model, where reaching eight characters meant one hidden layer over an eight-wide input, and reaching sixteen would mean a sixteen-wide input, and reaching a thousand would mean a thousand-wide input. In the hierarchy, going from eight characters to sixteen costs you exactly one more layer. Context grows exponentially with depth instead of linearly with width, which is the difference between affordable long context and impossible long context.
+
+## What the hierarchy buys you
+
+The tree is better than the flat layer for three connected reasons. It **builds representations in stages**: the first level learns about character pairs, the next about groups of four, the next about groups of eight, progressively higher-level chunks, the way later layers of a vision network detect progressively larger shapes. Make that concrete on a name fragment like `brianna`: the bottom level can fuse neighboring pairs (`br`, `ia`, `nn`, `a.`), the next level fuses those into four-character chunks (`bria`, `nna.`), and the top fuses the whole window, so each level reasons about a larger, more meaningful unit than the one below it. Each individual layer **stays simple**, fusing only two groups, so nothing has to learn a giant tangled mapping all at once. And because the receptive field doubles per level, **long context becomes cheap**, paid for in depth rather than width. The practical payoff in the lecture is exactly what you would hope: with the same idea and more usable context, the generated names get better again.
+
+There is also a software lesson hiding here. To build the tree cleanly, the lecture reorganizes the network into reusable **layer modules**, a `Linear`, a `Tanh`, a `BatchNorm`, snapped together in a `Sequential` container, which is precisely the API real frameworks like PyTorch use. The takeaway is structural: a neural network is built by composing simple, reusable layers, and making a network deeper is mostly a matter of stacking more of them.
+
+## Why this matters when you use AI
+
+The principle in this lesson, **stack simple layers and let depth build the understanding**, is the single most important structural idea in modern AI. No powerful model fuses its input in one step. Each layer takes the representation the previous layer produced and refines it a little, and the stack as a whole turns simple local operations into rich, global understanding. WaveNet itself, using exactly this hierarchy, produced the most natural-sounding synthetic speech of its era and shipped in real text-to-speech products.
+
+The same principle reaches across every kind of model. A convolutional network for images works exactly this way: stack small local filters and the effective receptive field grows with depth, so the earliest layers detect edges, the middle layers detect shapes, and the deep layers detect whole objects, edges fused into shapes fused into objects, the visual version of pairs fused into fours fused into eights. Audio (WaveNet), images (convolutional networks), and text (the model you just built) all lean on the same trick: a hierarchy of simple local operations whose reach compounds with depth.
+
+It also sets up the next phase directly. A transformer, the architecture behind today's large language models, is a stack of identical layers, each one refining its view of the whole sequence, the same "build understanding in stages" idea you just met, with a more powerful per-layer operation (attention) in place of the simple pairwise fusion here. When you hear that a model has "96 layers," this is what that means: ninety-six rounds of refinement, each building on the last. Depth is not a detail; it is where the power comes from.
+
+## Common pitfalls
+
+**Thinking deeper just means more parameters.** The point of the hierarchy is not size, it is staged composition: each layer builds on the previous one's output, so the network can form increasingly abstract features. A wide, shallow network has parameters but no stages.
+
+**Confusing the receptive field with the layer width.** Width is how many numbers a layer carries; receptive field is how much of the input an output can see. The WaveNet trick grows the receptive field through depth (doubling per level) without needing an enormous-width layer.
+
+**Assuming more context is always better.** Longer context helps only if the model can use it. The hierarchy makes long context affordable, but the right depth is still a design choice, and very deep stacks bring their own training challenges (the ones the initialization-and-normalization lesson was about).
+
+**Reading the tree as the final word in architecture.** WaveNet's fixed pairwise tree is one good way to fuse context gradually, not the only one. The next phase replaces it with attention, which lets each position decide for itself which others to combine, a more flexible kind of fusion.
+
+## What you should remember
+
+- **The flat MLP fused all of its context in one crude step.** Concatenate every context character and crush it through a single hidden layer; to see more, widen the input. There is no staged structure and it scales poorly.
+- **WaveNet restructures this into a hierarchy that fuses two groups at a time, level by level, so the receptive field doubles per layer.** With a context of eight characters, three simple fusing levels (pairs, then fours, then eight) reach the whole window; after `k` levels each output sees `2^k` characters, so one more layer doubles the context. Context grows with depth, not width, and the network builds representations in stages.
+- **Staged composition through depth is the central structural idea of modern AI.** Each layer refines the previous layer's representation, turning simple operations into rich understanding. A transformer is this same idea, a stack of identical refining layers, with attention as the per-layer operation, which is exactly where the next phase goes.
+
+You have now built a language model and refined it three ways: real context through embeddings, stable training through good initialization and normalization, and staged understanding through a deep hierarchy. That completes the language-model phase. The final phase builds the architecture that currently dominates AI, the **transformer**, starting from its core mechanism, self-attention, which lets each position in a sequence choose for itself which other positions to draw from.

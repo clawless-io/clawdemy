@@ -1,0 +1,27 @@
+---
+title: "Summary: Building an autograd engine: micrograd"
+description: The one-screen recap. What an autograd engine is, the three ideas that make it work, and what it changes about how you see AI frameworks.
+artifact: summary
+sidebar:
+  order: 4
+  label: Summary
+tableOfContents: false
+---
+
+**TL;DR.** A neural network learns by nudging its parameters to lower a loss, and that needs the gradient of the loss with respect to every parameter. An **autograd engine** computes those gradients automatically. micrograd, the smallest honest version (about 150 lines), does it with three ideas: wrap every number in a `Value` that records how it was computed (the **computational graph**), know each operation's **local derivative**, and **backpropagate**, walk the graph backward applying the chain rule, until every node holds its gradient. This is exactly what PyTorch does, just on tensors instead of single numbers.
+
+## Core ideas
+
+- **Every number remembers where it came from.** A `Value` carries its data, the operation that produced it, its input children, and a grad slot. Running the expression forward builds a graph of these nodes from leaf inputs up to the final loss.
+
+- **Each operation has a local derivative known in advance.** Addition passes the gradient through unchanged (local derivative 1 for each input). Multiplication hands each input the value of the other input. `tanh`, the nonlinearity that makes a neuron, uses `1 - tanh^2`. These are simple because they describe one operation, ignoring the rest of the graph.
+
+- **Backpropagation is the chain rule walked backward.** Seed the output's gradient at `dL/dL = 1`, then move backward through the graph in reverse topological order. At each node, multiply the incoming gradient by the local derivative and hand it down. When the walk finishes, every node, including every parameter, holds `dL/d(itself)`.
+
+- **A worked pass fits on one line of arithmetic per node.** For `L = (a*b + c) * f` with `a=2, b=-3, c=10, f=-2`, the backward pass gives `dL/da = 6`, `dL/db = -4`, `dL/dc = -2`, each from one rule applied repeatedly: incoming gradient times local derivative.
+
+- **Real frameworks do exactly this.** `loss.backward()` in PyTorch (or JAX, TensorFlow) records a graph, stores a local derivative per op, and walks the chain rule backward. micrograd is the same procedure at small scale; the only difference is single numbers versus tensors.
+
+## What changes for you
+
+The phrase "the framework computes the gradients for you" stops being magic. You now know there is no magic underneath: a graph, a local derivative per operation, and the chain rule walked backward. When a model trains, you can picture the gradient flowing back through every operation to every weight. That mental model is the foundation for everything in this track. The next lesson takes this engine and does what it was built for, assembling neurons into a network and training it by repeatedly computing gradients and stepping the parameters downhill.

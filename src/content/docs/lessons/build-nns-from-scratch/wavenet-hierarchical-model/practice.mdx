@@ -1,0 +1,129 @@
+---
+title: "Practice: a WaveNet-style hierarchical model"
+description: Check your understanding of the hierarchical model, then compute how depth buys context and trace a single fusion by hand.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+import Flashcard from '../../../../../components/Flashcard.astro';
+
+## Self-check
+
+Four short questions. Try to answer each in your head (or on paper) before opening the collapsible. Active retrieval is where the learning sticks; rereading is comfortable but does much less.
+
+**1. How does the flat MLP combine its context, and why is that crude?**
+
+<details>
+<summary>Show answer</summary>
+
+It concatenates the embeddings of all the context characters into one long vector and crushes them through a single hidden layer, fusing every position at once in one step. It is crude because there is no staged structure (nearby characters are not combined before distant ones) and it scales poorly: the only way to see more context is to widen that one layer's input.
+
+</details>
+
+**2. What is the core WaveNet idea, and what does a single fusion actually do?**
+
+<details>
+<summary>Show answer</summary>
+
+Fuse the context gradually, two neighboring groups at a time, in levels, building a tree instead of one flat layer. A single fusion is a tiny MLP layer: take two neighboring vectors (two character embeddings, or two summaries from the level below), concatenate them, and pass the result through a small linear layer and a `tanh`, producing one vector that summarizes the pair. The whole tree is that one operation repeated up the levels.
+
+</details>
+
+**3. Why does the receptive field double at every level?**
+
+<details>
+<summary>Show answer</summary>
+
+Because each level fuses two neighboring groups into one. A level-1 output summarizes 2 characters; a level-2 output fuses two level-1 outputs, so it summarizes 4; a level-3 output summarizes 8; and so on. Each step combines two spans into one of twice the size, so after `k` levels each output sees `2^k` characters.
+
+</details>
+
+**4. Why is "context grows with depth, not width" such a big deal?**
+
+<details>
+<summary>Show answer</summary>
+
+In the flat model, seeing `N` characters needs an `N`-wide input, so long context means an enormous layer. In the tree, seeing `N` characters needs only `log2(N)` levels, so doubling the context costs one extra layer. That is the difference between long context being impossibly expensive and being cheap, paid for in a little depth.
+
+</details>
+
+## Try it yourself
+
+Work out how depth buys context, then trace one fusion by hand.
+
+**Setup.** A WaveNet-style model fuses adjacent pairs at each level, so each level doubles the receptive field.
+
+**Steps.**
+
+1. You want the model to see **16** characters of context. How many fusing levels does the tree need? (Find `k` with `2^k = 16`.)
+2. How many levels for **64** characters? For **1024**?
+3. For each, how wide would the flat model's input have to be to see the same context? (Compare.)
+4. Trace one fusion: two character embeddings are each **2** numbers long. You concatenate them and pass through a small linear layer that outputs **3** numbers, then `tanh`. How many numbers go into the fusion, and how many come out?
+
+**Expected outcome.**
+
+```
+1.  2^4 = 16   -> 4 levels
+2.  2^6 = 64   -> 6 levels      2^10 = 1024 -> 10 levels
+3.  flat model: 16-wide, 64-wide, 1024-wide input respectively
+    (tree: 4, 6, 10 levels -> depth grows like log2 of the context)
+4.  fusion input:  2 + 2 = 4 numbers (the two embeddings concatenated)
+    fusion output: 3 numbers (linear layer to 3, then tanh element-wise)
+```
+
+Ten layers reach 1024 characters in the tree; the flat model would need a 1024-wide input for the same. And a single fusion is just the tiny concatenate-linear-`tanh` step you traced, repeated up the tree. That is the whole architecture: a small operation, stacked.
+
+**Confirm it against the real thing (optional).** In Andrej Karpathy's [makemore repo](https://github.com/karpathy/makemore), the Part 5 notebook builds this hierarchy with reusable layer modules and prints the tensor shapes at every level. Run it and watch the sequence length halve and the receptive field double from one level to the next, the doubling you computed, made visible in the shapes.
+
+## Flashcards
+
+Seven cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay out the full set as one card per page, ready to print or save as a PDF for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="How does the flat MLP combine context, and what's wrong with it?">
+
+It concatenates all context embeddings and crushes them through one hidden layer, fusing every position at once with no staged structure. To see more context you must widen the input. It does not scale.
+
+</Flashcard>
+
+<Flashcard question="What is the WaveNet idea?">
+
+Fuse context gradually, two neighboring groups at a time, in levels, building a tree. Each level performs the same simple fusion, but the span each output covers doubles per level. Information merges gradually instead of all at once.
+
+</Flashcard>
+
+<Flashcard question="What does a single fusion compute?">
+
+A tiny MLP layer: concatenate two neighboring vectors (embeddings or summaries from below), pass through a small linear layer and a `tanh`, producing one vector that summarizes the pair. The whole tree is this one operation repeated.
+
+</Flashcard>
+
+<Flashcard question="Why does the receptive field double per level, and what does k levels give?">
+
+Each level fuses two neighboring spans into one of twice the size: 2 characters, then 4, then 8, and so on. After `k` levels each output sees `2^k` characters. Reaching `N` characters needs only `log2(N)` levels.
+
+</Flashcard>
+
+<Flashcard question="Why is 'context grows with depth, not width' important?">
+
+Flat model: `N` characters needs an `N`-wide input (huge for long context). Tree: `N` characters needs `log2(N)` levels, so doubling context costs one extra layer. It makes long context affordable.
+
+</Flashcard>
+
+<Flashcard question="What does the hierarchy buy you (three reasons)?">
+
+Staged representations (pairs, then fours, then eights, like edges to shapes to objects); simple per-layer operations (each fuses only two groups); and cheap long context (paid for in depth, not width).
+
+</Flashcard>
+
+<Flashcard question="How does this connect to modern AI?">
+
+"Stack simple layers, build understanding with depth" is the core structural idea everywhere: audio (WaveNet), images (convolutional nets), text (transformers). A transformer is a stack of identical refining layers with attention as the per-layer operation.
+
+</Flashcard>
+
+</FlashcardSet>

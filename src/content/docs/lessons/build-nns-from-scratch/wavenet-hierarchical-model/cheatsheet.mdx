@@ -1,0 +1,60 @@
+---
+title: "Cheatsheet: a WaveNet-style hierarchical model"
+description: One-page reference. The flat model's crude fusion, the WaveNet tree, the receptive-field doubling, what one fusion does, and why depth is the point.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## The problem with the flat MLP
+
+It concatenates all context embeddings and crushes them through one hidden layer: every position fused at once, in a single step, with no staged structure. To see more context you widen the input. It does not scale.
+
+## The WaveNet idea: a tree of small fusions
+
+Fuse context two groups at a time, in levels:
+
+```
+level 1: fuse adjacent pairs of characters
+level 2: fuse adjacent pairs of those results
+level 3: fuse adjacent pairs of those...   (and so on up the tree)
+```
+
+Information merges gradually instead of being dumped into one layer. Borrowed from DeepMind's WaveNet (which generated raw audio); originally built with dilated causal convolutions.
+
+## What one fusion does
+
+Each fusion is a tiny MLP layer: take two neighboring vectors (two embeddings, or two summaries from the level below), **concatenate** them, pass through a small **linear layer + tanh**, out comes one vector summarizing the pair. The whole tree is this one operation repeated.
+
+## Receptive field doubles per level
+
+```
+depth (levels)   context the top sees
+1                2
+2                4
+3                8
+4                16
+10               1024
+```
+
+After `k` levels each output sees `2^k` characters: one more layer **doubles** the context. Context grows exponentially with depth, not linearly with width. Going from 8 to 16 characters costs one layer in the tree, versus doubling the input width in the flat model.
+
+## What the hierarchy buys you
+
+- **Staged representations:** pairs -> fours -> eights, progressively higher-level chunks (like edges -> shapes -> objects in a vision network).
+- **Simple layers:** each fuses only two groups; nothing learns a giant tangled mapping at once.
+- **Cheap long context:** paid for in depth, not width.
+
+## Software note
+
+The lecture reorganizes the net into reusable layer modules (`Linear`, `Tanh`, `BatchNorm`) snapped into a `Sequential` container, the API real frameworks use. Takeaway: networks are built by composing simple reusable layers; deeper = stack more.
+
+## Why it matters for AI
+
+"Stack simple layers, build understanding with depth" is the central structural idea of modern AI. Audio (WaveNet), images (convolutional nets), and text (this model, and transformers) all use a hierarchy of simple local operations whose reach compounds with depth. A transformer is a stack of identical refining layers with attention as the per-layer operation; "96 layers" means 96 rounds of refinement.
+
+## The one-line version
+
+Replace the flat MLP's one-step fusion with a tree of small linear+tanh fusions that combine two neighbors per level, so the receptive field doubles with depth and the network builds understanding in stages, the principle behind every deep architecture, transformers included.
