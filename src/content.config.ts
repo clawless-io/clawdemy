@@ -31,6 +31,9 @@ export const collections = {
 						'ai-foundations',
 						'privacy-local-first',
 						'pain-point-library',
+						// Mirror tracks (structural mirrors of external open courses)
+						'intro-to-deep-learning', // Track 12: MIT 6.S191 (Amini and Amini)
+						'build-nns-from-scratch', // Track 13: Karpathy Neural Networks Zero to Hero
 					])
 					.optional(),
 				course: z.string().optional(),
@@ -63,6 +66,14 @@ export const collections = {
 						'vendor-policies',
 						'local-first',
 						'rights-hygiene',
+						// Track 12 (Intro to Deep Learning)
+						'foundations-and-sequences',
+						'vision-and-generation',
+						'decisions-and-limits',
+						// Track 13 (Build Neural Networks from Scratch)
+						'the-autograd-engine',
+						'building-a-language-model',
+						'building-a-transformer',
 					])
 					.optional(),
 				phase_order: z.number().int().positive().optional(),
