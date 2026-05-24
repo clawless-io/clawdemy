@@ -1,0 +1,138 @@
+---
+/**
+ * Track 11 (Neural Network Intuition), Lesson 1, illustration 1 of 3.
+ *
+ * The shape-to-numbers reframe. A handwritten 3 on the left (drawn as a
+ * single stroked skeleton) becomes, on the right, a 28x28 grid of grayscale
+ * cells. The same 3 is rasterized by a distance field, so stroke centers are
+ * near 1.0 and edges fade through the mid-tones to 0.0 background, which is
+ * exactly what the labeled sample cells call out. The point: to a computer a
+ * digit is not a shape, it is 784 brightness numbers.
+ */
+
+const N = 28;
+const HW = 0.07; // stroke half-width in unit space; ~2 cells
+
+// Build the 3 skeleton as two stacked, right-opening arcs in a unit square
+// (y points up). Sampled densely so the distance field is smooth.
+type Pt = { x: number; y: number };
+const skeleton: Pt[] = [];
+function arc(cx: number, cy: number, r: number, fromDeg: number, toDeg: number, steps: number) {
+	for (let i = 0; i <= steps; i++) {
+		const t = fromDeg + ((toDeg - fromDeg) * i) / steps;
+		const a = (t * Math.PI) / 180;
+		skeleton.push({ x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) });
+	}
+}
+arc(0.46, 0.70, 0.22, 150, -75, 60); // upper bump
+arc(0.46, 0.30, 0.24, 75, -150, 60); // lower bump
+
+function intensity(ux: number, uy: number): number {
+	let best = Infinity;
+	for (const p of skeleton) {
+		const dx = ux - p.x;
+		const dy = uy - p.y;
+		const d = Math.sqrt(dx * dx + dy * dy);
+		if (d < best) best = d;
+	}
+	return Math.max(0, Math.min(1, 1 - best / HW));
+}
+
+// Grid geometry on the right.
+const gx0 = 372;
+const gy0 = 56;
+const cell = 8.4;
+
+type Cell = { r: number; c: number; x: number; y: number; cx: number; cy: number; val: number };
+const cells: Cell[] = [];
+for (let r = 0; r < N; r++) {
+	for (let c = 0; c < N; c++) {
+		const ux = (c + 0.5) / N;
+		const uy = 1 - (r + 0.5) / N;
+		const val = intensity(ux, uy);
+		cells.push({
+			r,
+			c,
+			x: gx0 + c * cell,
+			y: gy0 + r * cell,
+			cx: gx0 + (c + 0.5) * cell,
+			cy: gy0 + (r + 0.5) * cell,
+			val,
+		});
+	}
+}
+
+// Pick three sample cells to label: a bright stroke-center, a mid edge, a
+// dark background corner. Found from the rendered values so labels are honest.
+const bright = cells.reduce((a, b) => (b.val > a.val ? b : a), cells[0]);
+const mid = cells.reduce((a, b) => (Math.abs(b.val - 0.7) < Math.abs(a.val - 0.7) ? b : a), cells[0]);
+const darkCandidates = cells.filter((c) => c.r >= 1 && c.r <= 6 && c.c >= 1 && c.c <= 6);
+const dark = darkCandidates.reduce((a, b) => (b.val < a.val ? b : a), darkCandidates[0]);
+const labeled = [
+	{ cell: bright, val: bright.val, ly: 92 },
+	{ cell: mid, val: mid.val, ly: 150 },
+	{ cell: dark, val: dark.val, ly: 208 },
+];
+
+// Left glyph: stroke the same skeleton in a left-hand box (flip y for SVG).
+const lx0 = 64;
+const ly0 = 60;
+const lw = 150;
+const lh = 200;
+const glyphPath = skeleton
+	.map((p, i) => {
+		const sx = (lx0 + p.x * lw).toFixed(1);
+		const sy = (ly0 + (1 - p.y) * lh).toFixed(1);
+		return `${i === 0 ? 'M' : 'L'} ${sx} ${sy}`;
+	})
+	.join(' ');
+
+const labelX = 720;
+---
+
+<figure class="cw-illus">
+	<svg viewBox="0 0 800 360" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="nn-grid-title nn-grid-desc">
+		<title id="nn-grid-title">A handwritten 3 becomes a 28 by 28 grid of brightness numbers</title>
+		<desc id="nn-grid-desc">On the left, a handwritten digit 3 drawn as a single stroke. An arrow labeled "becomes" points right to a 28 by 28 grid of small square cells. The cells trace out the same 3 in grayscale: cells on the stroke are dark (high brightness values near 1.0), cells at the stroke edges are mid-gray (around 0.7), and cells in the background are blank (0.0). Three sample cells are outlined and labeled with their brightness values, illustrating that to a computer the digit is just 784 numbers, one per cell.</desc>
+
+		<!-- left: handwritten 3 as a stroked skeleton -->
+		<path d={glyphPath} fill="none" stroke="currentColor" stroke-width="13" stroke-linecap="round" stroke-linejoin="round" />
+
+		<!-- arrow -->
+		<defs>
+			<marker id="nn-grid-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+				<path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor" />
+			</marker>
+		</defs>
+		<text x="290" y="150" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13" fill="currentColor" opacity="0.7">becomes</text>
+		<line x1="246" y1="168" x2="338" y2="168" stroke="currentColor" stroke-width="2" marker-end="url(#nn-grid-arrow)" />
+
+		<!-- right: the 28 by 28 grayscale grid -->
+		{cells.map((c) => (
+			<rect x={c.x} y={c.y} width={cell} height={cell} fill="currentColor" opacity={c.val < 0.02 ? 0 : c.val} />
+		))}
+		<rect x={gx0} y={gy0} width={N * cell} height={N * cell} fill="none" stroke="currentColor" stroke-width="1" opacity="0.25" />
+
+		<!-- labeled sample cells -->
+		{labeled.map((s) => (
+			<g>
+				<rect x={s.cell.x - 0.5} y={s.cell.y - 0.5} width={cell + 1} height={cell + 1} fill="none" stroke="#7c3aed" stroke-width="2" />
+				<line x1={s.cell.x + cell} y1={s.cell.cy} x2={labelX - 46} y2={s.ly} stroke="#7c3aed" stroke-width="1.25" opacity="0.8" />
+				<rect x={labelX - 42} y={s.ly - 14} width="86" height="28" rx="4" fill="#7c3aed" opacity="0.12" />
+				<rect x={labelX - 42} y={s.ly - 14} width="86" height="28" rx="4" fill="none" stroke="#7c3aed" stroke-width="1.25" />
+				<text x={labelX + 1} y={s.ly + 5} text-anchor="middle" font-family="ui-monospace, SFMono-Regular, monospace" font-size="14" font-weight="700" fill="#7c3aed">{s.val.toFixed(1)}</text>
+			</g>
+		))}
+
+		<text x={gx0 + (N * cell) / 2} y="340" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12" fill="currentColor" opacity="0.7">28 <tspan font-family="ui-monospace, SFMono-Regular, monospace">x</tspan> 28 = <tspan font-weight="600" opacity="1">784 brightness numbers</tspan></text>
+		<text x={labelX + 1} y="248" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="currentColor" opacity="0.6">brightness</text>
+		<text x={labelX + 1} y="263" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="currentColor" opacity="0.6">per cell</text>
+	</svg>
+	<figcaption>To you, a 3 is a shape. To a computer it is this: a grid of cells, each holding one number for how dark it is, 0.0 for blank up to 1.0 for fully inked. There are no curves or loops in there anywhere, only 784 brightness numbers. And shift the same 3 a few cells over and every one of those numbers changes, which is what makes the digit so hard to pin down with rules.</figcaption>
+</figure>
+
+<style>
+	.cw-illus { margin: 1.75rem auto; max-width: 100%; }
+	.cw-illus svg { display: block; width: 100%; max-width: 780px; height: auto; margin: 0 auto; }
+	.cw-illus figcaption { text-align: center; font-size: 0.85rem; opacity: 0.75; margin-top: 0.5rem; font-style: italic; }
+</style>
