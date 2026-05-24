@@ -1,0 +1,104 @@
+---
+title: "Lesson: How machines see: convolution"
+description: "The digit network from earlier treated all 784 pixels as unrelated inputs, which throws away the most basic fact about an image: nearby pixels form shapes, and a shape can appear anywhere. This lesson introduces the fix, convolution, a small filter that slides across an image looking for a local pattern. We work an edge detector by hand and see why sharing one small filter everywhere is what makes vision networks efficient."
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+We are done with sequences. The next problem shape on the tour is images, and it has its own quirks that the networks so far handle badly. Think back to the digit recognizer: 784 pixels poured into a fully-connected layer, every pixel wired to every neuron, each treated as an independent input. That worked for tiny 28-by-28 digits, but it quietly throws away the two most important facts about a picture.
+
+First, **nearby pixels belong together**. An edge, a corner, a whiskers-and-nose, these are local arrangements of neighboring pixels. Treating pixel number 294 as unrelated to pixel 295 right next to it ignores the very structure that makes an image an image. Second, **a pattern can appear anywhere**. A cat in the top-left corner is the same cat in the bottom-right. A network that learns "cat" only in one position and has to relearn it everywhere else is wasting almost all of its effort.
+
+This lesson is the idea that fixes both: the **convolution**.
+
+## Why fully-connected networks are wrong for images
+
+Before the fix, feel the size of the problem. A modest 784-pixel image fed into a fully-connected layer of 784 neurons needs 784 times 784 weights, which is about 614,000 numbers, for one layer, on a tiny image. Real photographs have millions of pixels. The fully-connected approach explodes into billions of weights almost immediately, and most of them are spent learning the same kinds of local patterns over and over at every location, because, as we noted, it has no way to reuse what it learns in one spot somewhere else.
+
+So a fully-connected layer is both too big and oddly blind: enormous in parameters, yet unable to take advantage of the locality and repetition that define images. We want something that looks at small neighborhoods and reuses what it learns across the whole picture.
+
+## The convolution: a small filter that slides
+
+Here is the idea. Instead of wiring every pixel to every neuron, we take a tiny grid of weights, called a **filter** (or kernel), maybe 3 pixels by 3, and slide it across the image. At each position, the filter sits over a small patch of pixels, multiplies each pixel by its matching weight, and adds the results into a single number. That number says how strongly this patch matches the pattern the filter is looking for.
+
+{/* DIAGRAM PLACEHOLDER: a small 3x3 filter overlaid on the top-left of a larger pixel grid, with an arrow showing it sliding right and down across the image, producing one output number per position into a smaller output grid */}
+
+That is the whole operation. A filter is a little pattern-detector, and sliding it across the image asks, at every location, "is my pattern here?"
+
+## Watching an edge detector work
+
+Make it concrete. Here is a 3-by-3 filter whose weights are arranged to detect a vertical edge, dark on the left, bright on the right:
+
+```
+filter:        -1   0   +1
+               -1   0   +1
+               -1   0   +1
+```
+
+Now slide it over a patch of an image that actually has such an edge (left side dark, valued 0; right side bright, valued 1):
+
+```
+patch:          0   0   1
+                0   0   1
+                0   0   1
+```
+
+Multiply each pixel by the matching filter weight and add them all up. Each row contributes `(0)(-1) + (0)(0) + (1)(+1) = 1`, and there are three rows, so the total is **3**. A strong positive number: the filter lit up, announcing "there is a dark-to-bright vertical edge here."
+
+Now slide the same filter over a flat, featureless patch where every pixel is bright (valued 1):
+
+```
+patch:          1   1   1
+                1   1   1
+                1   1   1
+```
+
+Each row now gives `(1)(-1) + (1)(0) + (1)(+1) = 0`, so the total is **0**. The filter stayed quiet: no edge here. That contrast is the entire point. A filter responds strongly where its pattern is present and near zero where it is absent.
+
+Slide it across the whole image, one position at a time, and you collect one response number per location into a new grid. That grid is called a **feature map**: a fresh image-sized picture whose bright spots mark where the filter's pattern was found. The feature map is itself just numbers in a grid, which means the next layer can treat it as an input and run its own filters over it, a fact that becomes important in the next lesson.
+
+## Weight-sharing: the efficiency that changes everything
+
+Here is the part that makes convolution powerful, and it should feel familiar. The same filter, those same 9 weights, is used at every position as it slides. We do not learn a separate detector for each location; we learn one small detector and reuse it everywhere. (This is the same move recurrent networks made with sequences, reusing one set of weights at every step. Reuse keeps showing up as the way to handle structured data efficiently.)
+
+Two big things follow from that reuse:
+
+- **Far fewer parameters.** That vertical-edge filter is 9 numbers, total, no matter how large the image is. Compare it to the 614,000 weights of the fully-connected layer. The savings are enormous, and they grow with image size.
+- **Translation invariance.** Because the same detector scans every location, a pattern is found wherever it appears. Learn an edge detector once and it detects edges in the top-left, the center, and the bottom-right, all for free. The "relearn it at every position" waste is gone.
+
+Smaller and smarter at the same time. That combination is why convolution, not full connection, is how networks are wired to see.
+
+## From one filter to many
+
+One filter detects one kind of pattern. A real convolutional layer uses many filters side by side, each with its own weights, each scanning the whole image for its own pattern, one for vertical edges, one for horizontal edges, one for a particular curve, and so on. Each filter produces its own feature map, and the layer's output is the stack of all those maps.
+
+One honest clarification: the edge detector above had hand-picked weights, chosen so you could see the idea. In a real network, nobody sets those nine numbers by hand. The filters are just more weights, and they are learned exactly the way every weight in the previous track was learned, by gradient descent and backpropagation driving down a cost. The network discovers for itself which patterns are worth detecting. We used a tidy edge filter to make the mechanism visible; training would have found its own.
+
+What happens when you stack such layers, so that later filters look at the patterns found by earlier ones, is where simple edges start combining into corners, textures, and eventually whole objects. That stacking is the next lesson. For now, the load-bearing idea is the single convolution: a small, shared filter that slides across an image and reports where its pattern lives.
+
+## Why this matters when you use AI
+
+Convolution is the foundation of how computers handle images, and it is everywhere you have seen a machine "look" at something: photo libraries that find every picture of a beach, the face detection in a camera, medical-imaging tools that flag a suspicious region, the vision in self-driving research. All of them lean on this same trick of small, shared, sliding filters. Understanding it demystifies a whole category of AI: a vision model is not gazing at the picture as a whole the way you do; it is sliding many little pattern-detectors across it and building up from what they find. That also hints at why such systems can be fooled by odd inputs that scramble local patterns in ways a human eye would shrug off, a thread the limitations lesson in Phase 3 picks up.
+
+## Common pitfalls
+
+**Thinking convolution looks at the whole image at once.** It does the opposite: it looks at one small patch at a time and slides. Its power comes precisely from going local rather than global.
+
+**Thinking each position has its own weights.** The whole point is that one filter's weights are shared across every position. That sharing is what makes it efficient and translation-invariant.
+
+**Confusing a filter with the image.** A filter is a small grid of learned weights (a pattern-detector), not a piece of the picture. Sliding it produces a map of where its pattern occurs.
+
+**Thinking one filter is enough.** One filter finds one pattern. Vision needs many filters per layer, each detecting something different, and many layers stacked. This lesson is just the single building block.
+
+## What you should remember
+
+- **Fully-connected layers are wrong for images:** too many parameters, and they ignore that nearby pixels form patterns and that patterns can appear anywhere.
+- **A convolution slides a small filter across the image,** computing a local weighted sum at each position; a high response means the filter's pattern is present there. (Worked: an edge filter gave 3 on an edge, 0 on a flat patch.)
+- **Weight-sharing is the key win.** One small filter (for example, 9 weights) is reused at every position, giving far fewer parameters and translation invariance, the same reuse trick recurrence used for sequences.
+- **A layer uses many filters,** each producing a map of where its pattern appears; stacking layers (next lesson) builds edges up into objects.
+
+A fully-connected network stares at every pixel at once and learns nothing about where things are. A convolution slides a small, shared pattern-detector across the image, so it can find a feature anywhere with almost no extra cost. That is what it means to wire a network to see.
+
+Next: one filter finds an edge, but a cat is not an edge. The next lesson stacks convolutions into a hierarchy, edges feeding into corners and curves, those feeding into parts, parts into objects, and shows how that layered build-up turns local patterns into recognition.

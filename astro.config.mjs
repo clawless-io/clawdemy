@@ -610,6 +610,149 @@ export default defineConfig({
 						},
 					],
 				},
+				{
+					label: 'Track 12: Intro to Deep Learning',
+					items: [
+						{
+							label: 'Phase 1\nFoundations and sequences',
+							collapsed: true,
+							items: [
+								{
+									label: 'What deep learning adds',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/intro-to-deep-learning/what-deep-learning-adds/brief' },
+										{ label: 'Lesson', slug: 'lessons/intro-to-deep-learning/what-deep-learning-adds/lesson' },
+										{ label: 'Practice', slug: 'lessons/intro-to-deep-learning/what-deep-learning-adds/practice' },
+										{ label: 'Summary', slug: 'lessons/intro-to-deep-learning/what-deep-learning-adds/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/intro-to-deep-learning/what-deep-learning-adds/cheatsheet' },
+										{ label: 'References', slug: 'lessons/intro-to-deep-learning/what-deep-learning-adds/references' },
+									],
+								},
+								{
+									label: 'Why sequences need memory',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/intro-to-deep-learning/why-sequences-need-memory/brief' },
+										{ label: 'Lesson', slug: 'lessons/intro-to-deep-learning/why-sequences-need-memory/lesson' },
+										{ label: 'Practice', slug: 'lessons/intro-to-deep-learning/why-sequences-need-memory/practice' },
+										{ label: 'Summary', slug: 'lessons/intro-to-deep-learning/why-sequences-need-memory/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/intro-to-deep-learning/why-sequences-need-memory/cheatsheet' },
+										{ label: 'References', slug: 'lessons/intro-to-deep-learning/why-sequences-need-memory/references' },
+									],
+								},
+								{
+									label: 'Attention and transformers',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/intro-to-deep-learning/attention-and-transformers-in-brief/brief' },
+										{ label: 'Lesson', slug: 'lessons/intro-to-deep-learning/attention-and-transformers-in-brief/lesson' },
+										{ label: 'Practice', slug: 'lessons/intro-to-deep-learning/attention-and-transformers-in-brief/practice' },
+										{ label: 'Summary', slug: 'lessons/intro-to-deep-learning/attention-and-transformers-in-brief/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/intro-to-deep-learning/attention-and-transformers-in-brief/cheatsheet' },
+										{ label: 'References', slug: 'lessons/intro-to-deep-learning/attention-and-transformers-in-brief/references' },
+									],
+								},
+							],
+						},
+						{
+							label: 'Phase 2\nVision and generation',
+							collapsed: true,
+							items: [
+								{
+									label: 'How machines see',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/intro-to-deep-learning/how-machines-see-convolution/brief' },
+										{ label: 'Lesson', slug: 'lessons/intro-to-deep-learning/how-machines-see-convolution/lesson' },
+										{ label: 'Practice', slug: 'lessons/intro-to-deep-learning/how-machines-see-convolution/practice' },
+										{ label: 'Summary', slug: 'lessons/intro-to-deep-learning/how-machines-see-convolution/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/intro-to-deep-learning/how-machines-see-convolution/cheatsheet' },
+										{ label: 'References', slug: 'lessons/intro-to-deep-learning/how-machines-see-convolution/references' },
+									],
+								},
+								{
+									label: 'From edges to objects',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/intro-to-deep-learning/from-edges-to-objects/brief' },
+										{ label: 'Lesson', slug: 'lessons/intro-to-deep-learning/from-edges-to-objects/lesson' },
+										{ label: 'Practice', slug: 'lessons/intro-to-deep-learning/from-edges-to-objects/practice' },
+										{ label: 'Summary', slug: 'lessons/intro-to-deep-learning/from-edges-to-objects/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/intro-to-deep-learning/from-edges-to-objects/cheatsheet' },
+										{ label: 'References', slug: 'lessons/intro-to-deep-learning/from-edges-to-objects/references' },
+									],
+								},
+								{
+									label: 'Teaching machines to imagine',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/intro-to-deep-learning/teaching-machines-to-imagine/brief' },
+										{ label: 'Lesson', slug: 'lessons/intro-to-deep-learning/teaching-machines-to-imagine/lesson' },
+										{ label: 'Practice', slug: 'lessons/intro-to-deep-learning/teaching-machines-to-imagine/practice' },
+										{ label: 'Summary', slug: 'lessons/intro-to-deep-learning/teaching-machines-to-imagine/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/intro-to-deep-learning/teaching-machines-to-imagine/cheatsheet' },
+										{ label: 'References', slug: 'lessons/intro-to-deep-learning/teaching-machines-to-imagine/references' },
+									],
+								},
+								{
+									label: 'Generating by denoising',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/intro-to-deep-learning/generating-by-denoising-diffusion/brief' },
+										{ label: 'Lesson', slug: 'lessons/intro-to-deep-learning/generating-by-denoising-diffusion/lesson' },
+										{ label: 'Practice', slug: 'lessons/intro-to-deep-learning/generating-by-denoising-diffusion/practice' },
+										{ label: 'Summary', slug: 'lessons/intro-to-deep-learning/generating-by-denoising-diffusion/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/intro-to-deep-learning/generating-by-denoising-diffusion/cheatsheet' },
+										{ label: 'References', slug: 'lessons/intro-to-deep-learning/generating-by-denoising-diffusion/references' },
+									],
+								},
+							],
+						},
+						{
+							label: 'Phase 3\nDecisions and limits',
+							collapsed: true,
+							items: [
+								{
+									label: 'Learning by trial and reward',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/intro-to-deep-learning/learning-by-trial-and-reward/brief' },
+										{ label: 'Lesson', slug: 'lessons/intro-to-deep-learning/learning-by-trial-and-reward/lesson' },
+										{ label: 'Practice', slug: 'lessons/intro-to-deep-learning/learning-by-trial-and-reward/practice' },
+										{ label: 'Summary', slug: 'lessons/intro-to-deep-learning/learning-by-trial-and-reward/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/intro-to-deep-learning/learning-by-trial-and-reward/cheatsheet' },
+										{ label: 'References', slug: 'lessons/intro-to-deep-learning/learning-by-trial-and-reward/references' },
+									],
+								},
+								{
+									label: 'Where deep learning breaks',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/intro-to-deep-learning/where-deep-learning-breaks/brief' },
+										{ label: 'Lesson', slug: 'lessons/intro-to-deep-learning/where-deep-learning-breaks/lesson' },
+										{ label: 'Practice', slug: 'lessons/intro-to-deep-learning/where-deep-learning-breaks/practice' },
+										{ label: 'Summary', slug: 'lessons/intro-to-deep-learning/where-deep-learning-breaks/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/intro-to-deep-learning/where-deep-learning-breaks/cheatsheet' },
+										{ label: 'References', slug: 'lessons/intro-to-deep-learning/where-deep-learning-breaks/references' },
+									],
+								},
+								{
+									label: 'Seeing the field whole',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/intro-to-deep-learning/seeing-the-field-whole/brief' },
+										{ label: 'Lesson', slug: 'lessons/intro-to-deep-learning/seeing-the-field-whole/lesson' },
+										{ label: 'Practice', slug: 'lessons/intro-to-deep-learning/seeing-the-field-whole/practice' },
+										{ label: 'Summary', slug: 'lessons/intro-to-deep-learning/seeing-the-field-whole/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/intro-to-deep-learning/seeing-the-field-whole/cheatsheet' },
+										{ label: 'References', slug: 'lessons/intro-to-deep-learning/seeing-the-field-whole/references' },
+									],
+								},
+							],
+						},
+					],
+				},
 			],
 			components: {
 				// Adds og:image and twitter:image to every page; Starlight 0.38
