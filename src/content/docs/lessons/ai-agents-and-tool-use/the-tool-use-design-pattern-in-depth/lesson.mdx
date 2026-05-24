@@ -1,0 +1,147 @@
+---
+title: 'Lesson: The tool-use design pattern in depth'
+description: "Lesson 2 showed how a tool call works. This one is about how to make the model use the right tool at the right time, which comes down to one thing: the tool definition. The model picks tools from their descriptions and nothing else, so a tool it misuses is almost always a tool you described badly. We trace bad-versus-good tool definitions, fix vague parameters, and draw clean boundaries between tools that overlap."
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+Lesson 2 showed the mechanism: the model emits a structured tool call, the loop runs the tool, the result comes back. That tells you how a tool call works once the model decides to make it. It does not tell you how to get the model to make the right call in the first place, and that is where most real agent problems actually live.
+
+Here is the fact the whole lesson hangs on: the model chooses which tool to call, and with what arguments, based on the tool's description and nothing else. It cannot see the tool's code. It cannot run experiments. It reads the name, the description, and the parameter list you wrote, and it decides from those words alone. So when an agent calls the wrong tool, skips a tool it should have used, or passes garbage arguments, the cause is almost never a dumb model. It is a tool that was described badly.
+
+This lesson is the most directly useful one in the early part of the track if you are actually building an agent. By the end you will be able to write a tool definition the model can use reliably, and you will recognize the description problems behind the most common tool-use failures.
+
+## A tool definition is the model's only window
+
+A tool definition has four parts, and each one is doing a specific job for the model.
+
+- **The name.** A short handle like `get_weather`. The model uses it to refer to the tool when it calls.
+- **The description.** A sentence or two saying what the tool does and, just as important, when to use it. This is the part the model leans on most when deciding whether this tool fits the task in front of it.
+- **The parameters.** The inputs the tool needs, each with its own name, type, and ideally its own short description. The model fills these in when it calls.
+- **The expected output.** What the tool returns, so the model knows what it will get back and can plan the next step.
+
+Every one of those parts is text the model reads. Think of the whole definition as the model's only window onto the tool. If the window is dirty, the model sees the tool wrong and uses it wrong.
+
+## Worked example: a bad description and a good one
+
+Take a single tool and write it two ways.
+
+**Bad:**
+
+```
+name: search
+description: "Searches."
+parameters: query
+```
+
+What goes wrong: the model has no idea what `search` searches. The web? Your internal documents? A product catalog? Faced with a user question, it cannot tell whether this tool is relevant, so it either calls it when it should not or skips it when it should not. The word "Searches" tells the model nothing it did not already guess from the name.
+
+**Good:**
+
+```
+name: search_internal_docs
+description: "Search the company's internal knowledge base of support
+  articles and policy documents. Use this when the user asks about
+  company-specific procedures, products, or policies. Do not use it for
+  general world knowledge or live data."
+parameters:
+  query (string): "The user's question, rephrased as search keywords."
+```
+
+What changed: the name says what is searched, the description says what is inside and when to reach for it, it explicitly says when not to, and the parameter says how to fill it. The model now has everything it needs to decide correctly. Same tool, same code behind it. The only difference is the words, and the words are what the model acts on.
+
+## Parameters need descriptions too
+
+It is tempting to describe the tool well and leave the parameters as bare names. That is where wrong-argument bugs come from. The model fills arguments from the parameter descriptions the same way it picks tools from tool descriptions.
+
+```
+WEAK:
+  parameters:
+    date    # the model guesses a format: "tomorrow"? "2026-05-21"? "next Tue"?
+
+STRONG:
+  parameters:
+    date (string): "The target date in YYYY-MM-DD format. Resolve
+      relative dates like 'tomorrow' before calling."
+```
+
+With the weak version, the model might pass `"tomorrow"` to a tool that expects `2026-05-21`, and the tool fails or misbehaves. With the strong version, the model knows the exact format and that it must resolve relative dates itself first. You have moved a whole class of failure from runtime into the definition.
+
+## Worked example: two tools the model confuses
+
+The hardest tool-definition problem is not one tool, it is two that overlap. Give the model these:
+
+```
+get_weather(city, day)   description: "Get the weather."
+get_forecast(city)       description: "Get the forecast."
+```
+
+The model cannot tell these apart, because the descriptions do not draw a boundary. Weather and forecast are near-synonyms in plain language. It will pick one more or less at random, and if they behave differently, the agent is now unreliable for reasons that look like bad luck.
+
+Fix it by making each description say what makes it different from its neighbor:
+
+```
+get_current_weather(city)
+  description: "Current conditions right now (temperature, sky). Use for
+    'what is it like outside now' questions."
+get_forecast(city, days_ahead)
+  description: "Predicted conditions for a future day, up to 7 days out.
+    Use for 'will it rain tomorrow' style questions. Not for right now."
+```
+
+Now the boundary is explicit, including a "not for right now" on the forecast tool. When two tools could be confused, each description has to do double duty: say what the tool is for, and mark where it ends and the other begins.
+
+## Tell the model when not to use a tool
+
+A pattern worth naming on its own: negative guidance. The good examples above all included a "do not use this for X" clause, and that is not decoration. Models are eager to use the tools they are given. Left to a purely positive description, a model will often reach for a tool in cases just outside its intended use. A short "do not use this when..." line is one of the highest-leverage sentences you can add to a tool definition, because it closes off the near-miss cases that positive descriptions leave open.
+
+Watch it work. The agent has only the `search_internal_docs` tool, and the user asks a general-knowledge question:
+
+```
+USER: What is the capital of France?
+
+WITHOUT negative guidance:
+  MODEL -> call: search_internal_docs { query: "capital of France" }
+  LOOP  -> {} (nothing; the knowledge base has no world facts)
+  MODEL -> "I could not find that in our documents."   (a bad answer)
+
+WITH "Do not use for general world knowledge":
+  MODEL -> "The capital of France is Paris."            (answers directly)
+```
+
+The tool did not change. One sentence in its description stopped the model from reaching for it on a question it was never meant to handle.
+
+## Make the output legible too
+
+The definition's fourth part, the expected output, matters for the same reason the description does: the model has to read the result and decide what to do next (Lesson 2's step 4). A tool that returns an opaque blob makes that hard. Compare two return shapes for the same weather tool:
+
+```
+HARD TO READ:  { "t": 58, "c": 3, "p": 0.8 }
+EASY TO READ:  { "high_f": 58, "condition": "rain", "rain_chance": 0.8 }
+```
+
+Both carry the same data, but only the second lets the model use it confidently without guessing what `c: 3` means. Designing tools is not only about getting the model to call them correctly; it is also about handing back results the model can actually act on. Labeled, self-describing output is part of a good tool definition, not an afterthought.
+
+## A note on too many tools
+
+Descriptions carry more weight as the toolbox grows. With three tools, even rough descriptions usually work, because there is little to confuse. With thirty tools, several will have overlapping territory, and the quality of every description is what keeps the model picking correctly. If an agent with many tools is unreliable, the first place to look is not the model or the loop; it is whether the tool descriptions actually distinguish the tools from one another.
+
+## Common pitfalls
+
+- **Blaming the model for tool-selection errors.** The model picks from descriptions. A wrong pick almost always means an unclear or overlapping description, not a weak model.
+- **Naming a tool vaguely.** `search`, `process`, `handle`, and `do_task` tell the model nothing. The name is the first and shortest description; spend it well.
+- **Leaving parameters undescribed.** Bare parameter names cause wrong-argument bugs. Say the format and any rules the model must apply before calling.
+- **Writing only positive descriptions.** Without a "do not use this for X" line, models over-reach to neighboring cases. Negative guidance closes the near-misses.
+- **Letting two tools overlap silently.** If two descriptions could both plausibly match a request, the model will guess. Each description has to mark its boundary with the others.
+
+## What you should remember
+
+- **The model selects tools and fills arguments from descriptions alone.** It cannot see the code. A tool it misuses is almost always a tool described badly.
+- **A tool definition has four parts that are all text for the model:** name, description (what plus when to use), parameters (each described), and expected output. Treat the whole thing as the model's only window onto the tool.
+- **Parameters need their own descriptions,** including formats and any rules the model must apply, or you get wrong-argument failures.
+- **Negative guidance is high-leverage.** A "do not use this for X" clause closes the near-miss cases that positive descriptions leave open.
+- **When tools overlap, each description must draw the boundary.** The more tools an agent has, the more the quality of every description determines whether it picks correctly.
+
+The next lesson turns to something the loop has been missing so far: memory. Every example up to now started fresh each time. We will look at how an agent holds on to information, the difference between the short-term context of a single run and persistent memory across runs, and how to decide what an agent should actually remember.

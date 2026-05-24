@@ -1,0 +1,101 @@
+---
+title: 'Lesson: Agents that retrieve their own information: agentic RAG'
+description: "An agent that answers from your documents has to find the right passage first. The classic way to do that, RAG, is a fixed pipeline: always retrieve, then answer. This lesson shows the agentic turn, where retrieval becomes a tool the agent decides whether and when to call, can run more than once, and can judge whether what came back is good enough. That one change turns a rigid pipeline into a reasoning loop."
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+The last lesson left a thread hanging. An agent's persistent memory, and any large body of reference material it works from, has to live somewhere, and the agent has to pull the right piece at the right moment. If your agent answers questions from a 500-page manual, it cannot read all 500 pages every time. It has to find the few relevant paragraphs and work from those.
+
+The standard technique for that is RAG, retrieval-augmented generation. This lesson is about a sharper version of it. The ordinary form is a fixed pipeline; the agentic form makes retrieval a decision the agent owns. That one difference is the whole point, so we will build it carefully.
+
+## RAG in one breath
+
+RAG is simple in outline. You have a body of text the model was not trained on: your documents, a knowledge base, a manual. When a question comes in, you retrieve the passages most relevant to it, paste those passages into the model's context, and let the model answer using them. The retrieval step is what lets the model speak about information it never memorized.
+
+How retrieval finds the relevant passages, by matching meaning rather than exact words, using embeddings that place similar text near each other, is its own subject and not the point here. For this lesson, treat retrieval as a black box with one job: given a query, return the most relevant chunks of text. What matters is when and how the agent uses that box.
+
+## The catch: classical RAG is a fixed pipeline
+
+In its classic form, RAG runs the same three steps in the same order every time: retrieve, then read, then answer. Retrieval always happens, always once, always before the model speaks.
+
+That rigidity is fine for a narrow question-answering box, but it fights against everything we have built in this track. Consider what it gets wrong:
+
+- For a question the model can answer on its own ("what is 15% of 240?"), it retrieves anyway, wasting the step and stuffing the context with irrelevant passages.
+- For a question that needs two different lookups, it retrieves once and stops, answering from half the information.
+- For a question where the first search comes back weak, it has no way to notice and try again. It reads whatever it got and answers, even if what it got was wrong.
+
+The pipeline cannot adapt because there is no decision in it. It always does the same thing.
+
+## The agentic turn: retrieval becomes a tool
+
+Here is the change. Instead of a fixed retrieve-then-read pipeline, give the agent a retrieval tool and let it decide. This is exactly the move from Lesson 2: retrieval becomes a tool the agent can call inside its perceive-decide-act loop, on its own judgment, rather than a step someone wired in ahead of time.
+
+Now the agent can do what a pipeline cannot. It can skip retrieval when it does not need it. It can retrieve more than once, refining the query each time. After a search comes back, it can judge whether the result is good enough and, if not, search again with a better query or reach for a different tool. Retrieval stops being a fixed first step and becomes one move the agent chooses among many, whenever its reasoning calls for it.
+
+That is agentic RAG: the agent owns the retrieval decisions instead of following a predetermined path.
+
+### Worked example: the same three questions, two ways
+
+```
+CLASSICAL RAG (always retrieve once, then answer):
+  Q: "What is 15% of 240?"          -> retrieves docs (useless), answers
+  Q: "What's our refund window?"    -> retrieves once, answers
+  Q: "Compare our 2023 and 2024
+      refund policies."             -> retrieves once (gets only one year),
+                                       answers from half the picture
+
+AGENTIC RAG (retrieval is a tool the agent decides to use):
+  Q: "What is 15% of 240?"          -> no retrieval needed -> "36"
+  Q: "What's our refund window?"    -> retrieve("refund window") -> answer
+  Q: "Compare our 2023 and 2024
+      refund policies."             -> retrieve("2023 refund policy")
+                                       retrieve("2024 refund policy")
+                                       -> compare both -> answer
+```
+
+Same three questions. The agentic version skips a pointless retrieval, does a single one when that is enough, and does two targeted ones when the question demands it. The pipeline could not vary; the agent does.
+
+## Judging the results and trying again
+
+The most useful thing the agent gains is the ability to check its own retrieval. After a search returns, the agent can ask, in effect, "is this enough to answer well?" If the passages are off-topic or thin, it can refine the query and search again, exactly the self-correction you saw with tool failures in Lesson 2. A classical pipeline reads whatever the first search returned and commits to it. An agent can notice a weak result and fix it before answering.
+
+```
+Q: "Does our policy cover overseas returns?"
+  retrieve("overseas returns")      -> weak, generic shipping text
+  agent judges: not specific enough
+  retrieve("international return policy eligibility")  -> the actual clause
+  agent answers from the better result
+```
+
+## What it costs
+
+Agency is not free, and the honest tradeoff from earlier lessons applies here too. An agent that decides when to retrieve can decide wrong: it can skip a retrieval it needed, retrieve when it should have just answered, or loop on refining a query that was never going to work. The fixed pipeline is predictable precisely because it never decides. Agentic RAG trades that predictability for adaptability, and like any tool use, it is worth it when the questions are varied enough that one fixed path cannot serve them all.
+
+## Where it earns its keep
+
+The adaptability pays off most on jobs where one fixed retrieval was never going to be enough. A research assistant that has to gather facts from several sources, decide what is still missing, and go back for more is a natural fit: the work is inherently several retrievals deep, and the agent decides how deep as it goes. A support agent that may need to check one policy document or cross-reference three, depending on the question, is another: the number of lookups is not known in advance, so a fixed pipeline either over-fetches or comes up short. The common thread is variable depth. When you cannot say ahead of time how many retrievals a question needs, letting the agent decide is the design that fits.
+
+## It is still just a tool
+
+Notice that nothing here is new machinery. The retrieval tool is a tool like any other, which means the tool-definition discipline from Lesson 4 applies directly: describe the retrieval tool well, say what it searches and when to use it, or the agent will call it at the wrong times. And retrieval is often how the persistent memory from Lesson 5 gets fetched: the agent retrieves the relevant stored facts into its context exactly when a run needs them. Agentic RAG is not a separate system bolted onto the agent; it is the loop, the tool call, the tool definition, and memory, all working together on the specific job of pulling in the right information.
+
+## Common pitfalls
+
+- **Thinking RAG is one fixed thing.** Classical RAG is a fixed pipeline; agentic RAG is a decision the agent owns. The word "RAG" covers both, so be clear which one you mean.
+- **Reaching for agentic RAG when a pipeline would do.** If every question needs exactly one retrieval, the fixed pipeline is simpler and more predictable. Agency earns its keep when the questions vary.
+- **Forgetting the agent can retrieve badly.** A retrieval tool the agent controls can be called at the wrong time or looped on. The adaptability comes with the same reliability cost as any tool use.
+- **Neglecting the retrieval tool's description.** Because retrieval is just a tool, a vague description makes the agent use it at the wrong moments. Lesson 4 applies here in full.
+- **Treating retrieval quality as the agent's job.** How well the black box finds relevant text (the embeddings, the chunking) is a separate problem. A great agent over a bad index still answers from bad passages.
+
+## What you should remember
+
+- **Classical RAG is a fixed pipeline:** retrieve, read, answer, the same way every time. It cannot adapt because there is no decision in it.
+- **Agentic RAG makes retrieval a tool the agent decides to call.** The agent chooses whether to retrieve, when, how many times, and whether the result is good enough.
+- **That single change unlocks three behaviors a pipeline cannot:** skipping retrieval when it is not needed, retrieving multiple times for multi-part questions, and re-searching when the first result is weak.
+- **It is built entirely from earlier pieces:** the loop (Lesson 1), the tool call (Lesson 2), the tool definition (Lesson 4), and memory (Lesson 5). Agentic RAG is those parts pointed at the job of fetching information.
+- **Adaptability costs predictability.** An agent that decides when to retrieve can decide wrong. Use the fixed pipeline when one path serves; use agentic RAG when the questions vary enough to need judgment.
+
+So far the agent has decided things one step at a time: which tool now, whether to retrieve now. The next lesson steps up a level to planning, where the agent breaks a larger goal into an ordered sequence of steps before it starts acting, so it can tackle tasks too big to solve one reaction at a time.

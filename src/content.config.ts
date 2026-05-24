@@ -34,6 +34,7 @@ export const collections = {
 						// Mirror tracks (structural mirrors of external open courses)
 						'intro-to-deep-learning', // Track 12: MIT 6.S191 (Amini and Amini)
 						'build-nns-from-scratch', // Track 13: Karpathy Neural Networks Zero to Hero
+						'ai-agents-and-tool-use', // Track 20: Microsoft AI Agents for Beginners + Berkeley CS294
 					])
 					.optional(),
 				course: z.string().optional(),
@@ -74,6 +75,10 @@ export const collections = {
 						'the-autograd-engine',
 						'building-a-language-model',
 						'building-a-transformer',
+						// Track 20 (AI Agents and Tool Use)
+						'what-agents-are',
+						'agent-design-patterns',
+						'production-agents',
 					])
 					.optional(),
 				phase_order: z.number().int().positive().optional(),

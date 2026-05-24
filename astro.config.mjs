@@ -611,6 +611,149 @@ export default defineConfig({
 					],
 				},
 				{
+					label: 'Track 20: AI Agents and Tool Use',
+					items: [
+						{
+							label: 'Phase 1\nWhat agents are',
+							collapsed: true,
+							items: [
+								{
+									label: 'What makes an agent',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/ai-agents-and-tool-use/what-makes-an-ai-an-agent/brief' },
+										{ label: 'Lesson', slug: 'lessons/ai-agents-and-tool-use/what-makes-an-ai-an-agent/lesson' },
+										{ label: 'Practice', slug: 'lessons/ai-agents-and-tool-use/what-makes-an-ai-an-agent/practice' },
+										{ label: 'Summary', slug: 'lessons/ai-agents-and-tool-use/what-makes-an-ai-an-agent/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/ai-agents-and-tool-use/what-makes-an-ai-an-agent/cheatsheet' },
+										{ label: 'References', slug: 'lessons/ai-agents-and-tool-use/what-makes-an-ai-an-agent/references' },
+									],
+								},
+								{
+									label: 'Tool use',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/ai-agents-and-tool-use/how-tool-use-turns-a-model-into-an-agent/brief' },
+										{ label: 'Lesson', slug: 'lessons/ai-agents-and-tool-use/how-tool-use-turns-a-model-into-an-agent/lesson' },
+										{ label: 'Practice', slug: 'lessons/ai-agents-and-tool-use/how-tool-use-turns-a-model-into-an-agent/practice' },
+										{ label: 'Summary', slug: 'lessons/ai-agents-and-tool-use/how-tool-use-turns-a-model-into-an-agent/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/ai-agents-and-tool-use/how-tool-use-turns-a-model-into-an-agent/cheatsheet' },
+										{ label: 'References', slug: 'lessons/ai-agents-and-tool-use/how-tool-use-turns-a-model-into-an-agent/references' },
+									],
+								},
+								{
+									label: 'Choosing a framework',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/ai-agents-and-tool-use/choosing-an-agent-framework/brief' },
+										{ label: 'Lesson', slug: 'lessons/ai-agents-and-tool-use/choosing-an-agent-framework/lesson' },
+										{ label: 'Practice', slug: 'lessons/ai-agents-and-tool-use/choosing-an-agent-framework/practice' },
+										{ label: 'Summary', slug: 'lessons/ai-agents-and-tool-use/choosing-an-agent-framework/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/ai-agents-and-tool-use/choosing-an-agent-framework/cheatsheet' },
+										{ label: 'References', slug: 'lessons/ai-agents-and-tool-use/choosing-an-agent-framework/references' },
+									],
+								},
+							],
+						},
+						{
+							label: 'Phase 2\nAgent design patterns',
+							collapsed: true,
+							items: [
+								{
+									label: 'Tool definitions in depth',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/ai-agents-and-tool-use/the-tool-use-design-pattern-in-depth/brief' },
+										{ label: 'Lesson', slug: 'lessons/ai-agents-and-tool-use/the-tool-use-design-pattern-in-depth/lesson' },
+										{ label: 'Practice', slug: 'lessons/ai-agents-and-tool-use/the-tool-use-design-pattern-in-depth/practice' },
+										{ label: 'Summary', slug: 'lessons/ai-agents-and-tool-use/the-tool-use-design-pattern-in-depth/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/ai-agents-and-tool-use/the-tool-use-design-pattern-in-depth/cheatsheet' },
+										{ label: 'References', slug: 'lessons/ai-agents-and-tool-use/the-tool-use-design-pattern-in-depth/references' },
+									],
+								},
+								{
+									label: 'Giving agents memory',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/ai-agents-and-tool-use/giving-agents-memory/brief' },
+										{ label: 'Lesson', slug: 'lessons/ai-agents-and-tool-use/giving-agents-memory/lesson' },
+										{ label: 'Practice', slug: 'lessons/ai-agents-and-tool-use/giving-agents-memory/practice' },
+										{ label: 'Summary', slug: 'lessons/ai-agents-and-tool-use/giving-agents-memory/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/ai-agents-and-tool-use/giving-agents-memory/cheatsheet' },
+										{ label: 'References', slug: 'lessons/ai-agents-and-tool-use/giving-agents-memory/references' },
+									],
+								},
+								{
+									label: 'Agentic RAG',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/ai-agents-and-tool-use/agentic-rag/brief' },
+										{ label: 'Lesson', slug: 'lessons/ai-agents-and-tool-use/agentic-rag/lesson' },
+										{ label: 'Practice', slug: 'lessons/ai-agents-and-tool-use/agentic-rag/practice' },
+										{ label: 'Summary', slug: 'lessons/ai-agents-and-tool-use/agentic-rag/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/ai-agents-and-tool-use/agentic-rag/cheatsheet' },
+										{ label: 'References', slug: 'lessons/ai-agents-and-tool-use/agentic-rag/references' },
+									],
+								},
+								{
+									label: 'Planning',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/ai-agents-and-tool-use/planning/brief' },
+										{ label: 'Lesson', slug: 'lessons/ai-agents-and-tool-use/planning/lesson' },
+										{ label: 'Practice', slug: 'lessons/ai-agents-and-tool-use/planning/practice' },
+										{ label: 'Summary', slug: 'lessons/ai-agents-and-tool-use/planning/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/ai-agents-and-tool-use/planning/cheatsheet' },
+										{ label: 'References', slug: 'lessons/ai-agents-and-tool-use/planning/references' },
+									],
+								},
+								{
+									label: 'Multi-agent systems',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/ai-agents-and-tool-use/multi-agent-systems/brief' },
+										{ label: 'Lesson', slug: 'lessons/ai-agents-and-tool-use/multi-agent-systems/lesson' },
+										{ label: 'Practice', slug: 'lessons/ai-agents-and-tool-use/multi-agent-systems/practice' },
+										{ label: 'Summary', slug: 'lessons/ai-agents-and-tool-use/multi-agent-systems/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/ai-agents-and-tool-use/multi-agent-systems/cheatsheet' },
+										{ label: 'References', slug: 'lessons/ai-agents-and-tool-use/multi-agent-systems/references' },
+									],
+								},
+								{
+									label: 'Self-checking (metacognition)',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/ai-agents-and-tool-use/metacognition/brief' },
+										{ label: 'Lesson', slug: 'lessons/ai-agents-and-tool-use/metacognition/lesson' },
+										{ label: 'Practice', slug: 'lessons/ai-agents-and-tool-use/metacognition/practice' },
+										{ label: 'Summary', slug: 'lessons/ai-agents-and-tool-use/metacognition/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/ai-agents-and-tool-use/metacognition/cheatsheet' },
+										{ label: 'References', slug: 'lessons/ai-agents-and-tool-use/metacognition/references' },
+									],
+								},
+							],
+						},
+						{
+							label: 'Phase 3\nProduction agents',
+							collapsed: true,
+							items: [
+								{
+									label: 'Building trustworthy agents',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/ai-agents-and-tool-use/building-trustworthy-agents/brief' },
+										{ label: 'Lesson', slug: 'lessons/ai-agents-and-tool-use/building-trustworthy-agents/lesson' },
+										{ label: 'Practice', slug: 'lessons/ai-agents-and-tool-use/building-trustworthy-agents/practice' },
+										{ label: 'Summary', slug: 'lessons/ai-agents-and-tool-use/building-trustworthy-agents/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/ai-agents-and-tool-use/building-trustworthy-agents/cheatsheet' },
+										{ label: 'References', slug: 'lessons/ai-agents-and-tool-use/building-trustworthy-agents/references' },
+									],
+								},
+							],
+						},
+					],
+				},
+				{
 					label: 'Track 13: Build Neural Networks from Scratch',
 					items: [
 						{

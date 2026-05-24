@@ -99,6 +99,12 @@ const BLOOM_VERBS = [
 	'assemble',
 	'choose',
 	'walk',
+	'judge',
+	'decide',
+	'match',
+	'write',
+	'add',
+	'draw',
 ];
 
 const TRACK_5_PHASE_SLUGS = [
@@ -132,11 +138,18 @@ const TRACK_13_PHASE_SLUGS = [
 	'building-a-transformer',
 ] as const;
 
+const TRACK_20_PHASE_SLUGS = [
+	'what-agents-are',
+	'agent-design-patterns',
+	'production-agents',
+] as const;
+
 const PHASE_SLUGS = [
 	...TRACK_5_PHASE_SLUGS,
 	...TRACK_6_PHASE_SLUGS,
 	...TRACK_12_PHASE_SLUGS,
 	...TRACK_13_PHASE_SLUGS,
+	...TRACK_20_PHASE_SLUGS,
 ] as const;
 
 const BriefSchema = z.object({
@@ -155,6 +168,7 @@ const BriefSchema = z.object({
 		'pain-point-library',
 		'intro-to-deep-learning',
 		'build-nns-from-scratch',
+		'ai-agents-and-tool-use',
 	]),
 	difficulty: z.enum(['intro', 'standard', 'deep']),
 	estimated_read_minutes: z.number().int().positive(),
@@ -188,6 +202,7 @@ async function main(): Promise<number> {
 	// Same per-track tracking for the mirror tracks (Track 12, Track 13).
 	const phaseSlotsTrack12 = new Map<string, string[]>();
 	const phaseSlotsTrack13 = new Map<string, string[]>();
+	const phaseSlotsTrack20 = new Map<string, string[]>();
 
 	if (!existsSync(LESSONS_ROOT)) {
 		console.log(
@@ -355,6 +370,33 @@ async function main(): Promise<number> {
 							phaseSlotsTrack13.set(key, seen);
 						}
 					}
+
+					// Track 20 phase context: required when track is ai-agents-and-tool-use.
+					if (parsed.data.track === 'ai-agents-and-tool-use') {
+						if (parsed.data.phase === undefined) {
+							errors.push({
+								path: relative(ROOT, briefPath),
+								message: `Track 20 lesson missing required field: phase (one of ${TRACK_20_PHASE_SLUGS.join(', ')})`,
+							});
+						} else if (!TRACK_20_PHASE_SLUGS.includes(parsed.data.phase as any)) {
+							errors.push({
+								path: relative(ROOT, briefPath),
+								message: `Track 20 lesson has phase "${parsed.data.phase}" but Track 20 phases are: ${TRACK_20_PHASE_SLUGS.join(', ')}.`,
+							});
+						}
+						if (parsed.data.phase_order === undefined) {
+							errors.push({
+								path: relative(ROOT, briefPath),
+								message: `Track 20 lesson missing required field: phase_order`,
+							});
+						}
+						if (parsed.data.phase !== undefined && parsed.data.phase_order !== undefined) {
+							const key = `${parsed.data.phase}/${parsed.data.phase_order}`;
+							const seen = phaseSlotsTrack20.get(key) ?? [];
+							seen.push(relative(ROOT, briefPath));
+							phaseSlotsTrack20.set(key, seen);
+						}
+					}
 				}
 			}
 		}
@@ -401,6 +443,16 @@ async function main(): Promise<number> {
 				errors.push({
 					path: p,
 					message: `Track 13: duplicate (phase, phase_order) pair "${key}"; also used by: ${paths.filter((q) => q !== p).join(', ')}`,
+				});
+			}
+		}
+	}
+	for (const [key, paths] of phaseSlotsTrack20) {
+		if (paths.length > 1) {
+			for (const p of paths) {
+				errors.push({
+					path: p,
+					message: `Track 20: duplicate (phase, phase_order) pair "${key}"; also used by: ${paths.filter((q) => q !== p).join(', ')}`,
 				});
 			}
 		}

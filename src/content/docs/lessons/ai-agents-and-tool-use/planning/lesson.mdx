@@ -1,0 +1,96 @@
+---
+title: 'Lesson: Planning: breaking a goal into steps'
+description: "Every agent so far decided one move at a time, reacting to whatever just happened. That works until the task is too big to wing. This lesson is about the planning turn: the agent looks ahead, breaks a goal into an ordered set of sub-tasks, and decides the shape of the work before it starts. We trace a plan being built and executed, and show how an agent revises the plan when reality does not cooperate."
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+Up to now, the agent in this track has lived in the moment. Each trip around the loop it looked at the current state, picked one move, did it, and looked again. React, react, react. For everything we have built so far, that has been enough.
+
+It stops being enough when the task gets big. Ask an agent to "plan a three-day trip to Tokyo under a budget, with museums in the morning and food tours at night," and pure reaction starts to fail. The agent books a hotel before checking flight dates, or researches restaurants for a day it has not scheduled yet, or simply loses the thread halfway through a long task. A goal with many interdependent parts needs more than one good reaction at a time. It needs a plan.
+
+This lesson is about that turn: from deciding one move at a time to deciding the shape of the whole job first. By the end you will be able to describe how an agent decomposes a goal into an ordered set of sub-tasks, and how it revises that plan when the work does not go as expected.
+
+## Why reaction breaks down at scale
+
+A purely reactive agent has no view of the whole task. It sees the current state and the next move, nothing more. On a short task that is fine, because the whole task nearly fits in a single step. On a long task it causes three predictable problems: the agent does things in the wrong order because it cannot see dependencies, it repeats or skips work because it has no map of what is done, and it drifts off the goal because nothing is holding the overall shape in view.
+
+Planning fixes this by giving the agent that map. Before diving in, the agent lays out the steps. Now it has something to follow, to check progress against, and to keep it pointed at the goal.
+
+## Planning is decomposition
+
+At its core, planning is decomposition: taking one large goal and breaking it into an ordered list of smaller sub-tasks, each of which is achievable in a step or a few. The Tokyo trip becomes: check flight dates and prices, then pick dates that fit the budget, then book lodging for those dates, then build a day-by-day itinerary, then book the food tours that fit it. Each sub-task is small enough to act on directly, and the order captures the dependencies (you cannot build an itinerary before you know the dates).
+
+The agent produces this breakdown first, as its own step, and only then begins executing. That is the heart of the planning pattern: think out the structure, then act on it.
+
+## How an LLM plans
+
+The ability to produce a sensible plan is a reasoning skill, and it is the same skill behind a model "thinking step by step." In his lecture on LLM reasoning, Denny Zhou makes the case that prompting a model to lay out intermediate steps, rather than jump straight to an answer, substantially improves how it handles complex problems. Planning applies that directly: instead of asking the model for the final result, you ask it first to produce the steps that will get there.
+
+In practice the plan is usually written in a structured form, a numbered list or a machine-readable structure of steps, rather than loose prose. Structure makes the plan clear to follow, easy to check off as each step completes, and simple for the surrounding code (or, as we will see next lesson, other agents) to execute one item at a time.
+
+### Worked example: a goal decomposed, then executed
+
+```
+GOAL: "Plan a 3-day Tokyo trip under $2000, museums AM, food tours PM."
+
+STEP 1, the agent produces a plan (before acting):
+  1. Check flight prices for candidate dates
+  2. Pick dates that keep flights within budget
+  3. Book lodging for those dates
+  4. Draft a day-by-day itinerary (museums AM, food PM)
+  5. Book food tours that fit the itinerary
+
+STEP 2, the agent executes the plan, one step at a time:
+  -> check_flights(...)   picks dates under budget
+  -> book_lodging(...)    for the chosen dates
+  -> build_itinerary(...) museums AM, food PM
+  -> book_tours(...)      matched to the itinerary
+  -> reports the finished plan to the user
+```
+
+The agent did not improvise its way through. It decided the shape of the work, then carried it out in order. Each step is still a loop iteration with a tool call, the machinery from earlier lessons; planning is the layer that decides what those iterations should be and in what order.
+
+## Getting the grain size right
+
+A plan is only as good as the size of its steps, and decomposition can go wrong in two opposite directions. Steps that are too big hide their own complexity: "arrange the whole trip" as a single step is not a plan, it is the original goal wearing a list's clothing. Steps that are too small bury the shape in noise: "open the booking site, type the city, click search, read the first result" turns a plan into a transcript and gives the agent nothing to reason about. The useful grain is the level where each step is a single clear intention the agent can act on in a turn or a few, and where reading the list back tells you the strategy at a glance. If a step still feels like a project, break it down further; if the plan reads like keystrokes, pull the steps up a level.
+
+## Plan-then-execute, and replanning
+
+The example above is plan-then-execute: build the whole plan upfront, then run it. That works when the task is predictable. Often it is not, and the agent has to adapt. The outcome of one sub-task can change what the rest of the plan should be.
+
+This is replanning: the agent executes a step, observes the result, and revises the remaining plan in light of it. It is the same self-correction instinct you saw with tool failures and weak retrievals, lifted up to the level of the whole task.
+
+```
+PLAN step 1: check flights for the first week of June
+  -> result: nothing under budget that week
+REPLAN: the budget constraint beats the date preference
+  -> revised step 1: check flights for the second week of June
+  -> result: found dates under budget -> continue the plan from there
+```
+
+A rigid plan-then-execute agent would have failed or booked an over-budget flight. A replanning agent noticed the plan no longer fit reality and adjusted it. Most capable agents sit somewhere between the two: enough planning to give the work a shape, enough replanning to survive contact with the real world.
+
+## When planning is worth it
+
+The recurring tradeoff in this track applies here too. Producing and following an explicit plan costs an extra reasoning step and some rigidity. For a small task ("what is the weather tomorrow?") that overhead is pure waste; reaction is faster and cleaner. Planning earns its keep when the task is large enough that the agent would otherwise lose its way: multiple interdependent steps, a goal that has to hold together across many actions. Match the planning to the task, the same way you matched tool use, frameworks, memory, and retrieval to theirs.
+
+## Common pitfalls
+
+- **Planning tasks that do not need it.** A single-step task does not need an explicit plan; the planning step is then pure overhead. Reserve planning for genuinely multi-step goals.
+- **Treating the plan as unchangeable.** A plan built before any action is a hypothesis, not a contract. If results contradict it, the agent should replan, not plow ahead.
+- **Planning in vague prose.** A plan the agent cannot execute step by step is not useful. Structured, concrete steps beat a paragraph of intentions.
+- **Confusing planning with doing.** Producing a beautiful plan is not progress until the steps are executed and checked. The plan is the map, not the journey.
+- **Over-planning a moving target.** On highly unpredictable tasks, a giant upfront plan will be stale by step two. Plan in smaller horizons and replan often.
+
+## What you should remember
+
+- **Planning is the turn from reacting one move at a time to deciding the shape of the work first.** It gives the agent a map of a large task so it does not get lost.
+- **Planning is decomposition:** breaking one goal into an ordered set of smaller sub-tasks whose order captures their dependencies.
+- **Producing a plan is a reasoning move,** the same skill as a model thinking step by step. The plan is usually written in a structured, executable form, not loose prose.
+- **Plan-then-execute works for predictable tasks; replanning handles the rest.** When a step's result contradicts the plan, the agent revises the remaining steps instead of plowing ahead.
+- **Plan only when the task earns it.** Multi-step interdependent goals benefit; single-step tasks just pay the overhead. Match planning to the task like every other capability in this track.
+
+A plan often names sub-tasks that are practically separate jobs: find flights, book hotels, build an itinerary. A natural next question is whether one agent should do all of them, or whether each sub-task should go to a different agent built for it. The next lesson takes that up: multi-agent systems, when splitting work across several agents beats keeping it in one, and what that coordination costs.
