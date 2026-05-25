@@ -35,6 +35,7 @@ export const collections = {
 						'intro-to-deep-learning', // Track 12: MIT 6.S191 (Amini and Amini)
 						'build-nns-from-scratch', // Track 13: Karpathy Neural Networks Zero to Hero
 						'ai-agents-and-tool-use', // Track 20: Microsoft AI Agents for Beginners + Berkeley CS294
+						'neural-network-intuition', // Track 11: 3Blue1Brown Neural Networks series
 					])
 					.optional(),
 				course: z.string().optional(),
@@ -79,6 +80,10 @@ export const collections = {
 						'what-agents-are',
 						'agent-design-patterns',
 						'production-agents',
+						// Track 11 (Neural Network Intuition)
+						'network-structure',
+						'how-networks-learn',
+						'backpropagation',
 					])
 					.optional(),
 				phase_order: z.number().int().positive().optional(),
