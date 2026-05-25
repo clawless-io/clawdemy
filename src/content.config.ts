@@ -36,6 +36,7 @@ export const collections = {
 						'build-nns-from-scratch', // Track 13: Karpathy Neural Networks Zero to Hero
 						'ai-agents-and-tool-use', // Track 20: Microsoft AI Agents for Beginners + Berkeley CS294
 						'neural-network-intuition', // Track 11: 3Blue1Brown Neural Networks series
+						'practical-transformers', // Track 14: Hugging Face LLM Course
 					])
 					.optional(),
 				course: z.string().optional(),
@@ -84,6 +85,10 @@ export const collections = {
 						'network-structure',
 						'how-networks-learn',
 						'backpropagation',
+						// Track 14 (Practical Transformers — Hugging Face LLM Course)
+						'foundations',
+						'data-tokenizers-tasks',
+						'demos-and-frontier',
 					])
 					.optional(),
 				phase_order: z.number().int().positive().optional(),
@@ -128,6 +133,7 @@ export const collections = {
 							'clawless-kb',
 							'reddit-thread',
 							'original',
+							'web-course',
 						]),
 						primary_url: z.string().url().optional(),
 						attribution_block: z
