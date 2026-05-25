@@ -754,6 +754,149 @@ export default defineConfig({
 					],
 				},
 				{
+					label: 'Track 11: Neural Network Intuition',
+					items: [
+						{
+							label: 'Phase 1\nNetwork structure',
+							collapsed: true,
+							items: [
+								{
+									label: 'Handwritten digits',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/neural-network-intuition/the-handwritten-digit-problem/brief' },
+										{ label: 'Lesson', slug: 'lessons/neural-network-intuition/the-handwritten-digit-problem/lesson' },
+										{ label: 'Practice', slug: 'lessons/neural-network-intuition/the-handwritten-digit-problem/practice' },
+										{ label: 'Summary', slug: 'lessons/neural-network-intuition/the-handwritten-digit-problem/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/neural-network-intuition/the-handwritten-digit-problem/cheatsheet' },
+										{ label: 'References', slug: 'lessons/neural-network-intuition/the-handwritten-digit-problem/references' },
+									],
+								},
+								{
+									label: 'Neurons and layers',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/neural-network-intuition/neurons-and-layers/brief' },
+										{ label: 'Lesson', slug: 'lessons/neural-network-intuition/neurons-and-layers/lesson' },
+										{ label: 'Practice', slug: 'lessons/neural-network-intuition/neurons-and-layers/practice' },
+										{ label: 'Summary', slug: 'lessons/neural-network-intuition/neurons-and-layers/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/neural-network-intuition/neurons-and-layers/cheatsheet' },
+										{ label: 'References', slug: 'lessons/neural-network-intuition/neurons-and-layers/references' },
+									],
+								},
+								{
+									label: 'Weights and the squish',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/neural-network-intuition/weights-biases-and-the-squish/brief' },
+										{ label: 'Lesson', slug: 'lessons/neural-network-intuition/weights-biases-and-the-squish/lesson' },
+										{ label: 'Practice', slug: 'lessons/neural-network-intuition/weights-biases-and-the-squish/practice' },
+										{ label: 'Summary', slug: 'lessons/neural-network-intuition/weights-biases-and-the-squish/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/neural-network-intuition/weights-biases-and-the-squish/cheatsheet' },
+										{ label: 'References', slug: 'lessons/neural-network-intuition/weights-biases-and-the-squish/references' },
+									],
+								},
+								{
+									label: 'The whole network',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/neural-network-intuition/the-whole-network-as-one-function/brief' },
+										{ label: 'Lesson', slug: 'lessons/neural-network-intuition/the-whole-network-as-one-function/lesson' },
+										{ label: 'Practice', slug: 'lessons/neural-network-intuition/the-whole-network-as-one-function/practice' },
+										{ label: 'Summary', slug: 'lessons/neural-network-intuition/the-whole-network-as-one-function/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/neural-network-intuition/the-whole-network-as-one-function/cheatsheet' },
+										{ label: 'References', slug: 'lessons/neural-network-intuition/the-whole-network-as-one-function/references' },
+									],
+								},
+							],
+						},
+						{
+							label: 'Phase 2\nHow networks learn',
+							collapsed: true,
+							items: [
+								{
+									label: 'What learning means',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/neural-network-intuition/what-learning-really-means/brief' },
+										{ label: 'Lesson', slug: 'lessons/neural-network-intuition/what-learning-really-means/lesson' },
+										{ label: 'Practice', slug: 'lessons/neural-network-intuition/what-learning-really-means/practice' },
+										{ label: 'Summary', slug: 'lessons/neural-network-intuition/what-learning-really-means/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/neural-network-intuition/what-learning-really-means/cheatsheet' },
+										{ label: 'References', slug: 'lessons/neural-network-intuition/what-learning-really-means/references' },
+									],
+								},
+								{
+									label: 'The cost landscape',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/neural-network-intuition/the-cost-landscape/brief' },
+										{ label: 'Lesson', slug: 'lessons/neural-network-intuition/the-cost-landscape/lesson' },
+										{ label: 'Practice', slug: 'lessons/neural-network-intuition/the-cost-landscape/practice' },
+										{ label: 'Summary', slug: 'lessons/neural-network-intuition/the-cost-landscape/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/neural-network-intuition/the-cost-landscape/cheatsheet' },
+										{ label: 'References', slug: 'lessons/neural-network-intuition/the-cost-landscape/references' },
+									],
+								},
+								{
+									label: 'Gradient descent',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/neural-network-intuition/gradient-descent-step-by-step/brief' },
+										{ label: 'Lesson', slug: 'lessons/neural-network-intuition/gradient-descent-step-by-step/lesson' },
+										{ label: 'Practice', slug: 'lessons/neural-network-intuition/gradient-descent-step-by-step/practice' },
+										{ label: 'Summary', slug: 'lessons/neural-network-intuition/gradient-descent-step-by-step/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/neural-network-intuition/gradient-descent-step-by-step/cheatsheet' },
+										{ label: 'References', slug: 'lessons/neural-network-intuition/gradient-descent-step-by-step/references' },
+									],
+								},
+							],
+						},
+						{
+							label: 'Phase 3\nBackpropagation',
+							collapsed: true,
+							items: [
+								{
+									label: 'What backprop does',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/neural-network-intuition/what-backpropagation-is-really-doing/brief' },
+										{ label: 'Lesson', slug: 'lessons/neural-network-intuition/what-backpropagation-is-really-doing/lesson' },
+										{ label: 'Practice', slug: 'lessons/neural-network-intuition/what-backpropagation-is-really-doing/practice' },
+										{ label: 'Summary', slug: 'lessons/neural-network-intuition/what-backpropagation-is-really-doing/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/neural-network-intuition/what-backpropagation-is-really-doing/cheatsheet' },
+										{ label: 'References', slug: 'lessons/neural-network-intuition/what-backpropagation-is-really-doing/references' },
+									],
+								},
+								{
+									label: 'Backprop and chain rule',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/neural-network-intuition/backpropagation-and-the-chain-rule/brief' },
+										{ label: 'Lesson', slug: 'lessons/neural-network-intuition/backpropagation-and-the-chain-rule/lesson' },
+										{ label: 'Practice', slug: 'lessons/neural-network-intuition/backpropagation-and-the-chain-rule/practice' },
+										{ label: 'Summary', slug: 'lessons/neural-network-intuition/backpropagation-and-the-chain-rule/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/neural-network-intuition/backpropagation-and-the-chain-rule/cheatsheet' },
+										{ label: 'References', slug: 'lessons/neural-network-intuition/backpropagation-and-the-chain-rule/references' },
+									],
+								},
+								{
+									label: 'Seeing it whole',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/neural-network-intuition/seeing-it-whole-and-where-next/brief' },
+										{ label: 'Lesson', slug: 'lessons/neural-network-intuition/seeing-it-whole-and-where-next/lesson' },
+										{ label: 'Practice', slug: 'lessons/neural-network-intuition/seeing-it-whole-and-where-next/practice' },
+										{ label: 'Summary', slug: 'lessons/neural-network-intuition/seeing-it-whole-and-where-next/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/neural-network-intuition/seeing-it-whole-and-where-next/cheatsheet' },
+										{ label: 'References', slug: 'lessons/neural-network-intuition/seeing-it-whole-and-where-next/references' },
+									],
+								},
+							],
+						},
+					],
+				},
+				{
 					label: 'Track 13: Build Neural Networks from Scratch',
 					items: [
 						{

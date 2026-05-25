@@ -1,0 +1,129 @@
+---
+title: "Lesson: Weights, biases, and the squish"
+description: "Lesson 2 left one question open. A hidden neuron gets its number from the layer before it, but how exactly? The answer is the single computation every neuron in the network runs: multiply each incoming activation by a weight, add them up, add a bias, and squash the result into range. We work one neuron by hand with both sigmoid and ReLU, then count the knobs and watch a tiny network reach thirteen thousand."
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+import NnWeightedConnections from '../../../../../components/illustrations/NnWeightedConnections.astro';
+import NnSigmoidRelu from '../../../../../components/illustrations/NnSigmoidRelu.astro';
+
+Lesson 2 left a question hanging in the air. We said a neuron in a hidden layer "gets its activation from the layer before it," and that the hidden layers "do the work" of turning pixels into a guess. But we never said how. What is the actual rule that takes the numbers in one layer and produces the numbers in the next?
+
+This lesson is that rule. The good news, again, is that it is simpler than it sounds. Every single neuron in the network, in every hidden layer and the output layer, runs the exact same small computation. Learn it once and you understand all of them. It comes in three steps: weights, a bias, and a squish.
+
+## Connections carry weights
+
+Picture two neighboring layers, and draw a line from every neuron in the first to every neuron in the second. In the kind of network we are studying, called **fully connected**, that is exactly what happens: each neuron listens to every neuron in the layer before it. A hidden neuron receiving from a 784-neuron input layer has 784 lines coming into it.
+
+<NnWeightedConnections />
+
+Each of those lines carries a number called a **weight**. The weight says how much this particular input should matter to this particular neuron:
+
+- A large positive weight means "when this input is lit up, push my activation up."
+- A negative weight means "when this input is lit up, pull my activation down."
+- A weight near zero means "I do not care about this input at all."
+
+So the weights are how a neuron decides which parts of the previous layer it pays attention to. Different neurons have different weights, so they pay attention to different things.
+
+## Step one: the weighted sum
+
+Now we use those weights. To figure out its own number, a neuron takes each incoming activation, multiplies it by that connection's weight, and adds all the results together. That total is called the **weighted sum**.
+
+Written out for a neuron with inputs `a1, a2, a3, ...` and weights `w1, w2, w3, ...`, the weighted sum is just:
+
+```
+w1·a1 + w2·a2 + w3·a3 + ...
+```
+
+For a neuron fed by all 784 input pixels, that is 784 multiplications and 783 additions, all to produce one number. It is a lot of arithmetic, but every step is multiply-and-add. Nothing harder than that is happening.
+
+Here is a helpful way to picture what that sum is really measuring. The pattern of weights coming into a neuron is like a little template the neuron is holding up against the previous layer. When the incoming activations line up with that template, big values meeting big positive weights, the weighted sum comes out large. When they do not line up, the sum stays small. So the weighted sum is, in effect, a score for how well the input matches what this neuron is looking for. This is the mechanical version of the hopeful story from lesson 2: a neuron "looking for an edge" would just be a neuron whose weights form an edge-shaped template. Whether a trained network actually arranges its weights into tidy templates like that is still the open question we flagged, so keep holding it loosely; the point here is only that the weighted sum measures a match.
+
+## Step two: the bias
+
+The weighted sum on its own has no sense of "how much is enough." So we add one more number, learned separately, called the **bias**. The bias shifts the point at which the neuron starts to wake up:
+
+- A negative bias makes the neuron harder to activate. The weighted sum has to be strongly positive just to overcome it. The neuron is cautious.
+- A positive bias makes the neuron eager. It leans toward being active even when the weighted sum is small.
+
+You can think of the bias as the neuron's built-in mood, its default lean toward speaking up or staying quiet, before it even looks at its inputs. After this step the running total is `weighted_sum + bias`.
+
+## Step three: the squish
+
+There is a problem. The weighted sum plus bias can be any number at all, large positive, large negative, anything. But back in lesson 2 we said a neuron's activation is supposed to be a value between 0 and 1. So we pass the result through one more function whose only job is to squash any number into that range. This is the **activation function**, and the squash is why people informally call it "the squish."
+
+Two common choices:
+
+**Sigmoid.** The classic one. Its formula is `1 / (1 + e^(-x))`, and what matters is its shape: a smooth S-curve. Very negative inputs come out near 0, very positive inputs come out near 1, and 0 comes out at exactly 0.5. It gently maps the whole number line into the open range between 0 and 1.
+
+<NnSigmoidRelu />
+
+**ReLU.** The formula is `max(0, x)`: if the input is negative, the output is 0; if it is positive, the output is just the input unchanged. It is about as simple as a function gets, and in many modern networks it is the default choice, because it is fast to compute and tends to train well. It does not cap the top end at 1, which turns out to be fine in practice.
+
+Which one a network uses is a design decision. Sigmoid was the traditional pick; ReLU is common in a lot of today's networks. For building intuition, the important thing is what they share: both take the unbounded weighted-sum-plus-bias and turn it into a well-behaved activation for the next layer to use.
+
+## The complete neuron, in one formula
+
+Put the three steps together and you have the entire computation a neuron performs:
+
+```
+activation = squish( weighted sum of inputs + bias )
+```
+
+That is it. That is what every hidden and output neuron in the network does, over and over. Let us run one by hand.
+
+Take a small demo neuron with just three inputs (a real one would have hundreds, but the arithmetic is identical). Say the incoming activations are `0.5, 0.8, 0.2`, the weights on those connections are `0.3, -0.2, 0.5`, and the bias is `0.1`.
+
+First the weighted sum, plus the bias:
+
+```
+(0.5 · 0.3) + (0.8 · -0.2) + (0.2 · 0.5) + 0.1
+= 0.15 - 0.16 + 0.10 + 0.10
+= 0.19
+```
+
+Now the squish. With sigmoid, `1 / (1 + e^(-0.19))` works out to about `0.547`. So this neuron's activation is roughly 0.547, a little above the halfway mark.
+
+If the same network used ReLU instead, the squish would be `max(0, 0.19) = 0.19`, and the activation would be 0.19. Same inputs, same weights, same bias, different activation function, different result. Both are perfectly valid; they are just two ways of doing the final squash.
+
+## Counting the knobs
+
+Here is where it gets striking. Every weight and every bias is a separate number the network has to get right. Let us count them for the small network from lesson 2 (784, then 16, then 16, then 10).
+
+- Input to hidden layer 1: each of the 16 neurons has 784 weights plus 1 bias. That is `784 · 16 + 16 = 12,560`.
+- Hidden layer 1 to hidden layer 2: `16 · 16 + 16 = 272`.
+- Hidden layer 2 to output: `16 · 10 + 10 = 170`.
+
+Add them up: about **13,002** separate numbers. Thirteen thousand knobs, in a network small enough to recognize handwritten digits and nothing else. Modern networks do not have thousands of these knobs; they have billions. The word for all of them together is **parameters**.
+
+Sit with that contrast for a second. Each individual neuron is doing something almost trivially simple: multiply, add, squash. The network's ability to do something impressive does not come from any clever single step. It comes from the sheer number of these simple knobs, all set to just the right values.
+
+## Why this matters when you use AI
+
+When you read that a model has "billions of parameters," you now know exactly what that means: billions of weights and biases, each one a plain number plugged into the same multiply-add-squash formula you just ran by hand. There is no extra magic hiding in the large number. It is the same tiny computation, repeated at enormous scale.
+
+This also quietly answers where a model's "intelligence" lives. It is not in the structure, which is just layers and connections, and it is not in the formula, which never changes. It lives entirely in the specific values of those billions of parameters. Two networks with identical structure can behave completely differently purely because their parameters are set to different numbers. Which raises the obvious question: where do the right numbers come from? Nobody types thirteen thousand values by hand, let alone billions. They are found, automatically, from examples. That process is called training, and it is the heart of the next stretch of this track.
+
+## Common pitfalls
+
+**Thinking each neuron does something complicated.** It does not. Multiply each input by a weight, add them up, add a bias, squash. The same four-part move every time. Complexity comes from quantity, not from any single neuron.
+
+**Confusing weights and biases.** A weight sits on a connection and scales one specific input. A bias belongs to the neuron itself and shifts its overall eagerness to activate. Different jobs.
+
+**Thinking the activation function is where the smarts are.** Sigmoid and ReLU are fixed, simple functions that never change as the network learns. They just keep the numbers in a usable range. The learning happens in the weights and biases, not in the squish.
+
+**Assuming "billions of parameters" means something exotic.** It means billions of ordinary numbers in the same simple formula. Bigger, not different.
+
+## What you should remember
+
+- **Every neuron runs the same computation:** multiply each incoming activation by its weight, sum them, add a bias, then squash with an activation function. `activation = squish(weighted sum + bias)`.
+- **Weights set attention** (positive boosts, negative dampens, near-zero ignores); the **bias sets the neuron's default eagerness**; the **activation function** (sigmoid or ReLU) keeps the result in a usable range.
+- **Weights and biases together are the parameters.** Even the small digit network has about 13,000 of them; modern networks have billions.
+- **The network's behavior lives in the specific parameter values,** not in the structure or the formula. Finding the right values is what training does.
+
+Each neuron is almost embarrassingly simple. The power is in how many simple neurons there are, and in the exact numbers tuned into every one.
+
+Next: the cheatsheet boils the formula and the worked numbers onto one page. Then lesson 4 zooms all the way back out and shows the entire network as a single function, thirteen thousand knobs and all, mapping 784 numbers straight through to 10.
