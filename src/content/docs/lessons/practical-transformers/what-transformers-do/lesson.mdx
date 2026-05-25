@@ -1,0 +1,104 @@
+---
+title: "Lesson: What transformers do, and why they took over AI"
+description: A working tour of the transformer at the level you need to actually use one. We cover what it does end to end, why it replaced the sequential models, the three architectural shapes you will see, the timeline, what pre-training and fine-tuning actually mean in money and time, the limits the chapter you are mirroring names honestly, and where Hugging Face fits.
+sidebar:
+  order: 2
+  label: Lesson
+artifact: lesson
+---
+
+You typed something into a chat box this week. Maybe a question, maybe a draft email, maybe a request to summarize a meeting. The thing that wrote back to you was, with near certainty, a transformer.
+
+Not "powered by AI." Not "machine learning under the hood." A specific architecture, first written down in 2017, that has become so dominant that "AI" and "transformer" are now almost the same word in everyday usage. The language models behind the major chat products use it. The models you can download from open repositories use it. The summarizers, the code assistants, the embedding models behind search, the multimodal models that read images: nearly every system that handles language and uses it well is, at its core, a stack of transformer layers.
+
+This lesson is the on-ramp. By the end you should be able to describe, in plain working terms, what a transformer is, why it replaced what came before, the three shapes you will see in the wild, where it came from, the difference between the expensive part and the cheap part of building one, what it cannot reliably do, and where the Hugging Face ecosystem fits into all of this. None of this requires the math. The math comes later, and a lot of productive work happens without it.
+
+## What a transformer actually does, end to end
+
+Think of a transformer as a function. Tokens go in, tokens come out. A token is a small unit of text, sometimes a whole word, sometimes a piece of one. The model takes a sequence of tokens, runs them through many layers of math, and produces another sequence: a prediction, a classification, a continuation, a translation. The shape of the output depends on what the model was trained to do, but the input is always tokens, and the internal mechanism is always some arrangement of attention layers stacked with feed-forward layers.
+
+That is the working description. Tokens in, tokens out, attention in the middle. You can build months of practical AI work on top of that single sentence.
+
+What changes between products is what the tokens represent and what the model was trained to produce. A chat model has been trained so its output tokens form a helpful response to your input tokens. A translation model has been trained so its output tokens are the same sentence in a different language. An embedding model has been trained so its output is a vector that captures meaning. The architecture is the same family. The training objective is what makes one model a chat assistant and another a code completer.
+
+## Why transformers replaced what came before
+
+For about a decade before transformers, the dominant architecture for language was the recurrent neural network, the RNN, and its more capable cousin the LSTM. Both of them processed language the way you might read out loud: one token, then the next, carrying a running internal summary of what came before. That sequential approach had two real problems.
+
+The first is that long-range connections decay. By the time the model gets to the tenth word, the signal from the first word has been compressed and re-compressed through nine intermediate steps. A lot of it is gone. RNNs could partly compensate with cleverer memory cells, but the structural limit was real.
+
+The second is that sequential models cannot be parallelized. To process word ten, you need word nine, which needs word eight, and so on. Modern hardware is built around multiplying enormous matrices in parallel; sequential processing wastes most of that capability. Training a large RNN on a large corpus was glacially slow.
+
+The transformer solves both with one idea. Instead of processing tokens one after another, process them all in parallel and let each token directly look at every other token through an attention mechanism. Long-range connections become direct lookups instead of decaying summaries. Parallelism becomes natural because there is no sequential bottleneck inside a layer. The same architecture that handles a sentence handles a paragraph and, with engineering, an entire book. That trade is the whole reason transformers won.
+
+## The three architectural shapes
+
+Once you start reading model cards on the Hugging Face Hub or paper abstracts, you will see the same three shapes again and again. They are worth holding in your head as a sorting tool.
+
+**Encoder-only models** are built for understanding tasks. You feed in a piece of text and you get out a rich representation of it that can be used for classification, named-entity recognition, semantic search, or fed into a downstream model. The whole input is visible to every layer, so the model can build a thorough internal picture. The BERT family is the canonical example; RoBERTa and DistilBERT are widely used variants.
+
+**Decoder-only models** are built for generation. They produce one token at a time, each one conditioned only on what came before it. This left-to-right structure is exactly what you want for writing the next word, the next sentence, the next paragraph. The GPT family is the canonical example, and the recent wave of openly released models, Llama and Mistral among them, sits in this shape. Most of the chat assistants you have used are decoder-only models under the hood.
+
+**Encoder-decoder models** stitch the two shapes together. An encoder reads the input fully, a decoder generates the output one token at a time, and the decoder attends back into the encoder's output at each step. This shape suits any task where the input is one sequence and the output is a related-but-different sequence: translation, summarization, question rewriting. T5 and BART are the canonical examples.
+
+The three shapes share the same underlying transformer mathematics. What differs is which direction the attention can look and which sequence is being attended to. When you pick a model for a real task, the first sorting question is usually which of these three shapes fits.
+
+## A short timeline
+
+The transformer story moves fast, and a working timeline helps you place anything you read in context.
+
+In 2017, a team at Google published "Attention Is All You Need," the paper that introduced the architecture. It described the encoder-decoder shape and the multi-head attention mechanism that became standard. Almost nothing else from that year's NLP literature still matters; this paper is the spine.
+
+In 2018, BERT (from Google) and GPT-1 (from OpenAI) appeared, splitting the architecture into the encoder-only and decoder-only branches. In 2019, GPT-2 demonstrated that scaling up a decoder-only model produced surprisingly capable text. In 2020, GPT-3 pushed the same idea two orders of magnitude further and showed that scale alone unlocked capabilities the smaller models simply did not have.
+
+Late 2022 was the inflection point most people remember: ChatGPT made a transformer chat interface mainstream. From 2023 onward the field split into two visible streams. On one side, frontier proprietary models from OpenAI, Anthropic (the Claude family), and Google (the Gemini family) kept pushing capability and context length. On the other, open-weight models from Meta (the Llama family) and Mistral, among others, made it possible to download a strong general-purpose model and run it yourself. Both streams are still moving. Specific model version names go stale within months; we will keep this lesson durable by talking about families and trends, not the latest version number.
+
+## Pre-training, then fine-tuning
+
+Almost every useful transformer you will touch has been through two stages of training, and they look almost nothing alike.
+
+**Pre-training** is the expensive part. The model is fed an enormous corpus, typically a curated slice of the public web plus books, code, and other text, and trained on a generic objective. For decoder-only models the objective is to predict the next token. For encoder-only models it is to fill in masked tokens. The compute cost is large enough to make headlines: weeks or months of training on thousands of accelerators, with budgets that have moved from millions to hundreds of millions of dollars per major model. The artifact at the end of pre-training is what people mean by a "base model": broadly capable, not yet shaped for a specific task or for following instructions in a helpful way.
+
+**Fine-tuning** is the cheap part. You take a pre-trained model and continue training it on a small task-specific or instruction-shaping dataset, often for hours rather than months, often on a single machine rather than a cluster. Fine-tuning is how a base model becomes a chat assistant, a code reviewer, a domain-specific summarizer, a classifier for your support tickets. Many of the most useful models on the Hugging Face Hub are fine-tunes of a base model someone else paid to pre-train.
+
+For practical work the asymmetry is important. You will almost never pre-train. You will sometimes fine-tune. You will most often just load a pre-trained model and use it. The Hugging Face ecosystem is designed around that reality.
+
+## What transformers do not reliably do
+
+The Hugging Face chapter you are mirroring names this honestly, and we should too. A transformer learns its behavior from its training data. Patterns in that data, including biases, become patterns in its output. A model trained predominantly on English internet text will be better at English than at low-resource languages and will reflect the slants of the people who write on the English internet. This is not a marketing problem to be glossed; it is a property of the technology that any responsible user has to understand.
+
+Three other limits are worth naming. **Hallucination** is real: a generative model will produce fluent text that is factually wrong, with no internal signal distinguishing the two. **Context length is finite**: a model can only attend to a window of tokens at once, and behavior on very long inputs is often worse than on short ones, even within the advertised window. **Reasoning is more pattern recognition than deduction**: in many cases the model is generating what plausible reasoning text looks like rather than performing the reasoning itself, and a chain that reads convincingly can still arrive at a wrong answer.
+
+None of these limits make transformers unusable. They make transformers a tool you have to use with attention. Knowing them up front is part of literacy, not a counsel of despair.
+
+## What Hugging Face actually is
+
+Hugging Face, at this point, is two things working together.
+
+It is a **platform**, hosted at `huggingface.co`, that holds models, datasets, and small applications called Spaces. Anyone can publish; anyone can browse. The Hub is now the default place open-weight models are released, with model cards that describe training data, intended use, limitations, and license. Most of the open-weight model names you see in the news are accessible there.
+
+It is also a set of **open-source libraries** that make using those models tractable in Python. The `transformers` library loads models and tokenizers with a uniform API regardless of the underlying architecture; `datasets` handles the data side; `tokenizers` is the fast tokenization layer; `accelerate` makes the same training code run on a laptop CPU, a single GPU, or a multi-GPU cluster without rewriting. Behind those four are integrations with every major training and inference framework people actually use.
+
+That combination, a model hub and the libraries that make the hub usable, is why this course exists. The rest of Track 14 will teach you to operate confidently inside that ecosystem.
+
+## Why this matters when you use AI
+
+Three takeaways are worth carrying into every transformer-shaped tool you touch.
+
+You can use these models productively without understanding the math. The libraries are deliberately designed for that, and most of the day-to-day work in applied AI is choosing the right model, prompting or fine-tuning it well, and integrating it into a system that handles the limits we just named.
+
+The architectural shape is the first sorting question. Encoder-only for understanding, decoder-only for generation, encoder-decoder for sequence-to-sequence. Many bad results come from reaching for the wrong shape.
+
+The limits are not a footnote. Biases in, biases out. Hallucinations are unavoidable in current generative models, not a bug to be patched. Context windows have edges. Build your habits around those facts and your work gets better; ignore them and your work gets embarrassing.
+
+## What you should remember
+
+- **A transformer is tokens in, tokens out, with attention layers in the middle.** That working description is enough to make sense of most modern AI systems you will encounter.
+- **Transformers replaced RNNs and LSTMs because they are parallelizable and handle long-range connections directly,** not because they are conceptually more elegant.
+- **Three architectural shapes cover almost everything you will see:** encoder-only for understanding (BERT family), decoder-only for generation (GPT family, Llama, Mistral), encoder-decoder for sequence-to-sequence (T5, BART).
+- **The timeline is short:** 2017 paper, 2018 BERT and GPT-1, 2020 GPT-3 shows scale unlocks capability, late 2022 ChatGPT mainstream moment, 2023 onward open-weight and frontier proprietary streams running in parallel.
+- **Pre-training is the expensive part, fine-tuning is the cheap part, and most practical work uses pre-trained or lightly fine-tuned models without doing either yourself.**
+- **Transformers reflect their training data, hallucinate fluently, have finite context, and pattern-match more than they reason.** Use them with that map, not against it.
+- **Hugging Face is a platform plus libraries:** the Hub for models and datasets, and `transformers`, `datasets`, `tokenizers`, `accelerate` for putting them to work. The rest of this track is built on that foundation.
+
+Tokens in, tokens out, attention in the middle. Everything else in this track is learning to wield that.

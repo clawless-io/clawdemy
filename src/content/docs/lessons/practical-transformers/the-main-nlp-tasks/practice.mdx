@@ -1,0 +1,187 @@
+---
+title: "Practice: The main NLP tasks"
+description: Self-check on the shared pattern, the task-to-head mapping, and the two recurring wrinkles, a diagnose-the-task exercise, and flashcards for retrieval.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Seven short questions. Answer each before opening the collapsible.
+
+**1. What is the one loop that underlies every task in this lesson, and what changes between tasks?**
+
+<details>
+<summary>Show answer</summary>
+
+The loop: load and clean data, tokenize (with any alignment), load `AutoModelFor<Task>`, pick a data collator and a metric, train with the Trainer, evaluate, and push to the Hub. What changes between tasks is small and specific: which head you load, what shape the labels take, and which metric measures success.
+
+</details>
+
+**2. Which head and model shape fit token classification (NER), and what makes it harder than sequence classification?**
+
+<details>
+<summary>Show answer</summary>
+
+`AutoModelForTokenClassification` on an encoder model. It is harder because you predict a label for every token, but your labels are attached to words and one word can become several tokens. You align them using the fast tokenizer's word IDs, spreading each word's label across its tokens. The metric is seqeval (entity-level F1).
+
+</details>
+
+**3. How does extractive question answering use the fast tokenizer's offsets?**
+
+<details>
+<summary>Show answer</summary>
+
+The model predicts a start and end token position for the answer span, but the answer must be returned as a span of the original characters. The fast tokenizer's offsets map token positions back to character positions, so you can recover the exact answer text. Metrics are exact match and F1 (SQuAD).
+
+</details>
+
+**4. What is different about masked vs causal language modeling, and what do they have in common?**
+
+<details>
+<summary>Show answer</summary>
+
+Masked LM (BERT-style, `AutoModelForMaskedLM`) blanks tokens and predicts them; causal LM (GPT-style, `AutoModelForCausalLM`) predicts the next token. Both are self-supervised (the text is its own labels) and use `DataCollatorForLanguageModeling` (set `mlm=False` for causal). Both are scored with perplexity.
+
+</details>
+
+**5. What two extra tools do summarization and translation need, and why?**
+
+<details>
+<summary>Show answer</summary>
+
+`Seq2SeqTrainer` and `DataCollatorForSeq2Seq`, because the target is itself a sequence that must be padded and shifted, not a single label. Their metrics are generation-based (ROUGE for summarization, BLEU/SacreBLEU for translation), so evaluation actually generates output and compares it to references.
+
+</details>
+
+**6. You need to pull person and organization names out of news articles. Which task is it, which head, and which fast-tokenizer feature do you rely on?**
+
+<details>
+<summary>Show answer</summary>
+
+Token classification (named-entity recognition). Head: `AutoModelForTokenClassification` on an encoder. You rely on the fast tokenizer's word IDs to align the word-level entity labels to the tokens the model sees.
+
+</details>
+
+**7. Why is "diagnosis" the real applied skill in this lesson?**
+
+<details>
+<summary>Show answer</summary>
+
+Because naming the task correctly hands you the head, the data shape, and the metric all at once, and the training loop is nearly the same after that. Most real-world mistakes are framing mistakes (reaching for a decoder when you needed an encoder, hand-rolling a metric that already exists), not coding mistakes.
+
+</details>
+
+## Try it yourself: diagnose the task
+
+About 10 minutes, no code. This exercise drills the skill the lesson is really about.
+
+**Part A: map each problem to a task.** For each, name the NLP task, the `AutoModelFor<Task>` head, and the model shape (encoder / decoder / encoder-decoder).
+
+```
+a. Flag incoming emails as "complaint" or "not complaint".
+b. Extract every drug name and dosage mentioned in a clinical note.
+c. Given a product manual and a user question, return the sentence that answers it.
+d. Condense a 2,000-word report into a 3-sentence abstract.
+e. Translate support articles from English into German.
+f. Adapt a general model to legal text by continuing its fill-in-the-blank training on a legal corpus.
+```
+
+<details>
+<summary>What you'll get</summary>
+
+- **a. Sequence classification** -> `AutoModelForSequenceClassification`, encoder.
+- **b. Token classification (NER)** -> `AutoModelForTokenClassification`, encoder. (Relies on word IDs to align labels.)
+- **c. Extractive question answering** -> `AutoModelForQuestionAnswering`, encoder. (Relies on offsets to return the span.)
+- **d. Summarization** -> `AutoModelForSeq2SeqLM`, encoder-decoder. (Seq2SeqTrainer + ROUGE.)
+- **e. Translation** -> `AutoModelForSeq2SeqLM`, encoder-decoder. (Seq2SeqTrainer + BLEU.)
+- **f. Masked language modeling (domain adaptation)** -> `AutoModelForMaskedLM`, encoder. (DataCollatorForLanguageModeling, perplexity.)
+
+If you got the shape right on most, the core instinct is there: shape first, then head, then metric.
+
+</details>
+
+**Part B (reasoning).** A teammate is building (c) and reaches for a decoder-only `AutoModelForCausalLM`, planning to "just generate the answer." What is the trade-off versus the extractive QA approach?
+
+<details>
+<summary>What you should notice</summary>
+
+Both can work, but they are different tasks. Extractive QA returns an exact span from the source (faithful, traceable, cannot invent facts) and is scored with SQuAD metrics. A generative approach can phrase a fluent answer but can also hallucinate content not in the manual, and needs generation-based evaluation. For "return the sentence that answers it," extractive is the faithful fit; generation is the choice when you want a synthesized answer and can tolerate (and check for) the hallucination risk from lesson 1.
+
+</details>
+
+**Part C (reasoning).** Why do masked and causal language modeling not need a labeled dataset, while token classification does?
+
+<details>
+<summary>What you should notice</summary>
+
+In language modeling the text supervises itself: the "label" for a masked or next token is simply the token that was actually there, which the data collator produces automatically. Token classification needs a human-assigned label per token (this token is a PERSON, that one is nothing), which cannot be derived from the raw text, so it requires an annotated dataset.
+
+</details>
+
+## Flashcards
+
+Nine cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay the set out one card per page for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="What single loop underlies all the NLP tasks?">
+
+Load + clean data, tokenize (with alignment), load AutoModelFor<Task>, pick a collator and metric, train with the Trainer, evaluate, push. Only the head, label shape, and metric change between tasks.
+
+</Flashcard>
+
+<Flashcard question="Sequence vs token classification?">
+
+Sequence classification labels the whole input (AutoModelForSequenceClassification). Token classification labels every token (AutoModelForTokenClassification), e.g. NER, and needs word-ID alignment. Both use an encoder.
+
+</Flashcard>
+
+<Flashcard question="How does extractive QA work, and what does it rely on?">
+
+AutoModelForQuestionAnswering predicts start/end token positions of the answer span; fast-tokenizer offsets map those back to the original characters. Metrics: SQuAD exact match and F1.
+
+</Flashcard>
+
+<Flashcard question="Masked vs causal language modeling?">
+
+Masked LM (AutoModelForMaskedLM, BERT) fills blanked tokens; causal LM (AutoModelForCausalLM, GPT) predicts the next token. Both self-supervised via DataCollatorForLanguageModeling (mlm=False for causal); metric perplexity.
+
+</Flashcard>
+
+<Flashcard question="What do summarization and translation need extra?">
+
+Seq2SeqTrainer + DataCollatorForSeq2Seq (the target is a sequence) and generation-based metrics: ROUGE for summarization, BLEU/SacreBLEU for translation. Head: AutoModelForSeq2SeqLM.
+
+</Flashcard>
+
+<Flashcard question="Which tasks are token-level, and why does that matter?">
+
+Token classification and extractive QA. They work in token positions but labels/answers live at word/character level, so they need fast-tokenizer word IDs and offsets to align. This is why fast tokenizers matter.
+
+</Flashcard>
+
+<Flashcard question="How do you choose a model shape for a task?">
+
+Understanding tasks (classification, NER, QA) want an encoder; generation wants a decoder; sequence-to-sequence (summarize, translate) wants an encoder-decoder. Then add the matching AutoModelFor<Task> head.
+
+</Flashcard>
+
+<Flashcard question="Why don't language-modeling tasks need labels?">
+
+The text is its own supervision: the target for a masked or next token is the token that was actually there, produced automatically by the data collator. Token classification needs human-annotated per-token labels.
+
+</Flashcard>
+
+<Flashcard question="What is the real applied skill in NLP tasks?">
+
+Diagnosis: naming the task correctly. That single choice hands you the head, data shape, and metric. Most real mistakes are framing errors, not coding errors.
+
+</Flashcard>
+
+</FlashcardSet>

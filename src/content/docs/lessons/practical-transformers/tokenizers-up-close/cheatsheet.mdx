@@ -1,0 +1,89 @@
+---
+title: "Cheatsheet: Tokenizers up close"
+description: One-page reference. The four-stage pipeline, inspecting it, fast-tokenizer powers, the three subword algorithms, and training a new tokenizer.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## The tokenization pipeline (in order)
+
+| Stage | What it does |
+| --- | --- |
+| 1. Normalization | Clean text: lowercasing, strip accents, Unicode tidy-up |
+| 2. Pre-tokenization | Split cleaned text into words (the subword boundaries) |
+| 3. Model | Subword algorithm breaks words into tokens |
+| 4. Postprocessing | Add special tokens (`[CLS]`, `[SEP]`, etc.) |
+
+## Inspect the pipeline
+
+```python
+from transformers import AutoTokenizer
+tok = AutoTokenizer.from_pretrained("bert-base-uncased")
+
+tok.backend_tokenizer.normalizer.normalize_str("Héllò?")   # -> 'hello?'
+tok.backend_tokenizer.pre_tokenizer.pre_tokenize_str("Hi, you?")
+# -> [('hi', (0,2)), (',', (2,3)), ('you', (4,7)), ('?', (7,8))]   (with offsets)
+```
+
+## Fast vs slow tokenizers
+
+| | Fast | Slow |
+| --- | --- | --- |
+| Backed by | Rust (`tokenizers` lib) | Pure Python |
+| Default? | Yes (`AutoTokenizer` picks it) | Only if no fast version |
+| Offsets / word IDs | Yes (align tokens to source text) | No |
+| Speed | ~30x with `batched=True` | Slow |
+
+Offsets/word IDs are what make token classification (NER) and extractive QA work.
+
+## The three subword algorithms
+
+| Algorithm | Direction | Learns | Used by |
+| --- | --- | --- | --- |
+| BPE | Merge up from characters | Merge rules + vocab | GPT family |
+| WordPiece | Merge up (frequency-scored) | Vocab | BERT |
+| Unigram | Prune down from large vocab | Vocab + token scores | T5 (SentencePiece) |
+
+All produce a middle vocabulary of word-pieces, so rare words split into known parts.
+
+## Space markers (so text is recoverable)
+
+- GPT-2 (BPE): `Ġ` marks a space
+- SentencePiece (Unigram, T5): a special underscore marks a space
+- BERT: drops repeated spaces (tokenization not reversible)
+
+## Train a new tokenizer
+
+```python
+from datasets import load_dataset
+from transformers import AutoTokenizer
+
+raw = load_dataset("code_search_net", "python", split="train")
+old = AutoTokenizer.from_pretrained("gpt2")   # start from a fast tokenizer
+
+def corpus():                                  # generator: never all in RAM
+    for i in range(0, len(raw), 1000):
+        yield raw[i : i + 1000]["whole_func_string"]
+
+new = old.train_new_from_iterator(corpus(), 52000)   # 52000 = vocab size
+new.save_pretrained("my-tokenizer")
+new.push_to_hub("my-tokenizer")
+```
+
+- **Not** model training: deterministic statistics over the corpus, no gradient descent, no GPU.
+- Inherits the old tokenizer's algorithm, normalization, and special tokens; only the vocabulary changes.
+- Fast tokenizers only.
+
+## Words to use precisely
+
+- **Subword tokenization**: a vocabulary of word-pieces between whole-word and character level.
+- **Offsets / word IDs**: the source character span / original word each token maps to.
+- **`backend_tokenizer`**: handle to the underlying Rust tokenizer (normalizer, pre_tokenizer).
+- **Vocabulary size**: how many distinct tokens the tokenizer learns.
+
+## Recommended further study
+
+- Hugging Face LLM Course, Chapter 6: "The Tokenizers library." `huggingface.co/learn/llm-course/chapter6`. Released under Apache 2.0; this lesson mirrors its structure with original prose.

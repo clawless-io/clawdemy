@@ -1,0 +1,92 @@
+---
+title: "Cheatsheet: Wrangling data with the Datasets library"
+description: One-page reference. Loading, the map/filter pattern, batched=True, the handy methods, pandas interop, and saving.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## Load data
+
+```python
+from datasets import load_dataset
+
+# From the Hub
+ds = load_dataset("glue", "mrpc")
+
+# From local files (csv/json/text)
+ds = load_dataset("csv",
+    data_files={"train": "train.tsv", "test": "test.tsv"},
+    delimiter="\t")
+```
+
+Returns a `DatasetDict` (splits) of `Dataset` objects, each with `features` and `num_rows`. Arrow-backed on disk, so it scales past RAM.
+
+## Inspect + sample
+
+```python
+print(ds)                       # splits, features, num_rows
+ds["train"][0]                  # one row as a dict
+ds["train"].shuffle(seed=42).select(range(1000))   # reproducible sample
+ds["train"].unique("column")    # distinct values
+```
+
+## Transform: map (add/change columns)
+
+```python
+# Add a column (new key) or overwrite (existing key)
+ds = ds.map(lambda x: {"length": len(x["text"].split())})
+
+# Faster: process 1,000 at once (values become lists)
+ds = ds.map(lambda x: {"text": [clean(t) for t in x["text"]]}, batched=True)
+
+# Tokenize a whole dataset (fast tokenizer + batched = ~30x)
+ds = ds.map(lambda x: tokenizer(x["text"], truncation=True), batched=True)
+```
+
+`batched=True` is the biggest speedup; `num_proc=N` adds multiprocessing for non-Rust functions.
+
+## Transform: filter (keep/drop rows)
+
+```python
+ds = ds.filter(lambda x: x["condition"] is not None)   # drop None
+ds = ds.filter(lambda x: x["length"] > 30)             # drop short rows
+```
+
+`map` changes columns; `filter` removes rows. Both take a per-example function (lambda is idiomatic).
+
+## Handy methods
+
+| Method | Does |
+| --- | --- |
+| `rename_column(old, new)` | Rename a column across all splits |
+| `sort("col")` | Order rows by a column |
+| `unique("col")` | Distinct values in a column |
+| `train_test_split(train_size=0.8, seed=42)` | Carve a validation set |
+
+## Pandas interop + saving
+
+```python
+ds.set_format("pandas")          # output as DataFrame (Arrow untouched)
+df = ds["train"][:]
+# ... pandas work ...
+ds.reset_format()                # back to Arrow
+new = Dataset.from_pandas(df)    # DataFrame -> Dataset
+
+ds.save_to_disk("dir")           # Arrow
+load_from_disk("dir")            # reload
+ds.to_csv(...) / ds.to_json(...) # per-split export
+```
+
+## Words to use precisely
+
+- **DatasetDict / Dataset**: the splits container, and a single split (columns = `features`, rows = `num_rows`).
+- **Arrow**: the on-disk columnar format; why datasets scale past RAM.
+- **`batched=True`**: process a batch of examples per call; the key speed and the reason fast tokenizers are fast.
+- **Validation set**: a slice carved from training data to tune on, keeping the test set untouched.
+
+## Recommended further study
+
+- Hugging Face LLM Course, Chapter 5: "The Datasets library." `huggingface.co/learn/llm-course/chapter5`. Released under Apache 2.0; this lesson mirrors its structure with original prose.

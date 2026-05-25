@@ -127,6 +127,7 @@ const BLOOM_VERBS = [
 	'publish',
 	'place',
 	'situate',
+	'map',
 ];
 
 const TRACK_5_PHASE_SLUGS = [
@@ -173,7 +174,7 @@ const TRACK_11_PHASE_SLUGS = [
 ] as const;
 
 const TRACK_14_PHASE_SLUGS = [
-	'foundations',
+	'transformers-library',
 	'data-tokenizers-tasks',
 	'demos-and-frontier',
 ] as const;

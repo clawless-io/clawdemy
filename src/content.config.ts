@@ -86,7 +86,7 @@ export const collections = {
 						'how-networks-learn',
 						'backpropagation',
 						// Track 14 (Practical Transformers — Hugging Face LLM Course)
-						'foundations',
+						'transformers-library',
 						'data-tokenizers-tasks',
 						'demos-and-frontier',
 					])

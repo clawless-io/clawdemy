@@ -897,6 +897,173 @@ export default defineConfig({
 					],
 				},
 				{
+					label: 'Track 14: Practical Transformers',
+					items: [
+						{
+							label: 'Phase 1\nTransformers library',
+							collapsed: true,
+							items: [
+								{
+									label: 'What transformers do',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/practical-transformers/what-transformers-do/brief' },
+										{ label: 'Lesson', slug: 'lessons/practical-transformers/what-transformers-do/lesson' },
+										{ label: 'Practice', slug: 'lessons/practical-transformers/what-transformers-do/practice' },
+										{ label: 'Summary', slug: 'lessons/practical-transformers/what-transformers-do/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/practical-transformers/what-transformers-do/cheatsheet' },
+										{ label: 'References', slug: 'lessons/practical-transformers/what-transformers-do/references' },
+									],
+								},
+								{
+									label: 'Run a model',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/practical-transformers/run-a-model-in-a-few-lines/brief' },
+										{ label: 'Lesson', slug: 'lessons/practical-transformers/run-a-model-in-a-few-lines/lesson' },
+										{ label: 'Practice', slug: 'lessons/practical-transformers/run-a-model-in-a-few-lines/practice' },
+										{ label: 'Summary', slug: 'lessons/practical-transformers/run-a-model-in-a-few-lines/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/practical-transformers/run-a-model-in-a-few-lines/cheatsheet' },
+										{ label: 'References', slug: 'lessons/practical-transformers/run-a-model-in-a-few-lines/references' },
+									],
+								},
+								{
+									label: 'Fine-tune on your data',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/practical-transformers/fine-tune-on-your-data/brief' },
+										{ label: 'Lesson', slug: 'lessons/practical-transformers/fine-tune-on-your-data/lesson' },
+										{ label: 'Practice', slug: 'lessons/practical-transformers/fine-tune-on-your-data/practice' },
+										{ label: 'Summary', slug: 'lessons/practical-transformers/fine-tune-on-your-data/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/practical-transformers/fine-tune-on-your-data/cheatsheet' },
+										{ label: 'References', slug: 'lessons/practical-transformers/fine-tune-on-your-data/references' },
+									],
+								},
+								{
+									label: 'Share on the Hub',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/practical-transformers/share-on-the-hub/brief' },
+										{ label: 'Lesson', slug: 'lessons/practical-transformers/share-on-the-hub/lesson' },
+										{ label: 'Practice', slug: 'lessons/practical-transformers/share-on-the-hub/practice' },
+										{ label: 'Summary', slug: 'lessons/practical-transformers/share-on-the-hub/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/practical-transformers/share-on-the-hub/cheatsheet' },
+										{ label: 'References', slug: 'lessons/practical-transformers/share-on-the-hub/references' },
+									],
+								},
+							],
+						},
+						{
+							label: 'Phase 2\nData, tokenizers, tasks',
+							collapsed: true,
+							items: [
+								{
+									label: 'Wrangle data',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/practical-transformers/wrangle-data-with-datasets/brief' },
+										{ label: 'Lesson', slug: 'lessons/practical-transformers/wrangle-data-with-datasets/lesson' },
+										{ label: 'Practice', slug: 'lessons/practical-transformers/wrangle-data-with-datasets/practice' },
+										{ label: 'Summary', slug: 'lessons/practical-transformers/wrangle-data-with-datasets/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/practical-transformers/wrangle-data-with-datasets/cheatsheet' },
+										{ label: 'References', slug: 'lessons/practical-transformers/wrangle-data-with-datasets/references' },
+									],
+								},
+								{
+									label: 'Tokenizers up close',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/practical-transformers/tokenizers-up-close/brief' },
+										{ label: 'Lesson', slug: 'lessons/practical-transformers/tokenizers-up-close/lesson' },
+										{ label: 'Practice', slug: 'lessons/practical-transformers/tokenizers-up-close/practice' },
+										{ label: 'Summary', slug: 'lessons/practical-transformers/tokenizers-up-close/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/practical-transformers/tokenizers-up-close/cheatsheet' },
+										{ label: 'References', slug: 'lessons/practical-transformers/tokenizers-up-close/references' },
+									],
+								},
+								{
+									label: 'Main NLP tasks',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/practical-transformers/the-main-nlp-tasks/brief' },
+										{ label: 'Lesson', slug: 'lessons/practical-transformers/the-main-nlp-tasks/lesson' },
+										{ label: 'Practice', slug: 'lessons/practical-transformers/the-main-nlp-tasks/practice' },
+										{ label: 'Summary', slug: 'lessons/practical-transformers/the-main-nlp-tasks/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/practical-transformers/the-main-nlp-tasks/cheatsheet' },
+										{ label: 'References', slug: 'lessons/practical-transformers/the-main-nlp-tasks/references' },
+									],
+								},
+								{
+									label: 'Debug and get unstuck',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/practical-transformers/debug-and-get-unstuck/brief' },
+										{ label: 'Lesson', slug: 'lessons/practical-transformers/debug-and-get-unstuck/lesson' },
+										{ label: 'Practice', slug: 'lessons/practical-transformers/debug-and-get-unstuck/practice' },
+										{ label: 'Summary', slug: 'lessons/practical-transformers/debug-and-get-unstuck/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/practical-transformers/debug-and-get-unstuck/cheatsheet' },
+										{ label: 'References', slug: 'lessons/practical-transformers/debug-and-get-unstuck/references' },
+									],
+								},
+							],
+						},
+						{
+							label: 'Phase 3\nDemos and frontier',
+							collapsed: true,
+							items: [
+								{
+									label: 'Build a demo',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/practical-transformers/build-and-share-a-demo/brief' },
+										{ label: 'Lesson', slug: 'lessons/practical-transformers/build-and-share-a-demo/lesson' },
+										{ label: 'Practice', slug: 'lessons/practical-transformers/build-and-share-a-demo/practice' },
+										{ label: 'Summary', slug: 'lessons/practical-transformers/build-and-share-a-demo/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/practical-transformers/build-and-share-a-demo/cheatsheet' },
+										{ label: 'References', slug: 'lessons/practical-transformers/build-and-share-a-demo/references' },
+									],
+								},
+								{
+									label: 'Fine-tuning LLMs',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/practical-transformers/fine-tuning-llms/brief' },
+										{ label: 'Lesson', slug: 'lessons/practical-transformers/fine-tuning-llms/lesson' },
+										{ label: 'Practice', slug: 'lessons/practical-transformers/fine-tuning-llms/practice' },
+										{ label: 'Summary', slug: 'lessons/practical-transformers/fine-tuning-llms/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/practical-transformers/fine-tuning-llms/cheatsheet' },
+										{ label: 'References', slug: 'lessons/practical-transformers/fine-tuning-llms/references' },
+									],
+								},
+								{
+									label: 'Curate datasets',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/practical-transformers/curating-datasets/brief' },
+										{ label: 'Lesson', slug: 'lessons/practical-transformers/curating-datasets/lesson' },
+										{ label: 'Practice', slug: 'lessons/practical-transformers/curating-datasets/practice' },
+										{ label: 'Summary', slug: 'lessons/practical-transformers/curating-datasets/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/practical-transformers/curating-datasets/cheatsheet' },
+										{ label: 'References', slug: 'lessons/practical-transformers/curating-datasets/references' },
+									],
+								},
+								{
+									label: 'Reasoning frontier',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/practical-transformers/reasoning-models-and-the-road-ahead/brief' },
+										{ label: 'Lesson', slug: 'lessons/practical-transformers/reasoning-models-and-the-road-ahead/lesson' },
+										{ label: 'Practice', slug: 'lessons/practical-transformers/reasoning-models-and-the-road-ahead/practice' },
+										{ label: 'Summary', slug: 'lessons/practical-transformers/reasoning-models-and-the-road-ahead/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/practical-transformers/reasoning-models-and-the-road-ahead/cheatsheet' },
+										{ label: 'References', slug: 'lessons/practical-transformers/reasoning-models-and-the-road-ahead/references' },
+									],
+								},
+							],
+						},
+					],
+				},
+				{
 					label: 'Track 13: Build Neural Networks from Scratch',
 					items: [
 						{
