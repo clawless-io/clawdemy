@@ -40,6 +40,7 @@ export const collections = {
 						'reinforcement-learning-foundations', // Track 17: David Silver UCL RL Course
 						'llm-ops-and-production', // Track 21: Full Stack Deep Learning LLM Bootcamp
 						'build-an-llm-from-scratch', // Track 15: Sebastian Raschka book
+						'computer-vision', // Track 16: Stanford CS231n
 					])
 					.optional(),
 				course: z.string().optional(),
@@ -105,6 +106,10 @@ export const collections = {
 						'the-model',
 						'systems-and-efficiency',
 						'scale-data-and-alignment',
+						// Track 16 (Computer Vision — Stanford CS231n)
+						'foundations-for-vision',
+						'how-machines-see',
+						'generating-and-grounding-vision',
 					])
 					.optional(),
 				phase_order: z.number().int().positive().optional(),
