@@ -38,6 +38,7 @@ export const collections = {
 						'neural-network-intuition', // Track 11: 3Blue1Brown Neural Networks series
 						'practical-transformers', // Track 14: Hugging Face LLM Course
 						'reinforcement-learning-foundations', // Track 17: David Silver UCL RL Course
+						'llm-ops-and-production', // Track 21: Full Stack Deep Learning LLM Bootcamp
 					])
 					.optional(),
 				course: z.string().optional(),
@@ -95,6 +96,10 @@ export const collections = {
 						'planning-with-a-known-model',
 						'model-free-learning',
 						'scaling-up',
+						// Track 21 (LLM Ops and Production — Full Stack Deep Learning)
+						'foundations-and-first-app',
+						'building-production-apps',
+						'advanced-and-the-field',
 					])
 					.optional(),
 				phase_order: z.number().int().positive().optional(),
