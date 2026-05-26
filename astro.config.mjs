@@ -1213,6 +1213,161 @@ export default defineConfig({
 					],
 				},
 				{
+					label: 'Track 21: LLM Ops and Production',
+					items: [
+						{
+							label: 'Phase 1\nFoundations and first app',
+							collapsed: true,
+							items: [
+								{
+									label: 'Launch an LLM app',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/llm-ops-and-production/launch-an-llm-app/brief' },
+										{ label: 'Lesson', slug: 'lessons/llm-ops-and-production/launch-an-llm-app/lesson' },
+										{ label: 'Practice', slug: 'lessons/llm-ops-and-production/launch-an-llm-app/practice' },
+										{ label: 'Summary', slug: 'lessons/llm-ops-and-production/launch-an-llm-app/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/llm-ops-and-production/launch-an-llm-app/cheatsheet' },
+										{ label: 'References', slug: 'lessons/llm-ops-and-production/launch-an-llm-app/references' },
+									],
+								},
+								{
+									label: 'LLM foundations',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/llm-ops-and-production/llm-foundations/brief' },
+										{ label: 'Lesson', slug: 'lessons/llm-ops-and-production/llm-foundations/lesson' },
+										{ label: 'Practice', slug: 'lessons/llm-ops-and-production/llm-foundations/practice' },
+										{ label: 'Summary', slug: 'lessons/llm-ops-and-production/llm-foundations/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/llm-ops-and-production/llm-foundations/cheatsheet' },
+										{ label: 'References', slug: 'lessons/llm-ops-and-production/llm-foundations/references' },
+									],
+								},
+								{
+									label: 'Prompt engineering',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/llm-ops-and-production/prompt-engineering/brief' },
+										{ label: 'Lesson', slug: 'lessons/llm-ops-and-production/prompt-engineering/lesson' },
+										{ label: 'Practice', slug: 'lessons/llm-ops-and-production/prompt-engineering/practice' },
+										{ label: 'Summary', slug: 'lessons/llm-ops-and-production/prompt-engineering/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/llm-ops-and-production/prompt-engineering/cheatsheet' },
+										{ label: 'References', slug: 'lessons/llm-ops-and-production/prompt-engineering/references' },
+									],
+								},
+							],
+						},
+						{
+							label: 'Phase 2\nBuilding production apps',
+							collapsed: true,
+							items: [
+								{
+									label: 'Augmented LLMs',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/llm-ops-and-production/augmented-llms/brief' },
+										{ label: 'Lesson', slug: 'lessons/llm-ops-and-production/augmented-llms/lesson' },
+										{ label: 'Practice', slug: 'lessons/llm-ops-and-production/augmented-llms/practice' },
+										{ label: 'Summary', slug: 'lessons/llm-ops-and-production/augmented-llms/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/llm-ops-and-production/augmented-llms/cheatsheet' },
+										{ label: 'References', slug: 'lessons/llm-ops-and-production/augmented-llms/references' },
+									],
+								},
+								{
+									label: 'Project walkthrough',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/llm-ops-and-production/project-walkthrough/brief' },
+										{ label: 'Lesson', slug: 'lessons/llm-ops-and-production/project-walkthrough/lesson' },
+										{ label: 'Practice', slug: 'lessons/llm-ops-and-production/project-walkthrough/practice' },
+										{ label: 'Summary', slug: 'lessons/llm-ops-and-production/project-walkthrough/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/llm-ops-and-production/project-walkthrough/cheatsheet' },
+										{ label: 'References', slug: 'lessons/llm-ops-and-production/project-walkthrough/references' },
+									],
+								},
+								{
+									label: 'UX for LUIs',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/llm-ops-and-production/ux-for-luis/brief' },
+										{ label: 'Lesson', slug: 'lessons/llm-ops-and-production/ux-for-luis/lesson' },
+										{ label: 'Practice', slug: 'lessons/llm-ops-and-production/ux-for-luis/practice' },
+										{ label: 'Summary', slug: 'lessons/llm-ops-and-production/ux-for-luis/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/llm-ops-and-production/ux-for-luis/cheatsheet' },
+										{ label: 'References', slug: 'lessons/llm-ops-and-production/ux-for-luis/references' },
+									],
+								},
+								{
+									label: 'LLMOps',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/llm-ops-and-production/llmops/brief' },
+										{ label: 'Lesson', slug: 'lessons/llm-ops-and-production/llmops/lesson' },
+										{ label: 'Practice', slug: 'lessons/llm-ops-and-production/llmops/practice' },
+										{ label: 'Summary', slug: 'lessons/llm-ops-and-production/llmops/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/llm-ops-and-production/llmops/cheatsheet' },
+										{ label: 'References', slug: 'lessons/llm-ops-and-production/llmops/references' },
+									],
+								},
+							],
+						},
+						{
+							label: 'Phase 3\nAdvanced and the field',
+							collapsed: true,
+							items: [
+								{
+									label: 'What\'s next',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/llm-ops-and-production/whats-next/brief' },
+										{ label: 'Lesson', slug: 'lessons/llm-ops-and-production/whats-next/lesson' },
+										{ label: 'Practice', slug: 'lessons/llm-ops-and-production/whats-next/practice' },
+										{ label: 'Summary', slug: 'lessons/llm-ops-and-production/whats-next/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/llm-ops-and-production/whats-next/cheatsheet' },
+										{ label: 'References', slug: 'lessons/llm-ops-and-production/whats-next/references' },
+									],
+								},
+								{
+									label: 'Training your own LLM',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/llm-ops-and-production/training-your-own-llm/brief' },
+										{ label: 'Lesson', slug: 'lessons/llm-ops-and-production/training-your-own-llm/lesson' },
+										{ label: 'Practice', slug: 'lessons/llm-ops-and-production/training-your-own-llm/practice' },
+										{ label: 'Summary', slug: 'lessons/llm-ops-and-production/training-your-own-llm/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/llm-ops-and-production/training-your-own-llm/cheatsheet' },
+										{ label: 'References', slug: 'lessons/llm-ops-and-production/training-your-own-llm/references' },
+									],
+								},
+								{
+									label: 'Agents',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/llm-ops-and-production/agents/brief' },
+										{ label: 'Lesson', slug: 'lessons/llm-ops-and-production/agents/lesson' },
+										{ label: 'Practice', slug: 'lessons/llm-ops-and-production/agents/practice' },
+										{ label: 'Summary', slug: 'lessons/llm-ops-and-production/agents/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/llm-ops-and-production/agents/cheatsheet' },
+										{ label: 'References', slug: 'lessons/llm-ops-and-production/agents/references' },
+									],
+								},
+								{
+									label: 'Industry perspective',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/llm-ops-and-production/industry-perspective/brief' },
+										{ label: 'Lesson', slug: 'lessons/llm-ops-and-production/industry-perspective/lesson' },
+										{ label: 'Practice', slug: 'lessons/llm-ops-and-production/industry-perspective/practice' },
+										{ label: 'Summary', slug: 'lessons/llm-ops-and-production/industry-perspective/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/llm-ops-and-production/industry-perspective/cheatsheet' },
+										{ label: 'References', slug: 'lessons/llm-ops-and-production/industry-perspective/references' },
+									],
+								},
+							],
+						},
+					],
+				},
+				{
 					label: 'Track 13: Build Neural Networks from Scratch',
 					items: [
 						{

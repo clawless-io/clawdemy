@@ -1,0 +1,96 @@
+---
+title: "Lesson: Project walkthrough, a real LLM application end to end"
+description: The bootcamp's worked example. Read the production decisions embedded in askFSDL, a real RAG Q&A app over the course materials, against the components you have already learned. The complexity is in the decisions, not the lines of code.
+sidebar:
+  order: 2
+  label: Lesson
+artifact: lesson
+---
+
+You have built the components: the minimum-viable five-piece pipeline (lesson 1), the foundations and productive limits (lesson 2), the prompt-engineering toolkit (lesson 3), and the augmentation patterns of RAG and tool use (lesson 4). This lesson reads a **real LLM application end to end** and identifies the production decisions it embeds. The bootcamp's worked example is **askFSDL**, a question-answering app over the FSDL course materials. We will not reproduce its code; we will read its shape and the decisions baked into it, so you can recognize the same shape (and make better decisions) in applications you build.
+
+## The app, in one line
+
+**askFSDL** is a chat-style Q&A application: a user asks a question about the FSDL course content, and the application returns an answer grounded in the course materials, with citations back to the source video or text. Its job is narrow on purpose: a useful question-answering interface over a specific, bounded knowledge base.
+
+Its overall shape is the five-component pipeline from lesson 1, with lesson 4's RAG pipeline wedged into the "application code" component:
+
+```
+user input  ->  prompt template  ->  RAG retrieval over course corpus  ->
+              hosted-model API call  ->  streaming render with citations
+```
+
+Nothing on that line is novel after the last four lessons. The value of this walkthrough is in the **decisions** at each step.
+
+## Reading the production decisions
+
+A real application's quality is the sum of dozens of small choices. The ones worth naming, in the order they would appear if you were reading the code:
+
+### Knowledge source: scoped, on purpose
+
+The knowledge source is **only the FSDL course materials**, not the web, not a broader knowledge base. This is a deliberate scope decision: a narrow, well-known corpus that the app can answer well, rather than a sprawling one it would answer poorly. The implication is immediate, the system prompt can promise "this answers questions about the FSDL course content" and refuse politely on out-of-scope questions, instead of trying to be helpful about everything and failing inconsistently.
+
+The general principle: **scope your knowledge source to what you can actually retrieve over well**. A narrow app that works beats a broad app that does not.
+
+### Chunking: tutorial-shaped
+
+The materials are tutorial-style (lecture transcripts, slides, descriptions). Chunking is sized for that: chunks long enough to hold a self-contained idea (a few hundred tokens), with overlap so a sentence is not split across chunks. Metadata on each chunk records the source session and rough section, so citations have somewhere to point and metadata filtering is possible later.
+
+The general principle: **chunk for the content's natural unit**, not for an arbitrary fixed size, and tag chunks with the metadata your citations and filters will need.
+
+### Retrieval: top-k, with sources kept
+
+Retrieval embeds the user's question and fetches the top-k most similar chunks from the vector store. Each chunk arrives at the prompt with its source label still attached. The exact `k` is tuned empirically; the principle is to fetch enough to cover the question and small enough to leave context budget for the rest of the prompt and a useful `max_tokens` output.
+
+The general principle: **keep the source on every chunk** through the entire retrieval-to-answer flow. Citations are not bolted on at the end; they are carried.
+
+### Prompt: scope-honest, citation-asking
+
+The system prompt is short but disciplined. It says (in spirit, not verbatim): "You answer questions about the FSDL course based on the provided context. Cite which source each claim comes from. If the context does not contain the answer, say so plainly." That is the spec from lesson 3, applied honestly: the assistant has a scope, and refusing-out-of-scope is part of the spec, not a failure.
+
+The user message is the retrieved chunks (with their source labels) followed by the user's question. Critical instructions are at the end of the long prompt, per the lesson-3 toolkit. The system also caps `max_tokens` so responses do not ramble; concise responses are also the cheaper, faster ones (lesson 2).
+
+### Generation: model choice, streaming, citations
+
+The generation step picks a model that balances quality and cost for the workload, calls it with the assembled prompt, and **streams the response** rather than waiting for the whole reply. Streaming is a UX move (lesson 6) but it is decided here, at the call site. The model's response includes the citations the prompt asked for; the application renders them as clickable links back to the source materials.
+
+The general principle: **streaming and citations are decisions made at the call site and presented in the UI**; they are not afterthoughts.
+
+### Logging and feedback: the seed of LLMOps
+
+What is logged is the question, the retrieved chunk IDs, the prompt version, the model and parameters used, the response, and any user feedback (a thumbs-up/down or correction). This is the **seed of LLMOps** (lesson 7): without these logs, no real evaluation in production is possible; with them, the team can audit failures, find regressions, and improve retrieval and prompts deliberately.
+
+The general principle: **log enough to debug**. Question, retrieval IDs, prompt version, model identifier, parameters, response, user signal. Five to ten fields per request; trivial to add up front; nearly impossible to backfill once you need them.
+
+## What the walkthrough does not show, and why
+
+Reading a real app also reveals what is not in it yet. askFSDL is a worked teaching example, not a hardened product, so some pieces from the rest of this track are deliberately absent or minimal:
+
+- **Sophisticated UX** (lesson 6): the example has streaming and citations, but not the full toolkit of regeneration, hedging, and recoverable failure that production UI work adds.
+- **Production observability and evaluation pipelines** (lesson 7): the logging is the seed, not the bloom. Real LLMOps wraps these logs in dashboards, automatic regression tests, and evaluation harnesses.
+- **Multiple tools or agentic flow** (lesson 10): the example is a single RAG path. Agent-shaped applications add planning and multi-step tool use.
+
+This is honest scoping. A worked example that does everything is hard to read; one that does the core well, names what it is missing, and points at where each missing piece gets added is much more teachable.
+
+## The "five hours, not five weeks" reframing
+
+The bootcamp source repeatedly makes a point worth surfacing: a real LLM application of this shape is **small**. A few hundred lines of Python across the pipeline, plus the prompts, plus the chunked-and-indexed corpus, plus a hosted model someone else trained. The complexity is in the **decisions**, not the line count. Teams that ship in days have internalized this; teams that take months are usually fighting the wrong battle (a custom architecture, a model they trained from scratch, a never-finished evaluation system) for an application that the components from L1-L4 would already solve.
+
+The walkthrough's purpose is to make that point concrete: each named decision above is small in isolation, and together they are a working application.
+
+## Why this matters when you build AI
+
+Reading a real application is the cheapest way to develop the **production-decision eye** that distinguishes builders who ship from builders who tinker. Most LLM applications you will ever build look like this one in shape: a scoped knowledge source, a deliberate chunking, source-carrying retrieval, a small disciplined system prompt, streaming generation with citations, and logs that seed an evaluation practice. Once you can see those decisions in someone else's application, you can make them deliberately in your own, and the gap from "I built a prototype" to "I shipped a useful app" closes quickly. The next two lessons fill in what the walkthrough deliberately deferred: the UX layer (lesson 6) and the LLMOps layer (lesson 7).
+
+## What you should remember
+
+- **askFSDL is the worked example:** a Q&A app over the FSDL course materials, the shape of a large class of production LLM applications. Its quality is the sum of the decisions at each pipeline stage.
+- **Scope your knowledge source.** A narrow well-retrievable corpus beats a broad one. The system prompt can then promise (and honestly refuse out-of-scope).
+- **Chunk for the content's natural unit** and tag chunks with the metadata your citations and filters need.
+- **Carry the source on every chunk** through retrieval and into the prompt; citations are not bolted on at the end.
+- **Prompt as a scope-honest spec:** answer in-scope, cite sources, refuse out-of-scope plainly. End-place critical instructions; cap `max_tokens`.
+- **Streaming and citations are call-site decisions** rendered in the UI; not afterthoughts. UX-layer polish lives in lesson 6.
+- **Log enough to debug:** question, retrieval IDs, prompt version, model + parameters, response, user feedback. Five to ten fields up front; nearly impossible to backfill later. This is the seed of LLMOps (lesson 7).
+- **The "five hours, not five weeks" reframing:** real apps of this shape are a few hundred lines. The complexity is in the decisions, not the line count. Teams that ship internalize this.
+
+A real LLM application is mostly the parts you have learned, wired together with care. The walkthrough is not asking you to copy askFSDL; it is asking you to develop the eye that sees the same decisions in any LLM app, including the one you build next.

@@ -1,0 +1,117 @@
+---
+title: "Agents"
+description: "Lesson 10 of Track 21. What an LLM agent is (a tool-use loop with the model deciding the next step), the common patterns (ReAct, plan-and-execute, function-calling agents), the engineering failure modes that make agents hard to ship (loops, wrong paths, compound cost, harder evaluation), when to reach for an agent versus a single call, and how lesson 7's LLMOps discipline scales to multi-step loops. Mirror of Full Stack Deep Learning Bootcamp Session 10 (Harrison Chase, LangChain). Taught technical-primer: WHAT, WHEN, WHAT-GOES-WRONG, HOW; agent-autonomy and contested-alignment debates explicitly out of scope."
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+tableOfContents: true
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Why this lesson
+
+Lesson 4 introduced **tool use** as a four-step loop: the model selects a tool, the application executes the call, the result comes back, the model continues. That lesson kept the loop a single round. **An agent is what happens when you give the model permission to decide whether to take another round, and another, until the task is done.** The four steps stay the same; what changes is who decides "are we done yet."
+
+That tiny shift, from "the model uses one tool then answers" to "the model keeps deciding the next call until it answers," is the entire content of this topic. Everything else, the patterns, the tooling, the failure modes, the question of when to reach for an agent at all, falls out of that one idea. This is the deep dive that the L4 tool-use section pointed forward to.
+
+The source for this lesson is the Full Stack Deep Learning LLM Bootcamp Session 10, with **Harrison Chase (LangChain)** as the guest instructor.
+
+**Scope of this lesson.** Technical-primer. WHAT an agent is, WHEN to reach for one, WHAT goes wrong, HOW to build and operate one. Out of scope: contested debates about agent autonomy, agent safety, agent alignment, or what agents should or should not be allowed to do. Those are real and important questions that belong in their own forum with the right stakeholders (legal, policy, ethics, security); they are not what this lesson teaches. Same discipline that Track 14 lesson 12 and Track 15 lesson 14 apply to the same topic from the using- and build-sides; this lesson applies it from the production-shipping side.
+
+## What an agent is
+
+The minimum definition that is actually useful: **an LLM agent is the tool-use loop from lesson 4 with the model deciding when to stop.**
+
+Pseudocode, deliberately short:
+
+```python
+def run_agent(task):
+    history = [task]
+    while True:
+        step = model.predict(history)        # what should we do next?
+        if step.is_final_answer():
+            return step.answer
+        result = execute_tool(step.tool_call) # do it
+        history.append(step)
+        history.append(result)
+```
+
+That is it. Four things to notice:
+
+1. The model is called **once per step**, not once total. A 5-step agent costs roughly 5x a single call (more, because the history grows).
+2. The model decides **what to do next**, including whether to stop. There is no fixed plan baked in; the loop ends when the model emits "I have the answer."
+3. The model sees its own **growing history** of (decision, result) pairs. This is what lets it self-correct on a step that failed.
+4. There is no magic. The "agent" is the model + the tools + the loop + the prompt that wraps them. Calling it an agent does not change what the model is; it changes the **interaction shape**.
+
+You can layer onto this minimum: longer-term memory (persisted across runs), explicit planning steps that produce a list of sub-tasks up front (plan-and-execute), or multiple specialized agents that pass control between themselves (multi-agent). Those are useful but not foundational. The foundational unit is the loop above.
+
+## Common patterns
+
+Three patterns cover most production agents.
+
+**Function-calling agents.** The simplest and the most reliable in 2026. The model is asked to either (a) call a specific tool from a list with structured arguments, or (b) emit a final answer. The hosted API enforces the structured-arguments contract (JSON schema), so the parsing is not your problem. The loop is exactly the pseudocode above. Anthropic's Claude API, OpenAI's API, and Google's Gemini API all expose this. **Reach for this first** unless you have a specific reason not to.
+
+**ReAct (Reason + Act).** Pre-dates structured function calling. The model emits a free-text "Thought:" line, then an "Action:" line, then waits to be shown the action's "Observation:". The application parses the free-text format, runs the action, and feeds back the observation. Conceptually identical to function calling; mechanically messier (the parser breaks more, the prompt is longer). Worth knowing because the literature uses this vocabulary, and because it is what older agent libraries shipped before structured tools went mainstream.
+
+**Plan-and-execute.** A two-phase variant. Phase 1: the model produces a numbered plan of sub-tasks. Phase 2: a worker (either the same model or a smaller one) executes each sub-task in turn, possibly with its own tool use. The plan gives you a chance to verify the agent's intent before letting it act, which is useful when each action has real-world cost (API charges, sent emails, posted comments). The cost: you commit to a plan that the agent may discover is wrong mid-run, and you need re-planning logic to recover.
+
+Two variants are worth naming but not foundational:
+
+- **Memory-augmented agents** store facts learned across runs (in a vector store, a key-value store, or a database) and retrieve them as the loop runs. Useful for agents that should remember user preferences or accumulated context.
+- **Multi-agent setups** route a task between specialized sub-agents (a planner, a coder, a critic). Powerful but adds coordination cost and makes evaluation strictly harder. Most production deployments do not need this; a single capable function-calling agent goes a long way.
+
+**The default we recommend:** function-calling agent with a small set of well-defined tools, a short prompt that names the agent's job, and a hard loop-iteration cap. Add complexity only when a specific failure forces it.
+
+## When to reach for an agent
+
+Agents are not free. Each extra step is another model call, another round-trip, another chance to go wrong. **Reach for an agent only when the task genuinely requires multiple decisions the application cannot make in advance.**
+
+Three concrete tests, all should be yes:
+
+1. **The task has variable shape.** You cannot write the steps down ahead of time because they depend on what comes back from earlier steps. A "summarize this article" task does not need an agent; "answer this user question that may need different combinations of search, calculator, and database lookups depending on what is asked" does.
+2. **The required tools are real and bounded.** You have a small set (typically 3 to 10) of well-defined tools, each with a clear contract, each tested independently. A vague "browse the web and figure it out" tool is a red flag; "search\_docs(query)", "lookup\_order(order\_id)", "calculate(expression)" are clear contracts.
+3. **The cost and latency are acceptable.** A 5-step agent at 2 seconds per step is a 10-second response, and 5 times the per-call cost. Either the user is willing to wait, or the agent is doing inner work whose latency is hidden from the user. (This connects back to lesson 2's three productive limits: context, cost, latency. Agents multiply all three.)
+
+If any test fails, the simpler answer (a single call, or retrieval-augmented generation per lesson 4, or a hand-coded pipeline of steps) is almost always better. The most common agent-related production mistake is **using an agent where a single call would do** because it sounded more impressive in the design meeting. Build the simpler version first; reach for the agent when the simpler version genuinely cannot do the job.
+
+## What goes wrong (the engineering failure modes)
+
+Agents fail in ways that single calls do not. Five engineering failure modes show up across almost every production deployment.
+
+**Loops.** The agent calls the same tool with the same arguments, gets the same result, decides to call it again. This happens when the model misreads a result as a failure (rate-limit error, empty list, ambiguous response) and tries again hoping for a different outcome. **Mitigation: hard cap on loop iterations, plus a hard cap on identical tool calls; surface the cap to the model so it can adjust strategy.** Without a cap, an agent can burn a thousand calls before you notice.
+
+**Wrong paths.** The agent makes an early decision that takes the conversation off the productive trail, and then commits to that path through several more steps before giving up. The model sees the failed trail in history and doubles down. **Mitigation: structured re-planning checkpoints (after every N steps, the model is asked "is the current plan still working?"); aggressive evaluation against a held-out set so wrong-path patterns surface before production.**
+
+**Compound cost.** A 5-step agent does not cost 5x a single call. The context grows with every step (each tool result lands in the history), so step 5's call processes far more tokens than step 1's. Lesson 2's three productive limits all multiply. **Mitigation: summarize older history rather than feeding it verbatim; cap the maximum context size; smaller models for inner steps where capability is not the bottleneck.**
+
+**Harder evaluation.** A single call has one input and one output; an agent's behavior is a tree of possible step sequences. The same task can take 3 steps or 12 steps depending on what the tools return, and "correct" is a property of the full trajectory, not a single response. **Mitigation: evaluate at the trajectory level (did the agent reach a correct final answer, in how many steps, with what tool-call patterns?), not the per-step level; build evaluation harnesses early, not late (lesson 7's discipline scales here, but the test set is more expensive to build).**
+
+**Brittle tool boundaries.** The model's behavior is sensitive to small changes in tool descriptions, tool names, and the shape of the returned data. A clearer tool name, a tightened JSON schema, or a one-line example in the tool description can change the success rate substantially. **Mitigation: version your tool definitions like prompts (lesson 3's discipline); A/B test tool-description changes; treat tool design as a first-class engineering problem, not a documentation chore.**
+
+A note on what this lesson does NOT name. Agent **autonomy**, agent **safety**, and agent **alignment** are live debates in the wider field, and they matter, but they are not the engineering failure modes above and they are not what this lesson teaches. The five items above are the patterns you debug at 2 a.m.; the wider debates are a separate conversation with separate stakeholders. We are strict about that line here, the same way Track 14 lesson 12 and Track 15 lesson 14 are strict about it.
+
+## How to build and operate one
+
+The build side is short because the LLMOps discipline from lesson 7 carries directly over. Five practices.
+
+1. **Start with a function-calling agent and 3 to 5 well-defined tools.** No multi-agent setups, no memory layer, no plan-and-execute, until a specific failure of the simpler version forces the upgrade. The cheapest version that works is the right starting point.
+2. **Cap iterations and identical calls.** Every production agent should have a `max_steps` limit (typically 6 to 12) and a "no identical tool call twice in a row" guard. The cap should error visibly, not silently truncate; surface it to the model when reasonable so it can adjust.
+3. **Log every step, not just the final answer.** The lesson 7 log schema applies, plus: tool_called, tool_arguments, tool_result_summary, step_number, total_steps_so_far. Without trajectory-level logs, post-mortems on agent failures are impossible.
+4. **Evaluate at the trajectory level.** Build a held-out set of agent tasks with the expected final answers AND the expected tool-call patterns. Run it after every prompt or tool change. Track success rate, average steps, and per-step cost over time. This is more expensive than lesson 7's flat-call eval set, but it is the only way to catch regressions.
+5. **Observability before scale.** A dashboard that shows live agent trajectories (which tools fire most, where the loops happen, where the dead ends accumulate) is worth more than a clever prompt. You cannot fix what you cannot see, and agents make the "what is the model actually doing" question much harder than single calls.
+
+A general note: **agents are a young engineering area**, and the tooling around them moves fast. The patterns in this lesson are stable (the loop, the failure modes, the engineering practices); the libraries and frameworks that implement them will change shape over the next few years. The advice in this lesson is the part that ages well; specific library names and APIs go in the references.
+
+## What to remember
+
+- An LLM **agent** is the lesson-4 tool-use loop with the model deciding when to stop. That tiny shift, "the model picks the next call until it picks a final answer," generates every pattern, every failure mode, and every operational discipline in this lesson.
+- Three foundational patterns: **function-calling agents** (the reliable default in 2026), **ReAct** (the predecessor; still appears in the literature), and **plan-and-execute** (when you want to inspect intent before action).
+- Reach for an agent only when the task has **variable shape**, the tools are **real and bounded**, and the **cost and latency** are acceptable. Otherwise a single call, a RAG pipeline, or a hand-coded sequence is better. The most common agent mistake is using one where a single call would do.
+- Five engineering failure modes: **loops, wrong paths, compound cost, harder evaluation, brittle tool boundaries.** Each has a specific mitigation. These are the patterns you debug; they are not the same as agent-autonomy / agent-safety / agent-alignment debates, which live in a different forum.
+- Build practices: function-calling first; hard iteration and identical-call caps; trajectory-level logs; trajectory-level evaluation; observability before scale. Lesson 7's LLMOps discipline scales here, with the test set strictly more expensive to build.
+- **Scope of this lesson.** Strictly technical-primer. WHAT, WHEN, WHAT-GOES-WRONG, HOW. Out of scope: contested debates about agent autonomy, agent safety, and agent alignment; what agents should or should not be allowed to do; sector-specific compliance for agent deployment. Real and important; addressed in their own forum with the right stakeholders.
+
+Next: lesson 11, the track capstone, which steps back from the technical detail to the industry-perspective view that closes Phase 3 and the track.

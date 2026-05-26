@@ -1,0 +1,179 @@
+---
+title: "Practice: LLM foundations for production"
+description: Self-check on the working model, sampling, and the three productive limits, a back-of-envelope cost-and-latency exercise, and flashcards for retrieval.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Seven short questions. Answer each before opening the collapsible.
+
+**1. State three properties of a hosted LLM at the level you call it.**
+
+<details>
+<summary>Show answer</summary>
+
+It works in **tokens** (not characters or words; cost, context, and latency are all denominated in tokens). It is **stateless between calls** (each request stands alone; your application keeps conversation state and replays relevant pieces into the prompt). It was **trained on a fixed corpus up to some date** (broad knowledge is what was in that training; anything more recent or domain-specific must come through prompt or retrieval).
+
+</details>
+
+**2. Walk the autoregressive generation loop.**
+
+<details>
+<summary>Show answer</summary>
+
+(1) Tokenize the prompt. (2) Run through the network; produce a probability distribution over possible next tokens. (3) Sample one token from that distribution using your sampling settings. (4) Append the token to the sequence; repeat from step 2. (5) Stop on an end-of-sequence token, `max_tokens`, or a stop sequence. Output is produced one token at a time, which is why streaming is possible.
+
+</details>
+
+**3. What do `temperature` and `top_p` control, and when do you reach for non-default values?**
+
+<details>
+<summary>Show answer</summary>
+
+`temperature` scales how peaky the next-token distribution is: lower (closer to 0) is more deterministic, higher is more varied. `top_p` (nucleus sampling) limits sampling to the smallest set of tokens whose probability sums to `p`. Production answer apps usually run low temperature (0 to 0.4); creative tasks run higher. Defaults usually suffice; reach for non-defaults when an app needs more consistency (low) or more variance (higher), or when a known sampling combination is documented for the task.
+
+</details>
+
+**4. What is the context length, and what shares its budget?**
+
+<details>
+<summary>Show answer</summary>
+
+The maximum number of tokens the model can take as input in a single call (a hard limit per model). **System prompt + user message + retrieved context + few-shot examples + conversation history + `max_tokens` for the response** all share the same budget. The output is bounded by the same window. Hitting the wall forces tighter prompts, better retrieval, summarized history, or a longer-context model.
+
+</details>
+
+**5. Why does cost per token usually surprise teams later, even when "per call it's cheap"?**
+
+<details>
+<summary>Show answer</summary>
+
+Because cost compounds at scale. A 4,000-token system prompt sent to every user request is paid for every time; at any reasonable volume that adds up. Output tokens are usually several times more expensive than input tokens, so generation is the more expensive side and `max_tokens` plus prompting for concise responses are the largest cost levers. Different models also vary widely, so "which model" is an economic choice as much as a quality one.
+
+</details>
+
+**6. Decompose total response latency into its two components, and explain what each is sensitive to.**
+
+<details>
+<summary>Show answer</summary>
+
+`total time ≈ TTFT + (output_tokens / tokens_per_second)`. **TTFT (time-to-first-token)** is the wall-clock from request to the first streamed token; long inputs raise TTFT (more prompt to process). **tokens-per-second** is the streaming rate after that; total time then grows linearly in `output_tokens`. Streaming masks latency at the UX layer (lesson 6) by showing tokens as they arrive.
+
+</details>
+
+**7. Why is naming these three limits early a practical move, not just a framing one?**
+
+<details>
+<summary>Show answer</summary>
+
+Because nearly every later production decision (which model, how to prompt, when to retrieve, how to stream, when to cache, how to cap output) is a deliberate move against one of context, cost, or latency. Teams that have not named them spend money where they should optimize, over-optimize the wrong latency number, or assume unbounded retrieval. Naming the constraints makes the rest of the track's techniques look like targeted moves rather than recipes to memorize.
+
+</details>
+
+## Try it yourself: back-of-envelope a real app
+
+About 12 minutes, calculator. You will estimate cost and latency for a realistic application.
+
+**Part A: cost.** A customer-support assistant sees 50,000 requests per day. Each request has a 1,500-token system prompt plus 4,000 tokens of retrieved context, with an average 300-token user message. Average response is 250 tokens. Suppose input is priced at $3 per million tokens and output at $15 per million tokens. Estimate the daily and monthly API spend.
+
+<details>
+<summary>What you'll get</summary>
+
+Per-request input: `1,500 + 4,000 + 300 = 5,800` tokens. Per-request output: 250 tokens.
+
+Daily input tokens: `50,000 * 5,800 = 290,000,000` (290M).
+Daily output tokens: `50,000 * 250 = 12,500,000` (12.5M).
+
+Daily cost: `(290 * $3) + (12.5 * $15) = $870 + $187.50 = $1,057.50`.
+Monthly (30 days): `~$31,725`.
+
+Notice: input dominates by volume, but the per-token output rate is 5x, so output is closer to 20% of the bill despite being only ~4% of the tokens. Optimizing the **system prompt** (input) and the **`max_tokens`** (output) are both real money. Dropping the system prompt from 1,500 to 800 tokens saves `50,000 * 700 * $3/1M = $105/day = ~$3,150/month`. That is the level of impact lesson 3 (prompt engineering) regularly delivers.
+
+</details>
+
+**Part B (reasoning).** A user reports the app "feels slow." TTFT is 800 ms; tokens-per-second is 60; average output is 250 tokens. What is total response time, where is the perceived slowness coming from, and what do you change first?
+
+<details>
+<summary>What you should notice</summary>
+
+Total time `≈ 0.8s + (250 / 60) ≈ 0.8 + 4.2 = 5.0 seconds`. TTFT is fine (under a second); the bulk of the perceived wait is the streaming of 250 output tokens at 60/sec. **Streaming masks it** if shown to the user; without streaming, the user waits the full 5 seconds in silence. First fix: stream the response so the user sees tokens within ~1 second (which is the UX answer, lesson 6). Second fix: prompt for shorter responses or cap `max_tokens`, which cuts the total time linearly. Switching to a faster model is option three.
+
+</details>
+
+**Part C (reasoning).** A team plans "we'll just retrieve everything relevant and put it all in the prompt." Two productive limits push back. Which ones, and what does that imply for design?
+
+<details>
+<summary>What you should notice</summary>
+
+**Context length** (the hard input limit; "everything relevant" may not fit, and even at frontier-model lengths, packing more than needed leaves no headroom for the system prompt, few-shot, history, or `max_tokens` output) and **cost per token** (every retrieved chunk in every request is paid for every time; long prompts at scale compound dramatically; lesson 12 of Track 15's "less unique-clean beats more duplicated" applies to retrieval too). The implication: retrieval needs to be **targeted**, not exhaustive. Lesson 4 covers the design patterns.
+
+</details>
+
+## Flashcards
+
+Nine cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay the set out one card per page for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="Three properties of a hosted LLM at the API level?">
+
+Tokens (works in integer tokens; cost/context/latency denominated in tokens), stateless (no memory between calls; your app keeps state), trained on a fixed corpus up to some date (recency or domain knowledge must come through prompt or retrieval).
+
+</Flashcard>
+
+<Flashcard question="Walk the autoregressive generation loop.">
+
+Tokenize prompt -> get next-token distribution -> sample one -> append -> repeat -> stop on EOS, max_tokens, or a stop sequence. Output is one token at a time; that's why streaming is possible.
+
+</Flashcard>
+
+<Flashcard question="What do temperature and top_p control?">
+
+temperature: how peaky the distribution is (low = deterministic, high = varied). top_p: limits sampling to the smallest set of tokens whose probabilities sum to p (nucleus). Defaults usually suffice; tune for consistency or variance needs.
+
+</Flashcard>
+
+<Flashcard question="What is context length, and what shares its budget?">
+
+The max tokens the model can take as input per call. System + user + retrieved context + few-shot + history + max_tokens response all share the same window. A hard limit; output is bounded by it too.
+
+</Flashcard>
+
+<Flashcard question="Why does API cost surprise teams later?">
+
+It compounds at scale: a 4,000-token system prompt sent to every request is paid for every time. Output tokens cost several times more than input. max_tokens and concise prompts are the biggest levers.
+
+</Flashcard>
+
+<Flashcard question="Decompose total response latency.">
+
+total time ≈ TTFT + (output_tokens / tokens_per_second). TTFT rises with input length; total time rises linearly with output length. Streaming masks the latter at the UX layer.
+
+</Flashcard>
+
+<Flashcard question="Concise responses do two things; what are they?">
+
+Save money (output is the more expensive per-token side) AND save user time (linear in output_tokens at fixed streaming rate). Capping max_tokens + prompting for brevity is the biggest combined lever.
+
+</Flashcard>
+
+<Flashcard question="Why name the three productive limits early?">
+
+Nearly every later decision (model, prompt, retrieval, streaming, caching, max_tokens) is a deliberate move against context / cost / latency. Without naming them, teams over-optimize the wrong axis or assume unboundedness.
+
+</Flashcard>
+
+<Flashcard question="'Retrieve everything relevant' meets which two limits?">
+
+Context length (everything may not fit; even at frontier sizes leaves no headroom) and cost per token (every retrieved chunk in every request is paid every time; compounds dramatically at scale). Implies retrieval must be targeted, not exhaustive.
+
+</Flashcard>
+
+</FlashcardSet>

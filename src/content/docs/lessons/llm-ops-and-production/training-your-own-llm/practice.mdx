@@ -1,0 +1,191 @@
+---
+title: "Practice: Training your own LLM"
+description: Self-check on the decision criteria, the staged pipeline, the data discipline, and the economics, a fine-tune-or-not exercise, and flashcards for retrieval.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Seven short questions. Answer each before opening the collapsible.
+
+**1. What three things have to be true simultaneously before you should consider fine-tuning?**
+
+<details>
+<summary>Show answer</summary>
+
+(1) Prompting consistently fails on a specific recurring task at scale (the "where prompts run out" line from lesson 3). (2) Retrieval and tool use (lesson 4) do not fix it (the failure is "wrong behavior," not "missing knowledge"). (3) The failing task happens at high enough volume that inference savings of a smaller fine-tuned model justify the upfront training cost (lesson 8's economics). Most production applications never need to fine-tune; teams that should follow these three criteria.
+
+</details>
+
+**2. Walk the five stages of the recommended fine-tuning pipeline.**
+
+<details>
+<summary>Show answer</summary>
+
+(1) **Start from a strong open checkpoint** (Llama, Mistral, Phi family), not from scratch. (2) **Curate the fine-tuning data**: small, high-quality, format-matched, often synthetic-then-filtered, with a real held-out evaluation set. (3) **Run LoRA training** via TRL or Axolotl on a single capable GPU for hours to a day. (4) **Optionally preference-tune** with DPO if you need ranked-output quality. (5) **Evaluate against the held-out set** then **A/B test on real traffic** (lesson 7's discipline), and verify the cost/latency moved as expected (lesson 2).
+
+</details>
+
+**3. Why is data quality the leverage, and what's the cheapest practical source?**
+
+<details>
+<summary>Show answer</summary>
+
+A small high-quality dataset (hundreds to low thousands of examples for a focused task) typically beats a large noisy one; the model imitates what it sees. The cheapest practical source for SFT data is often **synthetic** (a strong hosted model generates many examples; you filter, review, and curate), with the Track 15 lesson 12 caveat that synthetic data carries the teacher's blind spots, so filter aggressively and mix with human-written examples where the budget allows.
+
+</details>
+
+**4. What is the standard low-cost fine-tune recipe, in tooling terms?**
+
+<details>
+<summary>Show answer</summary>
+
+**LoRA** (parameter-efficient fine-tuning) on a **small open base model** (a few billion parameters), with a **few hundred to a few thousand** curated instruction-response pairs, run via **TRL** (Hugging Face) or **Axolotl** (config-driven wrapper over TRL) on a **single GPU** for **hours to a day**, often on a managed compute provider (Together, Modal, Lambda Labs, Anyscale). DPO follows the SFT pass when preference data exists.
+
+</details>
+
+**5. State the economics rule for "should I fine-tune?"**
+
+<details>
+<summary>Show answer</summary>
+
+Estimate per-task hosted cost × expected lifetime volume, then compare to (fine-tune cost + serving cost over the same period). Fine-tune if the fine-tuned-and-served path is **meaningfully cheaper** AND **quality is at least equal** on your evaluation. Otherwise stay hosted. High-volume sub-tasks pay back the fine-tune cost quickly; low-volume tasks may not.
+
+</details>
+
+**6. How does fine-tuning fit into the "mix architecture" from lesson 8?**
+
+<details>
+<summary>Show answer</summary>
+
+Fine-tune the **high-volume narrow inner sub-tasks** (router, classifier, extractor, retriever-rewriter, evaluator-as-judge) where the per-call savings are real and the inputs and outputs are bounded. Keep the **user-facing outer synthesis** on a frontier hosted model, where the marginal cost is justified by user-visible quality. Most production apps that fine-tune at all do exactly this, one or two specific inner sub-tasks, the rest stays on the hosted API.
+
+</details>
+
+**7. Why does this lesson stay strictly at "when and how" and explicitly exclude broader debates?**
+
+<details>
+<summary>Show answer</summary>
+
+Because the engineering decision (when and how to fine-tune for a production application) and the broader debates around training-data policy, alignment, and similar topics live in different forums with different stakeholders. Mirrors the discipline from Track 14 lesson 10 and Track 15 lesson 13: technical-primer mechanics here, with explicit out-of-scope framing for the policy and contested-alignment layer. The reader needs to know how to decide and execute the fine-tune; the broader debates belong elsewhere.
+
+</details>
+
+## Try it yourself: fine-tune or not?
+
+About 10 minutes, no code. Apply the decision criteria.
+
+**Part A: four scenarios.** For each, decide whether the team should (a) keep prompting, (b) add retrieval / tools, (c) fine-tune, or (d) train from scratch. Defend each pick in one sentence.
+
+```
+1. A team built a Q&A assistant over their docs (RAG). About 5% of
+   answers are wrong because the model misreads the retrieved chunks.
+2. A 100K-request/day support classifier on a frontier model costs
+   $3,000/day. Quality is excellent.
+3. A small internal tool produces structured JSON from emails. Volume
+   is ~50 requests/day. Quality is "mostly right" on the hosted model
+   with a strong system prompt.
+4. A startup wants to build "their own foundation model" before shipping
+   anything.
+```
+
+<details>
+<summary>What you'll get</summary>
+
+1. **Prompting first, then maybe retrieval-config.** 5% wrong via misreading is often a prompt-engineering issue (clearer "answer using ONLY the provided context" + format constraints) or a retrieval issue (chunks not specific enough). Try those first; do not fine-tune yet. The model is doing what you asked; the issue is in the input, not in the model.
+2. **Fine-tune.** Three criteria true: prompting probably won't drop 80% of cost (it might trim a little); retrieval doesn't apply (it's a classifier); 100K req/day is high-volume. A small classifier on a fine-tuned 7B model would likely cost $50-200/day to serve, a $3M/year saving against the $1M/year hosted cost. Crossover is fast; this is exactly the canonical fine-tune case.
+3. **Keep prompting.** Volume (50/day = ~18K/year) is way too low to repay any fine-tuning effort, even cheap LoRA. Spend the time on prompt tightening + format constraints + structured-output mode; fine-tuning would be over-engineering for the volume.
+4. **Train from scratch is almost never right.** Track 15 territory; for a startup, the cost (compute, data, expertise, time) is enormous and the result will almost certainly underperform what a hosted frontier model offers. Ship using a hosted model first; consider fine-tuning specific sub-tasks once volume justifies it; consider from-scratch only with a structural advantage (proprietary data at scale, a research thesis) that hosted models cannot match.
+
+</details>
+
+**Part B (reasoning).** A team estimates: hosted cost is $0.005 per call, 200K calls/month, expected lifetime 24 months. Their fine-tune cost will be ~$2,500 (LoRA on a 7B model); serving cost they estimate at $0.0005 per call on commodity hardware. Should they fine-tune (quality permitting)?
+
+<details>
+<summary>What the math says</summary>
+
+Hosted lifetime: `200,000 calls/month × 24 months × $0.005/call = $24,000`.
+Fine-tuned-and-served lifetime: `$2,500 (one-time train) + (200,000 × 24 × $0.0005) = $2,500 + $2,400 = $4,900`.
+
+Fine-tuning saves roughly `$24,000 - $4,900 = ~$19,000` over the lifetime, an ~80% reduction. The crossover (when cumulative fine-tuned-and-served cost equals cumulative hosted cost) happens early in the run: `$2,500 / ($0.005 - $0.0005) = $2,500 / $0.0045 ≈ 556,000 calls`, or about three months at 200K/month. After three months the project is in the money; for the remaining 21 months it's saving real budget.
+
+Decision: **fine-tune** (quality permitting). The math is clear; the contingency is "quality permitting", pass the held-out evaluation set, A/B test on real traffic per lesson 7, and confirm the cost/latency moved as expected before fully switching.
+
+</details>
+
+**Part C (reasoning).** Why is this lesson framed strictly as a build-economics decision, with broader debates explicitly out of scope?
+
+<details>
+<summary>What you should notice</summary>
+
+Because the engineering decision (when and how to fine-tune for a production application) and the broader debates (training-data policy, alignment, contested claims about safety) live in different forums with different stakeholders, and conflating them helps neither. A reader needs a clear answer to "when should I do this, what does it cost, what do I get" to make the production decision; that's what this lesson delivers. The broader debates are real and important, but they belong with the right people in their own forum (legal, policy, ethics, security), with their own framing. Same discipline as Track 14 lesson 10 and Track 15 lesson 13.
+
+</details>
+
+## Flashcards
+
+Nine cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay the set out one card per page for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="Three criteria for fine-tuning?">
+
+(1) Prompting consistently fails on a specific recurring task at scale. (2) Retrieval/tools don't fix it (failure is "wrong behavior," not "missing knowledge"). (3) Volume is high enough that inference savings justify upfront training cost. ALL THREE true; most apps don't fine-tune.
+
+</Flashcard>
+
+<Flashcard question="The five-stage fine-tuning pipeline?">
+
+(1) Start from a strong open checkpoint (Llama/Mistral/Phi). (2) Curate small high-quality SFT data (often synthetic, filtered). (3) LoRA training via TRL/Axolotl on one GPU. (4) Optionally DPO. (5) Eval against held-out set + A/B test in production.
+
+</Flashcard>
+
+<Flashcard question="Why is data quality the leverage?">
+
+Small high-quality dataset (hundreds-low thousands) typically beats large noisy one. Model imitates what it sees. Synthetic data + aggressive filtering is the cheapest practical source; mix with human-written where budget allows.
+
+</Flashcard>
+
+<Flashcard question="Standard low-cost fine-tune recipe?">
+
+LoRA on a small (few-B-param) open base model, ~hundreds-thousands curated instruction-response pairs, TRL or Axolotl, single GPU, hours to a day. Managed providers: Together/Modal/Lambda/Anyscale. DPO follows when preference data exists.
+
+</Flashcard>
+
+<Flashcard question="Economics rule for 'should I fine-tune?'">
+
+Estimate per-task hosted cost × expected lifetime volume vs (fine-tune cost + serving cost). Fine-tune if meaningfully cheaper AND quality at least equal on your eval. Otherwise stay hosted.
+
+</Flashcard>
+
+<Flashcard question="The mix architecture and where fine-tuning fits?">
+
+Fine-tune high-volume narrow inner sub-tasks (router/classifier/extractor/retriever-rewriter/eval-as-judge). Keep user-facing outer synthesis on frontier hosted. Most production fine-tunes are one or two specific inner sub-tasks; rest stays hosted.
+
+</Flashcard>
+
+<Flashcard question="Why train-from-scratch is almost never right for an app team?">
+
+Track 15 territory; cost (compute, data, expertise, time) is enormous; result almost always underperforms hosted frontier. Only research / structural data advantage justifies it. App teams: hosted first; fine-tune specific sub-tasks when volume justifies.
+
+</Flashcard>
+
+<Flashcard question="What's out of scope in this lesson, and why?">
+
+Training-data policy, alignment debates, contested safety claims. Engineering decision (when/how/cost/quality) and broader debates live in different forums with different stakeholders. Same discipline as T14 L10 + T15 L13.
+
+</Flashcard>
+
+<Flashcard question="What does 'crossover' mean for fine-tuning economics?">
+
+The cumulative inference-call count where (fine-tune cost + cumulative serving cost) equals (cumulative hosted cost). Past crossover, fine-tuning saves real budget; before it, hosted is cheaper. Volume × lifetime determines whether crossover arrives early enough to matter.
+
+</Flashcard>
+
+</FlashcardSet>

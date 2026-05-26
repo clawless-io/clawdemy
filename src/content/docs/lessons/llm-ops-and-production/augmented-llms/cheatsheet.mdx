@@ -1,0 +1,89 @@
+---
+title: "Cheatsheet: Augmented language models"
+description: One-page reference. RAG pipeline, RAG trade-offs, tool use, RAG-as-a-tool, and the productive-limits view.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## Two augmentation patterns
+
+| Pattern | What it does | When to use |
+| --- | --- | --- |
+| **RAG** | Fetch context into the prompt | Missing knowledge |
+| **Tool use** | Let the model call external systems | Missing capabilities (search, compute, write actions) |
+
+Modern apps use both, often with RAG **implemented as a tool**.
+
+## RAG pipeline (seven moving parts)
+
+```
+knowledge source
+  -> chunking (size + overlap)
+  -> embedding model
+  -> vector store (Pinecone / Weaviate / Chroma / pgvector / ...)
+  -> retriever (embed query -> top-k similar chunks)
+  -> prompt composition (system + chunks-with-sources + user)
+  -> generation (with citations)
+```
+
+## RAG trade-offs (where the real work is)
+
+| Knob | Rule of thumb |
+| --- | --- |
+| Chunk size | A few hundred tokens; small overlap (50-100). Tune empirically. |
+| Top-k | Start 5-10; rarely above 20. More = better recall but bigger prompt. |
+| Embedding model | Try a couple on your data; quality varies by domain. |
+| Re-ranking | Big-set cheap retrieval -> small-set expensive re-rank. Adds latency, lifts hard-query quality. |
+| Hybrid search | Dense + BM25. Beats either alone for queries that mix semantic and exact terms. |
+| Metadata filtering | Tag chunks (date, type, customer ID, ...); filter at retrieval. Often the biggest single win. |
+
+## RAG failure mode + defense
+
+**Failure:** bad retrieval the model cannot detect; answer is confidently wrong.
+
+**Defense:** held-out retrieval-evaluation set (queries with their expected relevant chunks); measure retrieval quality **separately** from end-to-end answer quality.
+
+## Tool use (four steps)
+
+```
+1. Declare tool schemas (name, description, parameter types)
+2. Model decides: reply directly OR emit tool-call request
+3. Your code executes the tool; returns result
+4. Model continues: more tools, refine, or final answer
+```
+
+The model's decision (which tool, when, with what args) is itself prompt-engineered: clear tool descriptions are the equivalent of clear instructions.
+
+## RAG-as-a-tool > always-retrieve
+
+```
+Always-retrieve:  pays retrieval cost + latency on EVERY request
+RAG-as-a-tool:    model decides per request; simple requests skip retrieval
+```
+
+Cleaner, cheaper, matches the agent shape (lesson 10).
+
+## How it lives against the three productive limits
+
+| Limit | This lesson's move |
+| --- | --- |
+| **Context** | Retrieved chunks share the budget; tighter retrieval / re-rank / metadata filter buys back budget |
+| **Cost** | Every chunk per request paid every time; RAG-as-a-tool eliminates retrieval on requests that don't need it |
+| **Latency** | Retrieval adds wall-clock before generation; cache common retrievals, async-fetch, right-size top-k |
+
+## Words to use precisely
+
+- **Chunk**: a retrieval-sized piece of a source document.
+- **Embedding**: dense vector representing a chunk's meaning.
+- **Vector store**: database for nearest-neighbor search over embeddings.
+- **Top-k**: how many chunks to retrieve per query.
+- **Re-ranking**: a second-stage scoring of an initial retrieval set with a more expensive model.
+- **Hybrid search**: dense (embedding) + sparse (BM25) retrieval combined.
+- **Tool use / function calling**: model emits a structured request to call a declared function; your code executes; result feeds back.
+
+## Source
+
+- Full Stack Deep Learning, LLM Bootcamp (Spring 2023), Session 4: Augmented Language Models. `fullstackdeeplearning.com/llm-bootcamp`. Independent structural mirror in original prose; see references.

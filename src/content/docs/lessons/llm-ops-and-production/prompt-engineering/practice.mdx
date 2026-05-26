@@ -1,0 +1,203 @@
+---
+title: "Practice: Prompt engineering, \"Learn to Spell\""
+description: Self-check on the toolkit, when a prompt fix beats a code fix, and the engineering discipline, a rewrite-this-prompt exercise, and flashcards for retrieval.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Seven short questions. Answer each before opening the collapsible.
+
+**1. What is the single biggest lift on most prompts, and why?**
+
+<details>
+<summary>Show answer</summary>
+
+Being more explicit. Vague instructions ("summarize this") underperform precise ones that state the audience, format, tone, constraints, and edge-case handling. Length is fine; precision is what matters. The model is doing exactly what you asked, so asking more carefully is the cheapest, biggest improvement on most prompts.
+
+</details>
+
+**2. When should you reach for few-shot examples, and roughly how many?**
+
+<details>
+<summary>Show answer</summary>
+
+For format-sensitive or pattern-based tasks where prose description does not lock in the shape you want (specific JSON schemas, unusual output styles, classification with non-obvious labels). Two to five examples is usually enough; the model picks up the pattern much more reliably from examples than from instructions. The examples cost tokens, so trim to the smallest set that holds quality.
+
+</details>
+
+**3. What is the role of the system prompt versus the user message?**
+
+<details>
+<summary>Show answer</summary>
+
+The system prompt is the **spec** for what the assistant is: persona, behavior, format, constraints, edge-case handling, refusals, persistent rules. It carries across turns in a conversation. The user message is the specific request for this turn. Treat the system prompt as a contract you maintain in source control; the user message is data.
+
+</details>
+
+**4. When does chain-of-thought help, and how do you keep the reasoning out of the user-visible response?**
+
+<details>
+<summary>Show answer</summary>
+
+For multi-step reasoning (math, logic, multi-criteria decisions). Instruct the model to think first ("think step by step before answering"). To keep reasoning out of the user-visible output, combine with structured output: put reasoning in a `<thinking>` block (or similar), and use only the answer that follows. You keep the reasoning for debugging; the user sees just the answer.
+
+</details>
+
+**5. When does a prompt fix beat a code fix?**
+
+<details>
+<summary>Show answer</summary>
+
+When the failure looks like "the model misunderstood what was wanted" (correct input, wrong output, wrong format, missing constraint) rather than "the app sent the wrong thing" (wrong context, missing fields) or "the model genuinely cannot do this task" (capability ceiling). The middle category is the largest and the cheapest to fix; iterate on the prompt with the failing examples before changing application code.
+
+</details>
+
+**6. What two discipline practices turn prompt iteration into engineering?**
+
+<details>
+<summary>Show answer</summary>
+
+(1) **Version your prompts** in source control with an explicit version constant; treat changes like code changes with review. (2) **Test on a 20-50 example held-out set** when you change a prompt; score outputs against expected behavior (regex, structured check, another model as judge, or human review). Without these, "the new prompt is better" is a vibe; with them, it is a number you can defend.
+
+</details>
+
+**7. Where do prompts run out, and what comes next?**
+
+<details>
+<summary>Show answer</summary>
+
+When the model lacks the **knowledge** required (-> retrieval, lesson 4), when the task requires calling an **external system** (-> tool use, lesson 4), or when a persistent failure is expensive to fix per call and cheap to **train in** (-> fine-tuning, lesson 9). Reach for these *after* prompt iteration, not instead of it; the prompt is still the spec the retrieved or tool-using version follows.
+
+</details>
+
+## Try it yourself: rewrite this prompt
+
+About 12 minutes, no code required. You will apply the toolkit to a real-feeling prompt.
+
+**Part A: the original.** Here is a vague prompt a teammate wrote for a customer-support classifier:
+
+```
+Tell me what this email is about.
+```
+
+Rewrite it with the toolkit (clarity, format constraint, persona, a small system-prompt vs user-message split, and one or two few-shot examples). The application's job is to classify each support email into one of {billing, technical, account, other} and produce a one-sentence summary, as JSON.
+
+<details>
+<summary>What a stronger rewrite looks like</summary>
+
+```
+# System prompt (spec for the assistant)
+You are a careful customer-support triage classifier for an SaaS product.
+For each support email, decide a category and write a one-sentence summary.
+
+Output ONLY a JSON object with exactly these fields:
+- "category": one of "billing", "technical", "account", or "other"
+- "summary": a single sentence in plain English describing the user's actual issue
+
+If the email is ambiguous, choose the closest category and note the ambiguity briefly in the summary. Do not include any other text outside the JSON.
+```
+
+```
+# User message (the data, with few-shot)
+Here are two examples:
+
+Email: "I was charged twice this month. Can you refund the duplicate?"
+{"category": "billing", "summary": "User reports a duplicate charge and requests a refund."}
+
+Email: "The dashboard keeps crashing when I click Export."
+{"category": "technical", "summary": "User cannot use the Export feature; dashboard crashes on click."}
+
+Now classify this email:
+Email: [the actual incoming email here]
+```
+
+Notice the moves: persona (system), exact format (JSON, exact fields, no extra text), edge-case handling (ambiguity), two few-shot examples covering different categories, clean delimiters. The original "tell me what this email is about" was vague enough to produce ten different output shapes from ten emails; the rewrite produces predictable JSON the application can parse.
+
+</details>
+
+**Part B (reasoning).** A team reports their LLM application is "unreliable, gives wrong answers maybe 20% of the time." Walk through the prompt-fix-vs-code-fix triage from this lesson.
+
+<details>
+<summary>What you should notice</summary>
+
+Look at a sample of the failures first. (1) **Wrong input**: is the prompt being given the right context, the right fields, the right user data? If not, fix the app, not the prompt. (2) **Wrong output**: given correct input, is the model misunderstanding the task or the format? This is the prompt-fix category, more explicit instructions, format constraints, few-shot, system-prompt tightening. (3) **Capability ceiling**: does the failure persist after a thoroughly tightened prompt? Then it is retrieval (missing knowledge), tool use (missing capability), fine-tuning (expensive recurring failure), or a different model. The 20% bucket is almost always a mix of all three; sampling failures and triaging each is the cheapest first step, far cheaper than retraining or re-architecting.
+
+</details>
+
+**Part C (reasoning).** Why are "vibes-based" prompt tweaks dangerous in production, and what does the discipline section recommend instead?
+
+<details>
+<summary>What you should notice</summary>
+
+Vibes-based tweaking has two failure modes. (1) **You cannot tell if a change helped.** Without a test set, "this prompt is better" is just confidence; on the next batch of users it may be worse. (2) **You cannot roll back deliberately.** Without versioning, an undocumented prompt change in production is a regression with no audit trail. The discipline replaces both: **version the prompt** (source control + `prompt_version` constant) and **test on 20-50 held-out examples** with a real scoring rule (regex, structured check, model-as-judge, human review). The infrastructure is small (a spreadsheet + a Python script is enough to start); the change in confidence is large.
+
+</details>
+
+## Flashcards
+
+Nine cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay the set out one card per page for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="Biggest lift on most prompts?">
+
+Being more explicit. State audience, format, tone, constraints, and edge-case handling precisely. Length is fine; precision is what matters. Cheapest, biggest improvement on most prompts.
+
+</Flashcard>
+
+<Flashcard question="When and how many few-shot examples?">
+
+For format-sensitive or pattern-based tasks. 2-5 examples usually; biggest single lift for shape-sensitive output. Cost tokens, so trim to the smallest set that holds quality.
+
+</Flashcard>
+
+<Flashcard question="System prompt vs user message?">
+
+System: the SPEC (persona, behavior, format, constraints, refusals; persists across turns). User: this turn's data. Treat the system prompt as a contract maintained in source control.
+
+</Flashcard>
+
+<Flashcard question="When does chain-of-thought help, and how to hide it from users?">
+
+Multi-step reasoning (math, logic, multi-criteria). Instruct "think step by step before answering." Hide via structured output: put reasoning in a <thinking> block, show only the answer after. Keep reasoning for debugging.
+
+</Flashcard>
+
+<Flashcard question="Format constraints: what to do?">
+
+Tell the model the exact output shape (JSON object with named/typed fields; sentence count; bullets). Use structured-output / JSON mode where the provider offers it. Without it, few-shot examples lock in the format.
+
+</Flashcard>
+
+<Flashcard question="Prompt fix vs code fix triage?">
+
+Wrong INPUT (missing context, fields) -> code fix. Wrong OUTPUT given correct input (misunderstanding, format) -> prompt fix (largest category, cheapest). Persistent capability ceiling -> retrieval, tools, fine-tuning, or different model.
+
+</Flashcard>
+
+<Flashcard question="Two practices that turn prompting into engineering?">
+
+Version the prompt (source control + prompt_version constant; treat like code) and test on 20-50 real held-out examples when changing it (regex/structured check/LLM-judge/human). Vibes-driven tweaking is not engineering.
+
+</Flashcard>
+
+<Flashcard question="Where do prompts run out?">
+
+Missing knowledge -> retrieval (lesson 4). Need external systems -> tool use (lesson 4). Persistent failures cheap to train in -> fine-tuning (lesson 9). Reach for these AFTER prompt iteration; the prompt remains the spec.
+
+</Flashcard>
+
+<Flashcard question="How does prompt engineering respect the three productive limits?">
+
+Context: better prompts use the budget efficiently. Cost: concise prompts (input) + capped concise responses (output) save money at scale. Latency: shorter responses streamed cleanly are faster.
+
+</Flashcard>
+
+</FlashcardSet>

@@ -1,0 +1,102 @@
+---
+title: "Lesson: Training your own LLM"
+description: The deep dive on the fine-tune point of the build-vs-buy spectrum. When training your own model is the right move, the staged pipeline most teams should follow (start from an open checkpoint, fine-tune, optionally preference-tune), the practical tools and economics, and the production-side trade-offs that decide whether the project pays back.
+sidebar:
+  order: 2
+  label: Lesson
+artifact: lesson
+---
+
+Lesson 8 sketched the build-vs-buy spectrum and named "fine-tune an open model" as the middle point most teams should consider before "train from scratch." This lesson is the deep dive on that point: when training your own model is the right move for a production application, the staged pipeline that almost all teams should follow, the practical tools, and the economics that decide whether the project pays back. The source bootcamp's guest is Reza Shabani (Replit), who walked the same territory from a production perspective.
+
+This lesson is taught at the **technical-primer level**, same discipline as Track 14 lesson 10 (fine-tuning LLMs) and Track 15 lesson 13 (post-training): mechanical (when and how to consider it; how the methods work), not a debate about whether training your own model is dangerous or aligned. Contested questions about training-data policy, alignment, and similar topics are out of scope here.
+
+## When to train your own model
+
+The honest decision tree from lesson 8, applied:
+
+- **You almost never need to train from scratch.** Track 15's territory; for an application team, this is rarely the right answer, and the cost of doing it (compute, data, expertise, time) almost always exceeds what a hosted or fine-tuned model would give you.
+- **You should consider fine-tuning an open model when** three things are true at once:
+  1. Prompting consistently fails on a specific recurring task at scale (the "where prompts run out" line from lesson 3).
+  2. Retrieval and tool use (lesson 4) do not fix it (the failure is not "missing knowledge" but "wrong behavior").
+  3. The failing task happens at high enough volume that the inference savings of a smaller fine-tuned model justify the upfront training cost (lesson 8's economics; lesson 2's productive limits applied at lifetime scale).
+- **Otherwise, stay on the hosted API.** Most production applications never need to train anything; the hosted model + prompting + retrieval + LLMOps discipline carry them all the way.
+
+This decision is easier to get wrong than to get right. The most common failure is training too early, when prompting and retrieval still had room to run; the second most common is training when the volume does not justify the upfront cost.
+
+## The staged pipeline most teams should follow
+
+When you decide to fine-tune, the recipe is well-trodden. Mirrors Track 14 lesson 10 and Track 15 lesson 13 on the methods, applied at the application-team level:
+
+### 1. Start from an open checkpoint, not from scratch
+
+Pick an open-weight model in the right size class for your task and inference budget. Llama, Mistral, and Phi families are common starting points; the choice depends on quality requirements, context length, licensing, and the available tooling.
+
+The key point: **you are continuing training from a strong starting point, not starting from zero.** Pretraining is Track 15's territory; for a production application, picking a good open base and fine-tuning is the right shape.
+
+### 2. Curate the fine-tuning data
+
+This is the leverage. The data discipline mirrors Track 15 lesson 12 + Track 14 lesson 11:
+
+- **Quality > quantity.** A small, well-curated dataset (often hundreds or low thousands of examples for a focused task) typically beats a large noisy one.
+- **Match the format to the task.** SFT (supervised fine-tuning) data is `(instruction, response)` pairs in the model's chat template. Get the format right before scaling up data volume.
+- **Synthetic data is often the only practical source.** A strong hosted model generates many examples; you filter, review, and curate. The teacher's-blind-spots caveat from Track 15 lesson 12 applies: filter aggressively; mix with human-written examples where the budget allows.
+- **Hold out a real evaluation set.** Same LLMOps discipline from lesson 7: a 50-to-1000-example test set, scored, used as the gate for "is the fine-tune actually better than the prompted base?"
+
+### 3. Run the fine-tuning loop
+
+The mechanics from Track 14 lesson 10 and Track 15 lesson 13 carry over. Practical tooling:
+
+- **TRL** (Hugging Face) provides `SFTTrainer` and `DPOTrainer` for the standard recipes.
+- **Axolotl** is a popular configuration-driven wrapper over TRL that handles common patterns (LoRA configs, chat templates, dataset formats) with less boilerplate.
+- **LoRA / PEFT** is the parameter-efficient fine-tuning approach almost everyone uses; full fine-tuning is reserved for cases where the LoRA quality is genuinely not enough.
+- **Compute providers** for the training run: managed services (Together, Modal, Lambda Labs, Anyscale, others); your own cloud account when you have the infra.
+
+Most production fine-tunes are LoRA, on a small open model (a few billion parameters), with a curated dataset of a few hundred to a few thousand instruction-response pairs, run on a single GPU for hours to a day.
+
+### 4. Optionally, preference-tune
+
+If you need behavior beyond format-and-task-following (tone consistency, choice between two valid responses), follow the SFT with preference tuning, **DPO** typically rather than full RLHF (it is simpler and reaches comparable quality; see Track 15 lesson 13). This is the second pass for production fine-tunes that need ranked-output quality, not just task-following.
+
+### 5. Evaluate against the held-out set, then against production
+
+Before swapping in the fine-tuned model:
+
+- **Pass the held-out evaluation set.** If it does not beat the prompted base model on your real test set, the fine-tune did not help; iterate or stop.
+- **A/B test on real traffic** (lesson 7's discipline). Quality on the held-out set is necessary; quality on real users is sufficient.
+- **Watch cost and latency** (lesson 2 + lesson 7). The whole point was inference economics; verify they actually moved.
+
+## The economics that decide whether it pays back
+
+Lesson 8's framing made concrete with rough numbers:
+
+- **Fine-tuning compute** for a LoRA on a 7-13B open model is hours to a day on a single capable GPU, on the order of low hundreds of dollars to a few thousand depending on duration and provider.
+- **Per-token inference cost** of a fine-tuned 7B model served on commodity hardware is typically much lower than calling a frontier hosted model for the same response (often an order of magnitude or more), but you carry the serving operational cost.
+- **The crossover** is at inference volume: a high-volume sub-task that runs millions of times pays back the fine-tuning cost quickly; a low-volume task may not, and the hosted call is the right answer.
+
+The honest practical rule: **estimate per-task cost on the hosted model, multiply by expected lifetime task count, compare to (fine-tune cost + serving cost over the same period).** If the fine-tuned-and-served path is meaningfully cheaper and the quality is at least equal on your evaluation, fine-tune. Otherwise stay hosted.
+
+## The mix architecture, made specific
+
+Lesson 8 named the "mix" architecture pattern (small specialized inner sub-tasks, frontier outer synthesis). Training your own fits cleanly into it:
+
+- **Inner sub-tasks** (router, classifier, extractor, retriever-rewriter, evaluator-as-judge) are excellent fine-tune candidates: narrow inputs and outputs, high volume, the per-call savings are real.
+- **The user-facing outer synthesis** usually stays on a frontier hosted model, where the marginal cost is justified by the user-visible quality.
+
+This is also how the build-vs-buy spectrum often resolves in practice: most production applications fine-tune one or two specific inner sub-tasks and leave the rest on the hosted API.
+
+## Why this matters when you build AI
+
+For most application teams, training your own model is **not** the right move; for a specific subset of teams running a specific high-volume sub-task whose failure prompting cannot fix, it is exactly the right move. Knowing the decision criteria (the three-things-true-at-once test above), the staged pipeline (open checkpoint → curated SFT data → LoRA training → optional DPO → evaluation → A/B test), the tools (TRL, Axolotl, the major compute providers), and the economics (per-task hosted cost × volume vs fine-tune cost + serving cost) is the difference between a project that pays back and one that quietly burns budget for a year. The next lesson takes the agents direction from L8 deeper; the track capstone closes Phase 3 with the industry-perspective synthesis.
+
+## What you should remember
+
+- **Most teams should not train their own model.** Stay on hosted; fine-tune only when prompting consistently fails on a specific recurring task at scale AND retrieval/tools do not fix it AND the volume justifies the upfront cost.
+- **Train from scratch is almost never right** for an application team. Track 15's territory.
+- **The staged fine-tuning pipeline:** start from a strong open checkpoint, curate a small high-quality SFT dataset (often LLM-generated then filtered), run LoRA training with TRL/Axolotl, optionally preference-tune with DPO, evaluate against the held-out set + A/B test in production.
+- **Data is the leverage:** quality > quantity; format-match to the task; synthetic data with aggressive filtering is often the only practical source; hold out a real eval set.
+- **The economics rule:** estimate per-task hosted cost × expected lifetime volume vs (fine-tune cost + serving cost). Fine-tune if the fine-tuned path is meaningfully cheaper AND quality is at least equal on your evaluation; otherwise stay hosted.
+- **The mix architecture:** fine-tune the high-volume narrow inner sub-tasks (router, classifier, extractor, retriever-rewriter); keep the user-facing outer synthesis on a frontier hosted model. This is how the build-vs-buy spectrum typically resolves in practice.
+- **Scope of this lesson:** mechanical (when and how to consider training your own). Contested questions about training-data policy, alignment, and similar topics are out of scope here.
+
+Training your own model is a specific tool in the build-vs-buy spectrum, not a default. Most teams never need to use it; teams that should use it have a specific high-volume sub-task whose failure prompting cannot fix, and they follow a well-trodden pipeline (open checkpoint, curated SFT data, LoRA, optional DPO, evaluation, A/B test). Know the criteria; reach for it deliberately.

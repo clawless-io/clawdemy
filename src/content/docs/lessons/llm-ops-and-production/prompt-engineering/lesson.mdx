@@ -1,0 +1,110 @@
+---
+title: "Lesson: Prompt engineering, \"Learn to Spell\""
+description: The single highest-leverage skill for an LLM application. The toolkit (clarity, format, few-shot, chain-of-thought, system prompts, personas, delimiters, context placement), the discipline of versioning and testing, and the instinct to recognize when a prompt fix beats a code fix.
+sidebar:
+  order: 2
+  label: Lesson
+artifact: lesson
+---
+
+The source bootcamp's title for this session is "Learn to Spell," and the joke does double duty: it captures both how prompt engineering feels (small word changes have outsized effects) and how seriously you should take it (it is more like writing precise specifications than casting incantations). For an application-side LLM builder, prompt engineering is the single highest-leverage skill, and it is also the cheapest fix when something goes wrong. This lesson is the working toolkit, the discipline that turns it into engineering, and the instinct for when a prompt fix beats a code fix.
+
+## The toolkit
+
+There is no canonical "right way" to write prompts; there is a small set of techniques that consistently help, and an iterative process that finds the right combination for your task. The techniques worth holding:
+
+### Clarity and specificity
+
+The single biggest improvement on most prompts is being more explicit. Vague instructions ("summarize this") underperform precise ones ("summarize this in three sentences, in plain English, focused on the technical decisions made, not the timeline"). Length is fine; precision is what matters. State the audience, the format, the tone, the constraints, and what to do with edge cases.
+
+### Format constraints
+
+Tell the model exactly what shape the output should take. "Respond as a JSON object with keys `title` (string), `risk_level` (one of low/medium/high), and `summary` (3 sentences max)." If your provider offers a structured-output or JSON mode, use it; it constrains generation to a schema and removes a large class of parse failures. Without a structured mode, explicit examples of the format (see few-shot below) are the next best thing.
+
+### Few-shot examples
+
+For format-sensitive or pattern-based tasks, including two to five worked examples of input-output pairs in the prompt is often the single biggest quality lift available. The model picks up the format and the pattern far more reliably from examples than from prose description. The classic recipe:
+
+```
+Here are some examples:
+
+Input: [example 1 input]
+Output: [example 1 output]
+
+Input: [example 2 input]
+Output: [example 2 output]
+
+Now do this:
+Input: [actual input]
+Output:
+```
+
+Two-shot is often enough; more helps when the format is unusual. The examples cost tokens (and therefore money), so trim to the smallest set that holds quality.
+
+### Chain-of-thought
+
+For multi-step reasoning (math, logic, multi-criteria decisions), instruct the model to think before answering. Plain "think step by step before giving your final answer" works; richer versions include "first list the assumptions, then walk the steps, then state the answer." Combined with a structured-output discipline ("put your reasoning in a `<thinking>` block and the final answer after"), you can keep the reasoning for your own debugging while showing only the answer to users.
+
+### The system prompt as a spec
+
+In most provider APIs the system prompt is separate from the user message, and it persists across turns in a conversation. Treat it as the **spec** for what the assistant is: who it is, how it should behave, what format it should use, what it should refuse, what edge cases mean. A good system prompt is often the longest single piece of your prompt by token count, because it carries all the rules that should hold regardless of what the user types.
+
+### Persona and tone
+
+A clear persona ("You are a careful technical editor with strong opinions about clarity") sets style and behavior consistently in a way that pure instruction usually does not. Personas are not always appropriate (a JSON-emitting backend does not need a personality), but for user-facing assistants they are usually a win.
+
+### Negative constraints, used sparingly
+
+"Do not invent statistics," "do not use emojis," "do not apologize for not knowing." Negative constraints work, but they have a known failure mode: a long list of negatives both eats tokens and sometimes induces the very behavior you forbade (by making it salient). Reach for them when a specific failure mode keeps appearing in testing, not preemptively.
+
+### Delimiters and structure
+
+Cleanly separate instructions from input with delimiters: triple backticks, XML-style tags (`<user_question>...</user_question>`), or unambiguous headers. This both makes the prompt readable for you and reduces the chance the model confuses instructions with content.
+
+### Context placement
+
+Modern models attend reasonably well across the full context, but there is consistent evidence that placement still matters: critical instructions repeated near the end of the prompt are followed more reliably than those buried in the middle of a long context. If you have a long retrieved context plus instructions, putting the actual task instructions after the context (with a clear delimiter) is the standard placement.
+
+## When a prompt fix beats a code fix
+
+Most application failures triage into three categories:
+
+1. **The app is sending the wrong thing to the model** (wrong context retrieved, wrong fields, missing state). Code fix.
+2. **The model is misunderstanding what is wanted** (correct input, wrong output, wrong format, missing constraint). **Prompt fix.**
+3. **The model genuinely cannot do the task** (capability ceiling for this model). Different model, more retrieval, fine-tuning, or fundamental redesign.
+
+The middle category is enormous and the cheapest to fix. If the failure looks like the model "didn't get it" rather than "didn't have it," tighten the prompt before changing code. Iterating on the prompt with the failing examples is usually the fastest path to a working version.
+
+## The discipline that turns this into engineering
+
+Without discipline, prompt engineering becomes vibes. Two practices matter:
+
+- **Version your prompts.** Treat the prompt as code: it lives in source control, it has a version, and changes are reviewed. The provider's `prompt_version` parameter (where available) or a constant in your app gives you a single place to look. This sets up the LLMOps lesson (7), where prompt version + evaluation results + production logs all need to line up.
+- **Test on a small held-out set of examples.** Pick 20 to 50 real inputs (or synthesized ones) that exercise the cases you care about. Score the model's outputs against expected behavior (sometimes via another model as judge, sometimes a regex or a structured check, sometimes a human). When you change the prompt, run the set again and see what moved. Without this, "the new prompt is better" is a vibe; with it, "accuracy went from 78% to 91% on the 50-example set" is a fact.
+
+This discipline does not need fancy infrastructure to start. A spreadsheet, a Python script, and twenty real examples beat an elaborate eval pipeline you do not use.
+
+## Where prompts run out
+
+Prompts get you a long way, often further than first-time builders expect, but they are not infinite. When you keep hitting the same failure mode and tighter prompts stop moving the needle, the next moves are:
+
+- **Retrieval** (lesson 4): the model lacks the *knowledge* and needs context fetched from your data.
+- **Tool use** (lesson 4): the task requires calling an external system (a calculator, a search API, a database).
+- **Fine-tuning** (lesson 9): the failure is consistent and prompting is too expensive at scale; train the behavior in.
+
+But you do these *after* prompt engineering, not instead of it; the prompt is also the spec that the retrieval or tool-using version follows.
+
+## Why this matters when you build AI
+
+Prompt engineering is the unglamorous-but-essential application skill. Most production-quality LLM applications you admire have a long, carefully-written system prompt; a small library of few-shot examples; and a tested process for changing them. The change rate matters: a team that ships a new prompt version weekly with tests outperforms a team with a "better" architecture and no prompt discipline. It is also the lever that respects all three productive limits from lesson 2: better prompts use context efficiently, lower cost (concise both ways), and reduce wasted re-generations from misformatted output. The next phase opens up retrieval and the rest of the production toolkit; this lesson is the foundation those build on, because everything you retrieve has to be prompt-shaped.
+
+## What you should remember
+
+- **Prompt engineering is the single highest-leverage application skill.** Small word changes have outsized effects; treat the prompt as a precise spec, not an incantation.
+- **The toolkit:** clarity and specificity, **format constraints** (use JSON/structured-output modes when offered), **few-shot examples** (2-5; biggest single lift for format-sensitive tasks), **chain-of-thought** for multi-step reasoning, the **system prompt as the spec**, **persona/tone** for user-facing assistants, **negative constraints** used sparingly, **delimiters** to separate instructions from input, and **placing critical instructions near the end** of long prompts.
+- **A prompt fix beats a code fix** when the model misunderstands what is wanted (correct input, wrong output). This middle category is enormous; tighten the prompt before changing code.
+- **The discipline that turns prompting into engineering:** version your prompts (source control + a `prompt_version`), and test on 20-50 real held-out examples whenever you change them. Vibes-driven prompt tweaking is not engineering.
+- **Where prompts run out:** missing knowledge (retrieval, lesson 4), need to call external systems (tool use, lesson 4), or persistent failures cheap to train in (fine-tuning, lesson 9). Reach for these *after* prompt iteration, not instead of it.
+- **Better prompts respect all three productive limits** from lesson 2: cost-efficient (concise input and output), context-efficient (less wasted budget), latency-efficient (shorter responses).
+
+The prompt is the spec for what the assistant is. The "Learn to Spell" joke is not really a joke: small word changes really do move the model, and the highest-leverage discipline in application work is writing those words deliberately, versioning them, and testing the changes. Everything else in the track stacks on top of this skill.

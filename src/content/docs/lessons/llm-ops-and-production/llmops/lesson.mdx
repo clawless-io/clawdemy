@@ -1,0 +1,103 @@
+---
+title: "Lesson: LLMOps"
+description: The operational layer that keeps an LLM application working over time. Five engineering pillars (observability, evaluation in production, prompt versioning, cost and latency monitoring, regression testing) and the tools that implement each, taught as engineering rather than policy.
+sidebar:
+  order: 2
+  label: Lesson
+artifact: lesson
+---
+
+The minimum app works (lesson 1). It uses augmentation well (lesson 4). It has a real UX (lesson 6). Then a week later, the latency spikes; a prompt change ships and nobody can tell if it helped; an unexpected cost shows up on the bill; a model upgrade silently breaks the output format. **LLMOps** is the operational layer that catches all of that and keeps the application working over time. It is the namesake of this track, and it is most of what separates a demo from a production system.
+
+This lesson is taught as **engineering**. LLMOps is logging, evaluation, versioning, monitoring, and regression testing applied to LLM applications. Questions about incident-disclosure policy, vendor-failure / SLA / liability, compliance frameworks, and similar policy topics are real but **out of scope here**; this lesson is the engineering discipline, not the policy layer that may surround it.
+
+## What "LLMOps" actually is
+
+LLMOps is the LLM application analogue of DevOps and MLOps: the practices and tools that make running an application **observable, testable, and improvable** over time. Five engineering pillars do the work.
+
+### 1. Observability: log enough to debug, every time
+
+Lesson 5's "log 5-10 fields per request" is the seed of LLMOps observability. The mature version of that list:
+
+- The **prompt** (or the prompt id, with the full prompt stored elsewhere)
+- The **model** identifier and parameters (temperature, max_tokens, etc.)
+- The **prompt version** (lesson 3's versioning discipline)
+- The **retrieved context** ids (lesson 4) and any tool calls + their results
+- The **response** (full text)
+- **Token counts** (input + output)
+- **Latency** (TTFT and total)
+- **Cost** (computed from tokens and provider rate cards)
+- The **user feedback signal** (thumbs/edit/no-feedback)
+- An anonymized **trace id** linking the request across systems
+
+These fields make every later observability and evaluation move possible. **Without these logs, you are guessing.** Tools that store and search them include LangSmith, Helicone, Langfuse, Weights & Biases Prompts, and Arize Phoenix; the picks differ by stack and budget, the discipline does not.
+
+### 2. Evaluation in production
+
+Offline test sets (lesson 3's discipline) catch regressions before deploy. **Evaluation in production** catches the failures offline tests do not predict, because real users ask things the offline set never had. The standard moves:
+
+- **Sample and score live responses.** Take a small fraction of production responses (1-5%, weighted toward edge cases by random or by user-signal), and score them with a rubric. The score can come from another model (LLM-as-judge, lesson 10's wider discussion) or from human review.
+- **Surface poor responses to humans for labeling.** Negative user feedback, low LLM-judge scores, or retrieval-miss patterns get reviewed; the labels feed back into the offline test set.
+- **A/B test prompt or pipeline changes.** Run two prompt versions (or RAG configurations, or models) in parallel on real traffic; measure quality on the live sample and decide which to keep. The platforms above (LangSmith, Langfuse, Helicone) support this directly; you can also roll your own with a feature flag and the logging fields above.
+
+The point is the same as the offline discipline: **prove a change helped, do not assert it.**
+
+### 3. Prompt versioning
+
+Lesson 3 introduced prompt versioning; LLMOps is where it pays off. Treat the prompt as code: it lives in source control, has a version, and changes are reviewed. The deployed version is recorded in the logs (the observability layer above) so a change date can be correlated with quality changes. Promotion is staged (canary first, then full rollout, with rollback ready), the same way you deploy any other versioned code.
+
+Many LLMOps tools (LangSmith and friends) provide a prompt registry that holds versions, supports collaboration, and ties them back to evaluation results. A spreadsheet plus a constant in source control works to start; the registry pays off when more than one person is editing prompts.
+
+### 4. Cost and latency monitoring
+
+The lesson-2 productive limits become **dashboards and alerts**:
+
+- **Per-request cost and latency** charts, broken down by route, model, prompt version, and user segment.
+- **Aggregate cost** (daily, weekly, monthly) with budget alerts.
+- **Latency p50 and p95** with regression alerts (a model upgrade or a retrieval-config change can silently double latency).
+- **Cost-per-resolution** when the application solves a unit of work (a support ticket, a code-review, a query): the right "cost" metric for many businesses is per-job, not per-token.
+
+Most platform observability tools (Datadog, Honeycomb, Grafana) integrate with the LLM-specific ones above to give a single view. The detail you instrument up front is the detail you get when you need to investigate later.
+
+### 5. Regression testing
+
+The single highest-leverage move when you change anything (prompt, model, pipeline component) is to **rerun the test set first**. Lesson 3 named the 20-50 example held-out set as the seed; LLMOps grows it:
+
+- Expand to **100s-1000s of examples** covering the failure modes you have seen in production.
+- Score automatically where possible (regex, structured checks, LLM-as-judge with a clear rubric); reserve human review for the cases where automatic scoring is unreliable.
+- Run the suite **before every prompt or model change ships**. Refuse to merge changes that regress on the suite without explicit override.
+- Add a new example whenever a production failure is reviewed, so the suite grows with the application.
+
+The discipline turns "ship the change and hope" into "ship the change and know." It also makes **model upgrades** safe: when a provider releases a new model, you run the suite to verify quality before switching, and you can detect the silent regression that would otherwise show up as a vague "the app feels worse" report a week later.
+
+## Where the tools and the discipline meet
+
+A practical LLMOps stack today often looks like:
+
+- **One LLM-observability platform** (LangSmith, Langfuse, Helicone, Arize Phoenix, Weights & Biases Prompts, or similar) for the logs, the prompt registry, the evaluation harness, and the A/B testing primitives.
+- **One platform-observability tool** (Datadog, Honeycomb, Grafana) for the broader application metrics and alerts.
+- **A regression-test suite** kept in source control alongside the application, run in CI before deploys.
+- **A lightweight on-call/runbook** that names the common failure modes (timeouts, retrieval misses, cost spikes, format regressions) and the first move for each.
+
+The tools matter less than the discipline. A team with logging, evaluation, versioning, monitoring, and regression testing built up over time outperforms a team with the fanciest platform and no consistent practice, every time.
+
+## What this lesson does NOT cover
+
+To keep the scope honest: incident-disclosure policy (when and how to tell users that something went wrong), vendor-failure / SLA / liability questions, compliance frameworks (SOC 2, ISO, sector-specific regimes), and similar policy topics are real and important, and they belong in their own forum with the right people involved. This lesson is the **engineering** discipline that keeps an LLM application running well; the policy layer that may sit on top of it requires its own framing.
+
+## Why this matters when you build AI
+
+LLMOps is the unglamorous discipline that decides whether an LLM application stays good after launch. Without it, prompt changes ship without checks and regress silently; cost grows unmanaged; a model upgrade quietly breaks the output format; users report vague "it feels worse" experiences that take weeks to triage. With it, every change is measurable, every regression is catchable, every cost spike is investigatable, and the team can move faster because they can deploy with confidence. The discipline is small to start (the lesson-5 logging discipline + the lesson-3 prompt-versioning + a 20-50 example test set is a working LLMOps practice) and grows naturally as the application matures. Phase 2 closes here, the application is now buildable, shippable, usable, and operable. Phase 3 turns to the field's direction, when and how to consider training your own model, agents, and the broader landscape.
+
+## What you should remember
+
+- **LLMOps = engineering discipline for running LLM apps over time.** Five pillars: observability, evaluation in production, prompt versioning, cost and latency monitoring, regression testing.
+- **Observability:** log per-request the prompt + version + model + params + retrieved context ids + response + token counts + latency + cost + user feedback + trace id. Without these, you are guessing.
+- **Evaluation in production:** sample and score live responses (LLM-as-judge or human); surface poor responses for labeling that feeds back into the offline test set; A/B test prompt/pipeline changes on real traffic; prove changes helped, do not assert.
+- **Prompt versioning:** treat the prompt as code, source control + a version constant + a registry; the deployed version is recorded in logs so date-of-change correlates with quality changes; staged rollouts with rollback ready.
+- **Cost and latency monitoring:** per-request and aggregate dashboards, broken down by route/model/prompt-version/user-segment; budget alerts; p50/p95 latency regression alerts; sometimes cost-per-resolution as the business metric.
+- **Regression testing:** grow the lesson-3 test set to 100s-1000s; run before every change; refuse merges that regress without explicit override; new failures become new test examples; make model upgrades safe.
+- **The tools matter less than the discipline.** A team with the practice built up outperforms a team with the fanciest platform and no consistent habits.
+- **Out of scope:** incident-disclosure policy, vendor-failure / SLA / liability, compliance frameworks, similar policy topics. Real but require their own framing.
+
+LLMOps is the discipline that keeps an LLM application working over time. Observability, evaluation in production, versioned prompts, cost/latency monitoring, and regression testing turn "ship and hope" into "ship and know," and they are most of what separates a demo from a production system.

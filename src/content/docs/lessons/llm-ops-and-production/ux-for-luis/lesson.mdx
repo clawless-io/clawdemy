@@ -1,0 +1,90 @@
+---
+title: "Lesson: UX for language user interfaces"
+description: A language user interface is a new interaction surface, and the patterns that make one usable are different from the patterns of forms and buttons. Streaming, citations, regeneration, hedging, recoverable failure, and the supporting details that turn a working API call into an application a user actually wants to talk to.
+sidebar:
+  order: 2
+  label: Lesson
+artifact: lesson
+---
+
+A **language user interface (LUI)** is a fundamentally different interaction surface from forms and buttons. The user types or speaks in natural language; the system replies in natural language; the conversation has memory; the model is non-deterministic and sometimes wrong. The conventional UX toolkit (a button does the same thing every time; a form's fields are obvious; an error is binary) applies poorly. This lesson covers the patterns that distinguish LLM applications people actually want to use from ones that technically work, in the order they tend to be designed.
+
+This is a UX-and-interaction-design lesson. Content-policy questions (what should the model refuse?), moderation, and other policy debates are real but out of scope here; this lesson is about **patterns that make LLM applications usable**, not about what they should and should not say.
+
+## Streaming: turn waiting into watching
+
+Lesson 2's latency decomposition (`total ≈ TTFT + output_tokens/tokens_per_second`) is also a UX problem. A user staring at a blank screen for five seconds experiences a slow application; the same five seconds with text streaming token-by-token from the first second on feels fast. The model generates tokens one at a time anyway (lesson 2), and most provider APIs let you receive them as they arrive.
+
+The implementation is small (`stream=True` or a `messages.stream()` context manager in most clients) but the UX implications are larger:
+
+- **Render tokens as they arrive.** Append each delta to the visible text; do not wait for the whole reply.
+- **Show a "thinking" indicator before TTFT.** Streaming pulses or dots between submit and first token tell the user "we received your request and are working." Without one, the gap before tokens start can be perceived as a hang.
+- **Provide a Stop button.** A user who has seen enough should be able to stop generation; this also saves cost and tokens.
+
+Streaming is the single biggest UX win in an LLM application and the cheapest to implement. Skipping it is a baseline UX failure.
+
+## Citations: turn answers into evidence
+
+When an application answers from retrieved context (lesson 4), the model can be asked to cite which sources it used (lesson 5). Citations matter because they:
+
+- **Let users verify.** A confident answer with no provenance is just a claim; a confident answer with a clickable source becomes evidence the user can check.
+- **Make failure debuggable.** When the answer is wrong, the citation often shows that the retrieval was wrong (sent unrelated chunks) or that the model misread the right chunks. Triage is easier with a trail.
+- **Calibrate trust.** Users learn that this application shows its sources, which shifts how they read answers without sources (the rare case where the model answers from general knowledge, for example).
+
+The UI question is how to render them: footnote-style numbers, inline pills, hover-tooltips, or a separate citations panel. The exact form is a brand and information-architecture decision; what matters is that the citations are real, traceable, and visible.
+
+## Regeneration: the model is non-deterministic; embrace it
+
+LLM outputs are sampled (lesson 2); the same prompt with the same parameters can return different responses. A **Regenerate** button takes this as a feature rather than a bug. When a user's first answer is not quite right (wrong format, wrong angle, just not what they wanted), regenerating often produces something better, without forcing the user to rephrase the question.
+
+A small variant that earns its keep in many apps: **branching** the conversation. Let the user edit a previous message and re-run from that point, producing a parallel branch. This is how the better chat applications handle "I asked the wrong question first."
+
+## Hedging: honest uncertainty beats confident wrong
+
+Models default to a confident tone. A model that asserts wrong information confidently is far more damaging than one that says "I'm not sure, but..." or "this might be wrong, you should verify." **Hedging** is the practice of asking the model to acknowledge uncertainty in language, and rendering that uncertainty in the UI.
+
+Two practical moves:
+
+- **Prompt the model to hedge** when retrieval is thin or the question is outside the corpus's scope (the scope-honest system prompt from lesson 5). Lines like "If the provided context does not fully answer the question, say so plainly and offer what is in the context" produce honest uncertainty when the alternative is confident hallucination.
+- **Render uncertainty visibly.** Italics for "I'm not sure," a small warning icon when the model said it was unsure, distinct styling for sourced versus unsourced claims. The user should be able to tell at a glance.
+
+Hedging is uncomfortable for designers who prefer crisp answers, and it is exactly the discipline that builds long-term trust. It is also one of the cheapest UX-quality lifts in an LLM application.
+
+## Recoverable failure: when things go wrong, they should go wrong well
+
+Failures happen: the model API times out; retrieval returns nothing relevant; the model refuses; the network glitches; the response is malformed. The conventional UX response (a red banner saying "Error: 500") is the wrong one. The pattern that LUIs need is **recoverable failure**:
+
+- **Make the failure mode legible.** "The model timed out, please try again" is different from "we could not find anything relevant in our knowledge base for that question; here is what we did find" which is different from "I do not have enough information to answer that." Each tells the user a different thing and suggests a different next move.
+- **Provide a recovery action.** A retry button on timeouts; a "rephrase" suggestion on retrieval misses; a clear "ask differently" when the model refuses out-of-scope. Failures the user can act on are vastly better than failures they cannot.
+- **Preserve the user's input.** Never lose what they typed. A failed submission should leave the input in the box, ready to edit and retry.
+- **Log everything** (lesson 5's logging discipline, lesson 7's LLMOps). Recoverable for the user; debuggable for you.
+
+## The supporting details
+
+Beyond the five core patterns, a few smaller things consistently lift LLM applications:
+
+- **Strong input affordances.** A placeholder like "Ask a question about [your scope]" plus a short list of example questions tells users what the application can do better than any onboarding tour.
+- **Markdown rendering.** Models tend to produce markdown; render it (lists, headings, links, bold). Plain-text rendering of markdown looks broken.
+- **Code blocks with copy buttons.** For any application that produces code, syntax highlighting and a one-click copy is table stakes.
+- **Conversation persistence.** A user who closes the tab and comes back should not lose their conversation; offer history. This crosses into product territory (storage, auth) but the UX expectation is real.
+- **Latency masking patterns.** Skeleton UI while retrieval runs; a status line like "Searching documents..." or "Checking..." during multi-step operations; staged output (show partial structure as it streams). These turn unavoidable wait time into legible progress.
+
+## What this lesson does NOT cover
+
+To keep the scope honest: content policy, moderation, what the model should refuse, labeling AI-generated content, and other policy questions sit at the intersection of UX, product, legal, and platform decisions and are not in scope here. This lesson is the **interaction-design** patterns that make any LLM application more usable; the policy questions are real but require their own framing in their own forum.
+
+## Why this matters when you build AI
+
+Most of what distinguishes "I shipped an LLM app" from "people actually use the LLM app I shipped" is the patterns in this lesson. Streaming alone can take a five-second response from "slow" to "fast" without changing a line of model code. Citations move "trust me" to "verify yourself" and the perceived quality difference is large. Hedging is the rare UX move that makes users trust the application **more** because it tells the truth when it does not know. Recoverable failure is what separates an application a user comes back to from one they uninstall after the first error. None of this requires more model capability or more compute; it requires interaction-design discipline applied at the application layer. The next lesson, LLMOps, is the operational discipline that keeps all of this working over time.
+
+## What you should remember
+
+- **A LUI is a new interaction surface.** Streaming, citations, regeneration, hedging, and recoverable failure are its core patterns; conventional form-and-button UX applies poorly.
+- **Streaming is the single biggest, cheapest UX win.** Render tokens as they arrive; show a thinking indicator before TTFT; provide a Stop button. Skipping streaming is a baseline failure.
+- **Citations turn answers into evidence.** Let users verify, make failure debuggable, calibrate trust. The exact rendering is a brand decision; that they are real, traceable, and visible is not optional.
+- **Regeneration treats non-determinism as a feature.** A Regenerate button, and optionally branching (edit a prior message and re-run), handle "the first answer wasn't quite right" without forcing rephrase.
+- **Hedging is uncomfortable and right.** Prompt the model to hedge when context is thin; render uncertainty visibly; honest uncertainty beats confident wrong, especially over time.
+- **Recoverable failure means failing well.** Legible failure messages, recovery actions, preserved input, full logs. A failure the user can act on beats a failure they cannot.
+- **Supporting details lift quality:** strong input affordances + example questions, markdown rendering, code blocks with copy, conversation persistence, latency-masking status lines.
+
+A language user interface is a new surface, and the discipline that makes one usable is interaction design applied at the application layer, not more model capability. Streaming, citations, regeneration, hedging, and recoverable failure separate the LLM apps people return to from the ones they uninstall.
