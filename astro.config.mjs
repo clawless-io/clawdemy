@@ -749,6 +749,18 @@ export default defineConfig({
 										{ label: 'References', slug: 'lessons/ai-agents-and-tool-use/building-trustworthy-agents/references' },
 									],
 								},
+								{
+									label: 'Securing agents',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/ai-agents-and-tool-use/securing-agents/brief' },
+										{ label: 'Lesson', slug: 'lessons/ai-agents-and-tool-use/securing-agents/lesson' },
+										{ label: 'Practice', slug: 'lessons/ai-agents-and-tool-use/securing-agents/practice' },
+										{ label: 'Summary', slug: 'lessons/ai-agents-and-tool-use/securing-agents/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/ai-agents-and-tool-use/securing-agents/cheatsheet' },
+										{ label: 'References', slug: 'lessons/ai-agents-and-tool-use/securing-agents/references' },
+									],
+								},
 							],
 						},
 					],
