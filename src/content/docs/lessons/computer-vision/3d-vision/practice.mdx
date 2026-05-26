@@ -1,0 +1,198 @@
+---
+title: "Practice: 3D vision"
+description: Self-check on depth cues + 3D representations + methods, a fresh stereo-disparity-to-depth calculation, a representation-matching exercise, and flashcards.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Seven short questions. Answer each before opening the collapsible.
+
+**1. Why does 3D vision exist as a separate field from classification or detection?**
+
+<details>
+<summary>Show answer</summary>
+
+Because cameras project a 3D scene to a 2D image and depth (the third dimension) is lost in projection. Most useful interaction with the world (autonomous driving, robotics, AR/VR, photogrammetry) needs that geometry back. 3D vision is the family of methods that recover 3D structure from 2D images, a different shape of problem from classifying or detecting in the 2D image itself.
+
+</details>
+
+**2. What is stereo disparity, and which way does it scale with depth?**
+
+<details>
+<summary>Show answer</summary>
+
+When the same 3D point is photographed by two cameras separated by a baseline, the point projects to slightly different positions in the two images. The difference in image position (in pixels) is the **disparity**. It is **inversely** related to depth: closer points have **larger** disparity; farther points have smaller; infinitely far points have zero disparity (project to the same pixel column in both cameras).
+
+</details>
+
+**3. Write the stereo depth formula and name what each symbol is.**
+
+<details>
+<summary>Show answer</summary>
+
+`Z = (f · b) / d`. `Z` = depth (distance from cameras to the 3D point); `f` = focal length (in pixel units); `b` = baseline (distance between the two cameras); `d` = disparity (pixel difference in image position between the two views). The formula directly inverts the disparity-vs-depth relationship.
+
+</details>
+
+**4. Name four 3D representations and one thing each is good at or bad at.**
+
+<details>
+<summary>Show answer</summary>
+
+Any four of: **Depth map** (per-pixel depth; easy to produce and consume, but cannot represent backsides not visible from camera). **Point cloud** (set of 3D points; flexible, compact, no explicit surface). **Voxels** (3D grid; easy for 3D conv, but cubic memory cost limits resolution). **Mesh** (vertices + faces; explicit surface, standard in graphics, harder to learn end-to-end). **Implicit / SDF** (function from 3D point to occupancy or signed distance; flexible, modern). **NeRF / Gaussian splatting** (scene representations specialized for novel view synthesis; great at rendering, less direct for explicit geometry).
+
+</details>
+
+**5. Distinguish multi-view stereo (MVS) from Structure from Motion (SfM).**
+
+<details>
+<summary>Show answer</summary>
+
+**MVS** takes multiple images with **known camera positions** and produces dense 3D reconstruction. **SfM** takes many images with **unknown camera positions** and jointly recovers both the camera positions AND the 3D structure. SfM is typically run first to get the camera poses; MVS then refines to dense geometry given those poses. COLMAP is the canonical open-source pipeline that combines both.
+
+</details>
+
+**6. What does NeRF actually learn, and what does it produce at inference?**
+
+<details>
+<summary>Show answer</summary>
+
+A small MLP learns a function from `(x, y, z, viewing_direction)` to `(color, density)`, trained to reproduce many photographs of the same scene by minimizing reconstruction loss. At inference: given a new camera pose, integrate color and density along each ray through the pixel grid to render a novel view of the scene. NeRF implicitly captures both geometry and appearance; it excels at **novel view synthesis** but is slow to query for explicit geometry.
+
+</details>
+
+**7. What is 3D Gaussian Splatting's advantage over NeRF?**
+
+<details>
+<summary>Show answer</summary>
+
+Speed. Gaussian splatting represents a scene as a collection of small 3D Gaussians (each with position, covariance, color, opacity) and renders by efficient rasterization rather than NeRF's volumetric ray-integration. Much faster at both training and inference, often with comparable quality. Current state-of-the-art for real-time novel view synthesis at the time of writing.
+
+</details>
+
+## Try it yourself: stereo calculation, representation choice, scene-recovery method choice
+
+Three exercises, about 15 minutes.
+
+**Part A: a fresh stereo-depth computation.** Two cameras have focal length `f = 800 pixels` and baseline `b = 12 cm`. A particular 3D point shows up as disparity `d = 40 pixels` between the two images. Compute its depth Z. Then suppose another point shows disparity `d = 10 pixels`; compute its depth. Which point is closer?
+
+<details>
+<summary>Worked answer</summary>
+
+Apply `Z = (f · b) / d`.
+
+```
+Point 1: d = 40 pixels
+  Z = (800 · 12) / 40
+    = 9600 / 40
+    = 240 cm  (2.4 m)
+
+Point 2: d = 10 pixels
+  Z = (800 · 12) / 10
+    = 9600 / 10
+    = 960 cm  (9.6 m)
+```
+
+**Point 1 (240 cm = 2.4 m) is closer**; Point 2 (9.6 m) is farther. The larger disparity (40 px) corresponds to the closer point, exactly as the inverse-of-depth relationship predicts. The same b·f product divided by a smaller d gives a larger Z. Useful sanity check: if disparity were doubled (to 80 pixels), the same point would be at 120 cm, half the depth.
+
+</details>
+
+**Part B: representation choice.** For each task, name the most appropriate 3D representation (or representations) and briefly say why.
+
+1. Real-time pedestrian distance estimation in a self-driving stack from a single front camera.
+2. Producing a 3D-printable model of a sculpture by walking around it with a phone and capturing video.
+3. Letting users tour an AirBnB rental in 3D from any viewing angle, given a curated capture session.
+4. 3D detection of objects in a LIDAR point cloud for autonomous-driving perception.
+
+<details>
+<summary>Suggested answers</summary>
+
+1. **Depth map.** Per-pixel depth from a single image is exactly what a monocular depth model produces; quick to compute on-device; sufficient for distance estimation. Match a downstream module that consumes per-pixel depth or projects it into a bird's-eye view for planning.
+
+2. **Mesh** (final output) via point cloud (intermediate). Walk the phone around → Structure-from-Motion produces a sparse point cloud + camera poses → MVS or photogrammetry densifies → mesh extraction for 3D-printable output. Meshes are the standard format for 3D printers and 3D editing tools.
+
+3. **NeRF or 3D Gaussian Splatting.** Novel view synthesis from any viewing angle is exactly NeRF's or 3DGS's sweet spot. 3DGS is the fast modern choice; NeRF is the conceptual baseline. Both render arbitrary new views from a curated set of captures.
+
+4. **Point cloud.** LIDAR outputs point clouds directly. Modern 3D-detection architectures (PointNet, PointPillars, VoxelNet, CenterPoint, and successors) consume point clouds and produce 3D bounding boxes. Voxel-based methods convert the point cloud to a voxel grid first; either way, point cloud is the input representation.
+
+</details>
+
+**Part C: scene-recovery method choice.** You are given 200 unordered photographs of a public square (different times of day, different angles, no metadata about where each was taken). The goal: produce a 3D model of the square's geometry and a system that can render the square from any new viewpoint. In 3-4 sentences, outline the method pipeline you would use, naming the specific techniques at each stage.
+
+<details>
+<summary>What a good answer looks like</summary>
+
+Start with **Structure from Motion (SfM)** to jointly recover the camera positions (since they are unknown) and a sparse 3D point cloud of the square. COLMAP is the workhorse here, well-tested on collections of unordered photos. Once camera poses are known, choose between two paths for the final product. If you primarily need explicit 3D geometry (a 3D model you can edit or 3D-print): run **multi-view stereo (MVS)** on the SfM output for dense reconstruction, then extract a mesh. If you primarily need to render the scene from new viewpoints with high visual quality (novel view synthesis): train a **NeRF** or **3D Gaussian Splatting** model on the photos + SfM-recovered camera poses; the trained model can render the square from any new viewpoint.
+
+The deeper point: the 200-photo + unknown-poses constraint forces SfM at the first stage; everything after branches on whether the use case wants editable geometry or novel-view rendering. Both branches use the same camera-pose recovery, then diverge based on the deliverable.
+
+</details>
+
+## Flashcards
+
+Nine cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay out the full set as one card per page, ready to print or save as a PDF for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="Why does 3D vision exist as a field?">
+
+Cameras project 3D scenes to 2D images; depth is lost in projection. Most useful interaction with the world (self-driving, robotics, AR/VR, photogrammetry) needs 3D geometry recovered from 2D images. 3D vision is the family of methods that does this recovery.
+
+</Flashcard>
+
+<Flashcard question="Stereo depth formula?">
+
+`Z = (f · b) / d`. Z = depth, f = focal length (pixels), b = baseline between cameras, d = disparity (pixel difference in position). Closer points = larger disparity; infinite = zero disparity.
+
+</Flashcard>
+
+<Flashcard question="What is disparity, and how does it scale with depth?">
+
+Difference in image position (pixels) of the same 3D point between two stereo cameras. Inversely related to depth: closer points have larger disparity; farther points have smaller; infinitely far points have zero disparity (project to same column in both cameras).
+
+</Flashcard>
+
+<Flashcard question="Four 3D representations and one strength each?">
+
+Depth map (easy per-pixel, gateway concept). Point cloud (flexible, LIDAR output, no surface). Voxels (3D-conv-friendly, cubic memory). Mesh (precise surface, graphics standard). Implicit/SDF (flexible, modern). NeRF / Gaussian splat (specialized for novel view synthesis).
+
+</Flashcard>
+
+<Flashcard question="Multi-view stereo vs Structure from Motion?">
+
+MVS: multiple images with KNOWN camera positions → dense 3D reconstruction. SfM: many images with UNKNOWN camera positions → jointly recover poses AND 3D structure. SfM is typically run first; MVS refines. COLMAP combines both.
+
+</Flashcard>
+
+<Flashcard question="NeRF in one sentence?">
+
+Small MLP maps `(x, y, z, view direction) → (color, density)`; train on many photos of a scene by minimizing reconstruction loss; render any novel viewpoint by integrating color and density along camera rays. Excels at novel view synthesis; slow to query for explicit geometry.
+
+</Flashcard>
+
+<Flashcard question="3D Gaussian Splatting's advantage over NeRF?">
+
+Speed. Represents scene as a collection of small 3D Gaussians; renders by efficient rasterization rather than volumetric ray-integration. Much faster at both training and inference with comparable quality. Current state-of-the-art for real-time novel view synthesis.
+
+</Flashcard>
+
+<Flashcard question="Monocular depth estimation: supervised vs self-supervised?">
+
+Supervised: train on pairs of image + ground-truth depth (from RGB-D cameras or LIDAR vehicles). Self-supervised: train on stereo pairs or video by enforcing geometric consistency (no per-pixel depth labels needed). MiDaS is a popular general-purpose monocular depth model.
+
+</Flashcard>
+
+<Flashcard question="Why has 3D vision proliferated from labs to phones in the last decade?">
+
+Hardware-to-software shift. Dense 3D capture used to require specialized hardware (LIDAR, structured-light scanners). Decades of work on monocular depth, SfM, NeRF, and Gaussian splatting have progressively made 3D capture doable from ordinary cameras, sometimes a single photo or phone-shot video.
+
+</Flashcard>
+
+</FlashcardSet>

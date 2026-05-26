@@ -1,0 +1,185 @@
+---
+title: "Lesson: How machines see local patterns, convolution"
+description: Phase 1 gave us a general-purpose image classifier; it would work on images, audio, or any other tensor of numbers. This lesson opens Phase 2 by adding the first piece of architecture that knows it is looking at an image. We replace the fully-connected layer's brute-force pixel-pair weight with the convolution, a small learned filter that slides across the input. We work one filter by hand on a 5x5 image (a vertical-edge detector), see why weight sharing is the right prior for natural images, and count the parameter savings (AlexNet's first layer holds 34,944 numbers regardless of how big the input image is). The training loop does not change; what changes is what one specific layer computes.
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+Phase 1 closed with a general-purpose classifier: forward pass through a couple of linear layers with a non-linearity, a loss, a backward pass via backprop, a step downhill on the gradient. That machine will technically work on images, but it has two problems with them, and both are about a single piece, the linear layer that turns pixels into hidden features. Once we replace that piece, the rest of the training loop runs unchanged on top.
+
+This lesson is that replacement. The new piece is called **convolution**, and the family of networks built around it is the **convolutional neural network**, the CNN. We will see exactly what is wrong with fully-connected layers for image input, work the new operation by hand on a small image, count the parameter savings, and name the prior, **weight sharing**, that the architecture builds in. Phase 2 is the story of stacking these into the architectures that finally cracked computer vision.
+
+## The two things a fully-connected layer gets wrong for images
+
+Take a real image, 224 by 224 in color (1 of the standard input sizes for vision networks). Flattened, that is 224 × 224 × 3 = 150,528 pixel numbers, exactly the input vector our linear classifier was built to handle.
+
+Now suppose the first hidden layer has 100 hidden units, modest by modern standards. The first-layer weight matrix is 100 by 150,528, which is **15,052,800 weights**, plus 100 biases. That is the weight count of one hidden layer for one image size. CS231n's worked version of this same point uses a 200 by 200 by 3 input and notes that even a single fully-connected neuron then holds 120,000 weights; scale up to a real network and the cost is "wasteful and the huge number of parameters would quickly lead to overfitting."
+
+That is the first problem: **parameter explosion**. But there is a second problem, deeper than the count, that the fully-connected layer ignores something basic about images.
+
+A fully-connected layer treats pixel (0, 0) and pixel (0, 1) as unrelated inputs, on equal footing with pixel (0, 0) and pixel (223, 223). There is no built-in notion that nearby pixels in an image are related. Worse, it treats the cat in the top-left and the cat in the bottom-right as completely different inputs that need completely separate weights to recognize. The fully-connected layer learns no shared knowledge between spatial positions. Every cat-detector has to be relearned at every position.
+
+Natural images do not work that way. Local pixel patches contain the structure (edges, textures, parts), and the same kinds of structure appear *anywhere* in the frame. We want an architecture that knows both: that **local patches matter** and that **the same pattern can appear at any position**. Convolution is exactly that architecture.
+
+## The convolution operation
+
+Here is the move. Instead of a layer that has one weight per (input-pixel, output-unit) pair, we have a small **filter** (sometimes also called a **kernel**), say 3 by 3 pixels by the full input depth, with its own small set of weights. We **slide that filter across the input**, computing a dot product at each spatial position between the filter and the small image patch it currently overlaps. Each dot product produces one number, and the grid of numbers we get out is a 2D **feature map** (also called an **activation map**) showing how strongly that filter responded at each position.
+
+In one paragraph: a convolution is the same dot product as before, applied locally to image patches, repeated at every position with the same weights.
+
+A first-layer filter for a color image is typically described as 3 dimensions: spatial size by spatial size by input depth. So a 3 by 3 filter on an RGB image is actually 3 × 3 × 3 = 27 weights (plus one bias), regardless of the image's overall size. A 5 by 5 filter on the same RGB image is 5 × 5 × 3 = 75 weights. The filter's spatial extent is small; its depth always matches the input.
+
+## A worked example: a vertical edge detector by hand
+
+Take a tiny 5 by 5 grayscale input that contains a clean vertical edge (zeros on the left two columns, ones on the right three columns):
+
+```
+0 0 1 1 1
+0 0 1 1 1
+0 0 1 1 1
+0 0 1 1 1
+0 0 1 1 1
+```
+
+Apply the classic 3 by 3 vertical-edge filter:
+
+```
+-1  0  1
+-1  0  1
+-1  0  1
+```
+
+The filter is "looking for" bright on the right and dark on the left, with the middle column neutral. We slide it across the input with stride 1 and no zero-padding. The output spatial size is `(5 - 3 + 0) / 1 + 1 = 3`, so we get a 3 by 3 feature map.
+
+Take output position (0, 0). The corresponding input patch is rows 0-2, columns 0-2:
+
+```
+0 0 1
+0 0 1
+0 0 1
+```
+
+The dot product (sum of elementwise products) is `(-1)(0) + (0)(0) + (1)(1) = 1` for the first row, same for the second, same for the third, totaling **3**.
+
+Slide to position (0, 1). The input patch is now columns 1-3, still containing the edge:
+
+```
+0 1 1
+0 1 1
+0 1 1
+```
+
+Dot product: `(-1)(0) + (0)(1) + (1)(1) = 1` per row, totaling **3** again. The filter is still positioned over the edge.
+
+Slide to position (0, 2). The input patch is now columns 2-4, all ones (no edge):
+
+```
+1 1 1
+1 1 1
+1 1 1
+```
+
+Dot product: `(-1)(1) + (0)(1) + (1)(1) = 0` per row, totaling **0**. The filter sees a uniformly bright region and produces nothing.
+
+Doing all three rows of output (which by symmetry come out the same):
+
+```
+3 3 0
+3 3 0
+3 3 0
+```
+
+The filter "lit up" precisely where the edge sits in the image, and stayed silent where the image is uniform. That is what a single convolution does: it produces a feature map showing where in the image the filter's pattern occurred.
+
+Important caveat: in this example the filter is hand-chosen so you can see what it does. In a real CNN, **the filter weights are learned by backpropagation**, exactly like the weights of a fully-connected layer in lesson 4. The network discovers its own filters from the data, and the early layers tend to converge to filters that look like edge detectors, color blobs, and simple textures, which is the result rather than the design.
+
+## Many filters per layer
+
+A single filter detects one pattern; a useful layer detects many. The convention is to have a stack of filters at each layer, called the **depth** of the layer (sometimes also called the number of **channels** in the output). With K filters, each filter produces its own 2D feature map, and the layer's output is a 3D volume of shape `(spatial size) × (spatial size) × K`. Each of those K slices says "here is where my filter pattern showed up in the input."
+
+So a conv layer transforms a 3D input volume of shape `H × W × D_in` into a 3D output volume of shape `H_out × W_out × K`. The output's depth is the number of filters; its spatial size depends on the next thing we name.
+
+## Three hyperparameters: depth, stride, padding
+
+Conv layers have exactly three spatial hyperparameters.
+
+- **Depth (K).** How many filters in the layer, each learning to look for something different. K controls the depth of the output volume.
+- **Stride (S).** How far we slide the filter between positions. Stride 1 moves one pixel at a time and produces a dense output; stride 2 moves two pixels at a time and produces a smaller output.
+- **Zero-padding (P).** How many rings of zeros to add around the input's border. Padding 1 lets the filter sit "off the edge" cleanly; it is commonly used to make the output spatial size match the input.
+
+The **output spatial size** is given by an exact formula:
+
+```
+output_size = (W - F + 2P) / S + 1
+```
+
+where `W` is the input spatial size, `F` is the filter spatial size, `P` is padding, `S` is stride. CS231n's worked example: a 7 by 7 input with a 3 by 3 filter, stride 1, pad 0 gives `(7 - 3 + 0) / 1 + 1 = 5`, so a 5 by 5 output. Same input, stride 2: `(7 - 3 + 0) / 2 + 1 = 3`, a 3 by 3 output.
+
+The valid combinations of W, F, S, P must make this come out a whole number; if it does not, the configuration is invalid for that input.
+
+## Weight sharing: the prior baked into the architecture
+
+Here is the structural point that makes a CNN a CNN, not just a sparser linear layer. Within one filter, the **same weights are used at every spatial position**. Position (0, 0) and position (50, 50) and position (200, 200) all apply the *same* 27 weights of a 3 × 3 × 3 filter; they are not 3 separate sets of 27.
+
+CS231n names the rationale directly: "if one feature is useful to compute at some spatial position (x, y), then it should also be useful to compute at a different position (x', y')." Natural images have **translational structure**: an edge at the top of the image and an edge at the bottom share the same definition of "edge," so it would be wasteful to learn an edge-detector for each position independently.
+
+Weight sharing has two big consequences:
+
+1. **Dramatically fewer parameters**, because the layer holds one filter (not one filter-per-position) for each pattern it learns.
+2. **Translation equivariance** baked in: shift the input image and the output feature maps shift by the same amount, automatically. The network does not have to learn that a shifted cat is still a cat; the operation guarantees it for the first layer's features.
+
+## How much does this save?
+
+The parameter count of one conv layer is exact:
+
+```
+weights = F · F · D_in · K       (per layer, total)
+biases  = K                       (one per filter)
+```
+
+CS231n's running example uses AlexNet's first layer: 96 filters of size 11 × 11 × 3. That is 96 × 11 × 11 × 3 = **34,848 weights**, plus 96 biases, for **34,944 parameters total**. Crucially, that count does **not** depend on the input image's height or width. The same 34,944 parameters convolve a 224 by 224 image and a 1024 by 1024 image equally; only the output size differs.
+
+Compare to fully-connected. A single fully-connected neuron on a 224 by 224 by 3 image holds 150,528 weights, more than four times AlexNet's entire first-layer weight count of 34,848, for one neuron's worth of output. The savings are not marginal; they are several orders of magnitude.
+
+## What we have now: same training loop, new building block
+
+A conv layer is a different kind of layer, but the training loop from lesson 4 runs over it unchanged:
+
+1. **Forward pass.** Apply the conv operation: compute the dot product of each filter with each input patch, producing the output feature maps. (A non-linearity like ReLU is typically applied elementwise on the output.)
+2. **Loss.** The same SVM or softmax / cross-entropy from lesson 3, on whatever the final classifier produces.
+3. **Backward pass.** Backpropagation works on conv layers, same chain rule as before. Each filter weight gets a gradient summed over all the spatial positions it was applied to; the locality of conv simply means the local gradient has a particular shape.
+4. **Step.** `W ← W - α * ∇L` for every filter weight.
+
+What changed is one layer's *operation*; the gradient descent loop on top did not. That is why Phase 2 can introduce more conv-based architectures without rebuilding the entire training story.
+
+## Why this matters when you use AI
+
+Every modern vision model you have ever met, image classifiers, object detectors, image segmenters, image generators (in their down-sampling encoders), uses convolution somewhere in its forward pass, or its descendant the **vision transformer**, which we will reach later in the track. The reason is exactly the two-fold motivation above: the parameter cost is bounded by filter size, not image size, and the architecture knows that local patterns are the building blocks of images.
+
+The "deep" in "deep CNN" means many conv layers stacked, with each layer's features built from the features below it: early layers settle on edges and color blobs, middle layers on textures and parts, deep layers on whole-object templates. None of that hierarchy is specified anywhere in the code; it emerges from training. The next lesson surveys the architectures, AlexNet through ResNet, that figured out how to make this hierarchy go deep enough to actually work.
+
+If you came from Track 11 or Track 12, this lesson is the formal version of intuition you have already met. The handwritten-digit rasterization in Neural Network Intuition (the distance-field 3 you saw in lesson 1's diagrams there) and the "convolution as Photoshop filter" framing in Introduction to Deep Learning lesson 4 are the same operation, named precisely here and tied into the training loop.
+
+## Common pitfalls
+
+**Thinking convolution = Photoshop filter.** The math is similar (small kernel sliding over the image), and in fact Photoshop's blur, sharpen, and edge-detect filters are convolutions with hand-designed kernels. The difference is that CNN filter weights are **learned by backprop**, not designed by hand. Calling a CNN "fancy Photoshop" is true mathematically and very misleading pedagogically.
+
+**Thinking the filter sees the whole image.** Each filter sees a small local patch at each position. The network builds larger effective receptive fields by *stacking* conv layers: a second-layer filter looks at the first layer's output, which already summarized a small patch of the original image, so the second-layer filter indirectly depends on a larger region of the original. Depth, not width, is what grows the receptive field.
+
+**Thinking output size is a choice.** It is fully determined by the input size and the three hyperparameters: `(W - F + 2P) / S + 1`. Picking S, F, P picks the output size; only certain combinations work.
+
+**Forgetting that filters extend through the input depth.** A 3 by 3 filter on an RGB input is actually 3 × 3 × 3 = 27 weights plus a bias; the spatial extent is small but the depth is full. Skipping the depth dimension is the most common arithmetic mistake when first counting CNN parameters.
+
+## What you should remember
+
+- **A fully-connected layer is wrong for images** on two counts: parameter explosion (a single FC neuron on a 224 × 224 × 3 image needs 150,528 weights) and no spatial prior (it treats every pixel-pair as unrelated and has to learn position-specific detectors).
+- **Convolution applies a small filter at every spatial position.** Filter spatial size is small (3, 5, 11); depth matches input; the output at each position is a dot product. Many filters per layer give a depth-K output volume; the spatial size follows `(W - F + 2P) / S + 1`.
+- **Weight sharing is the vision prior.** The same filter weights are used at every spatial position, dramatically cutting parameter count and giving translation equivariance for free.
+- **Parameter count per conv layer:** `K · (F · F · D_in)` weights plus `K` biases, regardless of input image size. AlexNet's first layer: 34,944 parameters; same number for any input image dimensions.
+- **The training loop is unchanged.** Conv layer goes in the forward pass, backprop carries gradients through it, gradient descent steps on the weights. Phase 2's job is to stack and refine these layers; the engine underneath stays the same.
+
+A conv layer is the smallest architectural commitment that says, "I know this input is an image." Everything in Phase 2 is what gets built once that commitment is made.
+
+Next: a single conv layer detects local patterns; a stack of them, of the right size and shape, recognizes whole objects. The next lesson surveys the architectures that actually cracked vision, AlexNet, VGG, ResNet, and folds in a note on what it takes to train them at scale.

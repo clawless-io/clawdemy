@@ -1,0 +1,185 @@
+---
+title: "Practice: CNN architectures and training at scale"
+description: Self-check on the four landmark architectures, a matching exercise, a parameter-savings calculation, residual-block reasoning, and flashcards.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Seven short questions. Answer each before opening the collapsible.
+
+**1. What numerical result did AlexNet (2012) produce on ImageNet that made it the inflection?**
+
+<details>
+<summary>Show answer</summary>
+
+A top-5 error of 16 percent compared to the runner-up's 26 percent (CS231n verbatim). A ten-percentage-point gap in a mature competition; that single result effectively ended the hand-engineered-features era.
+
+</details>
+
+**2. What was VGG's structural argument, and what was the cost?**
+
+<details>
+<summary>Show answer</summary>
+
+Argument: take a small, uniform filter (3 by 3) and stack many of them deeply (16 weight layers in VGG-16). A stack of 3 by 3s covers the same receptive field as one larger filter, with more non-linearities and fewer parameters per layer. Cost: roughly 140 million parameters, mostly in the giant fully-connected tower at the top.
+
+</details>
+
+**3. What two changes give GoogLeNet (Inception) its low parameter count of about 4 million?**
+
+<details>
+<summary>Show answer</summary>
+
+(a) The Inception module's 1 by 1 convolutions reduce input depth before the more expensive 3 by 3 and 5 by 5 branches, so the per-module parameter cost is much lower than naive multi-scale convolution. (b) An average-pooling head instead of the giant fully-connected tower at the top, which eliminated the bulk of VGG-style parameter cost.
+
+</details>
+
+**4. State the residual block's formula and explain why it helps.**
+
+<details>
+<summary>Show answer</summary>
+
+`y = F(x) + x`. The block computes `F(x)` (whatever the inside conv layers compute) and adds the input `x` straight through via an identity shortcut. When the block does not need to do anything new, learning `F(x) = 0` is easy (so identity is trivially achievable, very deep networks no longer get worse just from being deep); when it does need to add something, `F` learns it. Gradients flow back through the shortcut unimpeded, addressing the vanishing-gradient problem that had capped pre-ResNet depth.
+
+</details>
+
+**5. What is the difference between data parallelism and model parallelism?**
+
+<details>
+<summary>Show answer</summary>
+
+Data parallelism: replicate the *same* model on every GPU; split the mini-batch across GPUs; each GPU computes its own gradient on its chunk; gradients are averaged across GPUs (AllReduce). The default for vision; scales nearly linearly. Model parallelism: split the *model's layers* across GPUs (when the model is too big for one GPU's memory); the forward pass passes activations between GPUs and the backward pass passes gradients. More complex and slower per step; reserved for very large models.
+
+</details>
+
+**6. Does distributed training change the gradient descent algorithm?**
+
+<details>
+<summary>Show answer</summary>
+
+No. The loss, the gradient, and the update rule (`W ← W - α * ∇L`) are unchanged. Distributed training is engineering on top: computing the same gradient faster by parallelizing the work, then averaging across replicas. The algorithm underneath is exactly what lesson 3 defined.
+
+</details>
+
+**7. Why is parameter count not the same as capability?**
+
+<details>
+<summary>Show answer</summary>
+
+Architecture, data, and training procedure shape capability, not raw size alone. The clearest illustration: GoogLeNet (~4M parameters) outperformed VGG (~140M parameters) on ImageNet despite being roughly thirty-five times smaller. Architectural ideas (1 by 1 conv for dimensionality reduction, parallel-path modules, residual blocks, no giant FC head) move the field more than raw size does.
+
+</details>
+
+## Try it yourself: match the landmark, count the savings, write the block
+
+Three short exercises, about 15 minutes.
+
+**Part A: match the architecture.** For each description, name the landmark architecture (AlexNet, VGG, GoogLeNet, or ResNet) it describes.
+
+1. 16 weight layers, only 3 by 3 convolutions throughout, roughly 140 million parameters.
+2. Identity shortcuts (`y = F(x) + x`) make networks of 152 layers trainable.
+3. 60 million parameters, ReLU + dropout, two GPUs trained for ~6 days, hit 16 percent top-5 error on ImageNet.
+4. About 4 million parameters total, parallel-path "modules" that combine multiple filter sizes with 1 by 1 dimensionality reduction.
+
+<details>
+<summary>Answers</summary>
+
+1. **VGG (VGG-16).** "16 CONV/FC layers" + "only 3x3 convolutions and 2x2 pooling from the beginning to the end" + ~140M params.
+2. **ResNet.** Identity shortcuts (skip connections) + heavy batch normalization; ResNet-152 was the canonical deep variant.
+3. **AlexNet.** ~60M params + ReLU + dropout + 2 GPUs + the 16 vs 26 percent top-5 inflection.
+4. **GoogLeNet (Inception).** Inception modules + 1 by 1 convs for dimensionality reduction + ~4M params (average-pooling head, no giant FC tower).
+
+</details>
+
+**Part B: parameter-savings calculation.** GoogLeNet has roughly 4 million parameters; VGG-16 has roughly 140 million. (a) How many times smaller is GoogLeNet than VGG, to the nearest integer? (b) AlexNet has 60 million parameters and beat the runner-up by a 10-percentage-point top-5-error margin (16 percent vs 26 percent). Roughly how much of an improvement is "16 from a 26 baseline" as a relative reduction in error?
+
+<details>
+<summary>Answers</summary>
+
+**(a)** 140 / 4 = **35x smaller**. GoogLeNet did roughly 1/35 the parameter cost of VGG and reached slightly better ImageNet accuracy. Parameter count is not capability.
+
+**(b)** From 26 to 16 is a drop of 10 percentage points; as a fraction of the baseline, that is 10 / 26 ≈ **38 percent relative reduction in top-5 error**. A 38 percent relative improvement in a single year in a mature competition is the kind of result that ends an era, and it did.
+
+</details>
+
+**Part C: rewrite a stack as a residual block.** Suppose a network has a stack of three conv layers in sequence, which together compute some function `H(x)` of their input `x`. (1) Write the conventional output. (2) Rewrite the same stack as a residual block, naming the residual function. (3) Suppose `H(x) = x` is the right answer (the block should pass its input through unchanged). How easy is this for each form to learn?
+
+<details>
+<summary>Answers</summary>
+
+**(1)** Conventional: `y = H(x)`. The three layers' job is to produce `H(x)` directly.
+
+**(2)** Residual: define `F(x) = H(x) - x`. Then the block's output is `y = F(x) + x`, with `x` added through an identity shortcut.
+
+**(3)** If the right answer is `H(x) = x` (identity), the conventional form has to *learn* the identity function across three conv layers, which is non-trivial. The residual form just needs `F(x) = 0`, which is easy (zero out the weights). That asymmetry is one of the reasons ResNet's deep variants train well: when a deeper block should be a no-op, it is trivially a no-op via the shortcut.
+
+</details>
+
+## Flashcards
+
+Nine cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay out the full set as one card per page, ready to print or save as a PDF for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="What did AlexNet's 2012 ImageNet result demonstrate?">
+
+16 percent top-5 error vs the runner-up's 26 percent. A 10-percentage-point gap that effectively ended the hand-engineered-features era of computer vision and started the deep-CNN era.
+
+</Flashcard>
+
+<Flashcard question="What was VGG's structural argument and parameter cost?">
+
+Take a small, uniform filter (3 by 3) and stack many of them deeply (16 weight layers in VGG-16). Cost: ~140M parameters, mostly in the FC tower at the top.
+
+</Flashcard>
+
+<Flashcard question="How did GoogLeNet (Inception) hit ~4M parameters?">
+
+Inception modules with 1 by 1 convs for dimensionality reduction before expensive 3 by 3 and 5 by 5 branches, plus an average-pooling head instead of a giant fully-connected tower.
+
+</Flashcard>
+
+<Flashcard question="ResNet's residual block formula and why it helps?">
+
+`y = F(x) + x`. Identity shortcut adds the input back to the block's output. If the block should do nothing, learning `F = 0` is trivial; gradients flow back through the shortcut unimpeded, addressing vanishing gradients and making very deep networks (e.g. 152 layers) trainable.
+
+</Flashcard>
+
+<Flashcard question="Why is parameter count not the same as capability?">
+
+Clearest illustration: GoogLeNet (~4M) outperformed VGG (~140M) on ImageNet, ~35x smaller. Architecture, data, and training procedure matter more than raw size alone.
+
+</Flashcard>
+
+<Flashcard question="Data parallelism in one sentence?">
+
+Replicate the same model on every GPU, split the mini-batch into chunks, each GPU computes its own gradient, then average gradients across GPUs (AllReduce) and take the same step. Scales nearly linearly; default for vision.
+
+</Flashcard>
+
+<Flashcard question="Model parallelism, and when is it used?">
+
+Split the model's layers across GPUs (when the model is too big for one GPU's memory). Forward pass passes activations between GPUs; backward pass passes gradients. More complex; reserved for very large models.
+
+</Flashcard>
+
+<Flashcard question="Does distributed training change the gradient descent algorithm?">
+
+No. Loss, gradient, update rule (`W ← W - α * ∇L`) are unchanged. Distributed training is engineering on top: same algorithm, computed faster via parallelism.
+
+</Flashcard>
+
+<Flashcard question="What scale shift happened from AlexNet to today?">
+
+AlexNet: 2 GPUs, ~6 days, 2012. Modern foundation-scale vision models: hundreds to thousands of accelerators, weeks of training. Same gradient descent algorithm; expanded engineering around it.
+
+</Flashcard>
+
+</FlashcardSet>

@@ -1,0 +1,159 @@
+---
+title: "Lesson: How a classifier learns, loss and optimization"
+description: Lesson 2 gave us a classifier with knobs (W and b) and no way to set them. This lesson hands you both halves of the answer. A loss function turns "predictions match labels" into a single number you want to minimize. Optimization is the loop that nudges W and b to drive that number down. We define two common losses (SVM and softmax), regularization, and the gradient descent update step by step, with the worked numbers carried in from the last lesson.
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+We left lesson 2 with a working machine and no idea how to set its dials. We can compute a score per class with `s = W · x + b`, and we can pick the highest. But how do we choose W and b in the first place? A network with the right values is a useful classifier; a network with random values is a noise generator. The training problem is exactly the problem of *finding the right values*, automatically, from labeled examples.
+
+This lesson is the answer in two parts. The first is a way to measure how wrong the current W and b are, as a single number, called the **loss**. The second is a procedure for adjusting W and b to push that number down, called **optimization**. Together they are the training loop, and the loop is, more or less, how every modern neural network gets trained. The vehicle is still the linear classifier from last lesson; the upgrade is everything that makes it learnable.
+
+## Step 1: turn "wrong" into a number
+
+Before we can fix wrongness we have to measure it. For a single training image with correct label `y`, the classifier produces a set of scores `s`. We want a function that takes that set of scores and the correct label and returns one number, large when the prediction is bad and small (ideally zero) when it is good. That function is the **loss**.
+
+A second design choice follows: with N training images, we want one loss for the *whole training set*. The standard answer is to average the per-image losses. So the **data loss** the classifier is trying to minimize is:
+
+```
+L_data = (1 / N) * Σ L_i
+```
+
+where `L_i` is the loss on training image `i`. The only thing left to decide is what `L_i` looks like. Two choices dominate the field, and they are the two CS231n teaches first.
+
+## A common loss: multiclass SVM (hinge) loss
+
+The **multiclass SVM loss** says: *the correct class's score should be higher than every other class's score by at least a margin (commonly 1).* If that holds, the loss is zero. Every class that fails to meet the margin contributes the shortfall.
+
+Written for one image with correct class `y` and scores `s`, summed over the wrong classes `j ≠ y`:
+
+```
+L_i = Σ_{j ≠ y}  max(0, s_j - s_y + 1)
+```
+
+Read that carefully. `s_j - s_y` is how much the wrong class `j` outscores the correct one (negative if the correct class is ahead). Adding 1 turns "ahead by 0" into "ahead by 1," so to push the loss to zero the correct class must be ahead by at least 1 from every other class. The `max(0, ...)` ignores classes that already meet the margin.
+
+Let us run last lesson's scores through it. The toy 2-by-2 / 3-class classifier predicted scores `[s_X, s_Y, s_Z] = [0.8, 0.3, -0.4]`, and the correct class is X.
+
+```
+L_i = max(0, s_Y - s_X + 1) + max(0, s_Z - s_X + 1)
+    = max(0, 0.3 - 0.8 + 1) + max(0, -0.4 - 0.8 + 1)
+    = max(0, 0.5)              + max(0, -0.2)
+    = 0.5                      + 0
+    = 0.5
+```
+
+The prediction was correct (X had the highest score), and yet the loss is not zero. That is the SVM loss saying: *yes, you got it right, but only by 0.5, which is less than the required margin of 1.* The classifier is asked to be confidently right, not just right. Class Z, which is already 1.2 below the correct class, contributes nothing because it already clears the margin.
+
+## An alternative loss: softmax (cross-entropy)
+
+The other common choice converts the scores into probabilities and then asks how much probability the model assigned to the correct class. The probabilities come from the **softmax function**:
+
+```
+p_j = exp(s_j) / Σ_k exp(s_k)
+```
+
+This forces the scores into the range `(0, 1)` and makes them sum to 1, so they read as probabilities. The **cross-entropy loss** is then minus the log of the probability the model gave to the correct class:
+
+```
+L_i = -log(p_y)
+```
+
+When the model is confident and correct, `p_y` is near 1 and `-log(p_y)` is near 0. When the model is wrong or hesitant, `p_y` is small and the loss grows large. Run it on the same scores:
+
+```
+exp(0.8) ≈ 2.226,  exp(0.3) ≈ 1.350,  exp(-0.4) ≈ 0.670
+sum ≈ 4.246
+p_X ≈ 2.226 / 4.246 ≈ 0.524
+L_i = -log(0.524) ≈ 0.646
+```
+
+Same prediction, same direction (loss is non-zero because the model is correct but only ~52 percent confident), different number. SVM gives 0.5, softmax gives ~0.65. In practice both work; modern image classifiers usually use softmax / cross-entropy because the probability interpretation is convenient. The deeper takeaway is what they share: a single number that goes down as the predictions get better.
+
+## Regularization: prefer simpler weights
+
+There is one more piece. Many different W's can give the same data loss, especially when the data is plentiful and the loss is loose; a classifier with huge weights and a classifier with modest weights can fit the training set equally well, and the modest one tends to generalize better to unseen images (which, recall from lesson 1, is the only kind of accuracy that counts).
+
+So we add a small penalty on the magnitude of W, called **regularization**. The most common form is **L2 regularization**, which adds the sum of squares of all the weights:
+
+```
+L = L_data + λ * Σ W²
+```
+
+The `λ` ("lambda") is a tuning knob that controls how much we care about small weights versus low data loss. Small λ lets the classifier prioritize fitting the data; large λ shrinks W more aggressively. The whole expression on the right is what the optimizer actually drives down.
+
+## Step 2: nudge the knobs (optimization)
+
+We now have a single number, `L`, that depends on W (the biases too, but absorbing them via the bias trick from last lesson keeps the notation clean). Our job is to find the W that makes `L` small. CS231n walks through three strategies, in order of how well they work.
+
+**Random search.** Generate many random W's, compute the loss on each, keep the best. On CIFAR-10 this lands around 15.5 percent accuracy, modestly better than the 10 percent of pure guessing, far from useful.
+
+**Random local search.** Start with a random W, generate a small random perturbation, accept it only if it lowers the loss. CIFAR-10: about 21.4 percent. Better, but we are essentially searching blindly.
+
+**Gradient descent.** The right answer. Instead of guessing how to move W, compute the direction `L` increases fastest, then step the opposite way. That mathematically guaranteed direction is the **gradient**.
+
+If lesson 6 of Neural Network Intuition (the cost landscape) is in your head, this is the same picture: the loss is the height of a vast surface over the W-axes, the gradient is the compass pointing steepest uphill, and the negative gradient is the compass pointing straight downhill. Take a small step downhill, recompute, repeat.
+
+## The update rule
+
+The mechanical heart of gradient descent is one line:
+
+```
+W ← W - α * ∇L
+```
+
+`∇L` is the gradient, a vector the same shape as `W`, pointing steepest uphill in W-space. The minus sign turns it around so we head downhill. `α` is the **learning rate** (sometimes called the step size), a small positive number controlling how far to step.
+
+The learning rate is one of the most consequential numbers in all of training. Too small and the loss creeps down imperceptibly. Too large and a step overshoots the valley and the loss can actually *increase*; CS231n shows a striking version of this on CIFAR-10 where a starting loss of 2.20 drops to 1.65 at one well-chosen step size and explodes to over 2500 at a step size only a couple of orders of magnitude larger. The downhill direction is correct; the step length is a separate, careful choice.
+
+## Computing the gradient: analytic vs numerical
+
+There are two ways to get `∇L` in practice.
+
+**Numerical gradient (finite differences).** Nudge one weight by a small `h`, recompute the loss, see how much it changed, and estimate the derivative as `(L(W + h·e_i) - L(W)) / h`. Simple, approximate, and very expensive: to get the full gradient you need to nudge every weight one at a time. For a network with thousands of weights it is too slow; for one with billions it is unusable.
+
+**Analytic gradient (calculus).** Derive the gradient symbolically once, then evaluate the formula directly. Fast (one pass to get all components at once), exact, and error-prone to derive by hand. Real systems use the analytic gradient and use the numerical one only as a sanity check (a **gradient check**: do the two answers agree?) during development.
+
+How the analytic gradient is computed efficiently for an arbitrarily deep network is its own large topic, called **backpropagation**, which is the next lesson and the closing piece of Phase 1.
+
+## Doing it cheaply: stochastic / mini-batch gradient descent
+
+One more wrinkle from the practical end. The training set might have millions of images. Computing the full data loss (and its gradient) by summing over every image, every step, is enormous. Two observations make this manageable.
+
+- A randomly sampled handful of training images gives a noisy but unbiased estimate of the full gradient.
+- We are taking thousands of small steps anyway, so a little noise per step averages out.
+
+So the standard recipe is **mini-batch gradient descent**: at each step, sample a small batch of training images (commonly 32, 64, 128, or 256), compute the loss and gradient on just that batch, and take the step. Each step is dramatically cheaper, and many more of them fit in the same wall-clock time. The convention of using powers of two for batch sizes is a hardware artifact: GPUs are most efficient at those shapes.
+
+When the mini-batch shrinks to a single example the algorithm is called **stochastic gradient descent (SGD)** in the strict sense, but in current practice "SGD" is the umbrella term for mini-batch gradient descent in general.
+
+## Why this matters when you use AI
+
+Several familiar things about working AI are this loop in disguise.
+
+Training takes hours or weeks because it is millions of small downhill steps, not one solved equation. "Convergence" means the loss stopped meaningfully decreasing, which is the optimizer telling you the local terrain has flattened. Two training runs of the same model can land at slightly different solutions because each rolled down its own random starting position into its own local valley. And when you read about a model's "loss curve" in a paper, you are looking at a plot of `L_data + λ * Σ W²` as a function of training steps; the lower it gets, the better the network fits its training data (with the standard caveat that real success is measured on unseen images, not the training loss).
+
+If you came from Neural Network Intuition, all of this is the same gradient descent you met there, now applied to a vision classifier rather than a generic neural network. The mechanics are unchanged; only the score function (linear classifier from lesson 2) and the loss (SVM or softmax) are vision-specific.
+
+## Common pitfalls
+
+**Confusing the gradient with the step.** The gradient says which direction loss rises fastest; the step is how far we move (and we move in the opposite direction). Mixing them up explains a lot of confused training-rate intuition.
+
+**Treating the loss number as a goal in itself.** A small training loss is not the goal; good performance on unseen images is. A model that drives its training loss to zero by memorizing has high test error; regularization exists exactly because of this gap.
+
+**Picking too large a learning rate.** It feels like "go faster," and a small range works that way, but past a threshold a too-large rate overshoots and the loss climbs. The CIFAR-10 number above (a 1000-times jump from 1.65 to >2500) is sobering. Always sweep the learning rate.
+
+**Confusing SVM and softmax losses.** They are different functions that produce different numbers; either can be used to train the same `s = W · x + b` model. Production image classifiers usually use softmax / cross-entropy.
+
+## What you should remember
+
+- **A loss turns "predictions vs labels" into one number** to drive down. Two standards: **multiclass SVM** (`max(0, s_j - s_y + 1)` summed over wrong classes; demands a margin) and **softmax / cross-entropy** (`-log(p_y)` after softmax; demands probability mass on the correct class).
+- **Regularization adds a penalty on large weights** (commonly `λ * Σ W²`) so the optimizer prefers simpler W's that generalize better to unseen images.
+- **Optimization minimizes that loss.** Random search is bad; gradient descent works. The gradient `∇L` is the steepest-uphill direction; the update rule is `W ← W - α * ∇L`; the **learning rate** `α` is the step size and is one of the most consequential hyperparameters.
+- **In practice we compute the gradient analytically** (fast and exact, with numerical finite-difference checks during development) and step on **mini-batches** of training data rather than the full set, which is what "SGD" means in current usage.
+
+The training loop is now in front of you: forward pass to get scores, loss to score the prediction, gradient of the loss with respect to every weight, one step against the gradient, repeat on the next mini-batch. That four-step cycle is how every classifier in this track, including the giant ones a few lessons from now, actually learns.
+
+Next: we have been speaking of a single classifier `s = W · x + b`, which is structurally too simple for real vision (the one-template-per-class limit from last lesson). The next lesson stacks classifiers into a neural network, then introduces **backpropagation**, the algorithm that gets the gradient through every weight in every layer in one efficient backward sweep. Phase 1 closes with that.

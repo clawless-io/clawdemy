@@ -1,0 +1,195 @@
+---
+title: "Practice: Detection, segmentation, and visualization"
+description: Self-check on the three task families, a fresh IoU computation by hand, an architecture-matching exercise, and flashcards.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Seven short questions. Answer each before opening the collapsible.
+
+**1. What does object detection produce, and how does that differ from classification?**
+
+<details>
+<summary>Show answer</summary>
+
+Object detection produces a *list* of `(class label, bounding box)` pairs, one per detected object in the image. Classification produces a single class label for the whole image. The list-shape (variable length, multiple objects per image, each with a location) is what makes detection architecturally more than classification.
+
+</details>
+
+**2. Distinguish the two-stage and one-stage detection families and give one example of each.**
+
+<details>
+<summary>Show answer</summary>
+
+Two-stage: first propose candidate regions, then classify and refine each. Example: Faster R-CNN (region proposal network + classification head). Historically more accurate, slower. One-stage: single forward pass produces all class scores + boxes in parallel over a dense grid. Example: YOLO. Historically faster, slightly less accurate; modern variants of both have narrowed the gap.
+
+</details>
+
+**3. Write the IoU formula and explain what it measures.**
+
+<details>
+<summary>Show answer</summary>
+
+`IoU = area of intersection / area of union`. It measures how much two boxes overlap, normalized to 0 (no overlap) through 1 (perfect overlap). A predicted box is typically counted as a "match" to a ground-truth box if IoU is above a threshold, commonly 0.5.
+
+</details>
+
+**4. Distinguish semantic from instance segmentation.**
+
+<details>
+<summary>Show answer</summary>
+
+Semantic: per-pixel class label only. Three cats in a photo would all have pixels labelled "cat," with no information about which pixel belongs to which cat. Instance: per-pixel class AND per-instance ID. The three cats produce three separate masks (cat #1, cat #2, cat #3). Instance segmentation effectively combines detection + per-instance per-pixel labelling.
+
+</details>
+
+**5. What is U-Net's distinguishing structural feature?**
+
+<details>
+<summary>Show answer</summary>
+
+An encoder-decoder shape (encoder downsamples, decoder upsamples back to input resolution) with **skip connections** from each encoder layer to the corresponding decoder layer. The skip connections pass spatial detail across the U-shape so the output can be both semantically informed (from deep features) and spatially precise (from early features). Standard architecture for medical image segmentation.
+
+</details>
+
+**6. Describe Grad-CAM in one sentence.**
+
+<details>
+<summary>Show answer</summary>
+
+Grad-CAM uses the network's own feature maps near the top, weighted by gradients of the predicted class score, to produce a coarse heatmap of "which regions in the image contributed most to this class prediction." Works on essentially any CNN architecture; the most common "show me where the model is looking" technique in practice.
+
+</details>
+
+**7. What is the honest caveat about CNN visualization techniques?**
+
+<details>
+<summary>Show answer</summary>
+
+They are useful for intuition and debugging, and often flag obvious failures (the classic example: a "wolf vs husky" classifier turning out to rely on snow in the background). They are **not** a complete explanation of why a network makes a particular decision. Modern interpretability and mechanistic understanding of neural networks is an active and unsettled research area; treat visualizations as a useful first look, not as ground truth.
+
+</details>
+
+## Try it yourself: compute an IoU, match the architecture, plan a visualization
+
+Three exercises, about 15 minutes.
+
+**Part A: a fresh IoU computation.** Predicted box `A = (2, 2, 12, 12)`, ground-truth box `B = (5, 5, 15, 15)`, in `(x1, y1, x2, y2)` format. Compute the intersection area, the union area, and the IoU. Does this prediction count as a match at threshold 0.5?
+
+<details>
+<summary>Worked answer</summary>
+
+```
+intersection_x1 = max(A.x1, B.x1) = max(2, 5) = 5
+intersection_y1 = max(A.y1, B.y1) = max(2, 5) = 5
+intersection_x2 = min(A.x2, B.x2) = min(12, 15) = 12
+intersection_y2 = min(A.y2, B.y2) = min(12, 15) = 12
+
+intersection area = (12 - 5) * (12 - 5) = 49
+A area = (12 - 2) * (12 - 2) = 100
+B area = (15 - 5) * (15 - 5) = 100
+union area = 100 + 100 - 49 = 151
+
+IoU = 49 / 151 ≈ 0.325
+```
+
+**No match at threshold 0.5** (0.325 < 0.5). The predicted box and the ground-truth box overlap, but not by enough to count as a hit under the standard convention. A vision system that reported this prediction would not be credited for finding the object, even though it found something nearby.
+
+</details>
+
+**Part B: match the architecture or technique.** For each description, name the architecture or visualization technique.
+
+1. Encoder-decoder shape with skip connections from each encoder layer to the corresponding decoder layer; standard in medical image segmentation.
+2. Extends Faster R-CNN with a per-region mask prediction head; the standard instance-segmentation architecture.
+3. Slide a small grey square across the image, record where masking it drops the prediction; produces a heatmap of "which regions did the network actually use."
+4. Region-proposal network learned end to end with the classifier; the two-stage detector that replaced its external proposal step.
+
+<details>
+<summary>Answers</summary>
+
+1. **U-Net.** The encoder-decoder with skips, classic medical-imaging segmentation.
+2. **Mask R-CNN.** Faster R-CNN + per-region mask head = instance segmentation.
+3. **Occlusion sensitivity.** Slow but directly faithful to "what the network is actually using."
+4. **Faster R-CNN.** Learned Region Proposal Network (RPN) replaces the external selective-search step that R-CNN and Fast R-CNN used.
+
+</details>
+
+**Part C: plan a visualization investigation.** You have trained an image classifier that achieves 95 percent accuracy on a validation set, but a colleague reports it makes occasional surprising mistakes on production images. You suspect the model may be using a spurious feature (like "snow in the background" for the wolf-vs-husky example). Describe a short investigation plan using techniques from this lesson, in 2-4 sentences, that would help test that hypothesis.
+
+<details>
+<summary>What a good answer looks like</summary>
+
+Run **Grad-CAM** on the surprising-failure images (and on correctly-classified images for contrast). If the heatmaps highlight background regions rather than the actual objects of interest, that is evidence of a spurious-feature problem. Cross-check with **occlusion sensitivity** on a few suspect cases: if covering the object barely changes the prediction while covering the background changes it a lot, the spurious feature is confirmed. For broader evidence, also project the model's deep features for these images via **t-SNE** and see whether the failure cases cluster by spurious feature (e.g., by background type) rather than by intended class.
+
+The deeper point: visualization techniques are diagnostic tools. They cannot prove the model is using a spurious feature in some deep sense, but a converging story across saliency, occlusion, and feature-space embedding is what evidence for spurious-feature reliance actually looks like in practice.
+
+</details>
+
+## Flashcards
+
+Nine cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay out the full set as one card per page, ready to print or save as a PDF for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="What does object detection output, and how does that differ from classification?">
+
+A list of (class label, bounding box) pairs, one per detected object. Classification outputs a single label for the whole image. Detection's variable-length list-of-objects output is what makes its architecture more than just a classifier.
+
+</Flashcard>
+
+<Flashcard question="IoU formula and what it measures?">
+
+`IoU = intersection area / union area`. Measures box overlap, 0 (none) to 1 (perfect). Standard match threshold is 0.5; stricter benchmarks use 0.75 or sweep across thresholds (mAP).
+
+</Flashcard>
+
+<Flashcard question="Two-stage vs one-stage detection: example of each + trade-off?">
+
+Two-stage: Faster R-CNN (region proposal then classify). One-stage: YOLO (single forward pass over a dense grid). Two-stage historically more accurate, slower; one-stage faster. Modern variants of both have narrowed the gap.
+
+</Flashcard>
+
+<Flashcard question="Anchor boxes in detection?">
+
+Pre-defined boxes of different shapes and sizes placed densely across the image. The network predicts offsets from these anchors rather than arbitrary box coords, which gives a sensible starting point and helps handle the range of object scales and aspect ratios.
+
+</Flashcard>
+
+<Flashcard question="Semantic vs instance segmentation?">
+
+Semantic: per-pixel class only (three cats all get "cat" pixels, no per-cat identity; FCN, U-Net). Instance: per-pixel class AND per-instance ID (three cats produce three separate masks; Mask R-CNN). Instance segmentation = detection + per-instance segmentation.
+
+</Flashcard>
+
+<Flashcard question="U-Net's distinguishing feature?">
+
+Encoder-decoder with skip connections from each encoder layer to the corresponding decoder layer. The skips pass spatial detail across the U-shape so the output is both semantically informed (deep features) and spatially precise (early features). Standard for medical image segmentation.
+
+</Flashcard>
+
+<Flashcard question="Saliency map vs occlusion sensitivity?">
+
+Saliency: gradient of class score wrt input pixels (cheap, one backward pass; "which pixels would most affect the score"). Occlusion: slide a grey square, record where masking drops the prediction (slower, many forward passes; more directly faithful to "what the network is actually using").
+
+</Flashcard>
+
+<Flashcard question="Grad-CAM in one sentence?">
+
+Uses the network's own feature maps near the top, weighted by gradients of the class score, to produce a coarse heatmap of "where in the image is the evidence for this class." Works on any CNN; most-used "where is the model looking" technique in practice.
+
+</Flashcard>
+
+<Flashcard question="Honest caveat about CNN visualization?">
+
+Useful for intuition and debugging; often flags obvious failures (wolf-vs-husky's snow background). NOT a complete explanation of why a network decides; interpretability remains an active research area (XAI). Treat visualizations as useful first looks, not as ground truth.
+
+</Flashcard>
+
+</FlashcardSet>

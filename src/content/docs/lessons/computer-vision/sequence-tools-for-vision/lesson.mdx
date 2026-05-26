@@ -1,0 +1,113 @@
+---
+title: "Lesson: Sequence tools for vision, recurrence and attention"
+description: "A single image is a static scene, but a lot of vision tasks are sequence-flavoured. A video is a sequence of frames; an image caption is a sequence of words; a vision transformer treats an image itself as a sequence of patches. This lesson covers the two sequence-processing tools (recurrence and attention) at the level needed for vision applications, and routes to sister tracks for the deep architectural mechanics. The unifying point is short: when the data or the answer is a sequence, the vision system needs a way to relate positions across that sequence, and the two ways the field has settled on are recurrence (one step at a time, carry a hidden state) and attention (compare every position to every other in parallel, weight by compatibility)."
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+So far this track has dealt with single static images: a 3072-number CIFAR input, a 224x224 ImageNet image, one input goes in and one label comes out. Plenty of vision tasks fit that shape. But many do not. Captioning a photo produces a *sequence* of words. Understanding a video means processing a *sequence* of frames. The most disruptive recent vision architecture, the vision transformer, treats an image itself as a *sequence* of small patches and dispenses with convolution entirely.
+
+This lesson covers the two tools the field uses to handle sequences, **recurrence** (RNNs and their cousins) and **attention** (with the transformer's particular form of it), at the level needed to read modern vision work. The deep architectural mechanics of both live in sister tracks; here we focus on what they look like *applied to vision*. The note at the end of the lesson points you at the right sister-track lesson for each if you want the full mechanical walkthrough.
+
+Combining recurrence and attention into one lesson here is a deliberate Phase 0 choice. Both are "sequence tools applied to vision" rather than vision-specific architectures, and Tracks 11, 12, and the upcoming practical-transformers track (T14) cover the architecture mechanics in depth. Repeating them here would duplicate; pointing to them keeps the focus on the vision-specific use cases.
+
+## Recurrence: one step at a time
+
+The recurrent neural network (RNN) is the older of the two ideas and the simpler to picture. To process a sequence, an RNN reads one input at a time and carries a **hidden state** forward from step to step. The hidden state is the network's running memory of what it has seen so far.
+
+In one line, the basic RNN update is:
+
+```
+h_t = f(W · x_t + U · h_{t-1} + b)
+```
+
+where `x_t` is the input at time `t`, `h_{t-1}` is the hidden state from the previous step, `W` and `U` are learned weight matrices, `b` is a learned bias, and `f` is a non-linearity (often `tanh` historically, or related). The output at step `t` is read off the hidden state, optionally through another linear layer. There are many variants (LSTMs and GRUs add internal gates that control what the hidden state remembers and forgets, addressing the original RNN's tendency to lose information over long sequences), but the spine is always: one element at a time, hidden state forward, output per step.
+
+For vision, the two canonical RNN use cases are:
+
+- **Image captioning.** A CNN encoder processes the image once to produce a feature vector; an RNN decoder then generates a caption one word at a time, with the image features serving as the initial context. So the input is a static image but the *output* is a sequence, and the RNN handles the sequence half.
+- **Video understanding.** Each frame is passed through a CNN to produce a per-frame feature; an RNN then processes those features as a sequence across time, so the model can recognize an action that depends on the temporal pattern (a hand reaching, then grasping, then lifting) rather than any one frame.
+
+The structural limits of the basic RNN are worth naming, because they motivate what came next: it processes the sequence **sequentially** (step `t` depends on step `t-1`'s hidden state, so the steps cannot be computed in parallel on a GPU), and it has trouble carrying information over **long sequences** (later steps tend to forget earlier ones, even with LSTM-style gating, especially when the relevant signal is far away in the sequence). For a vision system that needs to relate the first frame of a five-minute video to the last, both limits hurt.
+
+Track 12's lesson 2 (Why sequences need memory) covers the recurrence mechanism in more depth in a generic neural-network setting if you want the deeper walk.
+
+## Attention: process all positions at once
+
+**Attention** is the answer that mostly replaced recurrence for sequence work, including in vision. The core idea is short: instead of stepping through the sequence carrying a hidden state, compute, for each output position, a **weighted combination of all input positions**, where the weights depend on how well each input matches what the output position is "asking for."
+
+The standard formulation uses three matrices derived from the inputs: **queries** `Q`, **keys** `K`, and **values** `V`. The attention output is:
+
+```
+Attention(Q, K, V) = softmax( Q · K^T / sqrt(d_k) ) · V
+```
+
+Unpacked: `Q · K^T` produces a matrix of compatibility scores (how well each query matches each key, by dot product). Dividing by `sqrt(d_k)` (the dimension of the keys) keeps the scores from getting too sharp when `d_k` is large. The softmax turns each row into a probability distribution over input positions. Multiplying by `V` produces, for each query, a weighted average of the values, with weights given by the attention probabilities.
+
+The key practical differences from recurrence: **all positions are computed in parallel** (no sequential dependency between steps), and **every output position can directly attend to every input position** (no distance penalty). Both lifts come from the same change.
+
+Worked numerical example. Suppose we have one query `q = [1, 0]` (a 2-dimensional vector) and three keys `K = [[1, 0], [0, 1], [1, 1]]` with three corresponding values `V = [[1, 0], [0, 1], [1, 1]]`. With `d_k = 2`:
+
+```
+Scores (Q · K^T):      [1·1+0·0,  1·0+0·1,  1·1+0·1] = [1, 0, 1]
+Scaled (÷ sqrt(2)):    [0.707,    0,        0.707]
+exp(scaled):           [2.028,    1.000,    2.028]
+softmax (sum = 5.056): [0.401,    0.198,    0.401]
+output (weighted V):   0.401·[1,0] + 0.198·[0,1] + 0.401·[1,1]
+                     = [0.802, 0.599]
+```
+
+The query matched keys 1 and 3 equally (both with score 1) and key 2 not at all (score 0), so the softmax distributed 0.401 of the weight to keys 1 and 3 and 0.198 to key 2; the output is the corresponding weighted average of `V`. That four-line recipe (scores, scale, softmax, weighted sum) is the entire mechanism, scaled to dozens of queries and dozens of keys.
+
+Track 5 covers attention and the full transformer block in depth; the upcoming practical-transformers track (T14) covers transformer-style architectures end to end with code. For T16's purposes, the four-line recipe and the parallel-and-long-range advantages are what you need to read modern vision architectures.
+
+## Vision applications: where each tool actually shows up
+
+The two tools combine into three families of vision systems that are worth recognizing on sight.
+
+**Image captioning with CNN + RNN (or CNN + attention).** The classic 2015-era architecture is a CNN encoder feeding an RNN decoder: convolution turns the image into a feature vector, recurrence turns the vector into a caption word by word. The cleaner modern version usually replaces the RNN with an attention-based decoder that can attend to *different regions* of the image at each generated word ("attention over image regions"). When the model generates "cat," its attention map lights up over the cat in the image; when it generates "sitting on chair," the attention shifts to the chair. The attention map is one of the few directly inspectable behaviours in a deep vision system.
+
+**Video understanding.** Process each frame with a CNN (or, increasingly, with a vision transformer per frame), and then process the resulting per-frame feature *sequence* with either an RNN, a temporal CNN, or a transformer encoder over time. Action recognition, video captioning, video question-answering, and similar tasks all sit on this two-stage shape: per-frame visual features, then a sequence model over time.
+
+**Vision Transformer (ViT): images as sequences of patches.** This is the most disruptive recent shift in vision architecture. Instead of using convolution at all, ViT cuts the input image into a grid of small fixed-size patches (commonly 16 by 16), flattens each patch into a vector, treats those patch vectors as a *sequence* (with learned position embeddings so the model knows where each patch sat in the image), and runs a standard transformer encoder over that sequence. The output is a representation of the image (often read off a special learnable "class token" position), and a linear classifier on top produces class scores, exactly like lesson 2's tail.
+
+ViT was a real surprise: a transformer with no convolutional inductive bias, trained on enough data, matches or beats ResNet-family CNNs on ImageNet and scales further with more data. It also unifies architectures across modalities: the same transformer block used in language models works on images this way, which made multimodal systems much simpler to build (a single block type can process text tokens and image patches together).
+
+## Where the deep mechanics live (sister-track routing)
+
+This lesson stays at the "applied to vision" level by design. If you want to go deeper on either tool, the right destinations are:
+
+- **Recurrence (RNN, LSTM, GRU mechanics).** Track 12 lesson 2 (Why sequences need memory) covers the recurrence loop in a generic NN setting.
+- **Attention and transformer blocks (Q/K/V, multi-head, full transformer encoder/decoder).** Track 5 (AI Foundations) has a multi-lesson sequence on attention and the transformer architecture; the upcoming practical-transformers track (T14) covers it end to end with code.
+- **Track 11 (Neural Network Intuition)** lessons 3 and 4 establish the linear + non-linearity + backprop machinery both tools run on top of; the training loop in all three (RNN-based, attention-based, ViT) is the same lesson-3-of-T16 loss and gradient descent.
+
+## Why this matters when you use AI
+
+Three things you read about modern AI are this lesson in disguise.
+
+When a captioning model "looks at" different parts of an image as it writes the caption, you are seeing attention over image regions. When a video model "understands" that someone is *catching* a ball rather than *throwing* it, the temporal sequence model (RNN, temporal CNN, or transformer) is what enables that. When a paper or product announcement says "ViT-Large" or "Swin Transformer" or "DINOv2," the underlying architecture is the vision-transformer pattern: image -> patches -> transformer encoder.
+
+The unification ViT enabled also explains a lot of the recent multimodal model headlines. A system that "understands images and text together" usually does so by encoding each modality into the same kind of token stream (patches for images, sub-words for text), running a transformer over the combined stream, and reading off the answer. The same building block does both jobs. That symmetry was not architecturally possible before attention.
+
+## Common pitfalls
+
+**Confusing recurrence's "hidden state" with the network's weights.** The hidden state changes step by step within a single sequence; the weights are fixed across the whole sequence (only updated by backprop, between mini-batches, like every other parameter).
+
+**Thinking attention is a separate idea from the basic NN.** It is a particular kind of layer that uses the same multiply-add-softmax machinery, with the twist that its "weights" (the attention probabilities) depend on the input rather than being fixed parameters. The fixed parameters are the matrices that produce Q, K, V from the input.
+
+**Confusing ViT with "a convnet with attention added."** ViT replaces convolution; it does not add attention next to it. The classic ResNet uses convolution and no attention. ViT uses attention and no convolution. Hybrid models exist, but the pure ViT was the surprise.
+
+**Treating "transformer is better than CNN" as a settled fact.** Transformers and CNNs trade off: transformers need more data and compute to outperform CNNs but scale further; CNNs are more sample-efficient and remain competitive at moderate scale, especially with modern training recipes (ConvNeXt-style). The right choice depends on dataset size, compute budget, and deployment constraints.
+
+## What you should remember
+
+- **Recurrence (RNN, LSTM, GRU) processes a sequence step by step,** carrying a hidden state forward. `h_t = f(W · x_t + U · h_{t-1} + b)`. Vision uses: image captioning (RNN as decoder) and video understanding (RNN over per-frame features). Limits: sequential (no parallelism) and weak at long-range dependencies.
+- **Attention compares every position to every other in parallel,** outputting a weighted average of values with weights from query-key compatibility. `Attention(Q, K, V) = softmax(Q · K^T / sqrt(d_k)) · V`. Both lifts (parallel + long-range) come from the same change.
+- **Vision applications:** CNN-plus-RNN/attention image captioning; per-frame-CNN-then-sequence-model video understanding; **Vision Transformer (ViT)** treats an image as a sequence of patches and uses attention end to end, no convolution. ViT matches or beats ResNet at scale and unified vision with language architecturally.
+- **Sister tracks own the deep mechanics.** This lesson is what these tools look like applied to vision; Track 12 L2 covers recurrence, Track 5 (multi-lesson sequence) and T14 cover attention and transformers in depth. The training loop is identical: T16 L3's loss and gradient descent over T16 L4's backprop.
+
+Sequences enter computer vision in three places: as the output (captioning), as the input (video, ViT patches), and as both (video captioning). Recurrence handles them one at a time; attention handles them in parallel. The vision-transformer's bet, that an attention-only architecture can replace convolution entirely on images, has paid off at scale.
+
+Next: with the sequence tools in hand, we can go beyond "what is in this image" to richer questions, "what is in this image AND where is it" (detection), "which pixels belong to which object" (segmentation), and "what is this network actually looking at" (visualization). The next lesson covers all three.

@@ -1,0 +1,127 @@
+---
+title: "Cheatsheet: Diffusion models"
+description: One-page reference. Two-direction setup, training, inference, the three-way trade-off, latent diffusion, text-to-image.
+sidebar:
+  order: 5
+  label: Cheatsheet
+artifact: cheatsheet
+---
+
+## The two-direction setup
+
+| Direction | What | Learned? |
+|---|---|---|
+| Forward | Repeatedly add Gaussian noise: `x_t = sqrt(1-β_t)·x_{t-1} + sqrt(β_t)·ε` | No; defined by noise schedule β_1..β_T |
+| Reverse | Predict noise at step t; iterate from x_T back to x_0 | Yes; the trained network |
+| Generation | Start at `x_T ~ N(0, I)`; iterate reverse T times → `x_0` | At inference only |
+
+## Forward-step formula
+
+`x_t = sqrt(1 - β_t) · x_{t-1} + sqrt(β_t) · ε`,  with `ε ~ N(0, I)`.
+
+| Term | Effect |
+|---|---|
+| `sqrt(1 - β_t) · x_{t-1}` | Shrinks previous image slightly toward zero |
+| `sqrt(β_t) · ε` | Adds calibrated bump of fresh noise |
+| Both square roots | Keep total variance normalized as t grows |
+
+## Worked forward step
+
+| Source | x_{t-1} | β_t | ε | x_t |
+|---|---|---|---|---|
+| Body | 0.8 | 0.1 | -0.3 | ≈ 0.664 |
+| Practice | 0.5 | 0.04 | 1.5 | ≈ 0.790 |
+
+## Training recipe
+
+| Step | Action |
+|---|---|
+| 1 | Sample training image x_0 |
+| 2 | Sample random timestep t ~ uniform(1, T) |
+| 3 | Sample noise ε ~ N(0, I); compute x_t in one shot via the closed-form |
+| 4 | Pass (x_t, t) to network (typically U-Net with time embedding) |
+| 5 | Network predicts ε; loss = `||ε - ε_θ(x_t, t)||²` (MSE) |
+| 6 | Backprop + gradient descent (same L3-L4 machinery) |
+
+No adversarial dynamic; no encoder-decoder reconstruction term; just clean regression. Why diffusion trains so stably vs GANs.
+
+## Inference
+
+| Step | Detail |
+|---|---|
+| Start | x_T ~ N(0, I) (pure noise) |
+| Iterate | For t = T, T-1, ..., 1: use network to step from x_t to x_{t-1} |
+| End | x_0 is the generated image |
+| Cost | T forward passes (T often 1000 originally; sped up to 25-100 by DDIM, 1-4 by distillation) |
+
+## Inference speed-ups
+
+| Technique | What it does |
+|---|---|
+| DDIM (Song 2020) | Deterministic sampler; good samples in 25-100 steps |
+| Distilled diffusion (multiple lines) | Student model produces image in 1-4 steps |
+| Latent diffusion (Rombach 2022) | Operate in small VAE-compressed latent space; each step cheaper |
+
+## Latent diffusion architecture (the modern default)
+
+| Component | Role |
+|---|---|
+| Pre-trained VAE encoder | Image → compact latent code |
+| Diffusion model | Runs reverse process in the latent space |
+| Pre-trained VAE decoder | Latent → pixels |
+
+L11's VAE is load-bearing here as the first-stage encoder, even though diffusion replaced VAE for direct generation.
+
+## Text-to-image conditioning
+
+| Element | Detail |
+|---|---|
+| Cross-attention in U-Net | Image-feature positions attend to text-embedding positions |
+| Text embedding | Typically from CLIP's text encoder |
+| Classifier-free guidance | Train with + without prompt; combine at inference for tunable adherence vs diversity |
+
+## Three-way trade-off (this lesson + L11)
+
+| Property | VAE | GAN | Diffusion |
+|---|---|---|---|
+| Output quality | Slightly blurry | Sharp | Sharp / high-quality |
+| Training stability | Stable, principled | Unstable, art | Stable, simple MSE |
+| Mode coverage | Good | Mode-collapse risk | Good (no mode collapse) |
+| Likelihood | ELBO bound | None | Approximate / score-based |
+| Inference speed | Single pass (fast) | Single pass (fast) | Iterative (T steps; slow) |
+| Conditioning quality | Possible | Possible | Excellent (text-to-image dominant) |
+| Production use | Often as first-stage encoder | Real-time / on-device | Text-to-image; conditional generation; controlled editing |
+
+## Production systems (all diffusion-based)
+
+| System | Notes |
+|---|---|
+| Stable Diffusion | Latent diffusion; open-source; consumer-grade |
+| Imagen (Google) | High-resolution text-to-image |
+| DALL-E 2 / DALL-E 3 | OpenAI's text-to-image |
+| Midjourney | Proprietary; widely understood to be diffusion-based |
+
+## Vision applications
+
+| Application | Notes |
+|---|---|
+| Text-to-image | The dominant use today |
+| Image-to-image translation (text-guided) | img2img modes; instruction-based editing |
+| Inpainting / outpainting | Conditional on surrounding region |
+| Super-resolution | Condition on low-res input |
+| Controlled generation | ControlNet (depth, edges, pose, etc.) |
+| Video generation | Active research; mainstream-product-emerging |
+
+## Pitfalls
+
+| Pitfall | Reality |
+|---|---|
+| "Diffusion is just a fancier VAE" | Structurally different; no bottleneck latent; learns noise prediction, not direct generation |
+| β_t = predicted noise | β_t is the fixed schedule (how much noise gets added); `ε_θ(x_t, t)` is the network's prediction |
+| Iterative cost is fixed | DDIM, distillation, latent diffusion have dropped it dramatically; continues to drop |
+| Diffusion = text-to-image only | The architecture is general; inpainting, super-resolution, controlled generation, video, 3D are all active |
+| Diffusion = controversy | Technique vs application; the mechanism is general, controversies are about specific deployment choices |
+
+## One-line takeaway
+
+Diffusion reframes generation as iterative noise removal: train a network on simple MSE noise-prediction; sample by iterating from pure noise back to an image; pay iterative inference time for high-quality + stable training. Modern text-to-image systems (Stable Diffusion, Imagen, DALL-E 2/3) are all diffusion-based.

@@ -1,0 +1,193 @@
+---
+title: "Practice: Diffusion models"
+description: Self-check on the two-direction diffusion idea, a fresh forward-noising calculation, a method-choice exercise across the three generative families, and flashcards.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Seven short questions. Answer each before opening the collapsible.
+
+**1. Describe the diffusion model's two directions in one sentence each.**
+
+<details>
+<summary>Show answer</summary>
+
+**Forward** (no learning, just defined): repeatedly add Gaussian noise to a training image, by a noise schedule `β_1, ..., β_T`, until `x_T` is essentially pure noise. **Reverse** (the learned part): a network learns to predict the noise added at each step, so by running the network iteratively from `x_T` back toward `x_0`, you can transform pure noise into a sample from the data distribution.
+
+</details>
+
+**2. Write the forward-step formula and explain what each term does.**
+
+<details>
+<summary>Show answer</summary>
+
+`x_t = sqrt(1 - β_t) · x_{t-1} + sqrt(β_t) · ε`, where `ε ~ N(0, I)`. The first term **shrinks** the previous image slightly toward zero (by `sqrt(1 - β_t) ≈ 0.95` to 0.99); the second adds a calibrated **bump of fresh noise** (scaled by `sqrt(β_t)`). Both factors are square roots so the total variance stays normalized as `t` grows.
+
+</details>
+
+**3. What is the training loss for a diffusion model, and what does the network predict?**
+
+<details>
+<summary>Show answer</summary>
+
+Simple **MSE between predicted and true noise**: `|| ε - ε_θ(x_t, t) ||²`. At each training step: pick a training image x_0, sample a random timestep t, sample noise ε, produce x_t via a closed-form expression, then ask the network (a U-Net conditioned on t) to predict ε given (x_t, t). No adversarial dynamics; no encoder-decoder reconstruction term; just one regression target per training example. This is why diffusion trains so stably compared to GANs.
+
+</details>
+
+**4. Why is diffusion inference slow, and what techniques mitigate it?**
+
+<details>
+<summary>Show answer</summary>
+
+Inference requires running the trained reverse step T times (often 1000 in the original formulation) to go from `x_T` to `x_0`; each step is one network forward pass. Mitigations: **DDIM** (deterministic sampler producing good samples in 25-100 steps, sometimes fewer); **distilled diffusion** (a smaller student model produces a final image in 1-4 steps); **latent diffusion** (operate in a smaller VAE-compressed latent space, so each step is cheaper). Combined, modern systems often run in seconds rather than minutes.
+
+</details>
+
+**5. What is latent diffusion and why is it important?**
+
+<details>
+<summary>Show answer</summary>
+
+Latent diffusion (Rombach et al. 2022) runs the diffusion process not on pixels but on a much smaller **VAE-compressed latent space**. A pre-trained VAE encoder maps the image to a latent code; diffusion operates in that latent space; the VAE decoder maps the final latent back to pixels. Each diffusion step operates on a smaller tensor so it is much cheaper. This is the architecture behind Stable Diffusion and is the reason text-to-image generation became affordable to run at consumer scale. It also makes the L11 VAE load-bearing in production: it is the first-stage encoder for latent-diffusion.
+
+</details>
+
+**6. How does text conditioning work in text-to-image diffusion?**
+
+<details>
+<summary>Show answer</summary>
+
+The U-Net's noise-prediction blocks include **cross-attention** layers that let the image-feature positions attend to text-embedding positions. The text embedding is produced by a pre-trained language model (typically CLIP's text encoder). So at each denoising step, the network's noise prediction is conditioned on what the prompt says, steering the iterative denoising trajectory toward an image matching the prompt. **Classifier-free guidance** combines conditioned and unconditioned predictions at inference for a tunable "how closely to follow the prompt" knob.
+
+</details>
+
+**7. State the diffusion vs VAE vs GAN trade-off in one sentence each.**
+
+<details>
+<summary>Show answer</summary>
+
+**VAE:** stable training + smooth latent space, but slightly blurry outputs and single-pass fast inference. **GAN:** sharp outputs + single-pass fast inference, but unstable training, mode-collapse risk, no likelihood, no built-in encoder. **Diffusion:** high quality + stable training + good mode coverage, but iterative (slow) inference. Diffusion wins quality and stability; the cost is inference time, which is being attacked by DDIM / distillation / latent diffusion.
+
+</details>
+
+## Try it yourself: forward step, method choice, denoising trajectory reasoning
+
+Three exercises, about 15 minutes.
+
+**Part A: a fresh forward-noising step.** A single pixel currently has value `x_{t-1} = 0.5`, the noise schedule at step `t` is `β_t = 0.04`, and we sample `ε = 1.5` from `N(0, 1)`. Compute `x_t` using `x_t = sqrt(1 - β_t) · x_{t-1} + sqrt(β_t) · ε`. (Use `sqrt(0.96) ≈ 0.980`, `sqrt(0.04) = 0.2`.)
+
+<details>
+<summary>Worked answer</summary>
+
+```
+x_t = sqrt(1 - 0.04) · 0.5 + sqrt(0.04) · 1.5
+    = sqrt(0.96)     · 0.5 + sqrt(0.04) · 1.5
+    ≈ 0.980          · 0.5 + 0.200      · 1.5
+    ≈ 0.490          + 0.300
+    ≈ 0.790
+```
+
+So `x_t ≈ 0.79`. The pixel shrank slightly (the `sqrt(0.96) · 0.5 ≈ 0.49` term, just under the original 0.5) and then was bumped up by the sampled positive noise (0.2 · 1.5 = 0.30), landing at 0.79.
+
+Note how small β_t = 0.04 makes the per-step change: the original signal mostly survives one step. It is the *accumulation* of 1000 such small steps that turns the image into pure noise. The reverse process learns to undo *one* of these small steps reliably; running it 1000 times reverses the whole forward chain.
+
+</details>
+
+**Part B: method choice across the three generative families.** For each task, name the most-likely-best generative-image family (VAE, GAN, or diffusion) and briefly say why.
+
+1. Highest-quality text-to-image generation, latency tolerant (10-30 seconds per image is fine).
+2. Smooth interpolation between two faces for a morphing UI.
+3. Real-time image generation in a mobile game (must respond in well under a second).
+4. Train a model to inpaint missing regions of medical scans with a constraint that the inpainted regions look plausible to a radiologist.
+
+<details>
+<summary>Suggested answers</summary>
+
+1. **Diffusion** (or specifically latent diffusion / Stable Diffusion family). Highest-quality + tolerant of iterative inference time + text-conditioning is the diffusion sweet spot.
+2. **VAE-family** (or StyleGAN-family). Smooth latent space is the strength here; linear interpolation in latent space decodes to gradual morphs.
+3. **GAN** (or distilled diffusion / VAE). Single-pass inference is essential for real-time; the quality trade-off is acceptable. GANs and VAEs both decode in one forward pass; a heavily distilled diffusion model (4 steps or fewer) is also viable.
+4. **Diffusion**, almost certainly. Conditional inpainting is one of diffusion's strongest application areas; the iterative process can be conditioned to keep the surrounding region fixed and generate only the masked region, with high fidelity. Radiologist plausibility is a quality constraint; diffusion currently wins on quality for conditional generation.
+
+</details>
+
+**Part C: trajectory reasoning.** You are running text-to-image diffusion with prompt "a red sports car." With the default classifier-free-guidance scale, the output is a recognizable red sports car. You crank the guidance scale much higher. (1) What direction should the output shift in? (2) What direction should it shift in if you instead drop the guidance scale much lower? Briefly explain both.
+
+<details>
+<summary>What a good answer looks like</summary>
+
+(1) Higher guidance scale: the output should adhere more closely to the prompt's content (the car becomes "more redder," "more sports-car-shaped," "more iconic-sports-car"), often at the cost of some image diversity and naturalness. At very high guidance scales, outputs can become over-saturated, with unnatural color, anatomical artifacts, or strange textures, because the model is being pushed too hard toward the prompt and the prediction trajectory leaves the natural-image manifold.
+
+(2) Lower guidance scale: the output drifts toward more diverse and more natural-looking images, but the connection to the prompt weakens. At very low guidance, the model may produce images that only loosely match "red sports car," or that drift into adjacent concepts (sedans, motorbikes, red things that are not cars).
+
+The deeper point: classifier-free guidance is a balance between **prompt adherence** and **sample naturalness**. Different users want different settings (artists often crank it for stylized aesthetics; documentation pipelines often lower it for naturalness). It is one of the main user-facing knobs in any text-to-image system precisely because the trade-off is real.
+
+</details>
+
+## Flashcards
+
+Nine cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay out the full set as one card per page, ready to print or save as a PDF for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="Diffusion's two directions?">
+
+Forward (no learning): repeatedly add Gaussian noise per a schedule β_1..β_T until x_T is pure noise. Reverse (learned): network predicts the noise at each step; iterating from x_T back to x_0 turns pure noise into a synthesized image.
+
+</Flashcard>
+
+<Flashcard question="Forward step formula?">
+
+`x_t = sqrt(1 - β_t) · x_{t-1} + sqrt(β_t) · ε` where ε ~ N(0, I). First term shrinks slightly; second adds calibrated noise. Square roots keep total variance normalized.
+
+</Flashcard>
+
+<Flashcard question="Diffusion training loss and target?">
+
+Simple MSE between predicted and true noise: `||ε - ε_θ(x_t, t)||²`. Network (typically a U-Net conditioned on t) predicts the noise ε given (x_t, t). No adversarial dynamic; one clean regression target. Stable training.
+
+</Flashcard>
+
+<Flashcard question="Why is diffusion inference slow, and three mitigations?">
+
+T iterative forward passes (often 1000) to denoise. Mitigations: DDIM (deterministic sampler, 25-100 steps); distilled diffusion (1-4 steps via a student model); latent diffusion (operate in a small VAE-compressed latent space).
+
+</Flashcard>
+
+<Flashcard question="Latent diffusion in one sentence?">
+
+Run the diffusion process in a small VAE-compressed latent space (encoder + decoder are pre-trained) instead of in pixel space; each diffusion step is much cheaper. The architecture behind Stable Diffusion; the reason text-to-image became affordable.
+
+</Flashcard>
+
+<Flashcard question="How does text-to-image conditioning work?">
+
+Cross-attention in the U-Net's blocks lets image-feature positions attend to text-embedding positions (typically from CLIP's text encoder). The denoising step is conditioned on what the prompt says. Classifier-free guidance tunes how strictly the output follows the prompt.
+
+</Flashcard>
+
+<Flashcard question="What is classifier-free guidance and what does it control?">
+
+A trick: train both conditioned (on prompt) and unconditioned; at inference, take a weighted combination. The guidance scale knob trades off prompt adherence (high scale, "stays close to prompt") vs sample naturalness/diversity (low scale, "more diverse but loosely on-prompt"). One of the main user-facing knobs in text-to-image systems.
+
+</Flashcard>
+
+<Flashcard question="Diffusion vs VAE vs GAN, one-line trade-offs?">
+
+VAE: stable + smooth latent, blurry. GAN: sharp + fast, unstable. Diffusion: high-quality + stable + good mode coverage, slow iterative inference. Diffusion wins quality and stability; the cost is inference time (mitigated by DDIM, distillation, latent diffusion).
+
+</Flashcard>
+
+<Flashcard question="Why is the L11 VAE still load-bearing in modern diffusion systems?">
+
+Latent diffusion uses a pre-trained VAE encoder to map the image to a compact latent space; diffusion runs there; the VAE decoder maps back to pixels. The VAE is the first-stage encoder for the architecture behind Stable Diffusion. It never went away; it moved into a different layer of the stack.
+
+</Flashcard>
+
+</FlashcardSet>

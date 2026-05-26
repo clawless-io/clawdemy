@@ -1,0 +1,121 @@
+---
+title: "Lesson: Connecting pictures and words, vision and language"
+description: Modern AI systems do not treat images and language as separate problems. They share a representation. This lesson covers the family of techniques that connects vision with language. We walk CLIP's two-tower contrastive setup (the foundation of most modern multimodal vision systems), see how the same trained model enables zero-shot classification, image-text retrieval, and (with a text decoder added) image captioning and visual question answering, and work one image-text cosine similarity by hand. The deep mechanics of cross-modal architectures live in sister tracks; this lesson focuses on what CLIP does and how the downstream applications fall out of it.
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+The lessons so far in Phase 3 have looked at images on their own. We have learned features from unlabeled images (lesson 10), generated images (lessons 11 and 12), and recovered 3D structure from images (lesson 13). The thread that connects modern AI systems most directly to everyday use is one we have not yet covered head-on: **the bridge between images and language**.
+
+When you search your phone's photo library by typing "dog at the beach" and the right photos surface, that is a vision-language model. When a captioning system writes "a child holding a red balloon" for an image, that is a vision-language model. When a visual-question-answering system tells you what is on a restaurant menu in a photograph, when a screen-reader for visually-impaired users describes what is in front of them, when text-to-image diffusion (lesson 12) conditions on a prompt, vision-language models are doing the connecting work.
+
+This lesson covers the family of techniques that connects pictures and words. The architectural core is short and elegant: **two encoders (one for images, one for text) trained to embed paired data into the same vector space, where matching pairs are close and mismatched pairs are far**. Everything else, zero-shot classification, retrieval, captioning, VQA, falls out of that single setup. As with lessons 11-12, the deep mechanics of cross-modal architectures live in sister tracks (T24 covers vision-language models end-to-end; T14 covers transformer attention in depth); this lesson stays at vision-context applied intuition.
+
+## CLIP: the foundational two-tower setup
+
+The architectural pattern was crystallized by **CLIP** (Contrastive Language-Image Pre-training, Radford et al. 2021). The setup is two encoders trained jointly:
+
+- An **image encoder** (a Vision Transformer or a ResNet) that maps an image to an embedding vector.
+- A **text encoder** (a transformer) that maps a text string (typically a caption) to an embedding vector of the same dimension.
+
+Both encoders' outputs are projected to a shared embedding space; both are L2-normalized to unit vectors. Training data: **roughly 400 million (image, text) pairs** scraped from the web (a captioned image, or an image with surrounding alt text).
+
+The training objective is **contrastive**, in exactly the sense covered in lesson 10's self-supervised section, but now across modalities rather than within one modality:
+
+- For each `(image, text)` pair in a mini-batch, treat the matching pair as a **positive** (they should have high cosine similarity in the shared embedding space).
+- Treat the same image paired with any other text in the batch as a **negative** (low cosine similarity), and the same text paired with any other image as a negative.
+- Use a symmetric **InfoNCE loss** (essentially the NT-Xent loss from SimCLR, applied across image-text pairs in both directions) to pull positives together and push negatives apart.
+
+After training, the joint embedding space has the property that **an image and a caption describing it land near each other**; an image and an unrelated caption land far apart. That property is the asset; the downstream uses are different ways to read value out of it.
+
+## A worked image-text similarity
+
+Cosine similarity between an image embedding and a text embedding looks exactly like the self-supervised case from lesson 10: `cos(u, v) = (u · v) / (||u|| · ||v||)`. The new piece is just that one of the vectors came from an image encoder and the other from a text encoder; both sit in the same vector space because that is what CLIP's training enforced.
+
+A small numerical example. Suppose, after L2 normalization (so both vectors have length 1), CLIP gives an image of a cat the embedding `img = [0.6, 0.8]`, the caption "a photo of a cat" the embedding `txt_cat = [0.5, 0.866]`, and an unrelated caption "a photo of a car" the embedding `txt_car = [0.8, -0.6]`. Both vectors are unit-length, so the cosine simplifies to the dot product:
+
+```
+cos(img, txt_cat) = (0.6)(0.5) + (0.8)(0.866)
+                  = 0.300 + 0.6928
+                  ≈ 0.993       (very high; matching pair)
+
+cos(img, txt_car) = (0.6)(0.8) + (0.8)(-0.6)
+                  = 0.480 + (-0.480)
+                  = 0.000       (orthogonal; unrelated)
+```
+
+The cat-photo's embedding is ~0.99 cosine-similar to the cat-caption's embedding and orthogonal (0.0) to the car-caption's embedding. That structure is the entire useful property of a CLIP-style model: the geometry of the shared space encodes semantic content. Everything below uses it.
+
+## Zero-shot classification
+
+The first and most striking downstream use is **zero-shot classification**. You can build an image classifier for a new set of categories *without training on any of them*.
+
+The recipe is short. Pick the K categories you want to classify into (say "cat", "dog", "car"). Build a text prompt for each (commonly "a photo of a {class}"). Encode each prompt with the trained CLIP text encoder, producing K text embeddings. At inference, encode the input image with the trained CLIP image encoder. The predicted class is the one whose text embedding is most cosine-similar to the image embedding.
+
+That is it. You did no training on the K-class task; you just leveraged CLIP's general-purpose embedding space. Zero-shot CLIP was competitive with fully-supervised models on many ImageNet-style benchmarks at the time of publication, and it generalized to many categories far outside ImageNet without further tuning. The same trick works for arbitrary classes the developer thinks of in advance: medical conditions, products on a shelf, or fine-grained categories with no labeled training set, all just by changing what text strings get embedded.
+
+The recipe extends to **prompt engineering**: small changes to the text template ("a photo of a {class}" vs "an iPhone photo of a {class}" vs "a sketch of a {class}") can substantially shift accuracy by anchoring CLIP to a register of imagery; this is one of the very first cases in modern AI where prompt design materially affected downstream metrics.
+
+## Image-text retrieval
+
+The same setup gives **retrieval** in two directions for free. Encode a large corpus of images into a vector database; at query time, encode a text query and find the nearest image embeddings, that is **text-to-image search**. Reverse the corpus and query directions for **image-to-text search**.
+
+When your phone's photo library lets you search by typing "sunset" or "dog at the beach," the underlying machinery is some descendant of this: a CLIP-style image encoder indexed all your photos into a shared embedding space; your text query hits a nearest-neighbour search in that space.
+
+## Captioning: add a text decoder
+
+Zero-shot classification and retrieval treat the model as a **discriminator** of image-text matches. To produce text from images, you need a **decoder**. The standard recipe:
+
+- Use a strong image encoder (CLIP's, or a self-supervised ViT, or a similar pre-trained encoder) to embed the image.
+- Pass the image embedding (or richer per-region image features) into a **language model decoder** (a transformer that generates text one token at a time, conditioned on the image features).
+- Train the system to produce the matching caption for each training image, using standard language-model cross-entropy loss.
+
+Modern captioning architectures (BLIP, CoCa, LLaVA, and follow-ups) combine variations on this shape. The decoder is often a smaller language model with cross-attention to image features (lesson 7's cross-attention pattern, now mediating between modalities rather than within one). Captioning is one of the most direct vision-language tasks, and its quality has improved substantially since CLIP-style image encoders became widely available.
+
+## Visual Question Answering (VQA)
+
+A further extension: given an image and a question about it, produce an answer. "What color is the car in this picture?" "How many people are in the room?" "Is there food on the table?" The architecture is essentially the captioning setup with one extra piece: the text decoder's prompt is the question, and the answer is generated conditioned on both the image features and the question.
+
+VQA was a stand-alone field with custom architectures (VQA models with explicit attention over image regions, custom relation reasoning, etc.) before being largely subsumed by the more general vision-language-model recipe of "good image encoder + good language model + cross-attention + train on many image-question-answer triples." The trend has been toward fewer task-specific architectures and more general-purpose VLMs that handle classification, retrieval, captioning, and VQA from the same trained weights.
+
+## Where modern vision-language models sit
+
+Modern vision-language models (VLMs) typically take the shape:
+
+- A pre-trained **image encoder** (often a ViT trained either self-supervised or with a CLIP-style contrastive objective).
+- A pre-trained **language model decoder** (a transformer trained on text).
+- A **bridge module** that projects image features into the language-model's input space, often as a small adapter network or a learnable set of "query tokens" that compress image features.
+- Trained on image-text pairs (captions, image-question-answer triples, structured visual instructions) end-to-end or in stages, with the language model often instruction-tuned for vision tasks.
+
+The same architecture handles classification, retrieval (often via a separate CLIP-style head), captioning, VQA, and many other vision-language tasks from a single trained system. The deeper mechanical details (which bridge module shapes, how training data is curated, how multi-stage training schedules work) live in T24's vision-language-model treatment.
+
+## Why this matters when you use AI
+
+If you have searched a photo gallery by typing what you wanted to find, used a text-to-image system (lesson 12's diffusion + CLIP-style text conditioning), asked a screen-reader to describe an image, or interacted with any "vision-language" feature in a consumer AI product, the bridge between vision and language is doing the connecting work. CLIP-style contrastive pre-training is the engine behind most of these systems; even when the final product looks like text-to-image or VQA, a CLIP-style encoder is often inside it as one component.
+
+The economic point that closes Phase 3's framing: image-text pairs are abundant on the web (every image with a caption, alt text, or surrounding text is a free training pair). That abundance is what made the 400-million-pair scale of CLIP and its successors feasible. Self-supervised vision (lesson 10) made vision feasible without per-image labels; vision-language pre-training made multimodal AI feasible by using the web's natural pairing of images and text as the training signal. Both are part of the same shift: stop paying for hand-labeled data when the world has enough natural-occurring structure to exploit.
+
+## Common pitfalls
+
+**Treating CLIP as a classifier with a fixed label set.** It is a **joint embedding model**. Classifying with it is a downstream use that turns class names into text embeddings; you can change the classes by changing the text. The model itself has no fixed label set.
+
+**Forgetting that "zero-shot" still means "trained on something."** CLIP was trained on 400M image-text pairs. "Zero-shot classification" means zero training on the specific target task or labels; the model's general-purpose vision-language understanding was learned at scale, from data not curated for any one task.
+
+**Conflating CLIP's bias with a property of the architecture.** CLIP-style models inherit biases from their training data (which is web-scraped image-text pairs; the web has its own statistics). Those biases are real and study-worthy, but they are properties of the *data*, not the architectural pattern. A CLIP-style model trained on a different dataset has different biases.
+
+**Thinking VLMs do "understanding" in a human sense.** The geometry of the joint embedding space encodes statistical co-occurrence of images and text on the web. That statistical structure produces impressive downstream behaviour but is not the same as understanding the scene. The systems are sometimes confidently wrong on images outside their training distribution, exactly as you would expect from a pattern-matcher rather than a reasoner.
+
+## What you should remember
+
+- **CLIP's two-tower setup** (Radford et al. 2021): an image encoder + a text encoder trained jointly on ~400M web image-text pairs with a contrastive loss (matching pairs close in a shared embedding space, mismatched pairs far). The trained embedding space is the asset; all downstream uses read value from its geometry.
+- **Cosine similarity** between image and text embeddings encodes semantic match: `cos(img, txt_match) ≈ high`, `cos(img, txt_unrelated) ≈ 0` (or negative). Body: `[0.6, 0.8]` cat-image vs `[0.5, 0.866]` cat-text → cos ≈ 0.993; vs `[0.8, -0.6]` car-text → cos ≈ 0.000.
+- **Zero-shot classification.** Encode candidate class names as text prompts ("a photo of a {class}"); at inference, pick the class whose text embedding is closest to the image embedding. No training on the target task. Competitive with fully-supervised on many benchmarks. Prompt design matters.
+- **Image-text retrieval.** Same embedding space supports text-to-image and image-to-text search via nearest-neighbour lookup. The engine behind modern photo-gallery search.
+- **Captioning and VQA.** Add a text decoder (a language model with cross-attention to image features). Train to generate text conditioned on image + (optional question). Modern systems (BLIP, CoCa, LLaVA, and successors) use this shape; the trend is toward general-purpose VLMs that handle multiple tasks from one trained model.
+- **The economic frame.** Image-text pairs are abundant on the web; CLIP-style pre-training exploits that abundance to learn cross-modal structure at scale. The same shift that self-supervised learning made for within-modality vision (use unlabeled data) extends to cross-modal: use naturally-paired data instead of expensive task-specific annotation.
+
+Image and text are different modalities; CLIP showed that a single shared embedding space can hold both, learned from naturally-paired web data. Everything from photo-gallery search to text-to-image generation to captioning to VQA has built on top of that one architectural pattern. Phase 3 is closing on this lesson and the next.
+
+Next: we have built the technical layers of Phase 3 (self-supervised, GANs/VAEs, diffusion, 3D, vision-language). The final two lessons close the track. Lesson 15 covers **world modeling**, the frontier where vision models learn to predict future frames or states (relevant to robotics, autonomous driving, and large video models). Lesson 16, the closing lesson, takes the human-centered view: the real-world strengths, failure modes, and biases of vision systems, treated as engineering concerns rather than policy debates.

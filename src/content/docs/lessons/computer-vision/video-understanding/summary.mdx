@@ -1,0 +1,27 @@
+---
+title: "Summary: Video understanding"
+description: The 5-minute scan version. Video as 4D tensor; single-frame baseline; late vs early fusion; 3D convs; two-stream; video transformers.
+sidebar:
+  order: 4
+  label: Summary
+artifact: summary
+---
+
+A photo is one moment; a video is a sequence of moments along time. That single structural change makes input scale much larger (a 64-frame 224x224 RGB clip is ~9.6 million numbers, vs ~150 thousand for one image), forces some temporal-sampling discipline (you cannot process every frame of a real clip), and requires architectures that can relate frames to each other. The standard approaches escalate in order: **single-frame baseline** (a 2D classifier on one frame; embarrassingly competitive on many benchmarks); **late fusion** (per-frame features averaged); **early fusion** (stack frames as input channels); **3D convolutions** (filter slides spatially AND temporally; ~3x param cost per filter; C3D / I3D); **two-stream** (RGB appearance + optical-flow motion; SlowFast for the modern descendant); **CNN + RNN** (per-frame features into a sequence model; covered in lesson 7); and **video transformers** (spatio-temporal patches with factorized attention to control quadratic cost; TimeSformer, ViViT). The training loop is unchanged across all of them.
+
+## Core ideas
+
+- **Video tensor:** `T × H × W × C` (time × height × width × channels). 64 frames × 224x224 × 3 ≈ 9.6 million numbers per clip; a 1-minute 30fps clip is ~270 million. Temporal sampling (uniform stride, random temporal crops, multi-chunk averaging) is essential because no architecture processes that scale directly.
+- **Single-frame baseline first.** Always run it; if your video model is not beating it by a comfortable margin, the model is not learning anything temporal. Many benchmarks turn out to be largely solvable from one well-chosen frame because the visual context says a lot.
+- **Late fusion** (per-frame features averaged, then classified) captures content but not order ("reach then grasp" indistinguishable from the reverse). **Early fusion** (stack frames as input channels) sees temporal info at the first layer only.
+- **3D convolutions** generalize 2D conv with a temporal dimension on the filter. Filter shape T_f × F × F × D_in; at 3 temporal × 3x3 spatial × 3 input depth, that is 81 weights per filter vs 27 for 2D. ~3x parameters per filter, proportionally more compute. C3D (Tran 2015), I3D (Carreira & Zisserman 2017, "inflate" 2D ImageNet weights into 3D).
+- **Two-stream networks** (Simonyan & Zisserman 2014): one stream on RGB frames (appearance), one on precomputed optical flow (motion), fused late. **SlowFast** (Feichtenhofer 2019) is the modern descendant with two pathways at different temporal sampling rates.
+- **CNN + RNN** (lesson 7): per-frame 2D CNN features into an RNN/LSTM over time. Strong for video captioning where the output is itself a sequence.
+- **Video transformers** (TimeSformer 2021, ViViT 2021): cut video into spatio-temporal patches; embed; run a transformer encoder. **Factorized attention** (space then time, or other splits) avoids the quadratic cost of full self-attention over all spatial × temporal positions.
+- **Training loop unchanged.** Loss + gradient descent + backprop from lessons 3-4 run over any video architecture; what changes per architecture is the forward/backward pass at the temporal-handling layers and the resulting parameter count.
+
+## What changes for you
+
+Video models are everywhere quietly: phone photo galleries auto-generate clips, security cameras detect activities, sports broadcasts auto-tag highlights, YouTube and TikTok categorize uploaded videos, and autonomous vehicles run video models over their camera streams to track moving objects (motion is exactly what a single frame cannot provide). The architecture choice is engineering: latency-sensitive systems (security cameras processing many streams in real time) often use lightweight 3D convs or CNN-plus-RNN; accuracy-sensitive systems with budget (large-scale video search, content moderation, multimodal video QA) increasingly use video transformers at scale. The temporal-sampling choice (32 vs 64 vs 128 frames per training example) is one of the first knobs you tune. The single-frame baseline discipline ("does my fancy video model actually beat a 2D image classifier?") is the experimental hygiene that separates real temporal modelling from "we used the new architecture."
+
+A photo gave us pixels; a video gives us a sequence of pixel grids over time; the field's standard answers are some combination of 3D convs, two streams, RNNs, and increasingly transformers, all running the same Phase 1 training loop on top.

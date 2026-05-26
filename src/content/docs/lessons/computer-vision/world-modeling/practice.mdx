@@ -1,0 +1,202 @@
+---
+title: "Practice: World modeling"
+description: Self-check on predictive vs reactive vision + pixel vs latent + architectures, a fresh pixel-vs-latent efficiency calculation, an architecture-matching exercise, and flashcards.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Seven short questions. Answer each before opening the collapsible.
+
+**1. Distinguish reactive vision from predictive vision (world modeling).**
+
+<details>
+<summary>Show answer</summary>
+
+Reactive vision (every lesson so far): process the current input, output an answer (classification, detection, segmentation, depth, retrieval, etc.). Predictive vision / world modeling: given the past, predict the future. Self-driving trajectory prediction, robotics planning via forward simulation, and video generation are all variants of this same predict-the-future task.
+
+</details>
+
+**2. State the three architectural pieces that appear in most world models.**
+
+<details>
+<summary>Show answer</summary>
+
+(1) **Observation encoder** (CNN or ViT, often self-supervised) maps each observation to a compact representation. (2) **Dynamics model** (typically recurrent: RNN, LSTM, or transformer) predicts how the representation evolves over time, sometimes conditioned on actions. (3) **Decoder** (sometimes optional) maps predicted representations back to pixels, if the application needs to see the predicted future rather than just plan with it.
+
+</details>
+
+**3. What is the central trade-off in world modeling, and why does latent-space prediction win for most uses?**
+
+<details>
+<summary>Show answer</summary>
+
+The trade-off is **pixel-space vs latent-space prediction**. Pixel space is conceptually simple and directly useful for tasks that need to *see* the future (video generation), but expensive (each frame is hundreds of thousands of numbers; many frames forward is millions). Latent space (compact learned representation) is far cheaper (typically two to three orders of magnitude less per horizon length) and sufficient for most planning and decision-making uses, where you only need to score future trajectories, not render them. Decoding back to pixels (when needed) is one pass at the end, not 30.
+
+</details>
+
+**4. Describe the Dreamer family in one sentence.**
+
+<details>
+<summary>Show answer</summary>
+
+Hafner et al. 2019-2023. Train a recurrent world model (encoder + dynamics + decoder), then train an RL policy by **imagining many possible futures** inside the learned model (rather than only learning from real environment interactions). DreamerV3 generalized to many distinct environments with essentially the same hyperparameters, a notable robustness milestone.
+
+</details>
+
+**5. What is the MuZero idea?**
+
+<details>
+<summary>Show answer</summary>
+
+Combine deep learning with Monte Carlo Tree Search (AlphaGo / AlphaZero lineage), but use a **learned dynamics model** instead of an environment simulator. The dynamics model is trained to predict the next latent state, the reward, and the policy. MuZero learned to play Go, chess, shogi, and Atari at superhuman level from raw inputs **without ever being given the rules** of those games; the dynamics model learned the rules implicitly from observation.
+
+</details>
+
+**6. What is JEPA's structural claim?**
+
+<details>
+<summary>Show answer</summary>
+
+Predict in a learned latent space, not in pixels. The argument: pixel-level prediction is unnecessarily expensive and most of the per-pixel detail is not what matters for world modeling. Joint-Embedding Predictive Architecture trains a network to predict the latent representation of a future or masked region from observed context, similar to masked-image modeling but extended to time / structure prediction. V-JEPA is the video variant.
+
+</details>
+
+**7. Why is reading "world model" too literally a pitfall?**
+
+<details>
+<summary>Show answer</summary>
+
+A learned world model has fit the statistical structure of how its training data evolves. It is **not** a physics simulator with explicit conservation laws; it is a network that has learned a pattern. In familiar domains (matching its training data) it generalizes impressively; in novel domains it fails predictably. Reading "world model" as "the system understands physics" overstates what the architecture actually does.
+
+</details>
+
+## Try it yourself: pixel-vs-latent efficiency, architecture choice, prediction-evaluation reasoning
+
+Three exercises, about 15 minutes.
+
+**Part A: a fresh pixel-vs-latent efficiency calculation.** Consider a video-generation pipeline operating at 512 × 512 RGB at 24 fps, predicting 4 seconds (96 frames) into the future. (a) How many numbers must the pixel-space prediction produce per rollout? (b) If the model instead predicts in a learned latent space of dimension 256 per frame, how many numbers per rollout? (c) What is the efficiency ratio?
+
+<details>
+<summary>Worked answer</summary>
+
+**(a) Pixel-space.**
+- Per-frame pixel count: `512 · 512 · 3 = 786,432` numbers.
+- 96 future frames: `96 · 786,432 = 75,497,472` numbers per rollout.
+- ~75 million numbers to predict per generated 4-second clip.
+
+**(b) Latent-space.**
+- Per-frame latent: 256 numbers.
+- 96 future latent vectors: `96 · 256 = 24,576` numbers per rollout.
+
+**(c) Efficiency ratio.**
+```
+pixel / latent = 75,497,472 / 24,576 ≈ 3,072
+```
+
+The latent-space prediction is **about 3,072 times smaller** in output count for the same horizon and resolution. The dynamics model that produces these numbers is correspondingly smaller, and at production scale this is the difference between a feasible system and an infeasible one. Decoding back to pixels (when needed) is one forward pass through the decoder per frame, not a separate full-pixel-prediction pass.
+
+Comparing to the body's calculation (224 · 224 · 3 = 150,528 pixels per frame, 30 frames, latent 512 → ratio 294): at higher resolution and longer horizons, the pixel cost scales worse than the latent cost (the latent dimension is independent of resolution in principle, while pixel count grows quadratically). The argument for latent-space prediction sharpens as systems scale up.
+
+</details>
+
+**Part B: architecture matching.** For each description, name the world-modeling architecture.
+
+1. The early influential 2018 work: VAE encodes each frame; RNN predicts how the latent evolves; a small controller learns to act in the latent space.
+2. Trained a recurrent world model + policy in tandem; the policy is trained from imagined rollouts in the learned model rather than only from real environment interactions; V3 generalized to many domains with the same hyperparameters.
+3. Combines tree search with a learned dynamics model; the dynamics model predicts next state, reward, and policy jointly; learned to play Go and Atari without being given the rules.
+4. Predicts in latent space rather than pixel space; V-JEPA extends the idea to video by masking spatio-temporal regions and predicting their latent representations from the visible ones.
+
+<details>
+<summary>Answers</summary>
+
+1. **World Models (Ha and Schmidhuber 2018).** The early influential work that established the encoder + dynamics + controller pattern.
+
+2. **Dreamer family (Hafner et al. 2019-2023).** Recurrent world model + policy trained from imagined rollouts; DreamerV3 is the broadly-generalizing variant. Deep treatment of model-based RL lives in T18.
+
+3. **MuZero (Schrittwieser et al. 2019).** Tree search + learned dynamics that predicts state, reward, and policy; trained from observation alone with no rule access.
+
+4. **JEPA / V-JEPA (LeCun research direction; V-JEPA Bardes et al. 2024).** Latent-space prediction; video variant extends to spatio-temporal masked-prediction.
+
+</details>
+
+**Part C: evaluation reasoning.** A team is building a self-driving trajectory-prediction model. They are comparing two candidate world models. Model A has lower next-frame prediction error on the test set but predictions drift quickly into implausible futures by 3 seconds out. Model B has slightly higher next-frame error but holds together coherently for 5+ seconds. Which model should they pick, and what does this say about how to evaluate world models?
+
+<details>
+<summary>What a good answer looks like</summary>
+
+**Pick Model B.** Self-driving trajectory prediction needs predictions that are useful 2-5 seconds out, not just predictions that match the first frame slightly better. Model A's lower next-frame error is misleading because it does not capture the property that matters downstream (long-horizon coherence). Model B's slightly higher per-step error compounds more gracefully over the horizons the application needs.
+
+The deeper point: **prediction error is a proxy, not the goal**. What matters is whether the model's predictions support good decisions downstream. A model that predicts slightly worse on raw next-step error but compounds well over long horizons is typically better for planning and prediction tasks; conversely, a model that scores well on one-step error but drifts catastrophically is dangerous in deployment. Evaluation should include **long-horizon rollout quality**, **downstream task performance** (does the planning improve?), and **failure-mode analysis** (when does the model break, and how badly?), not just per-step accuracy on a held-out test set.
+
+This is one of the practical reasons world-model research papers report multiple horizons and use task-relevant metrics rather than pure prediction error, and why deployment requires more than "model A had lower validation loss."
+
+</details>
+
+## Flashcards
+
+Nine cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay out the full set as one card per page, ready to print or save as a PDF for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="Reactive vs predictive vision?">
+
+Reactive: process current input, output an answer (all CV so far). Predictive (world modeling): given the past, predict the future. Self-driving prediction, robotics planning, video generation are all predictive.
+
+</Flashcard>
+
+<Flashcard question="Three architectural pieces of most world models?">
+
+(1) Observation encoder (CNN/ViT) → compact representation. (2) Dynamics model (RNN/LSTM/transformer) predicts how representation evolves. (3) Decoder (optional) maps predicted representations back to pixels.
+
+</Flashcard>
+
+<Flashcard question="Pixel-space vs latent-space prediction trade-off?">
+
+Pixel: directly useful for video generation but expensive (millions of numbers per rollout at modest horizons). Latent: ~100-3000x cheaper depending on resolution/horizon; sufficient for planning and decision-making; decode at end if needed.
+
+</Flashcard>
+
+<Flashcard question="World Models (Ha & Schmidhuber 2018)?">
+
+VAE encodes frames; RNN predicts latent evolution; small controller acts in latent space. Established the encoder + dynamics + controller pattern for the field.
+
+</Flashcard>
+
+<Flashcard question="Dreamer family in one sentence?">
+
+Hafner 2019-2023. Recurrent world model + policy; policy trained from IMAGINED rollouts inside the learned model. DreamerV3 generalized to many distinct domains with the same hyperparameters.
+
+</Flashcard>
+
+<Flashcard question="MuZero's key idea?">
+
+Tree search (AlphaZero lineage) + LEARNED dynamics model (instead of given environment simulator). Predicts next state, reward, and policy jointly. Played Go, chess, shogi, Atari at superhuman level without being given the rules.
+
+</Flashcard>
+
+<Flashcard question="JEPA's claim?">
+
+Predict in a learned latent space, not in pixels. Pixel-level prediction is unnecessarily expensive; per-pixel detail is not what matters for world modeling. V-JEPA extends to video via spatio-temporal masked prediction.
+
+</Flashcard>
+
+<Flashcard question="Why is prediction error not the right evaluation metric?">
+
+Prediction error is a proxy. What matters downstream is whether predictions support good decisions (planning) or good rollouts (generation) or accurate forecasts (driving). A model with slightly higher one-step error but better long-horizon coherence is usually better.
+
+</Flashcard>
+
+<Flashcard question="Cross-track ties for world modeling?">
+
+T18 (planned, RL) covers model-based RL in depth (Dreamer family, MuZero deeper). T24 (planned, image gen + multimodal) covers production-scale video generation. T16's L15 covers world modeling from the CV side as predictive complement to L13's spatial 3D vision.
+
+</Flashcard>
+
+</FlashcardSet>

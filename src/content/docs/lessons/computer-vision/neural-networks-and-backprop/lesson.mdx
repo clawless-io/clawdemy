@@ -1,0 +1,144 @@
+---
+title: "Lesson: Learning features instead of coding them, neural networks and backprop"
+description: Lesson 2 capped us at one template per class. Lesson 3 gave us a training loop. This lesson closes Phase 1 by lifting that cap. We stack linear layers with a non-linearity between them (a neural network), watch the hidden layer learn its own features instead of having them hand-coded, and meet backpropagation, the algorithm that gets the gradient through every weight in every layer in one efficient backward sweep. By the end, you have the full general-purpose image classifier the rest of the track refines.
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+Three lessons have brought us here. Lesson 1 named the data-driven move (stop writing rules, show labeled examples). Lesson 2 gave the simplest concrete machine that carried it out: `s = W · x + b`, one template per class, with a clearly visible ceiling, the famous two-headed horse. Lesson 3 turned that machine into a learner by defining a loss and a step downhill on it. The remaining problem is real: one template per class is not enough for real visual classes that come in many forms. We need a classifier that can hold multiple ways of being a horse and still arrive at "horse."
+
+This lesson is the unlock. We do two things. First we add capacity to the model by stacking another layer with a non-linearity in between, which turns a linear classifier into a **neural network**. Second we explain the algorithm, **backpropagation**, that gets the gradient of the loss through every weight in every layer of that network in one efficient backward pass. Together they close Phase 1: a general-purpose image classifier you can actually train.
+
+## Stacking linears alone gets you nothing new
+
+Before adding the trick, see why the obvious move fails. We could try to gain capacity by stacking another linear layer on top of the first: feed `W1 · x + b1` into `W2 · (...) + b2`. Multiply it out:
+
+```
+W2 · (W1 · x + b1) + b2  =  (W2 · W1) · x  +  (W2 · b1 + b2)
+                         =  W' · x         +  b'
+```
+
+The composition is just another linear layer with `W' = W2 · W1` and `b' = W2 · b1 + b2`. Stacking linears alone gives you exactly the model you started with: one linear classifier in a fancier suit. There is no new representational power. To get more, we need something a linear map cannot do.
+
+## The fix: a non-linearity between layers
+
+The fix is to insert a **non-linear activation function** between the linear layers. The most common modern choice for vision is **ReLU**, the rectified linear unit:
+
+```
+ReLU(z) = max(0, z)
+```
+
+Negative numbers become zero; positive numbers pass through unchanged. It does almost nothing, on purpose: it is just a kink at zero. But that kink is the whole point. Once a non-linearity sits between two linear layers, the composition can no longer be flattened into a single linear map, and the model gains real capacity.
+
+A simple two-layer neural network for image classification then has this shape:
+
+```
+h = ReLU(W1 · x + b1)         // hidden layer: H feature numbers
+s = W2 · h + b2               // final linear classifier: K scores
+```
+
+The image `x` (3072 numbers for CIFAR-10) is multiplied by `W1` to produce `H` numbers, the **hidden layer activations** `h`. `H` is a design choice (often a few hundred to a few thousand). Then a second linear layer maps those `H` numbers into `K` class scores, just like the linear classifier we already have. The only new thing structurally is that one ReLU sits between.
+
+The lesson 3 training loop still works on this model exactly as written. We define the same loss on the K final scores, take the gradient with respect to *every* weight in *every* layer (W1, b1, W2, b2), and step downhill. The only complication is computing that gradient efficiently; we will address it in a few minutes.
+
+## What the hidden layer actually does: it learns features
+
+The hidden layer is where this becomes interesting. The `H` numbers it produces are not pixel values; they are **learned features** of the image. Each hidden unit looks at all 3072 input pixels through its own row of `W1`, computes a weighted sum, and the ReLU keeps the result if it is positive or kills it to zero. The final linear classifier `W2 · h + b2` then sees those `H` numbers, not the raw pixels, and reads off a label.
+
+Here is why that breaks the one-template-per-class limit. With many hidden units, the network can dedicate different units to different visual modes of a class. One unit might learn to fire on left-facing horse-like inputs; another on right-facing ones; another on grazing horses; another on horse-against-sky silhouettes. The final classifier for "horse" then has many feature numbers to combine, instead of one rigid template. The ghostly two-headed compromise from lesson 2 stops being forced.
+
+The features the hidden layer settles on are not specified anywhere in the code. They emerge from the training data and the loss. The network *learns* its own features, which is the structural difference between a linear classifier and a neural network.
+
+## A quick historical note: the feature engineering era ended here
+
+This is the move that changed computer vision. For roughly the two decades before 2012, "doing computer vision" mostly meant **hand-engineering features**. Researchers designed algorithms like SIFT, HOG, color histograms, and edge filters by hand, ran them on images to extract a feature vector, and then fed that vector into a (often linear) classifier. Whole conferences ran on novel hand-crafted features.
+
+When deep neural networks won the 2012 ImageNet competition by a wide margin, the dominant interpretation was not just "the network is bigger." It was that **the network learned its own features**, and the learned features turned out to be dramatically better than the hand-engineered ones. The feature-engineering era effectively ended within a couple of years. What we are introducing here, hidden layers that learn features, is the structural reason that shift was possible.
+
+## How the gradient gets through every layer: backpropagation
+
+We now have a network with several layers of weights, and lesson 3's training loop needs the gradient of the loss with respect to *each one* of them. The naive approach, nudge a weight by `h`, re-run the forward pass, see how much the loss changed, is conceptually fine and operationally hopeless: a network with a billion parameters would need a billion forward passes per training step. We need something dramatically better.
+
+The answer is **backpropagation**, and the one-line summary is: it is the chain rule of calculus, applied recursively through the computational graph of the network. With it, **one forward pass plus one backward pass produces gradients for every weight at once**.
+
+The mechanics, in CS231n's framing, are best seen as a **circuit of gates**. Every operation in the network (a multiplication, an addition, a ReLU, a matrix multiply) is a node. Each node does two things:
+
+- **On the forward pass:** it gets its inputs, computes its output, and also remembers the **local gradient** of its output with respect to each of its inputs.
+- **On the backward pass:** it receives an **upstream gradient** (the loss's sensitivity to its own output) and multiplies that by its local gradient to produce the gradient on each of its inputs, which it then hands back to its inputs as their upstream gradient.
+
+The chain rule is what makes this glue together correctly. Crucially, each node operates **completely locally**. It does not need to know what the rest of the network looks like; it just multiplies an upstream number by its own local derivative and passes the result backward. The full network's gradient falls out of every node doing only this small, local thing in reverse order.
+
+## Worked example: one chain-rule circuit by hand
+
+The classical CS231n example makes the mechanics concrete on a tiny circuit. Define `f(x, y, z) = (x + y) * z` and pick `x = -2, y = 5, z = -4`.
+
+**Forward pass.** Compute `q = x + y` and then `f = q * z`.
+
+```
+q = x + y = -2 + 5 = 3
+f = q * z = 3 * (-4) = -12
+```
+
+**Backward pass.** We want `df/dx`, `df/dy`, and `df/dz`. The output's gradient on itself is 1, so the backward starts with `df/df = 1`.
+
+The last gate is the multiplier `f = q * z`. Its local gradients are `∂f/∂q = z` and `∂f/∂z = q`. So multiplying by the upstream gradient (which is 1 here):
+
+```
+df/dq = z = -4       (sent backward to q)
+df/dz = q = 3        (sent backward to z; we are done with z)
+```
+
+The previous gate is the adder `q = x + y`. Its local gradients are both 1 (`∂q/∂x = 1, ∂q/∂y = 1`). So multiplying by the upstream gradient (`df/dq = -4`):
+
+```
+df/dx = df/dq * dq/dx = -4 * 1 = -4
+df/dy = df/dq * dq/dy = -4 * 1 = -4
+```
+
+The full gradient is `[df/dx, df/dy, df/dz] = [-4, -4, 3]`. Notice the structure: each gate handled its own local derivative, an upstream number arrived at it, and it sent properly-multiplied gradients to its inputs. The add gate did not know it was inside a `(x+y)*z` expression; it just did its local thing.
+
+Now picture this same recipe running through a network with thousands of gates instead of two: matrix multiplies, additions, ReLUs, the loss at the end. The forward pass computes everything, the backward pass starts at the loss and sweeps backward, and every weight in the network ends up with its own gradient. That is backprop, and it is what makes training a deep network practical at all.
+
+For a full step-by-step walk through backprop's intuition (output neurons "wanting" their activations up or down, those wishes summing into wishes for the previous layer, the chain rule giving the formal machinery), Track 11's lessons 8 and 9 cover the same idea in a generic neural-network setting; the math and the picture are identical to what's happening here.
+
+## What we have now: the full image-classifier loop
+
+With this lesson, the pieces of Phase 1 click together. The complete training loop for a vision classifier is:
+
+1. **Forward pass.** Feed a mini-batch of images through the network: `h = ReLU(W1 · x + b1)`, `s = W2 · h + b2`. Get scores.
+2. **Loss.** Compute the per-image loss (softmax + cross-entropy, or SVM) on the scores; average over the batch; add regularization.
+3. **Backward pass (backprop).** Sweep backward from the loss, applying the chain rule at every gate, to produce the gradient of the loss with respect to W1, b1, W2, b2.
+4. **Step.** `W ← W - α * ∇L` for every weight matrix. Move to the next mini-batch.
+
+That four-step cycle is how every vision classifier in this track, including the much deeper convolutional networks of Phase 2 and the modern giants of Phase 3, actually trains. The architecture changes; the loop does not.
+
+## Why this matters when you use AI
+
+The word "deep" in deep learning means many of these stacked layers, each adding more learned-feature capacity. When you read that a model has 8 layers, or 50, or 500, what it means is that the same pattern (linear, then non-linearity, then linear, then non-linearity, ...) is repeated that many times, with backprop carrying gradients through every step. A 50-layer network does not have a fundamentally smarter mechanism than a 2-layer one; it has more representational room.
+
+The fact that features are learned, not designed, also explains the field's labor pattern. Modern computer-vision work spends most of its energy on architecture (how the layers are arranged), data (what gets shown to the network), and training procedure (the loss, the optimizer, the schedule), and almost none on hand-designing features the way the pre-2012 era did. When a vision model surprises you, the reason traces back to features it learned that nobody specified, which is also why its failures often look strange: the features it learned are not the ones you would have written.
+
+If you came from Neural Network Intuition, this lesson is the vision-classifier version of what Track 11 covered as a generic story. The cost landscape, gradient descent, and backprop in T11's lessons 6 through 9 are the same algorithms running here, with the loss now being a vision-specific SVM or softmax loss and the inputs being flattened images.
+
+## Common pitfalls
+
+**Thinking "deep" means "smarter per layer."** Each layer is still just a linear map followed by a non-linearity. Depth is composition: each layer's features are built from the features below it. The mechanism is plain; the power is in stacking.
+
+**Skipping the non-linearity.** Two linear layers without a non-linearity between them are exactly equivalent to one linear layer. Without ReLU (or some other non-linearity), the extra layer is a no-op.
+
+**Thinking backprop is magic.** It is not. It is the chain rule applied locally at every node, in reverse order. Each node is unaware of the rest of the network; it just multiplies an upstream number by its own local derivative.
+
+**Confusing the forward and backward pass.** The forward pass computes the network's prediction (and stores intermediate values). The backward pass uses those stored values to compute gradients. Both passes run once per training step.
+
+## What you should remember
+
+- **Stacking linear layers alone changes nothing** (`W2 · (W1 · x + b1) + b2 = W' · x + b'`). A non-linearity (commonly `ReLU(z) = max(0, z)`) between layers is what gives a neural network its capacity.
+- **A two-layer NN: `h = ReLU(W1 · x + b1); s = W2 · h + b2`.** The hidden layer produces `H` **learned features** of the image; the final linear layer maps those features into class scores. This is what broke the one-template-per-class limit.
+- **Backpropagation is the chain rule applied through a computational graph.** Each node computes a local gradient, receives an upstream gradient, and multiplies them. One forward pass plus one backward pass gives gradients for every weight in the network at once.
+- **Pre-2012 CV hand-engineered features; deep learning learns them.** The feature-engineering era effectively ended when learned features started outperforming hand-designed ones; the hidden layer is the structural reason.
+
+The four-step training loop, forward, loss, backward, step, is the entire engine. Everything from this lesson forward is the same engine driving richer architectures.
+
+Next: a two-layer fully connected network learns features, but it ignores something essential about images, that nearby pixels are related and a pattern in one corner of an image can show up in another. Phase 2 opens with the architecture built around that observation: **convolutional neural networks**. The training loop will not change. The forward and backward passes will look a little different at one specific layer, and the results on image data will be dramatically better.

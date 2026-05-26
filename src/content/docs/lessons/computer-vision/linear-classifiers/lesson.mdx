@@ -1,0 +1,136 @@
+---
+title: "Lesson: Telling pictures apart with one score, linear classifiers"
+description: Lesson 1 named the strategy, learn from labeled examples. This lesson is the simplest machine that actually carries it out. A linear classifier flattens an image into a column of numbers, multiplies it by a weight matrix, adds a bias, and reads off one score per class. The highest score wins. We see what each row of the weight matrix really is (a learned template), work one prediction by hand, and meet the limit that the rest of the track exists to break.
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+Last lesson left us with a plan, not a machine. We agreed that hand-written rules collapse, that the way forward is to show a system labeled examples and let it learn the patterns. Good. Now we owe a concrete answer to the obvious next question: what exactly does that learned system look like? What turns 150,000 brightness numbers into a label?
+
+This lesson is the simplest honest answer, and it is the foundation everything else in the track is built on. It is called a **linear classifier**, and the entire thing fits in one equation. Once you can see what that equation is doing, the rest of computer vision is mostly the story of buying more capacity on top of this same idea.
+
+## One score per class
+
+Start with the shape of the job. We hand the classifier an image and ask for a label out of a fixed list of categories. Say the list is the ten classes of the classic CIFAR-10 dataset, airplane, car, bird, cat, deer, dog, frog, horse, ship, truck. The classifier's answer will not be a word; it will be **ten numbers**, one per class, called **scores**. We read off the highest one and call that the prediction.
+
+That gives us our target: build a function that turns the pixel numbers into ten scores. The linear classifier picks the most direct way imaginable. Flatten the image into a single tall column of numbers, multiply it by a learned matrix, and add a learned offset. That is the whole computation.
+
+## The score function: s = Wx + b
+
+Concretely, here is the equation written exactly as you will see it in any computer-vision text.
+
+```
+s = W · x + b
+```
+
+Let us name every symbol, then unpack it.
+
+- **x** is the **image as a column vector**. For a CIFAR-10 image (32 wide, 32 tall, 3 color channels), that is 32 times 32 times 3 = **3072 numbers**, stacked into one tall column. Nothing is gained from the flattening; we still hold the same pixel values, just listed end to end.
+- **W** is the **weight matrix**. For CIFAR-10's ten classes it is **10 rows by 3072 columns**, holding 30,720 learned numbers in total. One row of W per class.
+- **b** is the **bias vector**, ten numbers (one per class). A small per-class offset added at the end.
+- **s** is the **output**, the ten scores, one per class.
+
+The arithmetic is elementary. To compute the score for one class, take that class's row of W (3072 numbers), multiply it pointwise by the image's 3072 pixels, sum the products, and add that class's bias. Do that for all ten rows and you have all ten scores. The largest one is the predicted class. That is the entire classifier.
+
+{/* DIAGRAM PLACEHOLDER: a CIFAR-style image on the left; an arrow labeled "flatten" to a tall column of 3072 numbers (x); then "× W (10 × 3072) + b (10)" producing a column of 10 scores on the right, with the largest one highlighted and read off as the predicted class */}
+
+## Working one prediction by hand
+
+The CIFAR-10 numbers are too big to compute on paper, so let us shrink the problem until the whole thing fits in one example. Suppose our "image" is just 2 by 2 grayscale, so D = 4 pixels, and we have 3 classes, K = 3.
+
+Say the image (flattened) is `x = [0.9, 0.1, 0.8, 0.2]`, the learned weights and biases are:
+
+```
+W =  | 1.0  -1.0   1.0  -1.0 |     b = |  0.1 |
+     | 0.0   1.0  -1.0   0.0 |         |  0.0 |
+     |-1.0   0.0   0.0   1.0 |         | -0.1 |
+```
+
+Compute one score at a time. For class A (the top row of W):
+
+```
+s_A = (1.0)(0.9) + (-1.0)(0.1) + (1.0)(0.8) + (-1.0)(0.2) + 0.1
+    = 0.9 - 0.1 + 0.8 - 0.2 + 0.1
+    = 1.5
+```
+
+For class B:
+
+```
+s_B = (0.0)(0.9) + (1.0)(0.1) + (-1.0)(0.8) + (0.0)(0.2) + 0.0
+    = 0.1 - 0.8
+    = -0.7
+```
+
+For class C:
+
+```
+s_C = (-1.0)(0.9) + (0.0)(0.1) + (0.0)(0.8) + (1.0)(0.2) + (-0.1)
+    = -0.9 + 0.2 - 0.1
+    = -0.8
+```
+
+The three scores are `[1.5, -0.7, -0.8]`. The highest is class A at 1.5, so this image is predicted as class A. The whole classifier is multiply-and-add, K times, with the maximum read off at the end.
+
+Nothing about CIFAR-10 is different in spirit; you would just be doing this with 3072 multiplications per class instead of four.
+
+## What each row of W actually is
+
+Look at the score for class A again. Pixels where the weight is positive *boost* the score when they are bright; pixels where the weight is negative *reduce* it when they are bright; pixels where the weight is near zero do not matter. So a row of W is, in effect, a stencil saying *for this class, here are the brightness patterns we like and the ones we do not.* It is a **learned template** for the class.
+
+That phrasing is exact. If you take a row of CIFAR-10's W, reshape it back into a 32 by 32 by 3 image, you can literally look at it. People do this, and the pictures are striking: the "ship" template looks like a fuzzy blue-and-gray ship sitting on blue water, the "frog" template is a faint green smear, the "car" template carries a smudge of red where car bodies often sit in the training images.
+
+Read in this light, the score function is **template matching**, and the only thing that distinguishes it from older, hand-coded template matching is that **the templates are learned from data** instead of drawn by an engineer. The whole shift we talked about last lesson, "let the system find the patterns," shows up here as W being learned rather than written.
+
+The bias `b` is the only extra piece. It is one number per class added to that class's score at the end, regardless of the input. You can read it as a per-class default lean, "this class is a bit more common in the training data, so start a touch higher" or "this class is rare, start lower," before any pixels are even consulted.
+
+## Two ways to see the same equation
+
+The template view is one. The other is geometric, and the two are saying the same thing in different languages.
+
+Picture the space of all possible CIFAR-10 images, where every image is one point in a 3072-dimensional space (one axis per pixel). For each class, the equation `(row of W) · x + (bias for that class) = 0` defines a flat boundary, a **hyperplane**, slicing that huge space in two. Images on one side score positively for the class; images on the other side score negatively. The bias is what lets that boundary sit somewhere other than dead through the origin: changing the bias slides the hyperplane back and forth without changing its tilt.
+
+Asking "what does the classifier predict for this image?" is then geometrically the same as asking "which side of each of the ten hyperplanes does this image fall on?" The class whose hyperplane the image is most decisively *on the positive side of* wins.
+
+We will not need the geometric view to make later lessons work, but it is worth carrying as an alternate picture, because some explanations land harder from one side than the other, and reading later material in any computer-vision text it will come up.
+
+## What linear can and cannot do
+
+A linear classifier is the simplest learner that works, and it does work, sort of. On CIFAR-10, a careful linear classifier reaches about 40 percent accuracy: clearly better than the 10 percent you would get by guessing, far short of what humans or modern networks achieve. There is a structural reason for that gap, and naming it sets up the rest of the track.
+
+A linear classifier has exactly **one template per class** and exactly **one flat boundary per class**. That is enough when a class really does cluster around a single visual prototype. It is *not* enough when a class spans several distinct looks at once. Take the "horse" class in CIFAR-10. Some training horses face left, some face right. A linear classifier cannot have a left-facing-horse template *and* a right-facing-horse template; it can only have one. So what it learns is a single template that is a kind of blurred compromise, and you can actually see, in published visualizations of trained CIFAR-10 templates, a faint ghostly horse with what looks like two heads, one facing each way. The classifier merged the two modes because it had no room to keep them apart.
+
+The same thing bites the "car" class: red cars, blue cars, white cars all live under one label, with no shared color signature, and one linear template cannot represent them all without becoming a washed-out average that matches none well. The whole next stretch of this track, loss functions, optimization, then neural networks, is fundamentally about giving the classifier enough capacity to hold multiple templates per class, then templates of templates, until the multi-modal real world stops collapsing into ghost averages.
+
+## A small implementation note: the bias trick
+
+You will sometimes see the score function written without the `+ b` at the end. That is not a different equation; it is a notational shortcut called the **bias trick**. Add one extra dimension to the image vector that is always 1, and append one extra column to W to hold the biases. Now `Wx + b` and `Wx` (with the extended W and x) compute the exact same numbers. For CIFAR-10 that turns the 10-by-3072 W into 10-by-3073 and the input from 3072 numbers to 3073. Same arithmetic, less bookkeeping. It is worth recognizing on sight; otherwise you will run into code that "drops" the bias and think it is a different model.
+
+## Why this matters when you use AI
+
+The linear classifier is the smallest concrete thing computer vision does, and you can see its shape in everything bigger. When a modern vision model classifies an image, the final layer is typically still a linear classifier of the form `s = Wx + b`. What changed is the `x` it sees. In the model from this lesson, `x` is the raw pixels and the classifier is doing all the work, badly. In a convolutional network (Phase 2 of this track), `x` is a much richer set of learned features that the deeper layers extracted from the pixels first, and the linear classifier on top suddenly has an easy job. So this equation never goes away. It is the unchanging tip of every modern vision model; the lessons ahead add the body underneath.
+
+It also explains why classifier-based vision systems behave the way they do. They do not "understand" an image; they compare it to a fixed set of learned templates and read off a winner. When they confidently mislabel a doctored image or an out-of-distribution photo, what you are seeing is the templates matching something they should not have matched, because there is no concept of "wait, this looks unlike anything I have seen" baked into the equation. That blind-template-match behavior, present even in this simplest version of the classifier, persists in much larger forms all the way up the stack.
+
+## Common pitfalls
+
+**Thinking the templates are pictures of class members.** They are learned compromises that maximize the score on the training set, not photographs. Visualized, they often look smeared, off-color, or weirdly blended (the two-headed horse). That is exactly what "learning a single template for a multi-modal class" looks like.
+
+**Confusing rows and columns of W.** Each *row* of W belongs to one class and holds that class's weight for every pixel. Each *column* of W belongs to one pixel and holds every class's weight for that one pixel. The classifier scores by row.
+
+**Treating scores as probabilities.** The scores from `Wx + b` are unbounded real numbers; they can be negative, large, small, anything. Turning them into probabilities is a separate operation (the softmax function, which a later lesson covers). Until then, the only thing the scores are good for is ranking.
+
+**Thinking linear is enough because it works at all.** Yes, a linear classifier learns something. No, it is not enough. Roughly 40 percent on CIFAR-10 means it is wrong 6 times out of 10. The structural reason, one template per class, is what motivates everything that follows.
+
+## What you should remember
+
+- **A linear classifier turns an image into one score per class** via `s = W · x + b`, then picks the highest score. For CIFAR-10, x is 3072 numbers, W is 10 by 3072, b is 10 numbers, s is 10 scores.
+- **Each row of W is a learned template** for one class; the score is a dot product measuring how well the image matches that template. The bias is a per-class default offset.
+- **Geometrically, each class has one flat boundary (a hyperplane) in pixel space;** prediction asks which side of each boundary the image is on. The bias lets the boundary translate, not just rotate.
+- **One template (one boundary) per class is the limit.** Multi-modal classes get merged into ghostly averages (the famous two-headed horse). Loss, optimization, and neural networks, the rest of the track, are about getting past that limit.
+
+The whole of the linear classifier is one equation, but the equation does real work: it is the first concrete machine that turns pixel numbers into a prediction, and it is the last layer of nearly every modern vision model you have ever met.
+
+Next: we have a classifier with knobs (W and b), but no idea how to set them. The next lesson defines exactly what "the predictions match the labels" means as a single number to minimize, the **loss**, and shows the simple loop, **optimization**, that nudges the knobs to make it smaller. That is how learning actually happens.

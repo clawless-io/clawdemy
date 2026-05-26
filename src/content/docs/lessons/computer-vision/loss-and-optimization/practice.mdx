@@ -1,0 +1,201 @@
+---
+title: "Practice: Loss and optimization"
+description: Self-check on the loss + optimization loop, a fresh SVM loss case (and a softmax / cross-entropy walk-through), a one-step gradient descent update, and flashcards for retrieval.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Seven short questions. Answer each in your head (or on paper) before opening the collapsible.
+
+**1. In one sentence, what is a loss function?**
+
+<details>
+<summary>Show answer</summary>
+
+A function that turns "how well do the current scores match the correct labels" into a single number, large when the prediction is bad and small (ideally zero) when it is good. Driving that number down is what training does.
+
+</details>
+
+**2. Write the multiclass SVM loss for one image, with correct class y and scores s.**
+
+<details>
+<summary>Show answer</summary>
+
+`L_i = Σ over j ≠ y of max(0, s_j - s_y + 1)`. Each wrong class contributes its shortfall below the required margin of 1 over the correct class's score; classes that already clear the margin contribute zero.
+
+</details>
+
+**3. Write the softmax / cross-entropy loss for one image.**
+
+<details>
+<summary>Show answer</summary>
+
+Convert scores to probabilities with softmax: `p_j = exp(s_j) / Σ_k exp(s_k)`. Then `L_i = -log(p_y)`, the negative log probability the model assigned to the correct class. Confident-and-correct gives near 0; wrong or hesitant gives a large positive number.
+
+</details>
+
+**4. Why do we add a regularization term like `λ * Σ W²` on top of the data loss?**
+
+<details>
+<summary>Show answer</summary>
+
+Many different W's can achieve the same data loss; the penalty makes the optimizer prefer smaller (simpler) weights, which tend to generalize better to unseen images. λ controls the trade-off; larger λ shrinks W more aggressively.
+
+</details>
+
+**5. What direction does the gradient `∇L` point, and which way do we step?**
+
+<details>
+<summary>Show answer</summary>
+
+The gradient points in the direction of steepest **ascent** of the loss. We step in the **negative** gradient direction (down the slope), with step length set by the learning rate.
+
+</details>
+
+**6. What happens if the learning rate is too small? Too large?**
+
+<details>
+<summary>Show answer</summary>
+
+Too small: training creeps; loss decreases very slowly. Too large: a single step can overshoot the valley and the loss can actually *increase* (CS231n's CIFAR-10 demo shows a starting loss of 2.20 dropping to 1.65 at a good step size and exploding past 2500 at one too-large). The learning rate is one of the most consequential hyperparameters.
+
+</details>
+
+**7. What is mini-batch / stochastic gradient descent, and why is it the default?**
+
+<details>
+<summary>Show answer</summary>
+
+Each step samples a small batch of training images (commonly 32, 64, 128, or 256), computes the loss and gradient on just that batch, and takes the step. It is dramatically cheaper than computing over the full dataset every step, gives a noisy but unbiased estimate of the true gradient, and lets us take many more steps in the same wall-clock time.
+
+</details>
+
+## Try it yourself: SVM loss, softmax loss, and one gradient step
+
+Three short exercises, paper or calculator, about 15 minutes.
+
+**Part A: SVM loss with full margins.** From last lesson's body, the toy classifier on a different image gave scores `[s_A, s_B, s_C] = [1.5, -0.7, -0.8]` with correct class A. Margin is 1. Compute the multiclass SVM loss for this image.
+
+<details>
+<summary>Worked answer</summary>
+
+```
+L = max(0, s_B - s_A + 1) + max(0, s_C - s_A + 1)
+  = max(0, -0.7 - 1.5 + 1) + max(0, -0.8 - 1.5 + 1)
+  = max(0, -1.2)           + max(0, -1.3)
+  = 0                      + 0
+  = 0
+```
+
+The loss is **zero**. Both wrong classes are already more than 1 below the correct class, so both margins are satisfied with room to spare. This is what "confidently correct" looks like to the SVM loss, in contrast to the practice case in the body where the prediction was correct but the loss was 0.5 because the margin to class Y was only 0.5.
+
+</details>
+
+**Part B: softmax probabilities and cross-entropy.** Use clean numbers. For scores `s = [2, 1, 0]`:
+
+1. Compute the softmax probabilities `p_j = exp(s_j) / Σ exp(s_k)`. Use `exp(2) ≈ 7.389`, `exp(1) ≈ 2.718`, `exp(0) = 1`.
+2. Compute the cross-entropy loss `-log(p_y)` (natural log) for two cases: (a) the correct class is index 0; (b) the correct class is index 2.
+
+<details>
+<summary>Worked answer</summary>
+
+**1. Softmax.** Sum of exponentials: `7.389 + 2.718 + 1 ≈ 11.107`. Probabilities: `p_0 ≈ 7.389 / 11.107 ≈ 0.665`, `p_1 ≈ 2.718 / 11.107 ≈ 0.245`, `p_2 ≈ 1 / 11.107 ≈ 0.090`. They sum to 1, as they should.
+
+**2a.** Correct = index 0, `p_0 ≈ 0.665`. `L = -ln(0.665) ≈ 0.408`. The model is correct and roughly 67 percent confident; the loss is small but not zero.
+
+**2b.** Correct = index 2, `p_2 ≈ 0.090`. `L = -ln(0.090) ≈ 2.408`. The model is wrong and assigns only 9 percent probability to the truth; the loss is large.
+
+Same scores, different correct labels, very different losses. That asymmetry is exactly what training will exploit: nudge W so the correct class gets more probability mass, which lowers `-log(p_y)`.
+
+</details>
+
+**Part C: one gradient descent step.** Suppose for a small slice of W the current values are `W = [1.0, 2.0, -0.5]` and the gradient is `∇L = [0.2, -0.4, 0.1]`. Compute the updated `W` after one step at learning rate `α = 0.1`. Then redo with `α = 1.0`. What is the qualitative difference?
+
+<details>
+<summary>Worked answer</summary>
+
+The update rule is `W ← W - α * ∇L`.
+
+```
+α = 0.1:
+  W_new = [1.0 - 0.1*0.2,  2.0 - 0.1*(-0.4),  -0.5 - 0.1*0.1]
+        = [1.0 - 0.02,     2.0 + 0.04,        -0.5 - 0.01]
+        = [0.98,           2.04,              -0.51]
+
+α = 1.0:
+  W_new = [1.0 - 0.2,      2.0 + 0.4,          -0.5 - 0.1]
+        = [0.8,            2.4,                -0.6]
+```
+
+Same downhill direction, ten times farther. With a tame loss surface, the larger step makes faster progress. With a steep or curved surface, the larger step is the one that overshoots a valley and makes the loss *worse* on the next evaluation. That is why the learning rate matters as much as the gradient direction does.
+
+</details>
+
+## Flashcards
+
+Nine cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay out the full set as one card per page, ready to print or save as a PDF for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="What is a loss function?">
+
+A single number measuring how wrong the current predictions are against the correct labels. Large when the prediction is bad, small (ideally zero) when it is good. Training minimizes it.
+
+</Flashcard>
+
+<Flashcard question="Multiclass SVM loss formula?">
+
+`L_i = Σ_{j ≠ y} max(0, s_j - s_y + 1)`. Wrong classes contribute their shortfall below a required margin of 1 over the correct class's score; classes that already clear the margin contribute zero.
+
+</Flashcard>
+
+<Flashcard question="Softmax / cross-entropy loss formula?">
+
+Softmax: `p_j = exp(s_j) / Σ exp(s_k)`. Cross-entropy loss: `L_i = -log(p_y)`. Confident-and-correct gives near 0; wrong or hesitant gives large positive.
+
+</Flashcard>
+
+<Flashcard question="Why add a regularization term `λ * Σ W²`?">
+
+Many W's give the same data loss; smaller weights tend to generalize better to unseen images. The penalty makes the optimizer prefer simpler W; λ controls the trade-off.
+
+</Flashcard>
+
+<Flashcard question="What direction does the gradient `∇L` point?">
+
+Steepest **ascent** of the loss. We step in the **negative** gradient direction to go downhill, with step length set by the learning rate.
+
+</Flashcard>
+
+<Flashcard question="Gradient descent update rule?">
+
+`W ← W - α * ∇L`. α is the learning rate (step size). Iterate this many times to drive the loss down.
+
+</Flashcard>
+
+<Flashcard question="What does too-large vs too-small a learning rate do?">
+
+Too small: very slow progress. Too large: overshoot the valley and the loss can increase. CS231n's CIFAR-10 demo: loss 2.20 → 1.65 at a good rate; > 2500 at one too-large rate.
+
+</Flashcard>
+
+<Flashcard question="What is mini-batch / stochastic gradient descent (SGD)?">
+
+Compute the loss and gradient on a small batch of training images (commonly 32-256) rather than the full dataset, and take many cheap, slightly noisy steps. Standard practice.
+
+</Flashcard>
+
+<Flashcard question="Analytic vs numerical gradient: which do we use, and what is the other for?">
+
+Analytic (calculus) gradient: fast, exact; what we use in real training. Numerical (finite differences) gradient: approximate and slow; we use it as a sanity check ("gradient check") to verify the analytic derivation is correct.
+
+</Flashcard>
+
+</FlashcardSet>

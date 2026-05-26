@@ -1,0 +1,188 @@
+---
+title: "Practice: GANs and VAEs"
+description: Self-check on discriminative-vs-generative + VAE + GAN, a fresh reparameterization-trick computation, a tool-choice exercise, and flashcards.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Seven short questions. Answer each before opening the collapsible.
+
+**1. What does a discriminative model learn, and what does a generative model learn?**
+
+<details>
+<summary>Show answer</summary>
+
+Discriminative: `P(label | image)`, the probability of a label given an image; slices up image space. Generative: `P(image)` (or how to sample from it), describes image space; can produce new images that look like they came from the training distribution. Discriminative models classify, detect, segment; generative models synthesize.
+
+</details>
+
+**2. Describe the VAE shape in one sentence.**
+
+<details>
+<summary>Show answer</summary>
+
+An encoder maps an input image to a latent **distribution** (mean μ and std σ), a latent vector z is sampled from N(μ, σ²), and a decoder maps z back to a reconstruction. To generate, sample z directly from the standard normal prior N(0, I) and run the decoder; skip the encoder.
+
+</details>
+
+**3. State the reparameterization trick and explain why it is necessary.**
+
+<details>
+<summary>Show answer</summary>
+
+Instead of sampling `z ~ N(μ, σ²)` directly (a non-differentiable random operation), rewrite as `z = μ + σ * ε` where `ε ~ N(0, I)` is drawn from a fixed standard normal. Now z is a deterministic function of μ, σ, and ε; gradients flow through μ and σ (the trainable parameters) while the randomness sits in ε (no parameters, no gradient needed). Without this, you cannot backpropagate through the sampling step and the VAE cannot train.
+
+</details>
+
+**4. State the two terms in the VAE training loss and what each enforces.**
+
+<details>
+<summary>Show answer</summary>
+
+(1) **Reconstruction loss** (typically pixel MSE or cross-entropy), which penalizes how badly the decoder reproduces the input image from its latent sample. (2) **KL-divergence regularizer**, which pushes the encoder's per-image distribution N(μ, σ²) toward the prior N(0, I), keeping the latent space well-organized so any sampled z corresponds to *some* plausible image. The sum is called the Evidence Lower Bound (ELBO).
+
+</details>
+
+**5. Describe the GAN setup in one sentence.**
+
+<details>
+<summary>Show answer</summary>
+
+Two networks trained adversarially: a generator G maps random noise z to an image; a discriminator D classifies whether an image is real (from the training set) or fake (from G). G tries to fool D; D tries to discriminate correctly. At equilibrium, G's outputs are indistinguishable from real images and D outputs 0.5.
+
+</details>
+
+**6. State two characteristic strengths/weaknesses of each family.**
+
+<details>
+<summary>Show answer</summary>
+
+**VAE.** Strength: smooth, well-organized latent space (good for interpolation, latent-space arithmetic). Weakness: outputs tend to be slightly blurry (pixel-MSE-style losses average over plausible reconstructions). **GAN.** Strength: sharp, photorealistic outputs. Weakness: unstable training (mode collapse, oscillation), no likelihood, no built-in encoder.
+
+</details>
+
+**7. Why are VAEs still in production despite diffusion being better at high-quality generation?**
+
+<details>
+<summary>Show answer</summary>
+
+Many production systems use a VAE as a **first-stage encoder** that maps raw images down to a compact latent space, with a diffusion model then operating in that latent space (the "latent diffusion" architecture behind several popular image generators). The VAE never went away; it moved into a different layer of the stack. VAE-style methods also remain useful when smooth latent space matters (semantic editing, interpolation) and when inference latency and cost favour single-pass decoding over diffusion's iterative sampling.
+
+</details>
+
+## Try it yourself: reparameterization, tool choice, GAN training reasoning
+
+Three exercises, about 15 minutes.
+
+**Part A: a fresh reparameterization.** A VAE's encoder produces `μ = [0.2, 0.7, -0.3]` and `σ = [0.4, 0.1, 0.5]` for some input. Suppose ε is sampled from N(0, I) as `ε = [1.0, -0.5, 0.2]`. Compute the latent vector `z = μ + σ * ε` (elementwise).
+
+<details>
+<summary>Worked answer</summary>
+
+```
+z = [μ_1 + σ_1·ε_1, μ_2 + σ_2·ε_2, μ_3 + σ_3·ε_3]
+  = [0.2 + 0.4·1.0,    0.7 + 0.1·(-0.5),  -0.3 + 0.5·0.2]
+  = [0.2 + 0.4,        0.7 - 0.05,        -0.3 + 0.1]
+  = [0.6,              0.65,              -0.2]
+```
+
+So `z = [0.6, 0.65, -0.2]`. The randomness lives entirely in `ε`; the trainable `μ` and `σ` shape where in latent space the sample lands. During training, gradients flow back from the decoder's reconstruction loss through `z`'s formula to update `μ` and `σ` (and the encoder weights that produce them); they do not need to flow through `ε` at all because `ε` has no parameters.
+
+</details>
+
+**Part B: tool choice.** For each situation, choose the most appropriate generative-model family (VAE, GAN, diffusion, or "use a self-supervised encoder from L10 instead") and briefly say why.
+
+1. You want to interpolate smoothly between two face images so a UI can show a gradual morph.
+2. You want a frozen encoder that produces general-purpose visual features for downstream classification, with no need to synthesize images.
+3. You want to generate maximum-photorealism novel images of fictional landscapes; latency is not a critical constraint.
+4. You need to run image generation on a mobile device with tight latency and battery constraints; a small quality hit is acceptable.
+
+<details>
+<summary>Suggested answers</summary>
+
+1. **VAE.** Smooth, well-organized latent space is the strength; interpolation in latent space decodes to gradual morphs by construction. (StyleGAN's structured latent space is the GAN-family answer here; VAE-family is the straightforward default.)
+2. **Self-supervised encoder (L10).** No need for generation, only good features. Pre-train an encoder on huge unlabeled image data (DINOv2 or similar), use it frozen. VAEs and GANs are overkill if you do not actually need to synthesize.
+3. **Diffusion (next lesson; or a high-end GAN like StyleGAN).** Maximum photorealism is the strength of diffusion and modern GANs; if latency allows iterative sampling, diffusion is the modern default.
+4. **GAN or VAE.** Both are single-pass at inference (one forward pass through the decoder), much faster than diffusion's iterative sampling. Accept the quality trade-off for the latency win on-device.
+
+</details>
+
+**Part C: GAN training reasoning.** You are training a GAN and notice that the generator's loss is decreasing steadily, but the generated samples look monotonous (every random `z` produces a very similar image of the same kind, e.g. always cats facing left, even though your training set has cats facing many directions). In 2-3 sentences, name the failure mode, explain what is going wrong, and suggest one direction to address it.
+
+<details>
+<summary>What a good answer looks like</summary>
+
+This is **mode collapse**: the generator has found a small region of image space that reliably fools the discriminator (or fools it well enough), and has stopped exploring the full diversity of the training distribution. The decreasing generator loss is misleading; it does not capture diversity, only adversarial-classification success against the current discriminator. Approaches that help: use a more capable discriminator (it can learn that "all cats face left" is not actually the real distribution and push G away from it); use one of the GAN variants designed for stability (WGAN with gradient penalty, spectral normalization, progressive growing), or use a diffusion-based generator instead, which does not have mode collapse as a structural failure mode.
+
+The deeper point: GAN training metrics are tricky. Inspect generated samples regularly and check diversity, not just loss curves. This is one of the practical reasons diffusion has displaced GANs at the high end despite GANs being faster at inference.
+
+</details>
+
+## Flashcards
+
+Nine cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay out the full set as one card per page, ready to print or save as a PDF for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="Discriminative vs generative model: what does each learn?">
+
+Discriminative: `P(label | image)`; slices up image space; classify/detect/segment. Generative: `P(image)` or how to sample from it; describes image space; synthesize new images.
+
+</Flashcard>
+
+<Flashcard question="VAE shape in one sentence?">
+
+Encoder maps image to latent distribution (μ, σ); sample `z ~ N(μ, σ²)`; decoder reconstructs. Generate by skipping the encoder and sampling z from the standard normal prior N(0, I).
+
+</Flashcard>
+
+<Flashcard question="Reparameterization trick?">
+
+`z = μ + σ · ε` where `ε ~ N(0, I)`. Makes sampling differentiable; gradients flow through trainable μ and σ while randomness sits in parameter-free ε. Essential for VAE training.
+
+</Flashcard>
+
+<Flashcard question="VAE training loss (ELBO) has two terms?">
+
+Reconstruction loss (decoder reproduces input from latent sample) + KL-divergence regularizer (encoder distribution toward N(0,I) prior). Reconstruction makes outputs faithful; KL keeps latent space well-organized.
+
+</Flashcard>
+
+<Flashcard question="GAN setup in one sentence?">
+
+Generator G maps random noise to image; Discriminator D classifies real vs fake; trained adversarially (G fools D; D distinguishes). At equilibrium G's outputs are indistinguishable from real and D outputs 0.5.
+
+</Flashcard>
+
+<Flashcard question="VAE strengths and weaknesses?">
+
+Strengths: smooth/well-organized latent space (good interpolation, latent arithmetic); stable principled training. Weakness: slightly blurry outputs (MSE-style losses average plausible reconstructions).
+
+</Flashcard>
+
+<Flashcard question="GAN strengths and weaknesses?">
+
+Strengths: sharp, photorealistic outputs (discriminator pressure matches high-frequency real-image statistics). Weaknesses: unstable training (mode collapse, oscillations); no likelihood; no built-in encoder; loss values not directly meaningful.
+
+</Flashcard>
+
+<Flashcard question="What is mode collapse in GAN training?">
+
+Generator finds a small region of image space that fools the discriminator (or fools it well enough), and stops exploring the full training distribution. Every random z decodes to a similar image; G's loss may still decrease but diversity is lost. Inspect samples, not just loss curves.
+
+</Flashcard>
+
+<Flashcard question="Why are VAEs still in production despite diffusion winning at quality?">
+
+Many systems use a VAE as a first-stage encoder mapping raw images to a compact latent space; a diffusion model then operates in that latent space (the "latent diffusion" architecture). VAE-family also wins on inference latency (single pass vs diffusion's iterative sampling), important for on-device or cost-bound deployments.
+
+</Flashcard>
+
+</FlashcardSet>

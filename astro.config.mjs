@@ -1559,6 +1559,221 @@ export default defineConfig({
 					],
 				},
 				{
+					label: 'Track 16: Computer Vision',
+					items: [
+						{
+							label: 'Phase 1\nFoundations for vision',
+							collapsed: true,
+							items: [
+								{
+									label: 'Why seeing is hard',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/computer-vision/why-seeing-is-hard/brief' },
+										{ label: 'Lesson', slug: 'lessons/computer-vision/why-seeing-is-hard/lesson' },
+										{ label: 'Practice', slug: 'lessons/computer-vision/why-seeing-is-hard/practice' },
+										{ label: 'Summary', slug: 'lessons/computer-vision/why-seeing-is-hard/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/computer-vision/why-seeing-is-hard/cheatsheet' },
+										{ label: 'References', slug: 'lessons/computer-vision/why-seeing-is-hard/references' },
+									],
+								},
+								{
+									label: 'Linear classifiers',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/computer-vision/linear-classifiers/brief' },
+										{ label: 'Lesson', slug: 'lessons/computer-vision/linear-classifiers/lesson' },
+										{ label: 'Practice', slug: 'lessons/computer-vision/linear-classifiers/practice' },
+										{ label: 'Summary', slug: 'lessons/computer-vision/linear-classifiers/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/computer-vision/linear-classifiers/cheatsheet' },
+										{ label: 'References', slug: 'lessons/computer-vision/linear-classifiers/references' },
+									],
+								},
+								{
+									label: 'Loss + optimization',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/computer-vision/loss-and-optimization/brief' },
+										{ label: 'Lesson', slug: 'lessons/computer-vision/loss-and-optimization/lesson' },
+										{ label: 'Practice', slug: 'lessons/computer-vision/loss-and-optimization/practice' },
+										{ label: 'Summary', slug: 'lessons/computer-vision/loss-and-optimization/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/computer-vision/loss-and-optimization/cheatsheet' },
+										{ label: 'References', slug: 'lessons/computer-vision/loss-and-optimization/references' },
+									],
+								},
+								{
+									label: 'NNs + backprop',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/computer-vision/neural-networks-and-backprop/brief' },
+										{ label: 'Lesson', slug: 'lessons/computer-vision/neural-networks-and-backprop/lesson' },
+										{ label: 'Practice', slug: 'lessons/computer-vision/neural-networks-and-backprop/practice' },
+										{ label: 'Summary', slug: 'lessons/computer-vision/neural-networks-and-backprop/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/computer-vision/neural-networks-and-backprop/cheatsheet' },
+										{ label: 'References', slug: 'lessons/computer-vision/neural-networks-and-backprop/references' },
+									],
+								},
+							],
+						},
+						{
+							label: 'Phase 2\nHow machines see',
+							collapsed: true,
+							items: [
+								{
+									label: 'Convolution + CNNs',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/computer-vision/convolution-and-cnns/brief' },
+										{ label: 'Lesson', slug: 'lessons/computer-vision/convolution-and-cnns/lesson' },
+										{ label: 'Practice', slug: 'lessons/computer-vision/convolution-and-cnns/practice' },
+										{ label: 'Summary', slug: 'lessons/computer-vision/convolution-and-cnns/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/computer-vision/convolution-and-cnns/cheatsheet' },
+										{ label: 'References', slug: 'lessons/computer-vision/convolution-and-cnns/references' },
+									],
+								},
+								{
+									label: 'CNN architectures',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/computer-vision/cnn-architectures/brief' },
+										{ label: 'Lesson', slug: 'lessons/computer-vision/cnn-architectures/lesson' },
+										{ label: 'Practice', slug: 'lessons/computer-vision/cnn-architectures/practice' },
+										{ label: 'Summary', slug: 'lessons/computer-vision/cnn-architectures/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/computer-vision/cnn-architectures/cheatsheet' },
+										{ label: 'References', slug: 'lessons/computer-vision/cnn-architectures/references' },
+									],
+								},
+								{
+									label: 'Sequence tools',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/computer-vision/sequence-tools-for-vision/brief' },
+										{ label: 'Lesson', slug: 'lessons/computer-vision/sequence-tools-for-vision/lesson' },
+										{ label: 'Practice', slug: 'lessons/computer-vision/sequence-tools-for-vision/practice' },
+										{ label: 'Summary', slug: 'lessons/computer-vision/sequence-tools-for-vision/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/computer-vision/sequence-tools-for-vision/cheatsheet' },
+										{ label: 'References', slug: 'lessons/computer-vision/sequence-tools-for-vision/references' },
+									],
+								},
+								{
+									label: 'Detection + segmentation',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/computer-vision/detection-segmentation-visualizing/brief' },
+										{ label: 'Lesson', slug: 'lessons/computer-vision/detection-segmentation-visualizing/lesson' },
+										{ label: 'Practice', slug: 'lessons/computer-vision/detection-segmentation-visualizing/practice' },
+										{ label: 'Summary', slug: 'lessons/computer-vision/detection-segmentation-visualizing/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/computer-vision/detection-segmentation-visualizing/cheatsheet' },
+										{ label: 'References', slug: 'lessons/computer-vision/detection-segmentation-visualizing/references' },
+									],
+								},
+								{
+									label: 'Video understanding',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/computer-vision/video-understanding/brief' },
+										{ label: 'Lesson', slug: 'lessons/computer-vision/video-understanding/lesson' },
+										{ label: 'Practice', slug: 'lessons/computer-vision/video-understanding/practice' },
+										{ label: 'Summary', slug: 'lessons/computer-vision/video-understanding/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/computer-vision/video-understanding/cheatsheet' },
+										{ label: 'References', slug: 'lessons/computer-vision/video-understanding/references' },
+									],
+								},
+							],
+						},
+						{
+							label: 'Phase 3\nGenerating + grounding vision',
+							collapsed: true,
+							items: [
+								{
+									label: 'Self-supervised vision',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/computer-vision/self-supervised-vision/brief' },
+										{ label: 'Lesson', slug: 'lessons/computer-vision/self-supervised-vision/lesson' },
+										{ label: 'Practice', slug: 'lessons/computer-vision/self-supervised-vision/practice' },
+										{ label: 'Summary', slug: 'lessons/computer-vision/self-supervised-vision/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/computer-vision/self-supervised-vision/cheatsheet' },
+										{ label: 'References', slug: 'lessons/computer-vision/self-supervised-vision/references' },
+									],
+								},
+								{
+									label: 'GANs + VAEs',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/computer-vision/gans-and-vaes/brief' },
+										{ label: 'Lesson', slug: 'lessons/computer-vision/gans-and-vaes/lesson' },
+										{ label: 'Practice', slug: 'lessons/computer-vision/gans-and-vaes/practice' },
+										{ label: 'Summary', slug: 'lessons/computer-vision/gans-and-vaes/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/computer-vision/gans-and-vaes/cheatsheet' },
+										{ label: 'References', slug: 'lessons/computer-vision/gans-and-vaes/references' },
+									],
+								},
+								{
+									label: 'Diffusion models',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/computer-vision/diffusion-models/brief' },
+										{ label: 'Lesson', slug: 'lessons/computer-vision/diffusion-models/lesson' },
+										{ label: 'Practice', slug: 'lessons/computer-vision/diffusion-models/practice' },
+										{ label: 'Summary', slug: 'lessons/computer-vision/diffusion-models/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/computer-vision/diffusion-models/cheatsheet' },
+										{ label: 'References', slug: 'lessons/computer-vision/diffusion-models/references' },
+									],
+								},
+								{
+									label: '3D vision',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/computer-vision/3d-vision/brief' },
+										{ label: 'Lesson', slug: 'lessons/computer-vision/3d-vision/lesson' },
+										{ label: 'Practice', slug: 'lessons/computer-vision/3d-vision/practice' },
+										{ label: 'Summary', slug: 'lessons/computer-vision/3d-vision/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/computer-vision/3d-vision/cheatsheet' },
+										{ label: 'References', slug: 'lessons/computer-vision/3d-vision/references' },
+									],
+								},
+								{
+									label: 'Vision and language',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/computer-vision/vision-and-language/brief' },
+										{ label: 'Lesson', slug: 'lessons/computer-vision/vision-and-language/lesson' },
+										{ label: 'Practice', slug: 'lessons/computer-vision/vision-and-language/practice' },
+										{ label: 'Summary', slug: 'lessons/computer-vision/vision-and-language/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/computer-vision/vision-and-language/cheatsheet' },
+										{ label: 'References', slug: 'lessons/computer-vision/vision-and-language/references' },
+									],
+								},
+								{
+									label: 'World modeling',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/computer-vision/world-modeling/brief' },
+										{ label: 'Lesson', slug: 'lessons/computer-vision/world-modeling/lesson' },
+										{ label: 'Practice', slug: 'lessons/computer-vision/world-modeling/practice' },
+										{ label: 'Summary', slug: 'lessons/computer-vision/world-modeling/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/computer-vision/world-modeling/cheatsheet' },
+										{ label: 'References', slug: 'lessons/computer-vision/world-modeling/references' },
+									],
+								},
+								{
+									label: 'Human-centered AI',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/computer-vision/human-centered-ai/brief' },
+										{ label: 'Lesson', slug: 'lessons/computer-vision/human-centered-ai/lesson' },
+										{ label: 'Practice', slug: 'lessons/computer-vision/human-centered-ai/practice' },
+										{ label: 'Summary', slug: 'lessons/computer-vision/human-centered-ai/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/computer-vision/human-centered-ai/cheatsheet' },
+										{ label: 'References', slug: 'lessons/computer-vision/human-centered-ai/references' },
+									],
+								},
+							],
+						},
+					],
+				},
+				{
 					label: 'Track 13: Build Neural Networks from Scratch',
 					items: [
 						{

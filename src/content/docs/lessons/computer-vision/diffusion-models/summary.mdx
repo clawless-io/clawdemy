@@ -1,0 +1,28 @@
+---
+title: "Summary: Diffusion models"
+description: The 5-minute scan version. Two-direction idea, training, inference, the three-way trade-off, latent diffusion, text-to-image.
+sidebar:
+  order: 4
+  label: Summary
+artifact: summary
+---
+
+Lesson 11 left a gap: VAEs were stable-but-blurry, GANs sharp-but-unstable. **Diffusion models** filled it, and have largely replaced both for high-quality image generation since around 2020. The trick: gradually corrupt training images with noise (a fixed forward process), train a network to **predict and reverse the noise** (the learned reverse process), and then run the network iteratively from pure noise back to a synthesized image. Result: high quality + stable training at the cost of iterative (slow) inference. The cost is being attacked from many directions (DDIM, distilled diffusion, latent diffusion). All famous recent text-to-image systems (Stable Diffusion, Imagen, DALL-E 2/3) are diffusion-based.
+
+## Core ideas
+
+- **The two-direction setup.** Forward process (defined, not learned): repeatedly add Gaussian noise per a schedule `β_1, ..., β_T` until `x_T` is essentially pure noise. Per-step formula: `x_t = sqrt(1 - β_t) · x_{t-1} + sqrt(β_t) · ε`. Reverse process (learned): a network predicts the noise at each step; iterating from `x_T` back toward `x_0` turns pure noise into a synthesized image.
+- **Training.** Sample image `x_0`, sample timestep `t`, sample noise `ε`, compute `x_t` in one shot, train network (typically a U-Net conditioned on `t`) to predict `ε` from `(x_t, t)`. Loss is **simple MSE** between predicted and true noise. No adversarial dynamic, no encoder-decoder reconstruction term: just clean regression. This stability is why diffusion training works so reliably compared to GANs.
+- **Body worked forward step.** `x_{t-1} = 0.8, β_t = 0.1, ε = -0.3`: `x_t = sqrt(0.9)·0.8 + sqrt(0.1)·(-0.3) ≈ 0.949·0.8 - 0.316·0.3 ≈ 0.759 - 0.095 ≈ 0.664`. Practice walks a fresh case with β=0.04 and ε=1.5 → x_t ≈ 0.79.
+- **Inference is iterative.** Generating one image = T network forward passes (often 1000 originally). Three mitigations: **DDIM** (deterministic sampler, 25-100 steps); **distilled diffusion** (1-4 steps via student model); **latent diffusion** (operate in a small VAE-compressed latent space; the architecture behind Stable Diffusion; the reason text-to-image became affordable to run).
+- **Text-to-image conditioning** adds **cross-attention** in the U-Net's blocks to a text embedding (typically CLIP's text encoder). **Classifier-free guidance** trains both conditioned and unconditioned variants and combines them at inference for a tunable "prompt-adherence vs naturalness" knob.
+- **Trade-off vs VAE and GAN (L11):** diffusion wins quality and training stability and mode coverage; cost is iterative inference time. VAEs and GANs remain in production for cost/latency reasons. Crucially, the L11 VAE became **load-bearing again** as latent diffusion's first-stage encoder; it never went away.
+- **Technique vs application.** Diffusion is a general mechanism with many neutral and beneficial uses (scientific viz, medical synthesis, accessibility, content creation). Ethical concerns at the application level (copyright, consent, deepfakes, bias in text-to-image specifically) are real but apply to any high-capability generative-image method and are outside the scope of this technique-focused lesson.
+
+## What changes for you
+
+If you have used a text-to-image system in the last few years, you have used a diffusion model. The slowness you wait through is the iterative denoising loop running 25-50 (or more) steps per generation. The "guidance" or "CFG" slider in most interfaces is the classifier-free guidance scale. The "img2img" feature starts the reverse process from a noisy version of your input rather than pure noise, giving control over how much of the input is preserved. ControlNet-style features add structural conditioning (depth, edges, pose) by injecting additional inputs into the U-Net at each step.
+
+The same architecture underlies most production controlled image editing tools, inpainting tools, super-resolution features, and increasingly mainstream video-generation systems. Diffusion has been one of the few recent ML developments to be simultaneously a research breakthrough, a production system, and a widely-used consumer feature.
+
+VAEs gave smoothness at the cost of blurriness; GANs gave sharpness at the cost of stability; diffusion gives both quality and stability by reframing generation as iterative noise removal. The cost is inference time, and the field has spent years successfully shrinking it.

@@ -1,0 +1,210 @@
+---
+title: "Practice: Vision and language"
+description: Self-check on CLIP + zero-shot + retrieval + captioning + VQA, a fresh image-text cosine computation, an application-matching exercise, and flashcards.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Seven short questions. Answer each before opening the collapsible.
+
+**1. Describe CLIP's two-tower setup in one sentence.**
+
+<details>
+<summary>Show answer</summary>
+
+Two encoders trained jointly on ~400 million (image, text) pairs from the web: an image encoder (ViT or ResNet) and a text encoder (transformer); both project to a shared embedding space; trained with a contrastive loss so that matching (image, text) pairs are close in cosine similarity and mismatched pairs are far apart. The trained embedding space is the asset; all downstream uses read value from its geometry.
+
+</details>
+
+**2. How does CLIP do zero-shot classification?**
+
+<details>
+<summary>Show answer</summary>
+
+Pick the candidate classes; build a text prompt for each (commonly "a photo of a {class}"); encode each prompt with the trained CLIP text encoder, producing K text embeddings; at inference, encode the input image with the CLIP image encoder and pick the class whose text embedding is most cosine-similar to the image embedding. No training on the target task; competitive with fully-supervised models on many benchmarks at the time of CLIP's publication.
+
+</details>
+
+**3. What is image-text retrieval, and how does CLIP enable it for free?**
+
+<details>
+<summary>Show answer</summary>
+
+Search a corpus of images by typing a text query (text-to-image search), or search captions by a query image (image-to-text search). CLIP's shared embedding space gives this for free: encode a corpus of images into a vector database; encode any text query into the same space; nearest-neighbour search returns matching images. The same machine works both directions by swapping query and corpus.
+
+</details>
+
+**4. What changes when you go from CLIP-style retrieval to image captioning?**
+
+<details>
+<summary>Show answer</summary>
+
+Captioning needs to *generate* text from an image, not just *match* image and text. So you add a **language model decoder** (a transformer that generates text one token at a time) and feed it the image features via cross-attention; train to produce the matching caption for each training image. The image encoder can be CLIP's or a similar pre-trained encoder; the new piece is the decoder. Modern captioning architectures (BLIP, CoCa, LLaVA) variations on this shape.
+
+</details>
+
+**5. What is Visual Question Answering (VQA), and how does it differ from captioning?**
+
+<details>
+<summary>Show answer</summary>
+
+VQA: given an image AND a question, produce an answer. Architecturally close to captioning, but the text decoder's prompt is the question rather than empty (or generic). The answer is generated conditioned on both the image features and the question. Modern VLMs typically handle both captioning and VQA from the same trained weights; task-specific VQA architectures from the 2015-2020 era have largely been subsumed.
+
+</details>
+
+**6. Why does prompt engineering matter for zero-shot CLIP classification?**
+
+<details>
+<summary>Show answer</summary>
+
+The text prompt (e.g. "a photo of a {class}" vs "an iPhone photo of a {class}" vs "a sketch of a {class}") anchors CLIP to a specific register of imagery; the embedding produced is different in each case, which shifts which image embeddings end up nearest. Substantial accuracy differences can result from small prompt-template changes. This is one of the first cases in modern AI where prompt design materially affected downstream metrics, foreshadowing the prompt-engineering era of later language models.
+
+</details>
+
+**7. What is the economic frame that closes Phase 3?**
+
+<details>
+<summary>Show answer</summary>
+
+Image-text pairs are abundant on the web (every image with a caption or alt text is a free training pair). That abundance is what made CLIP-style training at the 400M-pair scale feasible. Combined with self-supervised vision (L10's "labels expensive, unlabeled abundant"), the field has shifted from paying for hand-curated labels toward exploiting the web's natural co-occurrence structure. Modern multimodal AI is built on the data abundance that comes with that shift.
+
+</details>
+
+## Try it yourself: cosine match, application choice, prompt engineering
+
+Three exercises, about 15 minutes.
+
+**Part A: a fresh image-text cosine similarity.** Suppose, after L2 normalization, CLIP gives a particular image the embedding `img = [0.8, 0.6]`. Three candidate text embeddings (each also unit length):
+
+- `txt_A = [0.6, 0.8]`
+- `txt_B = [0.0, 1.0]`
+- `txt_C = [-0.6, -0.8]`
+
+Compute `cos(img, txt_A)`, `cos(img, txt_B)`, and `cos(img, txt_C)`. (Since both vectors are unit length in each pair, cosine simplifies to the dot product.) Which text most likely matches the image?
+
+<details>
+<summary>Worked answer</summary>
+
+```
+cos(img, txt_A) = (0.8)(0.6)  + (0.6)(0.8)
+                = 0.48 + 0.48
+                = 0.96
+
+cos(img, txt_B) = (0.8)(0.0)  + (0.6)(1.0)
+                = 0 + 0.6
+                = 0.6
+
+cos(img, txt_C) = (0.8)(-0.6) + (0.6)(-0.8)
+                = -0.48 - 0.48
+                = -0.96
+```
+
+Cosines: `[0.96, 0.6, -0.96]`. **`txt_A` is the matching text** (highest cosine similarity). `txt_B` is partially aligned (a moderate cosine of 0.6, perhaps semantically related but not a direct match). `txt_C` is the *opposite* of the image embedding in the shared space (cosine = -0.96), the kind of semantic anti-pair CLIP's contrastive loss pushes apart aggressively. In a zero-shot classification with these three candidates, the prediction would be class A.
+
+</details>
+
+**Part B: application matching.** For each description, name the vision-language application/architecture (CLIP zero-shot classification, CLIP retrieval, captioning, VQA, or a general VLM).
+
+1. Your phone's photo gallery search finds all photos matching "sunset at the beach."
+2. A medical imaging tool classifies a scan as one of 12 possible conditions, with no training on those specific conditions (just text descriptions of each).
+3. A system describes the contents of an image to a visually-impaired user as "a child holding a red balloon in a sunny park."
+4. A user asks an AI system, "How many people are in this picture, and what are they doing?" and gets an answer about the image.
+
+<details>
+<summary>Suggested answers</summary>
+
+1. **CLIP-style image-text retrieval.** Encode photo library into a vector index with a CLIP image encoder; encode "sunset at the beach" with the CLIP text encoder; nearest-neighbour search returns matching photos.
+
+2. **CLIP zero-shot classification.** Build 12 text prompts ("a scan showing {condition}"); encode them with CLIP's text encoder; at inference, encode the scan with CLIP's image encoder and predict the closest text. No retraining; works for any text-describable category. (Caveat: medical CLIP variants pre-trained on medical text+image data typically outperform general-purpose CLIP for this; the recipe is the same.)
+
+3. **Captioning.** Image-to-text generation: image encoder + language model decoder with cross-attention; trained to produce captions matching training images. Used for accessibility tools and similar.
+
+4. **VQA / general VLM.** Image + question → answer; modern general-purpose VLMs handle this from one trained system. The same architecture often handles captioning (no question = generic caption) and VQA (with question = task-specific answer).
+
+</details>
+
+**Part C: prompt engineering.** You are using CLIP zero-shot classification for the categories `["dog", "cat", "horse"]`. With the default template "a photo of a {class}" you get 87 percent accuracy on your test set. (1) Suggest two alternate templates that might improve accuracy and briefly explain why each could help. (2) When would prompt engineering NOT help, and what would be the right thing to do instead?
+
+<details>
+<summary>What a good answer looks like</summary>
+
+**(1) Two reasonable alternates.**
+
+- **Domain-anchored**: `"a high-quality photograph of a {class}, taken with a professional camera"`. Anchors CLIP to high-quality imagery, which often correlates with the cleanest semantic signal in the training data and shifts the text embedding closer to image embeddings that come from well-shot photos.
+
+- **Prompt-ensembling**: encode several templates (`"a photo of a {class}"`, `"a picture of a {class}"`, `"a snapshot of a {class}"`, `"a close-up of a {class}"`), and average the text embeddings before computing cosine similarity. Ensembling reduces the variance from any one template's particularities. CLIP's original paper uses this trick at scale (80+ templates).
+
+**(2) When prompt engineering would NOT help.**
+
+If your test images come from a distribution genuinely outside CLIP's training data (e.g., medical scans, satellite imagery, scientific microscopy, niche industrial domains), prompt engineering can only get you so far; the encoder's features themselves are unfamiliar with your domain. In those cases the right move is to **fine-tune a domain-specific CLIP variant** on a smaller labeled dataset from the target domain, or to use a domain-pre-trained variant if one is available (BiomedCLIP for medical, RemoteCLIP for satellite, etc.). The general lesson: prompt engineering exploits an encoder's existing knowledge; it does not create new knowledge. If the encoder does not know your domain, retrain or fine-tune.
+
+</details>
+
+## Flashcards
+
+Nine cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay out the full set as one card per page, ready to print or save as a PDF for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="CLIP's two-tower setup in one sentence?">
+
+Image encoder + text encoder trained jointly on ~400M web (image, text) pairs with a contrastive loss; matching pairs close in shared embedding space, mismatched pairs far. The trained embedding space is the asset.
+
+</Flashcard>
+
+<Flashcard question="What does the contrastive loss enforce in the embedding space?">
+
+For each (image, text) pair in a mini-batch, the matching pair should be near each other (high cosine similarity) and mismatched in-batch pairs should be far apart. Symmetric InfoNCE applied across image-text pairs in both directions.
+
+</Flashcard>
+
+<Flashcard question="How does CLIP do zero-shot classification?">
+
+Encode candidate class names as text ("a photo of a {class}"); at inference, encode the input image and pick the class whose text embedding is most cosine-similar. No training on the target task; competitive with fully-supervised.
+
+</Flashcard>
+
+<Flashcard question="Image-text retrieval, both directions?">
+
+Encode an image corpus into a vector index (CLIP image encoder); search by encoding a text query (CLIP text encoder) and finding nearest images (text-to-image search). Reverse for image-to-text search.
+
+</Flashcard>
+
+<Flashcard question="What does captioning add over CLIP retrieval?">
+
+A language-model decoder. CLIP only MATCHES image and text; captioning GENERATES text from an image. Image encoder + transformer text decoder with cross-attention to image features, trained on caption pairs.
+
+</Flashcard>
+
+<Flashcard question="VQA vs captioning architecturally?">
+
+Same shape, with an additional text input. Captioning: image → caption. VQA: image + question → answer. Both use image encoder + text-generation decoder with cross-attention. Modern VLMs handle both from one trained system.
+
+</Flashcard>
+
+<Flashcard question="Why does prompt engineering matter for CLIP zero-shot classification?">
+
+Different text templates produce different text embeddings; the choice can substantially shift which image embeddings end up nearest. CLIP's original paper uses ensembles of 80+ templates. First major case in modern AI where prompt design materially affected downstream metrics.
+
+</Flashcard>
+
+<Flashcard question="When does CLIP zero-shot fail, and what to do?">
+
+When the test domain is genuinely outside CLIP's training data (medical scans, satellite, scientific microscopy). Prompt engineering can't fix this. Fine-tune on a small labeled set from the target domain, or use a domain-pre-trained CLIP variant (BiomedCLIP, RemoteCLIP, etc.).
+
+</Flashcard>
+
+<Flashcard question="Phase 3 economic frame?">
+
+Image-text pairs are abundant on the web (every image with caption or alt text is a free training pair). That abundance enables CLIP-scale (400M-pair) pre-training. Combined with self-supervised vision (L10), the field has shifted from hand-labeled to naturally-occurring training signal.
+
+</Flashcard>
+
+</FlashcardSet>

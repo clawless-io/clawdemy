@@ -1,0 +1,250 @@
+---
+title: "Practice: Convolution and CNNs"
+description: Self-check on the convolution operation and its hyperparameters, a fresh horizontal-edge filter by hand, output-size formula practice, parameter-count comparisons, and flashcards.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Seven short questions. Answer each before opening the collapsible.
+
+**1. What are the two problems with a fully-connected layer applied to images?**
+
+<details>
+<summary>Show answer</summary>
+
+(1) Parameter explosion: a single FC neuron on a 224x224x3 input holds 150,528 weights, and a modest hidden layer multiplies that by hundreds. (2) No spatial prior: the layer treats every pixel-pair as unrelated and must learn separate detectors for every spatial position, ignoring that natural images have local structure and the same patterns appear in many places.
+
+</details>
+
+**2. Describe the convolution operation in one sentence.**
+
+<details>
+<summary>Show answer</summary>
+
+A small learned filter (e.g. 3 by 3 spatially, full input depth) slides across the input volume, and at each spatial position computes a dot product between the filter and the input patch it overlaps, producing one value per position; the grid of values is the filter's feature (activation) map.
+
+</details>
+
+**3. Why does CS231n call weight sharing a "vision-appropriate prior"?**
+
+<details>
+<summary>Show answer</summary>
+
+Because natural images are translationally structured: if detecting a pattern (like an edge) is useful at one spatial position, it is intuitively useful at any other position too. Sharing the same filter weights at every position makes the assumption explicit, dramatically reduces the parameter count, and gives translation equivariance for free.
+
+</details>
+
+**4. Write the output spatial-size formula and name what each symbol means.**
+
+<details>
+<summary>Show answer</summary>
+
+`output_size = (W - F + 2P) / S + 1`. W = input spatial size, F = filter spatial size, S = stride (how many pixels we slide between positions), P = zero-padding (rings of zeros added around the input border). The result must be a whole number for the configuration to be valid.
+
+</details>
+
+**5. What is the exact parameter count of one conv layer?**
+
+<details>
+<summary>Show answer</summary>
+
+`weights = F * F * D_in * K` and `biases = K`, where F is filter spatial size, D_in is input depth, and K is the number of filters in this layer. Crucially, this count does NOT depend on the input image's height or width.
+
+</details>
+
+**6. What do the three conv hyperparameters K, S, P control?**
+
+<details>
+<summary>Show answer</summary>
+
+K (depth) = number of filters, which sets the depth of the output volume. S (stride) = pixels-per-slide, which reduces output spatial size as S grows. P (zero-padding) = rings of zeros at the border, used (with P chosen well) to keep output spatial size equal to input ("same" padding).
+
+</details>
+
+**7. What changes in the training loop when we add conv layers?**
+
+<details>
+<summary>Show answer</summary>
+
+The forward and backward passes through one specific layer compute different things (convolution instead of matrix multiply). The loss, the gradient descent step, and backprop's chain-rule mechanics are unchanged. The training loop on top of conv layers is the same four-step cycle from lesson 4.
+
+</details>
+
+## Try it yourself: convolve by hand, check output sizes, count parameters
+
+Three short exercises, paper and basic arithmetic, about 15 minutes.
+
+**Part A: a horizontal-edge filter on a horizontal-edge image.** The input is a 5 by 5 grayscale image with a clean horizontal edge (zeros on top three rows, ones on bottom two):
+
+```
+0 0 0 0 0
+0 0 0 0 0
+0 0 0 0 0
+1 1 1 1 1
+1 1 1 1 1
+```
+
+The filter is a 3 by 3 horizontal-edge detector (bright at bottom, dark at top):
+
+```
+-1 -1 -1
+ 0  0  0
+ 1  1  1
+```
+
+Stride 1, no padding (so output is 3 by 3). Compute the full output feature map.
+
+<details>
+<summary>Worked answer</summary>
+
+Output size: `(5 - 3 + 0) / 1 + 1 = 3`, so we get a 3 by 3 feature map. By the input's column-uniformity, every column of the output will be the same; we compute the three row values.
+
+**Output row 0** (input rows 0-2, all zeros): each input patch is all zeros, so the dot product is **0**. Row 0 of the output is `[0, 0, 0]`.
+
+**Output row 1** (input rows 1-3): the patch at any column position is
+
+```
+0 0 0     ← input row 1
+0 0 0     ← input row 2
+1 1 1     ← input row 3
+```
+
+Dot product with the filter: `(-1)(0) + (-1)(0) + (-1)(0)` + `(0)(0) + (0)(0) + (0)(0)` + `(1)(1) + (1)(1) + (1)(1)` = 0 + 0 + 3 = **3**. Row 1 is `[3, 3, 3]`.
+
+**Output row 2** (input rows 2-4):
+
+```
+0 0 0     ← input row 2
+1 1 1     ← input row 3
+1 1 1     ← input row 4
+```
+
+Dot product: 0 + 0 + 3 = **3**. Row 2 is `[3, 3, 3]`.
+
+Output feature map:
+
+```
+0 0 0
+3 3 3
+3 3 3
+```
+
+The filter responded zero on the all-zeros top, lit up at row 1 (the patch overlapping the edge transition), and stayed lit at row 2 (the patch sitting entirely in the bright region with the dark row 2 above contributing zero). The horizontal edge between rows 2 and 3 of the input shows up clearly as the row 1 / row 2 transition in the output.
+
+</details>
+
+**Part B: output-size formula practice.** Compute the output spatial size for each configuration. Use `output = (W - F + 2P) / S + 1`.
+
+1. W = 32, F = 5, S = 1, P = 2 (a typical CIFAR-10 first-conv setup).
+2. W = 224, F = 3, S = 1, P = 1 (a typical ResNet-style "same" padding).
+3. W = 5, F = 3, S = 2, P = 0 (downsampling our edge-detector input).
+4. W = 7, F = 3, S = 1, P = 0 (CS231n's verbatim example, for the answer key).
+
+<details>
+<summary>Answers</summary>
+
+1. `(32 - 5 + 4) / 1 + 1 = 31 + 1 = `**`32`**. Same as input (this is what `P = (F-1)/2` "same" padding does for stride 1).
+2. `(224 - 3 + 2) / 1 + 1 = 223 + 1 = `**`224`**. Same as input.
+3. `(5 - 3 + 0) / 2 + 1 = 1 + 1 = `**`2`**. Stride 2 halves the spatial size (with a small adjustment for the formula's `+1`).
+4. `(7 - 3 + 0) / 1 + 1 = 4 + 1 = `**`5`**. Matches CS231n's verbatim example.
+
+If any of these gave a non-integer, the configuration would be invalid for that input size. Real architecture design picks F, S, P carefully so the output is always an integer at every layer.
+
+</details>
+
+**Part C: parameter-count comparison.** Compute and compare the parameter count of a fully-connected layer vs a conv layer on the same input, with the same number of output channels / units.
+
+1. CIFAR-10 input (32 by 32 by 3 = 3072 pixels). (a) A fully-connected layer with 100 output units. (b) A conv layer with 100 filters of size 3 by 3.
+2. ImageNet-scale input (224 by 224 by 3 = 150,528 pixels). Same two layers (FC with 100 units; conv with 100 3 by 3 filters).
+
+<details>
+<summary>Answers</summary>
+
+**1. CIFAR-10.**
+
+```
+FC:   weights = 3072 * 100 = 307,200; biases = 100; total = 307,300
+Conv: weights = (3 * 3 * 3) * 100 = 2,700; biases = 100; total = 2,800
+```
+
+The conv layer is **about 110x smaller** in parameter count for the same number of outputs.
+
+**2. ImageNet-scale.**
+
+```
+FC:   weights = 150,528 * 100 = 15,052,800; biases = 100; total = 15,052,900
+Conv: weights = (3 * 3 * 3) * 100 = 2,700; biases = 100; total = 2,800
+```
+
+The FC layer balloons by ~50x going from CIFAR-10 to ImageNet input; the conv layer's parameter count is **unchanged**, because conv parameter count depends on filter size and input depth, not on input spatial size. The conv layer is **about 5,375x smaller** here. This is the savings that made deep image networks practical.
+
+</details>
+
+## Flashcards
+
+Nine cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay out the full set as one card per page, ready to print or save as a PDF for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="Why is a fully-connected layer wrong for images?">
+
+Two reasons: parameter explosion (a 224x224x3 input gives a single FC neuron 150,528 weights) and no spatial prior (it treats every pixel-pair as unrelated and must learn separate detectors for every position).
+
+</Flashcard>
+
+<Flashcard question="What is a convolution in one sentence?">
+
+A small learned filter (e.g. 3 by 3, full input depth) slides across the input, computing a dot product with each local patch, producing a 2D feature (activation) map. Many filters per layer give a depth-K output volume.
+
+</Flashcard>
+
+<Flashcard question="Output spatial-size formula?">
+
+`(W - F + 2P) / S + 1`. W = input spatial size, F = filter spatial size, S = stride, P = zero-padding. Must come out a whole number to be a valid configuration.
+
+</Flashcard>
+
+<Flashcard question="Parameter count of one conv layer?">
+
+`F * F * D_in * K` weights plus `K` biases, where D_in is the input depth and K is the number of filters. Does NOT depend on input spatial size; only on filter size, input depth, and filter count.
+
+</Flashcard>
+
+<Flashcard question="What does weight sharing mean and why is it a vision-appropriate prior?">
+
+The same filter weights are used at every spatial position. Vision-appropriate because natural images have translational structure: if detecting an edge is useful at one position, it is useful at any other. Cuts parameters dramatically; gives translation equivariance for free.
+
+</Flashcard>
+
+<Flashcard question="What do K, S, P control in a conv layer?">
+
+K (depth) = number of filters (= depth of output volume). S (stride) = pixels-per-slide; larger S shrinks output. P (zero-padding) = rings of zeros at border; tuned to control output spatial size.
+
+</Flashcard>
+
+<Flashcard question="What does 'same' padding mean?">
+
+Choose P so the output spatial size equals the input spatial size (typically P = (F - 1)/2 for stride 1 and odd F). Common in modern architectures so spatial size is only reduced where the architect chooses (e.g. by stride or pooling).
+
+</Flashcard>
+
+<Flashcard question="How are CNN filters chosen in practice?">
+
+Learned by backpropagation, exactly like the weights of a fully-connected layer in lesson 4. Hand-designed filters (edge detectors, blur, sharpen) are useful for illustration only; the network discovers its own filters from data.
+
+</Flashcard>
+
+<Flashcard question="What does adding conv layers change about the training loop?">
+
+The forward and backward passes at conv layers compute different things; everything else (loss, gradient descent step, backprop's chain rule) is unchanged. The four-step training loop from lesson 4 runs on CNNs unmodified.
+
+</Flashcard>
+
+</FlashcardSet>

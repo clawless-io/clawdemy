@@ -1,0 +1,144 @@
+---
+title: "Lesson: Generating images by denoising, diffusion"
+description: "VAEs were stable but blurry; GANs were sharp but unstable. Diffusion models take a third approach that has largely replaced both for high-quality image generation since around 2020. The trick is to gradually corrupt training images with noise, train a network to predict and remove that noise, and then run the network in reverse: start from pure noise and iteratively denoise into an image. This lesson covers diffusion at vision-context intuition level, works one forward noising step by hand, names the trade-offs (high quality and stable training, but slow iterative inference), and explains how text-to-image systems (Stable Diffusion, Imagen, DALL-E 2/3 family) add language conditioning on top."
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+Lesson 11 closed with a clean trade-off. VAEs gave a smooth, well-organized latent space at the cost of slightly blurry outputs. GANs gave sharp photorealistic outputs at the cost of unstable training and no built-in encoder. Neither was a perfect solution; a generative-image method that combined "high quality" with "stable training" was missing from the picture.
+
+**Diffusion models** are that missing piece. Introduced in their modern form in 2020 (Ho, Jain, and Abbeel's "Denoising Diffusion Probabilistic Models" paper, DDPM for short), they have largely displaced both VAEs and GANs at the high end of image generation, and they are the architecture behind the famous text-to-image systems of recent years (Stable Diffusion, Imagen, and the DALL-E 2 / 3 family). This lesson covers them at vision-context intuition level.
+
+As with lesson 11, the deep mechanics live in sister tracks. T19 (the generative-modeling track) goes deep on the diffusion process's variational interpretation and the equivalence with score-based generative models. T24 (image generation) covers production text-to-image pipelines end to end. T16's job is to give you enough intuition to recognize diffusion architectures in vision work, understand their trade-off vs VAEs and GANs, and route accordingly.
+
+## The two-direction idea
+
+Diffusion takes a strange route to generation. Instead of training a network to produce images directly (the VAE decoder does this; the GAN generator does this), it trains a network to *remove noise* from an image. The whole architecture has two directions, only one of which is learned.
+
+**Forward process (no learning, just defined).** Take a training image `x_0`. Add a small amount of Gaussian noise to produce `x_1`. Add another small amount to produce `x_2`. Repeat, say, `T = 1000` times. By the end, `x_T` is essentially pure noise; nothing of the original image is visible. This process is fully specified in advance (no parameters to learn); the only choice is a **noise schedule** `β_1, β_2, ..., β_T` (small positive numbers, often ~ 10^-4 to 10^-2) controlling how fast noise is added at each step.
+
+**Reverse process (this is what gets trained).** The model learns to reverse the corruption one step at a time. Given a noised image `x_t` at any step `t`, the network learns to predict either the noise that was added, or the slightly-less-noisy `x_{t-1}` directly (mathematically equivalent under the standard formulation). Train on many `(x_t, t)` pairs sampled by running the forward process on training images.
+
+**Generation, at inference.** Start from pure noise `x_T ~ N(0, I)`. Apply the trained reverse step T times: `x_T → x_{T-1} → ... → x_1 → x_0`. The end of the chain is a sample from the training distribution: a synthesized image. The network never saw the data distribution directly; it only ever saw "predict the noise at this corruption level," and that turns out to be enough.
+
+This is the strange-but-elegant move that makes diffusion work. The data is the training images, the task is denoising, and "generation" emerges from running denoising iteratively starting from pure noise.
+
+## The forward process step by step, with one calculation
+
+The forward noising step is one line of math:
+
+```
+x_t = sqrt(1 - β_t) · x_{t-1}  +  sqrt(β_t) · ε,    where ε ~ N(0, I)
+```
+
+The first term **shrinks** the previous image slightly; the second adds a calibrated **bump of fresh noise**. Both factors are square roots so the total variance stays normalized as `t` grows.
+
+A small numerical example. Suppose a single pixel (or just one component of a vector image) has value `x_{t-1} = 0.8`, the noise schedule at step `t` is `β_t = 0.1`, and we sample `ε = -0.3` from N(0, 1) for this pixel:
+
+```
+x_t = sqrt(1 - 0.1) · 0.8 + sqrt(0.1) · (-0.3)
+    = sqrt(0.9)   · 0.8 + sqrt(0.1) · (-0.3)
+    ≈ 0.9487       · 0.8 + 0.3162    · (-0.3)
+    ≈ 0.7590       + (-0.0949)
+    ≈ 0.6641
+```
+
+The pixel moved from 0.8 to ~0.664, partly shrunk toward zero and partly nudged by random noise. Stack 1000 such steps and the original signal is essentially gone; `x_T` is indistinguishable from a sample of pure noise. The reverse process's job is to learn to *undo* one of these steps reliably, so 1000 reverse steps can take pure noise all the way back to a plausible image.
+
+## Training: predict the noise
+
+What does the network actually learn? Concretely:
+
+1. Sample a training image `x_0` from your dataset.
+2. Sample a random timestep `t ~ uniform(1, T)`.
+3. Sample noise `ε ~ N(0, I)` and use a closed-form expression (derivable from the forward process applied `t` times) to produce `x_t` from `x_0` in one shot.
+4. Pass `(x_t, t)` to the network. The network's job is to predict `ε`, the noise that was added.
+5. Loss is mean squared error between the predicted noise `ε_θ(x_t, t)` and the true `ε`: `|| ε - ε_θ(x_t, t) ||²`.
+
+Repeated across many training examples and many timesteps, the network learns to estimate the noise at any corruption level. The architecture is typically a **U-Net** (which you have already met in lesson 8 for semantic segmentation), modified to be conditioned on `t` (a sinusoidal time embedding gets injected at multiple layers).
+
+The training loss is just MSE. There is no adversarial dynamic (so no mode collapse, no oscillation); there is no encoder-decoder reconstruction term (so no per-pixel-average blurriness); there is one clean regression target per training example. This stability is one of the reasons diffusion training works so reliably compared to GANs.
+
+## Inference: iterative denoising
+
+To generate an image, the network's prediction at each step is used to step from `x_t` toward `x_{t-1}`. The standard formula combines the network's noise prediction with the noise schedule to estimate the previous-step image; this is iterated from `t = T` down to `t = 1`, ending at `x_0`, the generated image.
+
+The crucial property: **inference is iterative**. With `T = 1000`, generating one image requires 1000 forward passes of the network. This is dramatically slower than a VAE's single decoder pass or a GAN's single generator pass. It is the main trade-off you accept in exchange for diffusion's quality.
+
+Several techniques cut this cost without much quality loss:
+
+- **DDIM** (Song et al. 2020): a deterministic sampler that produces good samples in many fewer steps (typically 25-100, sometimes as few as 10).
+- **Distilled diffusion** (multiple lines of work; Stable Diffusion Turbo and similar): train a smaller "student" model to produce a final image in a handful of steps (1-4) instead of running the full reverse process.
+- **Latent diffusion** (Rombach et al. 2022): instead of operating in pixel space, operate in a much smaller latent space provided by a pre-trained VAE encoder. Each diffusion step is then cheaper because the spatial size of the operated-on tensor is smaller. This is the architecture behind Stable Diffusion, and it is the reason text-to-image generation became affordable to run.
+
+Note the elegance of latent diffusion: the VAE you met in lesson 11, which was "obsoleted" by diffusion for direct generation, is now load-bearing as the first-stage encoder for latent diffusion. The two families are complementary in production, not strictly competing.
+
+## Adding conditioning: text-to-image
+
+Vanilla diffusion generates from random noise alone, with no control over what the output is (you get *something* from the training distribution, but you cannot specify what). The famous text-to-image systems (DALL-E 2 / 3, Stable Diffusion, Imagen) add **conditioning**: the network's noise-prediction at each step is conditioned on additional input, typically a text embedding produced by a pre-trained language model like CLIP's text encoder.
+
+Concretely, the U-Net's blocks include **cross-attention** layers (the attention from lesson 7) that let the image-feature positions attend to the text-embedding positions. The result is a denoising step that pays attention to "what the prompt says" while predicting noise, so the iterative denoising trajectory is steered toward an image matching the prompt.
+
+A common training and inference trick is **classifier-free guidance**: train the model both conditioned (on prompt) and unconditioned (no prompt; null token); at inference, take a weighted combination of the two predictions. Higher guidance scales mean the output stays closer to the prompt; lower scales mean more diverse output. This single parameter is one of the main knobs in modern text-to-image systems.
+
+## Why diffusion won at high quality
+
+Putting the trade-offs together:
+
+| Property | VAE | GAN | Diffusion |
+|---|---|---|---|
+| Output quality | Slightly blurry | Sharp | Sharp / high-quality |
+| Training stability | Stable, principled | Unstable; engineering art | Stable, simple MSE loss |
+| Mode coverage | Good | Mode-collapse risk | Good (no mode collapse) |
+| Likelihood | ELBO bound | None | Approximate / score-based |
+| Inference speed | Single pass (fast) | Single pass (fast) | Iterative (T steps; slow) |
+| Conditioning | Possible | Possible | Excellent (text-to-image dominant) |
+
+Diffusion gives you VAE-like training stability *and* GAN-like (or better) output quality, at the cost of iterative inference. The iterative cost is mitigated by latent diffusion and distilled samplers; the quality and stability are what made it the modern default.
+
+## Vision applications
+
+Most modern text-to-image systems are diffusion-based: Stable Diffusion (latent diffusion), Imagen (Google), DALL-E 2 / 3 (OpenAI), Midjourney (proprietary; widely understood to be diffusion-based). Beyond text-to-image:
+
+- **Image-to-image translation** with text guidance (img2img modes; instruction-based editing).
+- **Inpainting** (conditional on the surrounding region) and **outpainting** (extend an image beyond its borders).
+- **Super-resolution** (condition on a low-resolution input).
+- **Controlled generation** with additional inputs (depth maps, edge maps, pose; ControlNet and similar methods).
+- **Video generation** (extending diffusion to the time dimension; an active research area as of writing).
+
+The architecture has unified an enormous range of image-generation work under one mechanism, which is part of why the field consolidated around it so fast.
+
+## Why this matters when you use AI
+
+If you have used a text-to-image system in the last few years, you have used a diffusion model. The slowness you feel waiting for the image to appear is the iterative denoising loop running 25-50 (or more) steps per generation. The "guidance" or "CFG" slider in most interfaces is the classifier-free guidance scale named above. The "img2img" feature uses the trained model to start the reverse process partway through (from a noisy version of your input image rather than pure noise), giving control over how much of the input is preserved.
+
+The same architecture underlies most production controlled-image-editing tools (inpainting, ControlNet, depth-conditioned generation), most "stylize this image" features, and increasingly the video-generation systems just emerging in mainstream products. The mechanism is one of the few recent ML developments that has simultaneously been a research-quality breakthrough, a production-ready system, and a widely-used consumer feature.
+
+As with the L11 framing: the technique is general. Diffusion models have many neutral and beneficial uses (scientific visualization, medical-image synthesis for training, accessibility tools, content creation, simulation). Specific applications, particularly text-to-image at scale, raise ethical questions around copyright, consent, deepfakes, and bias that are real, but they apply to any high-capability generative-image method, not diffusion specifically; those questions are outside the scope of this lesson, which covers the mechanism.
+
+## Common pitfalls
+
+**Thinking diffusion is just "a fancier VAE."** It is structurally different. There is no compact bottleneck latent (the "latent" in latent-diffusion is a separate VAE that is *fed* by the user, not produced by the diffusion model itself). The mechanism is iterative denoising; the network is trained on noise prediction, not on direct image generation.
+
+**Confusing the noise schedule's `β_t` with the predicted noise.** `β_t` is a fixed hyperparameter (the noise schedule); it controls *how much* noise gets added at step `t`. The network's prediction `ε_θ(x_t, t)` is the model's guess at *what* noise was added; this is what gets learned.
+
+**Treating diffusion's iterative cost as fixed.** It is the main practical limitation, but it is being attacked from many directions (DDIM, distilled diffusion, consistency models, latent diffusion). Inference cost has dropped substantially since the original DDPM and continues to drop.
+
+**Thinking text-to-image is the only application.** Most production diffusion work is text-to-image, but the architecture is more general; inpainting, super-resolution, controlled generation, image-to-image translation, video, and 3D generation are all active diffusion-based areas.
+
+**Reading "diffusion" as synonymous with controversy.** Same as for GANs in the last lesson: technique vs application. The mechanism is general; the controversies (copyright, deepfakes, consent) are about specific deployment choices and apply to any high-capability generative method.
+
+## What you should remember
+
+- **Forward process (no learning):** repeatedly add Gaussian noise to training images, by a small schedule β_1, ..., β_T, until `x_T` is essentially pure noise. Per-step formula: `x_t = sqrt(1 - β_t) · x_{t-1} + sqrt(β_t) · ε`.
+- **Reverse process (the learned part):** train a network (typically a U-Net conditioned on the timestep `t`) to predict the noise at each step. Loss is simple MSE between predicted and true noise.
+- **Generation:** start from pure noise `x_T ~ N(0, I)`; iteratively denoise for T steps; end with `x_0`, a synthesized image. Trade-off: high quality + stable training at the cost of iterative (slow) inference.
+- **Speed-ups** in production: DDIM (fewer steps with a deterministic sampler), distilled diffusion (1-4 steps), and especially **latent diffusion** (operate in a small VAE-compressed latent space; the architecture behind Stable Diffusion). The VAE from lesson 11 is now load-bearing as latent diffusion's first-stage encoder.
+- **Text-to-image** adds prompt conditioning via cross-attention to a text embedding (typically CLIP's text encoder), with **classifier-free guidance** giving a tunable knob for "stay close to the prompt vs more diverse." Stable Diffusion, Imagen, and DALL-E 2/3 are all diffusion-based.
+- **Mechanism vs application.** Diffusion is a general technique with many neutral or beneficial uses; the well-known ethical questions about text-to-image at scale apply to any high-capability generative method and are outside the scope of this technique-focused lesson.
+
+VAEs gave smoothness at the cost of blurriness. GANs gave sharpness at the cost of stability. Diffusion gives both quality and stability, by reframing generation as iterative noise removal. The cost is inference time, and the field has spent years successfully shrinking it.
+
+Next: we have covered three generative-image families. The next lesson turns to a different vision question entirely, **3D vision**, recovering three-dimensional structure (depth, shape, scene geometry) from two-dimensional images. After that we connect images with language, then move toward world modeling and the human-centered view that closes the track.

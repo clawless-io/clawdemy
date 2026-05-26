@@ -1,0 +1,123 @@
+---
+title: "Lesson: Learning from images without labels, self-supervised vision"
+description: Every supervised vision model so far in this track has needed labeled images, and labels are expensive. ImageNet's million labels took years of human effort; many domains (medical scans, satellite imagery, scientific data) have far more unlabeled than labeled images. This lesson covers self-supervised learning, the family of techniques that lets a model learn useful visual features from unlabeled images alone. We walk the pretext-task history (rotation prediction, jigsaw, colorization), the modern contrastive shift (SimCLR, MoCo, BYOL) with one cosine-similarity by hand, and masked image modeling (MAE, DINO). The pre-train-then-fine-tune workflow that powers most modern vision-language and multimodal systems lives here.
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+Phase 2 closed with a working image classifier, an object detector, a segmenter, a video model. All of them required labeled data: every image came with a human-attached `cat` or `car` or `road-pixel`. That assumption is starting to look like a luxury.
+
+Labels are expensive. ImageNet's roughly one million labeled images took years of organized human annotation effort, and that is for a curated benchmark with clean class definitions. Real applications often have orders of magnitude more *unlabeled* images than labeled ones, sometimes by necessity (medical scans where labeling requires a radiologist's time, satellite imagery where labels do not yet exist for the questions being asked, scientific data of any kind). The natural question: can a vision model learn useful features from unlabeled images, and use those features to do well on labeled tasks downstream?
+
+This lesson is the answer. The technique is called **self-supervised learning**, and it has reshaped how modern vision systems are built. We walk the history of pretext tasks (the original idea), the contrastive-learning shift that made it work at scale, and the masked-image-modeling techniques that are the current default. The output of all of them is the same: a network that has learned useful visual features from unlabeled data, ready for downstream tasks.
+
+## The core idea: invent a label the data already contains
+
+The trick that defines self-supervised learning: take an unlabeled image and *construct* a label from the image itself, then train a network on the resulting label as if it were normal supervised learning. The constructed task is called a **pretext task**, and its labels come from the data, not from a human annotator. The network does not really care about the pretext task in itself; what matters is that solving it forces the network to learn visual features that turn out to transfer well to real tasks.
+
+The downstream use is then standard. Pre-train a network on a huge unlabeled image set with the pretext task. Take the trained network (usually just the encoder; throw away the pretext-specific head). Plug it into a downstream task, either **fine-tune** the whole network on a small labeled dataset, or **linear-probe** by training only a single linear classifier on top of the frozen pre-trained features. The point: get most of the work done with unlabeled data; spend the precious labeled data only where it actually matters.
+
+## A short history of pretext tasks
+
+The first wave of self-supervised methods (roughly 2014-2018) was a sequence of clever pretext-task designs.
+
+- **Relative position prediction** (Doersch et al. 2015): cut out two patches from an image and ask the network to predict their spatial relationship (the second patch is "above-left," "below," "to the right," and so on). Solving it requires understanding what is in each patch and how they fit together.
+- **Rotation prediction** (Gidaris et al. 2018): rotate an image by 0, 90, 180, or 270 degrees and ask the network to predict the angle. Surprisingly effective despite the apparent silliness: predicting rotation correctly requires recognizing canonical object orientation, which requires recognizing the object.
+- **Jigsaw puzzles** (Noroozi and Favaro 2016): cut an image into a grid (say 3 by 3), shuffle the patches, ask the network to predict the original permutation.
+- **Colorization** (Zhang et al. 2016): take a grayscale image and ask the network to predict the original color. Doing this well requires understanding what objects are present (skin is roughly skin-toned, foliage is roughly green, sky is roughly blue).
+- **Inpainting** (Pathak et al. 2016): mask out a region of the image and ask the network to predict the missing pixels. Anticipates the masked-image-modeling techniques that came back at scale a few years later.
+
+The pretext-task approach worked, with each new task pushing slightly better downstream performance, but none came close to the gap with fully-supervised pretraining on ImageNet. The shift came when the field stopped designing pretext tasks one at a time and moved to a different framing entirely.
+
+## Contrastive learning: pull similar things together, push different things apart
+
+The breakthrough was **contrastive learning**, which generalized the per-task setup into a much simpler objective: learn features so that **two augmented views of the same image are close in feature space, and views of different images are far apart**. No prediction of any specific quantity; just a similarity structure imposed on the learned features.
+
+The canonical instantiation is **SimCLR** (Chen et al. 2020). For each image in a mini-batch:
+
+1. Generate two random augmentations (crops, color jitter, blur, flip): call them `(x, x⁺)`. These are a **positive pair**.
+2. Treat all other augmented images in the batch as **negative examples**: `(x, x⁻_1), (x, x⁻_2), ...`.
+3. Pass everything through the same encoder to get feature vectors.
+4. Define the loss so the positive pair has high similarity and negative pairs have low similarity, using a cosine similarity + temperature-scaled softmax called **NT-Xent loss** (normalized temperature-scaled cross-entropy).
+
+The intuition is short: the network learns features where "the same image, photographed slightly differently" has a representation close to itself, and "a different image entirely" does not. Strong augmentations are essential, the model must be forced to recognize the same scene through dramatic visual changes.
+
+A quick worked similarity. Suppose image A's two augmentations produce feature vectors `a = [1, 0]` and `a⁺ = [0.9, 0.4]`, and a different image B produces `b = [-0.5, 0.8]`. Cosine similarity is `cos(u, v) = (u · v) / (||u|| * ||v||)`:
+
+```
+cos(a, a⁺) = (1·0.9 + 0·0.4) / (sqrt(1) · sqrt(0.81 + 0.16))
+           = 0.9 / sqrt(0.97)
+           ≈ 0.9 / 0.985
+           ≈ 0.914     (high; positive pair)
+
+cos(a, b)  = (1·(-0.5) + 0·0.8) / (sqrt(1) · sqrt(0.25 + 0.64))
+           = -0.5 / sqrt(0.89)
+           ≈ -0.5 / 0.943
+           ≈ -0.530    (low; negative pair)
+```
+
+The positive pair is at ~0.914 cosine similarity; the negative pair is at ~-0.530. The contrastive loss pulls the positive higher and pushes the negative lower, on every step, across many image pairs. Scaled to mini-batches of thousands of images, the network ends up with features where "same image, different view" is consistently close and "different image" is consistently far.
+
+Two important variants you will see cited:
+
+- **MoCo** (He et al. 2019, with v2 and v3 follow-ups): contrastive learning with a **momentum-updated encoder** producing a queue of negatives, which lets you scale to many more negatives than fit in a single GPU's mini-batch. More memory-efficient than SimCLR's "all negatives in one big batch" approach.
+- **BYOL** (Grill et al. 2020): contrastive-style training **without explicit negatives**. Two networks (an online network and a target network updated with momentum); the online network learns to predict the target network's representation of an augmented view. Surprising that it works without negatives at all; the consensus story is that the asymmetric setup prevents the "all features collapse to the same point" failure mode you would expect.
+
+Contrastive learning closed most of the gap with supervised pretraining on ImageNet and opened it on some downstream tasks. By around 2020, "self-supervised features compete with supervised" was no longer a controversial claim.
+
+## Masked image modeling: the BERT idea for vision
+
+The most recent shift is **masked image modeling**, which adapts BERT-style "predict the masked token" training to vision. The architecture is typically a Vision Transformer (lesson 7); the pretext task is:
+
+1. Split the image into patches.
+2. Randomly mask a large fraction of the patches (often 75 percent).
+3. Train the network to reconstruct the masked patches from the visible ones.
+
+**MAE** (Masked Autoencoders Are Scalable Vision Learners, He et al. 2022) is the canonical paper. It pairs a heavy encoder (sees only visible patches, ~25 percent of input) with a lightweight decoder (reconstructs masked patches). The encoder ends up learning rich features because it has to support the decoder's reconstruction job. Computationally efficient because most patches are simply not processed by the encoder.
+
+**DINO** and **DINOv2** (Caron et al. 2021, 2023) use **self-distillation**: a student network learns to predict a teacher network's output (the teacher is a momentum-averaged copy of the student). DINOv2's features have become a strong general-purpose vision encoder for many downstream tasks, often used frozen as a feature extractor.
+
+Masked image modeling and self-distillation tend to produce features that are **more semantically meaningful** than features from contrastive learning, in the sense that downstream tasks (especially fine-grained ones like segmentation and detection) benefit more from them. The current research frontier is mostly variations and combinations of these ideas.
+
+## How self-supervised features get used downstream
+
+The standard workflow is **pre-train then transfer**:
+
+1. **Pre-train** the encoder on a huge unlabeled image dataset (Internet-scale or domain-specific) with one of the methods above. This is the expensive step; days or weeks on many GPUs.
+2. **Transfer** the pre-trained encoder to a downstream task with a much smaller labeled dataset. Two common modes: **fine-tuning** (train the whole network including the encoder on the labeled task, usually with a small learning rate on the encoder) or **linear probing** (freeze the encoder; train only a single linear classifier on top of the frozen features). Linear probing is faster and lets you compare encoders fairly; fine-tuning usually yields better task accuracy.
+
+The economic point: pre-training is expensive but happens once. Fine-tuning is cheap and happens per downstream task. So one large pre-trained encoder amortizes across many downstream applications. This is exactly the same pattern as in language models (pre-train a large language model on Internet text; fine-tune on each specific task), and it has converged on the same engineering shape in vision.
+
+## Why this matters when you use AI
+
+Self-supervised learning is the engine behind several things you have seen.
+
+When a research lab releases a "general-purpose vision encoder" (DINOv2, CLIP's vision tower, MAE-pretrained ViT) and that encoder turns out to do well on segmentation, classification, retrieval, and depth estimation without retraining, you are seeing the self-supervised pre-training paying off. The single pre-trained encoder transfers to many tasks with small task-specific heads.
+
+Multimodal models (vision-and-language systems like CLIP and the larger families of vision-language-models) often use self-supervised image encoders as one component, paired with a similarly pre-trained text encoder, jointly fine-tuned on image-text pairs. The vision side of "this model understands images and text" is usually some self-supervised encoder.
+
+In domain-specific work, self-supervised learning is what makes vision feasible in areas with scarce labels. A radiology system can pre-train on millions of unlabeled scans (which exist) and fine-tune on the small set of expert-labeled cases (which are expensive). The same pattern shows up in satellite imagery, microscopy, and any field where unlabeled data dominates labeled data, which is most of them.
+
+## Common pitfalls
+
+**Confusing self-supervised with unsupervised.** Self-supervised constructs labels from the data and runs standard supervised training on them; unsupervised in the classical sense (clustering, density estimation, no labels of any kind) is different. The "supervision" in self-supervised comes from the pretext-task labels you derive automatically.
+
+**Skipping pretext tasks because contrastive worked.** Pretext-task methods like rotation prediction are still useful in some settings (small datasets, specific domains where the augmentations contrastive learning relies on are not available or appropriate). The history matters because it tells you what other levers exist.
+
+**Pre-training on data that does not match the downstream task.** A self-supervised encoder pre-trained on Internet photos may transfer poorly to satellite imagery, even at scale. The pretrained encoder learns the statistics of its pre-training distribution; if your downstream domain is very different, pre-train on something closer or expect the transfer to be limited.
+
+**Treating linear-probing accuracy as final task accuracy.** Linear probing measures feature quality cleanly (no encoder updates allowed); fine-tuning measures what you actually get when you let the encoder adapt. The two often diverge; published numbers tend to be linear probing for feature comparison and fine-tuning for headline accuracy.
+
+## What you should remember
+
+- **Self-supervised learning constructs labels from the data itself** and runs standard supervised training on a pretext task. The pretext task does not matter in itself; what matters is that solving it forces the network to learn visual features that transfer well to real tasks.
+- **Pretext-task history (2014-2018):** relative-position prediction, rotation prediction, jigsaw puzzles, colorization, inpainting. Each works; none closed the gap with supervised pretraining alone.
+- **Contrastive learning (2020 onward).** Two augmentations of the same image = positive pair (high cosine similarity wanted); other images = negative pairs (low similarity wanted); SimCLR's NT-Xent loss is the canonical instantiation. MoCo scales with a momentum-updated negative queue; BYOL trains without explicit negatives using a momentum-target setup. Closed most of the gap with supervised pretraining.
+- **Masked image modeling and self-distillation (2021 onward).** MAE: mask 75 percent of patches; reconstruct from the visible 25; the encoder learns rich features. DINO / DINOv2: self-distillation; student predicts teacher (a momentum copy of itself). Produces strong general-purpose vision features; DINOv2 is the current go-to general-purpose encoder for many downstream tasks.
+- **Pre-train then transfer** is the workflow. Pre-train an encoder on huge unlabeled data (expensive, once); fine-tune or linear-probe on a small labeled downstream dataset (cheap, repeatedly per task). One encoder amortizes across many applications.
+
+Self-supervised learning is what lets vision systems work in the (common) case where unlabeled data is abundant and labeled data is precious. The pretext task is the lever; the encoder is the durable artifact; the downstream fine-tune is where the labels actually get spent.
+
+Next: with feature-learning covered for the no-labels case, we can move to generation proper. The next lesson opens the generative-models stretch with GANs and VAEs, the two architectures that taught networks to produce realistic images from scratch.

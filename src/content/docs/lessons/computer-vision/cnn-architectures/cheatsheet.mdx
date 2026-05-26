@@ -1,0 +1,71 @@
+---
+title: "Cheatsheet: CNN architectures and training at scale"
+description: One-page reference. The four landmarks, their key ideas, parameter counts, and the training-at-scale glossary.
+sidebar:
+  order: 5
+  label: Cheatsheet
+artifact: cheatsheet
+---
+
+## The four landmark architectures (2012-2015)
+
+| Year | Architecture | Headline idea | Layers | Parameters | ImageNet top-5 |
+|---|---|---|---|---|---|
+| 2012 | AlexNet | First deep CNN to win ImageNet; ReLU + dropout + 2 GPUs | 8 (5 conv + 3 FC) | ~60M | 16% (vs 26% runner-up) |
+| 2014 | VGG-16 | Depth + uniformity (only 3x3 conv + 2x2 pool) | 16 | ~140M | single-digit |
+| 2014 | GoogLeNet (Inception) | Inception modules + 1x1 dim reduction + avg-pool head | 22 | ~4M | single-digit |
+| 2015 | ResNet | Skip connections (`y = F(x) + x`) + heavy batch norm | up to 152 | ~25M (ResNet-50), ~60M (ResNet-152) | low single-digit (below human-level ~5%) |
+
+## Key structural ideas
+
+| Idea | What it does | Architecture |
+|---|---|---|
+| ReLU | Faster training; partly addresses vanishing gradients | AlexNet onward |
+| Dropout (FC layers) | Regularization; counter overfitting in dense layers | AlexNet onward |
+| 3x3 conv stacks | Same receptive field as larger filter, fewer params, more non-linearities | VGG |
+| Inception module | Parallel filter sizes (1x1, 3x3, 5x5) + 1x1 dim reduction | GoogLeNet |
+| Average-pool head | Replaces giant FC tower, kills millions of params | GoogLeNet |
+| Residual block | `y = F(x) + x`; identity shortcut for gradient flow | ResNet |
+| Batch normalization | Stabilizes training; "heavy use" in ResNet | ResNet onward |
+
+## Why ResNet's skip connection works
+
+| Scenario | Conventional block | Residual block |
+|---|---|---|
+| Block should be identity | Has to LEARN `H(x) = x` (hard) | Trivial: `F(x) = 0` |
+| Block should do useful work | Learn `H(x)` directly | Learn `F(x) = H(x) - x` |
+| Backward pass | Gradient must pass through every layer | Also flows back through `+ x` shortcut, unimpeded |
+
+## Training at scale (CS231n Lec 11, folded)
+
+| Technique | What it does | When to use |
+|---|---|---|
+| Data parallelism | Replicate model on N GPUs, split mini-batch, AllReduce gradients | Default; scales nearly linearly |
+| Model parallelism | Split model's layers across GPUs | Model too big for one GPU's memory |
+| Mixed precision | 16-bit floats with 32-bit accumulation | Almost always; cuts memory + boosts throughput |
+| Gradient accumulation | Run several mini-batches per gradient step | When memory limits true batch size |
+| LR warmup | Start LR tiny, ramp up over first epochs | Stable training at scale |
+| Linear scaling rule | Scale LR proportionally to batch size | When growing batch via data parallelism |
+
+## Scale anchors
+
+| Era | Hardware | Wall-clock |
+|---|---|---|
+| AlexNet (2012) | 2 GPUs | ~6 days |
+| Foundation-scale vision (current) | Hundreds to thousands of accelerators | Weeks |
+
+The gradient descent algorithm is identical; the engineering scaled around it.
+
+## Pitfalls
+
+| Pitfall | Reality |
+|---|---|
+| Parameter count = capability | GoogLeNet (~4M) beat VGG (~140M) on ImageNet, ~35x smaller |
+| "Deeper always better" | Only after residual blocks (ResNet) made depth trainable |
+| Skip connections are exotic | They are `+ x`. The shocking thing is how much that one addition unlocks |
+| Distributed training = different algorithm | No; same gradient descent, just parallelized engineering |
+| Year-by-year ImageNet numbers are precise | Directional trend; small differences depend on training tricks + protocol |
+
+## One-line takeaway
+
+Four architectures define the canon (AlexNet inflection; VGG depth-and-uniformity; GoogLeNet smarter-not-bigger; ResNet skip-connections-make-depth-work); ResNet's `y = F(x) + x` is now everywhere, including inside vision transformers and large language models; training-at-scale is parallelism engineering on the same algorithm.
