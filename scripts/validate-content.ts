@@ -134,6 +134,10 @@ const BLOOM_VERBS = [
 	'triage',
 	'version',
 	'develop',
+	'categorize',
+	'diagnose',
+	'reason',
+	'sketch',
 ];
 
 const TRACK_5_PHASE_SLUGS = [
@@ -198,6 +202,12 @@ const TRACK_21_PHASE_SLUGS = [
 	'advanced-and-the-field',
 ] as const;
 
+const TRACK_15_PHASE_SLUGS = [
+	'the-model',
+	'systems-and-efficiency',
+	'scale-data-and-alignment',
+] as const;
+
 const PHASE_SLUGS = [
 	...TRACK_5_PHASE_SLUGS,
 	...TRACK_6_PHASE_SLUGS,
@@ -208,6 +218,7 @@ const PHASE_SLUGS = [
 	...TRACK_14_PHASE_SLUGS,
 	...TRACK_17_PHASE_SLUGS,
 	...TRACK_21_PHASE_SLUGS,
+	...TRACK_15_PHASE_SLUGS,
 ] as const;
 
 const BriefSchema = z.object({
@@ -231,6 +242,7 @@ const BriefSchema = z.object({
 		'practical-transformers',
 		'reinforcement-learning-foundations',
 		'llm-ops-and-production',
+		'build-an-llm-from-scratch',
 	]),
 	difficulty: z.enum(['intro', 'standard', 'deep']),
 	estimated_read_minutes: z.number().int().positive(),
@@ -269,6 +281,7 @@ async function main(): Promise<number> {
 	const phaseSlotsTrack14 = new Map<string, string[]>();
 	const phaseSlotsTrack17 = new Map<string, string[]>();
 	const phaseSlotsTrack21 = new Map<string, string[]>();
+	const phaseSlotsTrack15 = new Map<string, string[]>();
 
 	if (!existsSync(LESSONS_ROOT)) {
 		console.log(
@@ -571,6 +584,33 @@ async function main(): Promise<number> {
 							phaseSlotsTrack21.set(key, seen);
 						}
 					}
+
+					// Track 15 phase context: required when track is build-an-llm-from-scratch.
+					if (parsed.data.track === 'build-an-llm-from-scratch') {
+						if (parsed.data.phase === undefined) {
+							errors.push({
+								path: relative(ROOT, briefPath),
+								message: `Track 15 lesson missing required field: phase (one of ${TRACK_15_PHASE_SLUGS.join(', ')})`,
+							});
+						} else if (!TRACK_15_PHASE_SLUGS.includes(parsed.data.phase as any)) {
+							errors.push({
+								path: relative(ROOT, briefPath),
+								message: `Track 15 lesson has phase "${parsed.data.phase}" but Track 15 phases are: ${TRACK_15_PHASE_SLUGS.join(', ')}.`,
+							});
+						}
+						if (parsed.data.phase_order === undefined) {
+							errors.push({
+								path: relative(ROOT, briefPath),
+								message: `Track 15 lesson missing required field: phase_order`,
+							});
+						}
+						if (parsed.data.phase !== undefined && parsed.data.phase_order !== undefined) {
+							const key = `${parsed.data.phase}/${parsed.data.phase_order}`;
+							const seen = phaseSlotsTrack15.get(key) ?? [];
+							seen.push(relative(ROOT, briefPath));
+							phaseSlotsTrack15.set(key, seen);
+						}
+					}
 				}
 			}
 		}
@@ -667,6 +707,16 @@ async function main(): Promise<number> {
 				errors.push({
 					path: p,
 					message: `Track 21: duplicate (phase, phase_order) pair "${key}"; also used by: ${paths.filter((q) => q !== p).join(', ')}`,
+				});
+			}
+		}
+	}
+	for (const [key, paths] of phaseSlotsTrack15) {
+		if (paths.length > 1) {
+			for (const p of paths) {
+				errors.push({
+					path: p,
+					message: `Track 15: duplicate (phase, phase_order) pair "${key}"; also used by: ${paths.filter((q) => q !== p).join(', ')}`,
 				});
 			}
 		}

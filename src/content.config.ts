@@ -39,6 +39,7 @@ export const collections = {
 						'practical-transformers', // Track 14: Hugging Face LLM Course
 						'reinforcement-learning-foundations', // Track 17: David Silver UCL RL Course
 						'llm-ops-and-production', // Track 21: Full Stack Deep Learning LLM Bootcamp
+						'build-an-llm-from-scratch', // Track 15: Sebastian Raschka book
 					])
 					.optional(),
 				course: z.string().optional(),
@@ -100,6 +101,10 @@ export const collections = {
 						'foundations-and-first-app',
 						'building-production-apps',
 						'advanced-and-the-field',
+						// Track 15 (Build an LLM from Scratch — Sebastian Raschka)
+						'the-model',
+						'systems-and-efficiency',
+						'scale-data-and-alignment',
 					])
 					.optional(),
 				phase_order: z.number().int().positive().optional(),
