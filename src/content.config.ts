@@ -37,6 +37,7 @@ export const collections = {
 						'ai-agents-and-tool-use', // Track 20: Microsoft AI Agents for Beginners + Berkeley CS294
 						'neural-network-intuition', // Track 11: 3Blue1Brown Neural Networks series
 						'practical-transformers', // Track 14: Hugging Face LLM Course
+						'reinforcement-learning-foundations', // Track 17: David Silver UCL RL Course
 					])
 					.optional(),
 				course: z.string().optional(),
@@ -89,6 +90,11 @@ export const collections = {
 						'transformers-library',
 						'data-tokenizers-tasks',
 						'demos-and-frontier',
+						// Track 17 (Reinforcement Learning Foundations — David Silver UCL)
+						'the-rl-setup',
+						'planning-with-a-known-model',
+						'model-free-learning',
+						'scaling-up',
 					])
 					.optional(),
 				phase_order: z.number().int().positive().optional(),

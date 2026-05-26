@@ -179,6 +179,13 @@ const TRACK_14_PHASE_SLUGS = [
 	'demos-and-frontier',
 ] as const;
 
+const TRACK_17_PHASE_SLUGS = [
+	'the-rl-setup',
+	'planning-with-a-known-model',
+	'model-free-learning',
+	'scaling-up',
+] as const;
+
 const PHASE_SLUGS = [
 	...TRACK_5_PHASE_SLUGS,
 	...TRACK_6_PHASE_SLUGS,
@@ -187,6 +194,7 @@ const PHASE_SLUGS = [
 	...TRACK_20_PHASE_SLUGS,
 	...TRACK_11_PHASE_SLUGS,
 	...TRACK_14_PHASE_SLUGS,
+	...TRACK_17_PHASE_SLUGS,
 ] as const;
 
 const BriefSchema = z.object({
@@ -208,6 +216,7 @@ const BriefSchema = z.object({
 		'ai-agents-and-tool-use',
 		'neural-network-intuition',
 		'practical-transformers',
+		'reinforcement-learning-foundations',
 	]),
 	difficulty: z.enum(['intro', 'standard', 'deep']),
 	estimated_read_minutes: z.number().int().positive(),
@@ -244,6 +253,7 @@ async function main(): Promise<number> {
 	const phaseSlotsTrack20 = new Map<string, string[]>();
 	const phaseSlotsTrack11 = new Map<string, string[]>();
 	const phaseSlotsTrack14 = new Map<string, string[]>();
+	const phaseSlotsTrack17 = new Map<string, string[]>();
 
 	if (!existsSync(LESSONS_ROOT)) {
 		console.log(
@@ -492,6 +502,33 @@ async function main(): Promise<number> {
 							phaseSlotsTrack14.set(key, seen);
 						}
 					}
+
+					// Track 17 phase context: required when track is reinforcement-learning-foundations.
+					if (parsed.data.track === 'reinforcement-learning-foundations') {
+						if (parsed.data.phase === undefined) {
+							errors.push({
+								path: relative(ROOT, briefPath),
+								message: `Track 17 lesson missing required field: phase (one of ${TRACK_17_PHASE_SLUGS.join(', ')})`,
+							});
+						} else if (!TRACK_17_PHASE_SLUGS.includes(parsed.data.phase as any)) {
+							errors.push({
+								path: relative(ROOT, briefPath),
+								message: `Track 17 lesson has phase "${parsed.data.phase}" but Track 17 phases are: ${TRACK_17_PHASE_SLUGS.join(', ')}.`,
+							});
+						}
+						if (parsed.data.phase_order === undefined) {
+							errors.push({
+								path: relative(ROOT, briefPath),
+								message: `Track 17 lesson missing required field: phase_order`,
+							});
+						}
+						if (parsed.data.phase !== undefined && parsed.data.phase_order !== undefined) {
+							const key = `${parsed.data.phase}/${parsed.data.phase_order}`;
+							const seen = phaseSlotsTrack17.get(key) ?? [];
+							seen.push(relative(ROOT, briefPath));
+							phaseSlotsTrack17.set(key, seen);
+						}
+					}
 				}
 			}
 		}
@@ -568,6 +605,16 @@ async function main(): Promise<number> {
 				errors.push({
 					path: p,
 					message: `Track 14: duplicate (phase, phase_order) pair "${key}"; also used by: ${paths.filter((q) => q !== p).join(', ')}`,
+				});
+			}
+		}
+	}
+	for (const [key, paths] of phaseSlotsTrack17) {
+		if (paths.length > 1) {
+			for (const p of paths) {
+				errors.push({
+					path: p,
+					message: `Track 17: duplicate (phase, phase_order) pair "${key}"; also used by: ${paths.filter((q) => q !== p).join(', ')}`,
 				});
 			}
 		}
