@@ -1,0 +1,185 @@
+---
+title: "Q-learning: model-free control"
+description: "MC and TD prediction estimated V^pi from samples. Q-learning is the control counterpart: estimate Q^* from samples, then act greedily. Its update is the TD bootstrap on Q with a max-over-actions in the target. That single change combines the Bellman optimality equation from Phase 2 with the sample-based bootstrap from the previous lesson, gives the canonical model-free control algorithm, and is the foundation of DQN. This lesson works five Q-learning steps on a 2-state-2-action MDP, contrasts on-policy SARSA with off-policy Q-learning, and explains why exploration (epsilon-greedy) is required, not optional."
+track: reinforcement-learning-foundations
+order: 8
+phase: model-free-learning
+phase_order: 3
+difficulty: standard
+estimated_read_minutes: 13
+estimated_practice_minutes: 16
+prerequisites:
+  - lessons/reinforcement-learning-foundations/temporal-difference-learning
+learning_outcomes:
+  - Write the Q-learning update and explain how it combines TD's bootstrap with the Bellman optimality max
+  - Distinguish on-policy (SARSA) from off-policy (Q-learning) by which action enters the target
+  - Run Q-learning through several sample transitions on a small MDP and read off the greedy policy
+  - Explain why exploration (e.g. epsilon-greedy) is required for Q-learning to converge to Q^*
+  - Recognize Q-learning as the foundation of DQN and modern value-based deep RL, including the deadly-triad caveat
+authors:
+  - clawdemy
+published_at: 2026-05-25
+last_reviewed: 2026-05-25
+status: draft
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+{/* COMPONENT PLACEHOLDER (Lead wires at promotion): <LessonFreshness lastReviewed={frontmatter.last_reviewed} /> */}
+{/* COMPONENT PLACEHOLDER (Lead wires at promotion): <SourceLecture url="https://davidstarsilver.wordpress.com/teaching/" title="David Silver, UCL Reinforcement Learning Course, Lecture 5: Model-Free Control (Q-learning)" instructor="David Silver" /> */}
+
+MC and TD in the previous two lessons estimated **V^pi** for a fixed policy from samples; that was prediction. **Q-learning** is the **control** counterpart: estimate **Q^*** directly from samples, then act greedily. Its update is the TD bootstrap on Q with one ingredient added: a **max over actions** in the target, exactly the operator that turned the Bellman expectation equation into the Bellman optimality equation back in Phase 2. That single change is the bridge between everything you have learned so far, sample-based bootstrapping (lesson 7) combined with optimality-not-expectation (lessons 3 and 5), giving the canonical model-free control algorithm and the foundation of DQN.
+
+This lesson is short on motivation (you have it) and long on the update plus a hand-traced five-step run that makes the off-policy property visible.
+
+## The Q-learning update
+
+Recall TD(0) for V:
+
+```
+V(s_t)  <-  V(s_t)  +  alpha * [ r_(t+1) + gamma * V(s_(t+1)) - V(s_t) ]
+```
+
+**Q-learning** does the same thing on Q, but the target uses the **max over actions** at the next state:
+
+```
+Q(s_t, a_t)  <-  Q(s_t, a_t)  +  alpha * [ r_(t+1) + gamma * max_{a'} Q(s_(t+1), a') - Q(s_t, a_t) ]
+```
+
+Two changes from TD(0):
+
+- The function being updated is Q (state-action) instead of V (state). You need Q to act without a model, as the architectural payoff from lesson 3 made precise.
+- The bootstrap uses **max over a'** of Q(s_(t+1), a'), not Q at the action you actually take next. That is the Bellman optimality target, sampled.
+
+Compare with value iteration's update from lesson 5:
+
+```
+V_(k+1)(s)  =  max_a [ R(s, a) + gamma * sum_(s') P(s' | s, a) V_k(s') ]
+```
+
+Value iteration computes the expectation over P using the model; Q-learning uses **one observed transition** as a sample of that expectation, on Q instead of V. Same recursion; planning becomes learning by swapping the expectation for a sample.
+
+## Off-policy: behavior vs target
+
+Q-learning has an unusual and powerful property called **off-policy** learning. The target uses `max_{a'} Q(s_(t+1), a')`, the value the agent would get if it acted **greedily** from s_(t+1). But the agent does not have to act greedily; it can take any action it likes at s_t to generate the experience. The action a_t in the update is the action the agent **actually** took (called the **behavior** action), but the target reasons about the action it **would have** taken if it were optimal (a property of the **target** policy, which is greedy with respect to Q).
+
+This separation matters in two big ways:
+
+- **Exploration.** The agent typically uses an **epsilon-greedy** behavior policy: with probability epsilon, act randomly; otherwise, take argmax_a Q(s, a). Random actions are crucial because Q-learning's convergence guarantees require **every (s, a) pair to be visited infinitely often**. Without exploration, some (s, a) get zero updates and Q estimates there stay at their initial values forever, blocking convergence.
+- **Learning from any source.** Because the update does not depend on which behavior produced the data, Q-learning can learn from a replay buffer of past experience, from a different agent's logs, or from a human demonstrator. DQN's experience replay buffer is exactly this property put to work: store transitions, sample minibatches at random, train Q on them. The buffer is "off-policy" data relative to the current Q.
+
+A short on-policy alternative for contrast: **SARSA** has the same shape as Q-learning but uses the agent's actual next action a_(t+1) in the target:
+
+```
+SARSA:       Q(s_t, a_t)  <-  Q(s_t, a_t) + alpha * [ r_(t+1) + gamma * Q(s_(t+1), a_(t+1))   - Q(s_t, a_t) ]
+Q-learning:  Q(s_t, a_t)  <-  Q(s_t, a_t) + alpha * [ r_(t+1) + gamma * max_{a'} Q(s_(t+1), a') - Q(s_t, a_t) ]
+```
+
+SARSA learns the value of the policy actually being followed (including its exploration); Q-learning learns the value of always-greedy regardless of how the agent behaves. SARSA is **on-policy**; Q-learning is **off-policy**. Both are useful; Q-learning's off-policy nature is what makes it the workhorse for value-based deep RL.
+
+## Worked example: five Q-learning steps on the H/S MDP
+
+Reuse the two-state, two-action MDP from lesson 4 (policy iteration) so the relationship with the planning case is direct. States A, B; actions stay and switch; deterministic transitions; gamma = 0.9. Reminders:
+
+```
+From A:   stay -> A (R = +1),  switch -> B (R = 0)
+From B:   stay -> B (R = -1),  switch -> A (R = +2)
+```
+
+We know from lesson 4 (and you could re-derive) that:
+
+```
+V^*(A) = 10,  V^*(B) = 11
+Q^*(A, stay)  = 1 + 0.9 * V^*(A) = 10
+Q^*(A, switch) = 0 + 0.9 * V^*(B) = 9.9
+Q^*(B, stay)  = -1 + 0.9 * V^*(B) = 8.9
+Q^*(B, switch) = 2 + 0.9 * V^*(A) = 11
+pi^*(A) = stay     pi^*(B) = switch
+```
+
+Now run Q-learning from scratch. Initialize Q(s, a) = 0 for every (s, a). Step size alpha = 0.5. The behavior policy will take a mix of actions (so we visit each (s, a) and so we see the off-policy max in the target do real work). Watch the target carefully on each step.
+
+**Step 1.** s = A, behavior takes a = **stay**. Observe r = 1, s' = A.
+
+```
+target = 1 + 0.9 * max( Q(A, stay), Q(A, switch) ) = 1 + 0.9 * max(0, 0) = 1
+delta = 1 - Q(A, stay) = 1 - 0 = 1
+Q(A, stay) <- 0 + 0.5 * 1 = 0.5
+```
+
+**Step 2.** s = A, behavior takes a = **switch** (exploration). Observe r = 0, s' = B.
+
+```
+target = 0 + 0.9 * max( Q(B, stay), Q(B, switch) ) = 0 + 0.9 * max(0, 0) = 0
+delta = 0 - Q(A, switch) = 0 - 0 = 0
+Q(A, switch) <- 0 + 0.5 * 0 = 0       (no change yet; both Q values at B are zero)
+```
+
+**Step 3.** s = B, behavior takes a = **switch**. Observe r = 2, s' = A.
+
+```
+target = 2 + 0.9 * max( Q(A, stay), Q(A, switch) ) = 2 + 0.9 * max(0.5, 0) = 2 + 0.45 = 2.45
+delta = 2.45 - Q(B, switch) = 2.45 - 0 = 2.45
+Q(B, switch) <- 0 + 0.5 * 2.45 = 1.225
+```
+
+**Step 4.** s = A, behavior takes a = **stay** again. Observe r = 1, s' = A.
+
+```
+target = 1 + 0.9 * max( Q(A, stay), Q(A, switch) ) = 1 + 0.9 * max(0.5, 0) = 1 + 0.45 = 1.45
+delta = 1.45 - Q(A, stay) = 1.45 - 0.5 = 0.95
+Q(A, stay) <- 0.5 + 0.5 * 0.95 = 0.975
+```
+
+**Step 5.** s = B, behavior takes a = **stay** (exploring an action it has not tried yet at B). Observe r = -1, s' = B.
+
+```
+target = -1 + 0.9 * max( Q(B, stay), Q(B, switch) ) = -1 + 0.9 * max(0, 1.225) = -1 + 1.1025 = 0.1025
+delta = 0.1025 - Q(B, stay) = 0.1025 - 0 = 0.1025
+Q(B, stay) <- 0 + 0.5 * 0.1025 = 0.05125
+```
+
+After five transitions:
+
+```
+Q(A, stay)   = 0.975     Q(A, switch) = 0
+Q(B, stay)   = 0.05125   Q(B, switch) = 1.225
+```
+
+Read off the greedy policy:
+
+```
+pi_greedy(A) = argmax{ Q(A, stay), Q(A, switch) } = argmax{ 0.975, 0 }     = stay
+pi_greedy(B) = argmax{ Q(B, stay), Q(B, switch) } = argmax{ 0.05125, 1.225 } = switch
+```
+
+That is **pi^*** already, after only five Q-learning steps. The Q **values** are nowhere near their true Q^* of (10, 9.9, 8.9, 11), they will need many more updates to numerically converge, but the **policy ranking** (which action is best at each state) is correct very early. This is the same early-stabilization pattern from value iteration (lesson 5), now in the sample-based setting. In practice you keep iterating until Q converges, but for control purposes the greedy policy can be useful long before then.
+
+Two things to notice about the off-policy max in action: at step 3, the target used `max(0.5, 0) = 0.5`, the **stay** value at A; the agent did not have to take stay at A right then for the target to use it. And at step 5, the target used `max(0, 1.225) = 1.225`, the value Q-learning **already knew** for B-switch from step 3, even though the agent's behavior step 5 was actually B-stay. That is the off-policy property doing work: the agent acts however, the target reasons about the best.
+
+## Why this matters when you use AI
+
+Q-learning is the canonical model-free control algorithm and the foundation of value-based deep RL.
+
+- **DQN = Q-learning + neural network + engineering tricks.** DQN approximates Q with a neural network and trains it to minimize the squared TD error against a Q-learning target. The two crucial engineering additions are **experience replay** (store transitions in a buffer; sample minibatches at random for training, breaking temporal correlations and reusing data) and **target networks** (use a slowly-updated copy of Q for the max in the target, to stabilize training). These are direct responses to the **deadly triad** (TD bootstrap + off-policy + function approximation) named in the previous lesson.
+- **Off-policy = data efficiency.** Because Q-learning learns from any transition regardless of how it was generated, it can reuse old experience and learn from diverse sources. That is why DQN's replay buffer (essentially an off-policy data store) is so effective.
+- **Foundation for many extensions.** Double DQN, dueling DQN, prioritized replay, distributional Q-learning, and rainbow all start from this lesson's update and add ingredients. The base recipe is the line of math in this lesson.
+- **Limits at scale.** Tabular Q-learning does not work when |S| or |A| is huge (every (s, a) needs many visits to converge). Function approximation (next lesson) is the lift; the lesson here is the algorithm in its purest form.
+
+## Common pitfalls
+
+- **Confusing the Q-learning target with the SARSA target.** Q-learning uses `max_{a'} Q(s_(t+1), a')` (off-policy); SARSA uses `Q(s_(t+1), a_(t+1))` with the actual next action (on-policy). Same shape, different action choice in the target, different convergence behavior.
+- **Skipping exploration.** Without epsilon-greedy (or another exploration scheme), many (s, a) pairs are never visited and Q-learning cannot converge to Q^*. Convergence proofs explicitly require infinite-visit conditions.
+- **Treating fully-greedy behavior during learning as safe.** A pure-greedy behavior policy can get stuck in a poor local choice forever because it never visits the alternatives. Some exploration is required during learning, even though the **target** is fully greedy.
+- **Believing Q-learning converges fast in practice.** The early-stabilization of the **greedy policy** can be quick (as in the worked example), but the actual Q values typically take many transitions to converge numerically, especially on large state spaces.
+- **Underestimating the deadly triad with function approximation.** Naive Q-learning with a neural network can diverge. DQN's experience replay and target networks are not optional polish; they are what makes the combination stable. The next lesson develops this.
+
+## What you should remember
+
+- The **Q-learning update** combines TD's sample bootstrap with the Bellman optimality max: **Q(s_t, a_t) <- Q(s_t, a_t) + alpha * [ r_(t+1) + gamma * max_{a'} Q(s_(t+1), a') - Q(s_t, a_t) ]**.
+- It is **off-policy**: the target reasons about the best next action regardless of which action the agent actually took next. SARSA's on-policy alternative replaces the max with Q at the actual next action.
+- Off-policy means **exploration is required**: epsilon-greedy (or another scheme) lets the behavior visit every (s, a) so Q-learning's convergence guarantee can apply.
+- On the H/S MDP at alpha = 0.5, gamma = 0.9, five hand-traced Q-learning steps from Q = 0 give Q = (0.975, 0, 0.05125, 1.225); the greedy policy is already **pi^* = (A: stay, B: switch)** even though the Q values have not converged to Q^* = (10, 9.9, 8.9, 11).
+- Q-learning is the **foundation of DQN** and value-based deep RL; experience replay and target networks are the engineering fixes that tame the **deadly triad** (TD + off-policy + function approximation), which the next lesson develops.

@@ -1,0 +1,160 @@
+---
+title: "Value functions and the Bellman equations"
+description: "With the MDP nailed down, you need a way to say how good things are. The state-value V and action-value Q answer that, the expected total reward from a state, or from a state-action pair, under a policy. Their defining property is recursive: the value of where you are equals one step of reward plus the (discounted) value of where you land. That recursion, in two forms (expectation under a policy, and optimality over the best action), is the Bellman equation, the mathematical heart of reinforcement learning and the engine every later method either solves or approximates."
+track: reinforcement-learning-foundations
+order: 3
+phase: the-rl-setup
+phase_order: 3
+difficulty: standard
+estimated_read_minutes: 13
+estimated_practice_minutes: 16
+prerequisites:
+  - lessons/reinforcement-learning-foundations/markov-decision-processes
+learning_outcomes:
+  - Define the state-value V(s) and the action-value Q(s, a) as expected returns under a policy
+  - Write the Bellman expectation equation for V and Q and see it as a one-step recursion
+  - Derive the recursion from G_t = r_(t+1) + gamma * G_(t+1)
+  - Write the Bellman optimality equation and distinguish max-over-actions from the policy-weighted sum
+  - State why an optimal policy is greedy with respect to Q* and why that makes value-based methods possible
+authors:
+  - clawdemy
+published_at: 2026-05-25
+last_reviewed: 2026-05-25
+status: draft
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+{/* COMPONENT PLACEHOLDER (Lead wires at promotion): <LessonFreshness lastReviewed={frontmatter.last_reviewed} /> */}
+{/* COMPONENT PLACEHOLDER (Lead wires at promotion): <SourceLecture url="https://davidstarsilver.wordpress.com/teaching/" title="David Silver, UCL Reinforcement Learning Course, Lectures 2-3: Value functions and the Bellman equations" instructor="David Silver" /> */}
+
+The MDP from the previous lesson gives you the rules of the game. To play it, the agent needs a notion of **how good** things are: is this state worth being in? Is this action worth taking here? Those notions are the **value functions**, V and Q, and the equations they satisfy, the **Bellman equations**, are the single most important mathematical object in reinforcement learning. Every algorithm in the rest of this track either solves Bellman equations directly (Phase 2, planning) or approximates a solution from samples (Phase 3, learning). Get the recursion clear here and the rest of the track falls out.
+
+## Two value functions: V and Q
+
+There are two natural ways to ask "how good is this?", and RL uses both.
+
+**The state-value function V^pi(s).** Suppose the agent is in state s and is going to follow a fixed policy pi from now on. The state-value is the **expected return**:
+
+```
+V^pi(s) = E_pi [ G_t  |  s_t = s ]
+        = E_pi [ r_(t+1) + gamma * r_(t+2) + gamma^2 * r_(t+3) + ...  |  s_t = s ]
+```
+
+In words: take the trajectory the agent would generate from s under pi, sum up the discounted rewards, and take the expectation (over the randomness in the policy and the environment). V tells you **how good a state is, assuming you follow pi from now on**.
+
+**The action-value function Q^pi(s, a).** Same idea but with the first action pinned down. You are in s, you take action a (which might not be what pi would do), and then you follow pi from the next state onward:
+
+```
+Q^pi(s, a) = E_pi [ G_t  |  s_t = s, a_t = a ]
+```
+
+Q tells you **how good a (state, action) pair is**, fixing the first action.
+
+The two are linked. The state-value is the policy-weighted average of the action-values:
+
+```
+V^pi(s) = sum over a of  pi(a | s) * Q^pi(s, a)
+```
+
+Why do we need both? Because V tells you how good a state is but not which action to take from it; Q tells you which action is best by comparing Q-values across actions. If you have only V and you don't know the model, you can't pick an action without simulating each one. Q has the action choice baked in, which is exactly what you need to act when you can't look ahead. The rest of the track will lean heavily on Q for control.
+
+## The Bellman expectation equation, derived in one line
+
+Here is the move that makes value functions tractable. By definition, the return splits into one immediate reward plus the discounted return from the next step:
+
+```
+G_t = r_(t+1) + gamma * G_(t+1)
+```
+
+Take expectations on both sides under policy pi, conditioning on s_t = s. The left side becomes V^pi(s). On the right, r_(t+1) becomes the expected immediate reward, and gamma * G_(t+1) becomes gamma times the expected return from s_(t+1), which by definition is gamma * V^pi(s_(t+1)). Averaging over which a is taken (under pi) and which s_(t+1) results (under the dynamics P), you get the **Bellman expectation equation for V**:
+
+```
+V^pi(s) = sum over a of  pi(a | s) * [ R(s, a)  +  gamma * sum over s' of  P(s' | s, a) * V^pi(s') ]
+```
+
+Read it slowly. For each action a the policy might take, you compute the expected immediate reward R(s, a) plus the discounted expected next-state value, then average those over the actions weighted by pi(a | s). This is a **recursion**: V at s is expressed in terms of V at neighbors. The same derivation for Q (this time pinning a fixed):
+
+```
+Q^pi(s, a) = R(s, a)  +  gamma * sum over s' of  P(s' | s, a) * sum over a' of  pi(a' | s') * Q^pi(s', a')
+```
+
+Both equations express the same idea: **the value of where you are equals one step of reward plus the discounted value of where you land, averaged appropriately**.
+
+## A small example of the recursion
+
+The cleanest way to see it work is a short chain where the value at the end is known. Suppose three states A -> B -> C, the policy is forced (one action each), and we somehow know V(C) = 10 (perhaps C is a terminal-ish "goal" state whose value is given). Rewards along the chain are R(A) = 3 and R(B) = 2, with gamma = 0.9 and deterministic transitions.
+
+```
+V(B) = R(B) + gamma * V(C) = 2 + 0.9 * 10 = 11
+V(A) = R(A) + gamma * V(B) = 3 + 0.9 * 11 = 3 + 9.9 = 12.9
+```
+
+The recursion lets value at A be computed from value at B, which is computed from value at C. The same move scales to any structure, the only complication is when the graph has cycles, which is the usual case.
+
+## When the graph has cycles: a 2x2 system
+
+Return to the two-state H/S MDP from the previous lesson (one action "do" in each state; R(H, do) = +1, R(S, do) = -1; P(H | H, do) = 0.8, P(S | H, do) = 0.2, P(H | S, do) = 0.5, P(S | S, do) = 0.5). With only one action, the Bellman expectation equation under that (forced) policy is:
+
+```
+V(H) = 1   +  gamma * [ 0.8 * V(H)  +  0.2 * V(S) ]
+V(S) = -1  +  gamma * [ 0.5 * V(H)  +  0.5 * V(S) ]
+```
+
+Two equations in two unknowns, V(H) and V(S). This is a linear system you could solve by hand at small scale, and for tiny MDPs that is the most direct path. For anything larger it would not fit on paper. The two methods in Phase 2 (lessons 4 and 5) are exactly the iterative ways to solve a Bellman expectation system at any scale; this lesson stops at writing the equation.
+
+What changed conceptually from the chain example: with cycles, V depends on itself (V(H) appears on both sides). The Bellman equation is no longer a one-shot computation; it is a **fixed-point equation**. The next two lessons are about iterating toward that fixed point.
+
+## The Bellman optimality equation: max instead of sum
+
+The expectation equation talks about value under a particular policy pi. What you actually want is the **optimal policy** pi^* and its value V^*. By definition:
+
+```
+V^*(s)   = max over pi of  V^pi(s)         (the best you can do from s)
+Q^*(s, a) = max over pi of  Q^pi(s, a)
+```
+
+The recursion that V^* satisfies is the **Bellman optimality equation**, and it differs from the expectation equation in one critical place: instead of averaging actions under a policy, it **takes the max over actions**.
+
+```
+V^*(s)   = max over a of  [ R(s, a)  +  gamma * sum over s' of  P(s' | s, a) * V^*(s') ]
+Q^*(s, a) = R(s, a)  +  gamma * sum over s' of  P(s' | s, a) * max over a' of  Q^*(s', a')
+```
+
+The optimal value of a state is the value of the **best** action from that state (not the average over a policy). The optimal value of an (s, a) is the immediate reward plus the discounted optimal value at the next state, where "optimal at the next state" means picking the best next action.
+
+The single most useful consequence: if you know Q^*, the **optimal policy is greedy**:
+
+```
+pi^*(s) = argmax over a of  Q^*(s, a)
+```
+
+That is, an optimal agent at state s simply picks whichever action has the highest Q^*(s, a). This is the architectural reason value-based methods are powerful. Solve for Q^* (somehow), and the policy is trivial; you do not need to also learn a separate policy network. Phase 2 will compute Q^* exactly (when the model is known). Phase 3 will estimate Q^* from samples without a model. Either way, **the policy falls out of the value**.
+
+## Why this matters when you use AI
+
+The Bellman equations are the engine inside every RL method you will meet.
+
+- **Planning methods (Phase 2) iterate the Bellman equations directly.** Value iteration applies the Bellman optimality update repeatedly until V converges to V^*. Policy iteration alternates the Bellman expectation update (evaluation) with greedy improvement. Both work because the Bellman operator is a contraction; the underlying math is the same recursion you just saw.
+- **Model-free methods (Phase 3) approximate the recursion from samples.** Temporal-difference learning (TD) updates V (or Q) toward `r_(t+1) + gamma * V(s_(t+1))`, which is the Bellman target estimated from one observed transition rather than computed over P. Q-learning is the same idea on Q with a max. The Bellman equation is what tells these algorithms what target to chase.
+- **Deep RL replaces the table with an approximator.** DQN uses a neural network to approximate Q and minimizes the squared error between its prediction and the Bellman target. The equation does not change; only the representation does. The same is true for policy-gradient methods, which lean on a different (but related) recursion.
+
+When you see "the loss is the Bellman residual" in a paper or "we used a TD(0) target," it is this lesson's recursion at work. Everything downstream is what to do with it.
+
+## Common pitfalls
+
+- **Confusing the Bellman expectation and optimality equations.** The expectation equation uses a sum over actions weighted by pi; the optimality equation uses a max over actions. Mixing them up loses you either the policy you wanted to evaluate (using max) or the optimum you wanted to find (using sum).
+- **Forgetting that the recursion is a fixed-point equation in the cyclic case.** With cycles, V appears on both sides and you cannot just plug in numbers; you need an iterative method or a linear solve. Phase 2 covers the iterative case.
+- **Acting on V without a model.** V tells you which **states** are good but not which **action** to take, because you need a model P to look ahead from each candidate a. Q has the action choice built in and is what you act on when the model is unknown.
+- **Off-by-one on the recursion.** The convention here matches the previous lesson: a_t in s_t produces r_(t+1) and s_(t+1). Slipping subscripts is the most common bookkeeping error in RL derivations.
+- **Believing Q^* alone fixes the exploration problem.** Acting greedily with respect to your *current estimate* of Q while still learning will lock you in too early; exploration (epsilon-greedy and friends, lesson 8) is still required during learning. Greedy is only optimal with respect to the *true* Q^*.
+
+## What you should remember
+
+- **V^pi(s)** is the expected discounted return from state s under policy pi; **Q^pi(s, a)** is the same with the first action pinned. **V(s) = sum_a pi(a|s) * Q(s, a)**.
+- The **Bellman expectation equation** writes V (and Q) as a recursion: the value here equals one step of reward plus the discounted expected value at the next state, averaged over actions under pi.
+- It is derived in one line from **G_t = r_(t+1) + gamma * G_(t+1)** by taking expectations and applying the definitions.
+- The **Bellman optimality equation** replaces the policy-weighted sum with a **max over actions**, defining V^* and Q^*. Once you have Q^*, the **optimal policy is greedy**: pi^*(s) = argmax_a Q^*(s, a).
+- Every later method in the track is either **iterating** the Bellman equation directly (Phase 2 planning) or **approximating** it from samples (Phase 3 learning); the same recursion underlies all of them.

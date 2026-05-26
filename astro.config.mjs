@@ -1064,6 +1064,155 @@ export default defineConfig({
 					],
 				},
 				{
+					label: 'Track 17: RL Foundations',
+					items: [
+						{
+							label: 'Phase 1\nThe RL setup',
+							collapsed: true,
+							items: [
+								{
+									label: 'What RL actually is',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/reinforcement-learning-foundations/what-reinforcement-learning-actually-is/brief' },
+										{ label: 'Lesson', slug: 'lessons/reinforcement-learning-foundations/what-reinforcement-learning-actually-is/lesson' },
+										{ label: 'Practice', slug: 'lessons/reinforcement-learning-foundations/what-reinforcement-learning-actually-is/practice' },
+										{ label: 'Summary', slug: 'lessons/reinforcement-learning-foundations/what-reinforcement-learning-actually-is/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/reinforcement-learning-foundations/what-reinforcement-learning-actually-is/cheatsheet' },
+										{ label: 'References', slug: 'lessons/reinforcement-learning-foundations/what-reinforcement-learning-actually-is/references' },
+									],
+								},
+								{
+									label: 'Markov decision processes',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/reinforcement-learning-foundations/markov-decision-processes/brief' },
+										{ label: 'Lesson', slug: 'lessons/reinforcement-learning-foundations/markov-decision-processes/lesson' },
+										{ label: 'Practice', slug: 'lessons/reinforcement-learning-foundations/markov-decision-processes/practice' },
+										{ label: 'Summary', slug: 'lessons/reinforcement-learning-foundations/markov-decision-processes/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/reinforcement-learning-foundations/markov-decision-processes/cheatsheet' },
+										{ label: 'References', slug: 'lessons/reinforcement-learning-foundations/markov-decision-processes/references' },
+									],
+								},
+								{
+									label: 'Value + Bellman',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/reinforcement-learning-foundations/value-functions-and-the-bellman-equations/brief' },
+										{ label: 'Lesson', slug: 'lessons/reinforcement-learning-foundations/value-functions-and-the-bellman-equations/lesson' },
+										{ label: 'Practice', slug: 'lessons/reinforcement-learning-foundations/value-functions-and-the-bellman-equations/practice' },
+										{ label: 'Summary', slug: 'lessons/reinforcement-learning-foundations/value-functions-and-the-bellman-equations/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/reinforcement-learning-foundations/value-functions-and-the-bellman-equations/cheatsheet' },
+										{ label: 'References', slug: 'lessons/reinforcement-learning-foundations/value-functions-and-the-bellman-equations/references' },
+									],
+								},
+							],
+						},
+						{
+							label: 'Phase 2\nPlanning with a known model',
+							collapsed: true,
+							items: [
+								{
+									label: 'Policy iteration',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/reinforcement-learning-foundations/policy-iteration/brief' },
+										{ label: 'Lesson', slug: 'lessons/reinforcement-learning-foundations/policy-iteration/lesson' },
+										{ label: 'Practice', slug: 'lessons/reinforcement-learning-foundations/policy-iteration/practice' },
+										{ label: 'Summary', slug: 'lessons/reinforcement-learning-foundations/policy-iteration/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/reinforcement-learning-foundations/policy-iteration/cheatsheet' },
+										{ label: 'References', slug: 'lessons/reinforcement-learning-foundations/policy-iteration/references' },
+									],
+								},
+								{
+									label: 'Value iteration',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/reinforcement-learning-foundations/value-iteration/brief' },
+										{ label: 'Lesson', slug: 'lessons/reinforcement-learning-foundations/value-iteration/lesson' },
+										{ label: 'Practice', slug: 'lessons/reinforcement-learning-foundations/value-iteration/practice' },
+										{ label: 'Summary', slug: 'lessons/reinforcement-learning-foundations/value-iteration/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/reinforcement-learning-foundations/value-iteration/cheatsheet' },
+										{ label: 'References', slug: 'lessons/reinforcement-learning-foundations/value-iteration/references' },
+									],
+								},
+							],
+						},
+						{
+							label: 'Phase 3\nModel-free learning',
+							collapsed: true,
+							items: [
+								{
+									label: 'Monte Carlo prediction',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/reinforcement-learning-foundations/monte-carlo-prediction/brief' },
+										{ label: 'Lesson', slug: 'lessons/reinforcement-learning-foundations/monte-carlo-prediction/lesson' },
+										{ label: 'Practice', slug: 'lessons/reinforcement-learning-foundations/monte-carlo-prediction/practice' },
+										{ label: 'Summary', slug: 'lessons/reinforcement-learning-foundations/monte-carlo-prediction/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/reinforcement-learning-foundations/monte-carlo-prediction/cheatsheet' },
+										{ label: 'References', slug: 'lessons/reinforcement-learning-foundations/monte-carlo-prediction/references' },
+									],
+								},
+								{
+									label: 'Temporal-difference learning',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/reinforcement-learning-foundations/temporal-difference-learning/brief' },
+										{ label: 'Lesson', slug: 'lessons/reinforcement-learning-foundations/temporal-difference-learning/lesson' },
+										{ label: 'Practice', slug: 'lessons/reinforcement-learning-foundations/temporal-difference-learning/practice' },
+										{ label: 'Summary', slug: 'lessons/reinforcement-learning-foundations/temporal-difference-learning/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/reinforcement-learning-foundations/temporal-difference-learning/cheatsheet' },
+										{ label: 'References', slug: 'lessons/reinforcement-learning-foundations/temporal-difference-learning/references' },
+									],
+								},
+								{
+									label: 'Q-learning',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/reinforcement-learning-foundations/q-learning/brief' },
+										{ label: 'Lesson', slug: 'lessons/reinforcement-learning-foundations/q-learning/lesson' },
+										{ label: 'Practice', slug: 'lessons/reinforcement-learning-foundations/q-learning/practice' },
+										{ label: 'Summary', slug: 'lessons/reinforcement-learning-foundations/q-learning/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/reinforcement-learning-foundations/q-learning/cheatsheet' },
+										{ label: 'References', slug: 'lessons/reinforcement-learning-foundations/q-learning/references' },
+									],
+								},
+							],
+						},
+						{
+							label: 'Phase 4\nScaling up',
+							collapsed: true,
+							items: [
+								{
+									label: 'Function approx + deep RL',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/reinforcement-learning-foundations/function-approximation-and-deep-rl/brief' },
+										{ label: 'Lesson', slug: 'lessons/reinforcement-learning-foundations/function-approximation-and-deep-rl/lesson' },
+										{ label: 'Practice', slug: 'lessons/reinforcement-learning-foundations/function-approximation-and-deep-rl/practice' },
+										{ label: 'Summary', slug: 'lessons/reinforcement-learning-foundations/function-approximation-and-deep-rl/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/reinforcement-learning-foundations/function-approximation-and-deep-rl/cheatsheet' },
+										{ label: 'References', slug: 'lessons/reinforcement-learning-foundations/function-approximation-and-deep-rl/references' },
+									],
+								},
+								{
+									label: 'Policy gradient + modern RL',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/reinforcement-learning-foundations/policy-gradient-and-the-path-to-modern-rl/brief' },
+										{ label: 'Lesson', slug: 'lessons/reinforcement-learning-foundations/policy-gradient-and-the-path-to-modern-rl/lesson' },
+										{ label: 'Practice', slug: 'lessons/reinforcement-learning-foundations/policy-gradient-and-the-path-to-modern-rl/practice' },
+										{ label: 'Summary', slug: 'lessons/reinforcement-learning-foundations/policy-gradient-and-the-path-to-modern-rl/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/reinforcement-learning-foundations/policy-gradient-and-the-path-to-modern-rl/cheatsheet' },
+										{ label: 'References', slug: 'lessons/reinforcement-learning-foundations/policy-gradient-and-the-path-to-modern-rl/references' },
+									],
+								},
+							],
+						},
+					],
+				},
+				{
 					label: 'Track 13: Build Neural Networks from Scratch',
 					items: [
 						{

@@ -1,0 +1,207 @@
+---
+title: "Practice: Function approximation and deep RL"
+description: "A self-check on function approximation, the semi-gradient update, and the deadly triad, a fresh linear-Q gradient-step exercise with a step-size-too-large diagnostic, a deadly-triad-and-DQN-fixes matching drill, and flashcards built for retrieval."
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+The skill is the semi-gradient update on a parameterized Q. The deadly-triad drill is the conceptual move: knowing which of DQN's two engineering tricks is solving which problem when. Keep a scratchpad.
+
+## Self-check
+
+Six short questions. Answer each in your head before opening the collapsible.
+
+**1. Why do tabular value methods fail to scale?**
+
+<details>
+<summary>Show answer</summary>
+
+Because tabular methods need one entry per (s, a). Beyond a few thousand discrete states the table is too big to store; for raw-observation state spaces (pixels, joint positions, continuous sensors) the state space is effectively infinite and a table has no meaning. Function approximation replaces the table with a parameterized function whose parameters generalize across states.
+
+</details>
+
+**2. Write the squared-TD-error loss and the semi-gradient update.**
+
+<details>
+<summary>Show answer</summary>
+
+```
+Loss(theta) = E[ ( target - Q_theta(s, a) )^2 ],
+                target = r + gamma * max_{a'} Q_theta(s', a')   (Q-learning style)
+
+Semi-gradient update:
+theta <- theta + eta * delta * grad_theta Q_theta(s, a),
+                delta = target - Q_theta(s, a)
+```
+
+Called **semi-gradient** because the target also depends on theta but is treated as fixed when computing the gradient.
+
+</details>
+
+**3. What are the three pieces of the deadly triad, and why can the combination diverge?**
+
+<details>
+<summary>Show answer</summary>
+
+(1) **TD bootstrap** -- target uses Q_theta(s'), an estimate. (2) **Off-policy** -- target uses max over actions, not the action the agent took. (3) **Function approximation** -- an update at one (s, a) changes Q at all other states via shared parameters. Any two are usually fine; together they can divergence because updates can chase moving targets that they themselves move.
+
+</details>
+
+**4. What does experience replay solve in DQN?**
+
+<details>
+<summary>Show answer</summary>
+
+Two things. (1) **Decorrelation**: consecutive transitions are highly correlated; random minibatches from a replay buffer are closer to i.i.d., which SGD's convergence assumes. (2) **Data reuse**: each transition contributes to many gradient updates over its time in the buffer, important when real environment steps are expensive (a real robot, a slow simulator).
+
+</details>
+
+**5. What does the target network solve in DQN?**
+
+<details>
+<summary>Show answer</summary>
+
+It stops the network from chasing its own tail. The live Q-network theta is trained against a target that uses a **frozen** copy of the parameters, theta-minus. The frozen copy is synced to the live one only every N steps. Without the target network, every gradient update would immediately move the target the very same network is training toward, oscillating and often diverging.
+
+</details>
+
+**6. Why is semi-gradient the practical choice over full-gradient (residual gradient)?**
+
+<details>
+<summary>Show answer</summary>
+
+Empirically it works much better. Propagating the gradient through the target as well (residual gradient) is theoretically cleaner but practically slower and less stable. Semi-gradient is the standard choice in tabular and deep value-based RL.
+
+</details>
+
+## Try it yourself: one semi-gradient step on a linear Q
+
+Linear Q with one feature: Q_theta(x) = theta_0 + theta_1 * x. Start with **theta_0 = 0, theta_1 = 0**. Observe a transition: **x_t = 4, r = 2, x_(t+1) = 5**, gamma = 0.9, step size eta = 0.02. (One action, so dropping `a` for brevity.)
+
+```
+Compute:
+  1. Q_theta(x_t) and Q_theta(x_(t+1)).
+  2. The target r + gamma * Q_theta(x_(t+1)) and the TD error delta.
+  3. grad_theta Q_theta(x_t) and the new theta after one semi-gradient step.
+  4. Q_theta(x_t) after the update -- is it closer to the target?
+```
+
+Then think about: what happens if you bump eta from 0.02 to 0.1?
+
+<details>
+<summary>Show answer</summary>
+
+```
+1. Q_theta(x_t = 4)     = 0 + 0 * 4 = 0
+   Q_theta(x_(t+1) = 5) = 0 + 0 * 5 = 0
+
+2. target = 2 + 0.9 * 0 = 2
+   delta  = target - Q_theta(x_t) = 2 - 0 = 2
+
+3. grad_theta Q_theta(x_t) = (d/d_theta_0, d/d_theta_1) Q = (1, x_t) = (1, 4)
+   theta_0 <- 0 + 0.02 * 2 * 1 = 0.04
+   theta_1 <- 0 + 0.02 * 2 * 4 = 0.16
+
+4. After update:  Q_theta(x_t = 4) = 0.04 + 0.16 * 4 = 0.68
+   Closer to the target (2) than it was (0), without overshooting.
+```
+
+**Bonus: what if eta = 0.1 instead?**
+
+```
+theta_0 <- 0 + 0.1 * 2 * 1 = 0.2
+theta_1 <- 0 + 0.1 * 2 * 4 = 0.8
+After update:  Q_theta(x_t = 4) = 0.2 + 0.8 * 4 = 3.4   (overshoots target 2!)
+```
+
+The update **overshoots** because the gradient is proportional to the feature value (x_t = 4), so big features amplify the update. With function approximation, step size needs more care than in the tabular case; large features can blow up the gradient. This is a small concrete instance of why function approximation is "delicate" and why feature scaling matters in deep RL.
+
+</details>
+
+## Try it yourself: match the symptom to the DQN fix
+
+For each problem, name the DQN fix that addresses it: **experience replay**, **target network**, or **both**.
+
+```
+A. Consecutive transitions from one trajectory are highly correlated, so
+   SGD's i.i.d. assumption is violated.
+B. Each environment step is expensive (a real robot, a slow simulator); we
+   want each transition to contribute to many gradient updates.
+C. Every gradient step on the live Q-network immediately moves the target
+   the network is training toward; training oscillates and sometimes diverges.
+D. We are training a CNN on Atari frames with Q-learning's off-policy max
+   from scratch; the naive setup is unstable.
+```
+
+<details>
+<summary>Show answer</summary>
+
+- **A: experience replay.** Random minibatches from a large transition buffer are much closer to i.i.d. than consecutive transitions from one trajectory.
+- **B: experience replay.** Each transition stays in the buffer for many steps; each minibatch it appears in adds another gradient update on it.
+- **C: target network.** Freezing a slowly-updated copy of Q for the target stabilizes the regression goal so the live network is not chasing its own tail.
+- **D: both.** This is exactly the deadly-triad scenario DQN targets: TD bootstrap + off-policy + function approximation. The fix is experience replay (for A and B) **and** a target network (for C). Either alone is usually not enough; the combination is what made the Atari result work.
+
+The takeaway: each fix solves a distinct problem, and the two work together. Replay handles the data side (correlation, reuse); the target network handles the target-stability side. Deep value-based RL without both is fragile.
+
+</details>
+
+## Flashcards
+
+Eight cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay out the full set as one card per page for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="Why do tabular value methods fail to scale?">
+
+Tables need an entry per (s, a). Beyond a few thousand discrete states the table is too big; for raw-observation state spaces (pixels, continuous sensors) the state space is effectively infinite. Function approximation replaces the table with a parameterized function whose parameters generalize across states.
+
+</Flashcard>
+
+<Flashcard question="Write the semi-gradient Q-learning update.">
+
+theta <- theta + eta * delta * grad_theta Q_theta(s, a), with delta = target - Q_theta(s, a) and target = r + gamma * max_{a'} Q_theta(s', a'). 'Semi' because the target also depends on theta but is treated as fixed for the gradient.
+
+</Flashcard>
+
+<Flashcard question="What are the three pieces of the deadly triad?">
+
+(1) TD bootstrap (target uses Q estimate). (2) Off-policy (target uses max, not actual action taken). (3) Function approximation (an update at one (s, a) changes Q everywhere via shared parameters). All three together can diverge.
+
+</Flashcard>
+
+<Flashcard question="What does experience replay solve, and what two benefits does it give?">
+
+Stores transitions in a buffer; sample random minibatches for SGD. (1) Decorrelates consecutive transitions (closer to i.i.d.). (2) Each transition contributes to many gradient updates (data reuse, important when env steps are expensive).
+
+</Flashcard>
+
+<Flashcard question="What does the target network solve in DQN?">
+
+Stops the live Q-network from chasing its own tail: the target uses a frozen copy of the parameters (theta-minus) updated only every N steps. The live network has a stable regression goal for a while, then theta-minus syncs to theta and the cycle continues.
+
+</Flashcard>
+
+<Flashcard question="Why is semi-gradient the practical choice over full-gradient (residual gradient)?">
+
+Empirically, semi-gradient works much better. Propagating the gradient through the target too (residual gradient) is theoretically cleaner but slower and less stable. Semi-gradient is the standard in tabular and deep value-based RL.
+
+</Flashcard>
+
+<Flashcard question="One update on a linear Q with feature x; why can large features destabilize the update?">
+
+Because grad_theta Q includes the feature value (e.g. d/d_theta_1 = x), so a large x amplifies the gradient and a too-large step size can overshoot the target dramatically. Feature scaling and careful eta selection matter in function-approximation RL.
+
+</Flashcard>
+
+<Flashcard question="What is the recipe for DQN, in one line?">
+
+Q-learning + a (convolutional) neural network approximating Q + experience replay + target network. The two engineering tricks are what tame the deadly triad and make deep value-based RL stable.
+
+</Flashcard>
+
+</FlashcardSet>

@@ -1,0 +1,194 @@
+---
+title: "Practice: Markov Decision Processes"
+description: "A self-check on the MDP tuple, the Markov property, and the discounted return, an identify-the-pieces exercise that formalizes a real system as an MDP, a compute-the-return exercise at three discount values that shows gamma in action, and flashcards built for retrieval."
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+Two skills to build: writing a real problem as an MDP (naming S, A, P, R, gamma) and computing the discounted return by hand at a few values of gamma so the role of the discount factor is something you feel, not memorize. Keep a scratchpad.
+
+## Self-check
+
+Six short questions. Answer each in your head before opening the collapsible.
+
+**1. Write down the MDP tuple and name what each piece encodes.**
+
+<details>
+<summary>Show answer</summary>
+
+The tuple is **(S, A, P, R, gamma)**: a set of **states** S, a set of **actions** A, the **transition probabilities** P(s' | s, a), the **reward function** R(s, a), and the **discount factor** gamma in [0, 1). Together they specify the dynamics of the world and what the agent values.
+
+</details>
+
+**2. State the Markov property, and say what it does NOT mean.**
+
+<details>
+<summary>Show answer</summary>
+
+The Markov property: the distribution over the next state and reward depends only on the current state and action, not on prior history. It does **not** mean "history is irrelevant to the problem" -- it means **the state representation has been chosen so the history is already summarized in the state**. A single Atari frame is not Markov; four stacked frames (which encode velocity) usually are.
+
+</details>
+
+**3. Define a trajectory and write the discounted return G_t.**
+
+<details>
+<summary>Show answer</summary>
+
+A trajectory is the sequence s_0, a_0, r_1, s_1, a_1, r_2, s_2, ... produced by following a policy in the environment. The discounted return from time t is **G_t = r_(t+1) + gamma * r_(t+2) + gamma^2 * r_(t+3) + ...** -- the geometrically weighted sum of all future rewards from t onward.
+
+</details>
+
+**4. What does the discount factor gamma control, and why must it be strictly less than 1 for continuing tasks?**
+
+<details>
+<summary>Show answer</summary>
+
+It controls **myopia**: gamma near 0 makes the agent care only about immediate reward; gamma near 1 makes it weigh long-term reward almost as much as immediate. For continuing (non-terminating) tasks with bounded rewards, gamma < 1 is required so the infinite sum of discounted rewards converges and the return is well-defined.
+
+</details>
+
+**5. Why is "state design" a real engineering job?**
+
+<details>
+<summary>Show answer</summary>
+
+Because the Markov property is a property of the state representation, not the world. If the state omits crucial information (the Atari frame without velocity, the robot's joint positions without their velocities), the Markov assumption fails and the algorithms that assume it can diverge. State design is choosing what to include so the next-state/reward distribution actually depends only on the current state.
+
+</details>
+
+**6. In what sense is P (and often R) known in Phase 2 of the track and unknown in Phase 3?**
+
+<details>
+<summary>Show answer</summary>
+
+In Phase 2 (planning), you assume you know the full MDP, including P and R, and compute the optimal policy directly. In Phase 3 (model-free learning), you only get to **sample** transitions and rewards by acting in the environment; you never write P down. The MDP still underlies the analysis, but the agent must learn good behavior from samples alone.
+
+</details>
+
+## Try it yourself: identify the pieces
+
+A streaming-service recommender shows one piece of content per user session and gets a reward when the user engages. Formalize it as an MDP by naming each piece.
+
+```
+1. What is the STATE s?  (What information does the agent need to act?)
+2. What is the ACTION a?
+3. What does the TRANSITION P(s' | s, a) describe, and is it known?
+4. What is the REWARD R, and who designed it?
+5. What is a reasonable DISCOUNT gamma, and what does the choice express?
+```
+
+<details>
+<summary>Show answer</summary>
+
+```
+1. STATE  s : the user's current context -- recent watch history, time of
+              day, device, perhaps an embedding of their long-run profile.
+              State design matters: too little (just "user id") will not be
+              Markov; too much risks brittle state spaces.
+
+2. ACTION a : which piece of content to show next (chosen from the catalog,
+              possibly restricted by availability and policy).
+
+3. P(s'|s,a): the user's response distribution -- whether they click, skip,
+              or finish, and how their state updates afterwards.
+              UNKNOWN in practice; must be learned from samples (Phase 3).
+
+4. REWARD R : a number expressing engagement (e.g. +1 for a watch over 30
+              seconds, 0 for a skip). DESIGNED by the team; the choice
+              shapes what the agent optimizes -- a bad design produces an
+              agent that games the metric.
+
+5. gamma   : likely 0.9-0.99. Lower (~0.9) optimizes near-term engagement;
+              higher (~0.99) values keeping the user around for many
+              future sessions. The choice expresses the business' time
+              horizon, not a property of the world.
+```
+
+The exercise is the formalization itself. Once those five pieces are named, every algorithm in the rest of the track has a precise problem to solve.
+
+</details>
+
+## Try it yourself: compute the return at three gammas
+
+Take a new trajectory in the H-S MDP from the lesson: **S -> H -> H -> S**, with rewards r_1 = -1 (taken from S), r_2 = +1 (taken from H), r_3 = +1 (taken from H), r_4 = -1 (taken from S). Compute G_0 at gamma = 0, 0.5, and 0.9.
+
+<details>
+<summary>Show answer</summary>
+
+```
+gamma = 0    (myopic):
+  G_0 = r_1 = -1
+
+gamma = 0.5:
+  G_0 = -1 + 0.5*1 + 0.25*1 + 0.125*(-1)
+      = -1 + 0.5 + 0.25 - 0.125 = -0.375
+
+gamma = 0.9 (far-sighted):
+  G_0 = -1 + 0.9*1 + 0.81*1 + 0.729*(-1)
+      = -1 + 0.9 + 0.81 - 0.729 = -0.019  (almost zero)
+```
+
+Three returns from the same trajectory and one knob. Notice the sign almost flips between gamma = 0 (the agent calls this bad, -1) and gamma = 0.9 (the agent calls this nearly neutral, -0.019). The two good middle steps barely register at low gamma but almost cancel the bad bookends at high gamma. That is what "the discount controls behavior" actually means: an agent optimizing G_0 will make different choices under different gammas, and the choice of gamma is the engineer's, not the world's.
+
+</details>
+
+## Flashcards
+
+Eight cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay out the full set as one card per page for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="What are the five pieces of the MDP tuple?">
+
+(S, A, P, R, gamma): states, actions, transition probabilities P(s'|s,a), reward function R(s,a), and discount factor gamma in [0, 1). Together they specify the world's dynamics and what the agent values.
+
+</Flashcard>
+
+<Flashcard question="State the Markov property in one line.">
+
+The next state and reward depend only on the current state and action, not on prior history -- the state representation summarizes everything that matters.
+
+</Flashcard>
+
+<Flashcard question="Is the Markov property a property of the world?">
+
+No -- it is a property of the state representation you choose. A single Atari frame is not Markov; four stacked frames usually are. State design is what keeps the assumption honest.
+
+</Flashcard>
+
+<Flashcard question="Write the discounted return G_t.">
+
+G_t = r_(t+1) + gamma * r_(t+2) + gamma^2 * r_(t+3) + ... = sum over k >= 0 of gamma^k * r_(t+k+1). The geometrically weighted sum of future rewards from time t.
+
+</Flashcard>
+
+<Flashcard question="What does the discount factor gamma control, and why is gamma < 1 required for continuing tasks?">
+
+gamma controls myopia (near 0) vs far-sightedness (near 1). For continuing tasks with bounded rewards, gamma < 1 is required so the infinite sum converges. Episodic tasks can use gamma = 1 because the sum is finite.
+
+</Flashcard>
+
+<Flashcard question="What is a policy?">
+
+A rule for choosing actions from a state. Deterministic: pi(s) returns one action. Stochastic: pi(a | s) returns a distribution over actions. The policy plus the environment generate a trajectory.
+
+</Flashcard>
+
+<Flashcard question="Phase 2 vs Phase 3 of the track: what is known about the MDP?">
+
+Phase 2 (planning) assumes P and R are known; you solve the MDP directly. Phase 3 (model-free learning) assumes only samples from the environment; the agent learns good behavior from interaction without writing P down.
+
+</Flashcard>
+
+<Flashcard question="Why is the reward subscript r_(t+1) rather than r_t?">
+
+By the standard convention, the agent's action a_t is taken in state s_t, and the resulting reward r_(t+1) and next state s_(t+1) arrive on the next time step. The first reward in a trajectory is r_1, not r_0.
+
+</Flashcard>
+
+</FlashcardSet>

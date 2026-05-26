@@ -1,0 +1,149 @@
+---
+title: "Monte Carlo prediction"
+description: "Phase 2 assumed you know P and R; Phase 3 is the much more common case where you don't. Monte Carlo prediction is the simplest model-free way to evaluate a policy: play episodes, average the observed returns, let the law of large numbers do the rest. This lesson lays out the algorithm in its first-visit and every-visit variants, walks four episodes of a small 3-state MDP through to a converged estimate, and is honest about MC's two-sided nature, unbiased in expectation but high in variance, which sets up TD learning in the next lesson as the bias-variance trade."
+track: reinforcement-learning-foundations
+order: 6
+phase: model-free-learning
+phase_order: 1
+difficulty: standard
+estimated_read_minutes: 13
+estimated_practice_minutes: 16
+prerequisites:
+  - lessons/reinforcement-learning-foundations/value-iteration
+learning_outcomes:
+  - Explain why model-free prediction is needed when P and R are unknown, and distinguish prediction from control
+  - Apply Monte Carlo prediction to estimate V^pi by averaging observed returns over episodes
+  - Distinguish first-visit MC from every-visit MC and recognize that both converge to V^pi
+  - Explain why Monte Carlo estimates are unbiased but high-variance, and what that implies in practice
+  - Recognize Monte Carlo's requirement of terminating episodes and why TD learning extends to the continuing case
+authors:
+  - clawdemy
+published_at: 2026-05-25
+last_reviewed: 2026-05-25
+status: draft
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+{/* COMPONENT PLACEHOLDER (Lead wires at promotion): <LessonFreshness lastReviewed={frontmatter.last_reviewed} /> */}
+{/* COMPONENT PLACEHOLDER (Lead wires at promotion): <SourceLecture url="https://davidstarsilver.wordpress.com/teaching/" title="David Silver, UCL Reinforcement Learning Course, Lecture 4: Model-Free Prediction (Monte Carlo methods)" instructor="David Silver" /> */}
+
+Phase 2 was the easy case: you had the MDP fully in hand, so policy iteration and value iteration could just compute on it. Phase 3 is the case that matters most in practice: **you do not know P or R**, only what the environment does when you act. To compute anything you have to **learn from samples**. This phase walks the three foundational ideas of model-free RL: **Monte Carlo prediction** (this lesson), **temporal-difference learning** (next), and **Q-learning for control** (the lesson after).
+
+Monte Carlo is the simplest. To estimate the value of a policy, play episodes under it, look at the actual total reward each episode gave from each state, and average. No model, no Bellman lookahead, no clever bootstrapping. Just experience and arithmetic. It works because of the law of large numbers, and it is the first algorithm in this track that runs in a setting where you would actually deploy an RL agent.
+
+## Model-free prediction (and the prediction-vs-control split)
+
+A quick vocabulary clean-up. In RL, two related but distinct problems get bundled into "the RL problem":
+
+- **Prediction (also called evaluation).** Given a fixed policy pi, estimate V^pi (or Q^pi). You are not trying to find a better policy; you are evaluating the one you have.
+- **Control.** Find a better policy, ideally the optimal pi^*.
+
+This lesson is **prediction** in the **model-free** setting: estimate V^pi by interacting with the environment under pi, with no access to P or R, only the (s, a, r, s') tuples the environment hands you. Lesson 8 will pivot to control with Q-learning.
+
+The prediction-control split matters because most RL algorithms reuse a prediction method inside a control loop. Monte Carlo prediction is the inner prediction step; replace policy evaluation in Phase 2's GPI loop with this, and you have Monte Carlo control (a method that exists; we will not dwell on it). The same lift works with the next lesson's TD method, giving SARSA and Q-learning.
+
+## The Monte Carlo idea
+
+By definition, V^pi(s) is the **expected return** from s under pi: V^pi(s) = E_pi[G_t | s_t = s]. Monte Carlo just estimates that expectation the way you would estimate any expectation, by sampling and averaging.
+
+The plan:
+
+```
+1. Run an episode under pi to termination, recording (s_0, a_0, r_1, s_1, a_1, r_2, ..., s_T).
+2. For each state s that was visited at some time t in the episode, compute the return
+   G_t  =  r_(t+1) + gamma * r_(t+2) + ... + gamma^(T-t-1) * r_T
+3. Add G_t to the running average of returns observed from s.
+4. Repeat for many episodes. V(s) := average of all observed returns from s.
+```
+
+The law of large numbers does the work: as the number of episodes grows, the sample average from each state converges to its true expected return V^pi(s).
+
+Two minor design choices, both fine:
+
+- **First-visit MC.** Within each episode, count only the **first** time s is visited; ignore later visits to the same s in that same episode.
+- **Every-visit MC.** Count **every** visit to s within each episode.
+
+Both converge to V^pi(s) under standard conditions. First-visit MC is marginally cleaner theoretically (independent samples per episode); every-visit MC tends to use the data slightly more efficiently. In small MDPs the difference is academic.
+
+It is convenient to maintain the average incrementally. After observing a new return G from state s:
+
+```
+count(s)  <-  count(s) + 1
+V(s)      <-  V(s) + (G - V(s)) / count(s)
+```
+
+If you use a fixed small step size alpha instead of 1/count, you get an exponentially-weighted moving average, which is useful when the underlying environment may be slowly changing (non-stationary), and which is also the form TD learning uses next lesson.
+
+## Worked example: four episodes of a 3-state MDP
+
+Take a tiny episodic MDP with three states: **S** (start), **A**, **T** (terminal). One action available everywhere (call it "go"); transitions are deterministic in the first hop and stochastic in the second; gamma = 1 (episodic, so no discount needed for simplicity).
+
+```
+From S, "go": -> A,  reward R(S->A) = 1.
+From A, "go": -> T,  reward is +4 with probability 0.5,  0 with probability 0.5.
+```
+
+**True values, by definition.** The expected return from A is the expected reward of its one hop: 0.5 * 4 + 0.5 * 0 = **2**. The expected return from S is the immediate +1 plus the expected return from A: 1 + 2 = **3**.
+
+```
+V^pi(A) = 2,    V^pi(S) = 3   (the true values we want Monte Carlo to recover)
+```
+
+Now run four episodes. Suppose by chance the reward from A is +4 in episodes 1 and 3, and 0 in episodes 2 and 4 (the 50-50 split happens to realize exactly evenly). For each episode, compute the return from each state.
+
+```
+Episode 1:  S -> A (reward 1)  ->  T (reward 4)
+  G(S) = 1 + 4 = 5,      G(A) = 4
+
+Episode 2:  S -> A (reward 1)  ->  T (reward 0)
+  G(S) = 1 + 0 = 1,      G(A) = 0
+
+Episode 3:  same as episode 1.  G(S) = 5,  G(A) = 4
+Episode 4:  same as episode 2.  G(S) = 1,  G(A) = 0
+```
+
+**First-visit Monte Carlo averages** (S and A each appear once per episode, so first-visit = every-visit here):
+
+```
+V(S) = (5 + 1 + 5 + 1) / 4 = 12 / 4 = 3       (matches V^pi(S))
+V(A) = (4 + 0 + 4 + 0) / 4 =  8 / 4 = 2       (matches V^pi(A))
+```
+
+Four episodes was enough here because the 50-50 split realized exactly evenly. If the first three episodes had all rolled the +4 outcome (three out of four high), the running averages after four episodes would be V(S) = (5+5+5+1)/4 = 4 and V(A) = (4+4+4+0)/4 = 3, both **off by 1** from the truth. With more episodes the average would converge back. That noise, swinging high or low based on the realized sequence, is the fundamental MC trade-off: **unbiased in expectation, but high in variance**.
+
+## Unbiased but high-variance: the MC trade
+
+Two facts to keep straight.
+
+- **Unbiased.** The Monte Carlo estimator of V^pi(s) is unbiased: in expectation over the randomness of episodes, the average return from s equals V^pi(s) exactly. There is no systematic error baked in.
+- **High variance.** The return G_t is a sum of many random rewards over a long trajectory, so its variance can be very large. A single episode is a noisy sample; the running average can be far from V^pi for many episodes when returns are spread wide. Convergence to the true value is guaranteed but can be slow.
+
+This is the **bias-variance trade-off** of value estimation. Monte Carlo has zero bias and high variance. The next lesson's TD learning makes the opposite choice (some bias, much lower variance) by bootstrapping from an estimated next-state value instead of waiting for a full return. Both ideas are correct; they trade off in different ways, and modern RL methods mix the two on a spectrum (TD(lambda), n-step methods).
+
+## Why this matters when you use AI
+
+Monte Carlo is rarely the algorithm of choice in modern deep RL, but the **shape** of it is everywhere.
+
+- **Policy evaluation from logs.** Off-policy evaluation methods often use Monte Carlo-style averaging of returns weighted by importance ratios, the model-free way to ask "how good would this policy have been?" from historical data.
+- **Game self-play.** AlphaGo's Monte Carlo Tree Search uses Monte Carlo-style rollouts to estimate the value of a position. The variance is dampened by the tree structure; the core "play it out and average" idea is Monte Carlo.
+- **The bias-variance lens.** Whenever a paper compares "n-step returns" or "TD(lambda)" choices, they are choosing a point on the MC-to-TD bias-variance spectrum. Knowing MC's role (the unbiased extreme) is half the picture; knowing TD's role (the low-variance bootstrap) is the other half (next lesson).
+- **Episode requirement is a real limit.** MC needs episodes that terminate; for continuing problems (a long-running scheduler, an online recommender) you cannot wait for a full return. That is one of the reasons TD is the everyday workhorse and MC is reserved for episodic problems where the return is naturally bounded.
+
+## Common pitfalls
+
+- **Confusing prediction with control.** Monte Carlo prediction evaluates a fixed pi; it does not improve the policy. The control version (Monte Carlo control) wraps prediction in a GPI loop, just like Phase 2 did for the planning case.
+- **Using MC on a continuing task as-is.** The estimator computes the return of a full episode; on a non-terminating task you would never finish computing it. Episodic tasks only, unless you adapt with TD-style bootstrapping.
+- **Confusing low bias with low error.** Unbiased does not mean accurate from few samples; it means accurate in expectation over infinite samples. With few episodes the estimate can be wildly off due to variance, even though its expectation is right.
+- **Forgetting the first-visit-vs-every-visit choice changes which samples enter the average.** Both converge, but the running numbers can differ in early episodes. Pick one, stick with it.
+- **Treating MC as the "right" answer because it has no bias.** Bias is one error component; variance is the other. MC's high variance can make TD's biased estimate strictly more accurate in practice.
+
+## What you should remember
+
+- **Model-free prediction** estimates V^pi (or Q^pi) when you do not have P and R, only experience: (s, a, r, s') tuples from interaction with the environment.
+- **Monte Carlo prediction** is the simplest model-free method: play episodes under pi, compute the return from each state visited, and average. Update incrementally: V(s) <- V(s) + (G - V(s)) / count(s).
+- **First-visit MC** counts only the first visit to s in each episode; **every-visit MC** counts every visit. Both converge to V^pi.
+- MC is **unbiased but high-variance**: the estimate's expectation is exactly V^pi, but individual episode returns are noisy, so convergence can be slow. The 4-episode S/A/T example hits V exactly when the 50-50 split realizes evenly; with a less even split it would be off by a small amount that shrinks as you add episodes.
+- MC requires **terminating episodes** (you need the full return), which is why TD learning is the workhorse for continuing tasks. Bias-variance is the trade between them, and the next lesson is the other end of the spectrum.

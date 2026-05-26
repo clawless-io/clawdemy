@@ -1,0 +1,239 @@
+---
+title: "Practice: Q-learning: model-free control"
+description: "A self-check on the Q-learning update, off-policy vs on-policy, and the exploration requirement, a five-step Q-learning trace on a fresh small MDP with the greedy policy already matching pi^*, a Q-learning-vs-SARSA target-computation drill, and flashcards built for retrieval."
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+The skill is doing the Q-learning update by hand: pick the next-state max over actions for the target, compute the TD error against the current Q, nudge. The off-policy vs on-policy comparison (Q-learning vs SARSA) is the conceptual move that distinguishes the canonical control algorithm from its on-policy sibling. Keep a scratchpad.
+
+## Self-check
+
+Six short questions. Answer each in your head before opening the collapsible.
+
+**1. Write the Q-learning update.**
+
+<details>
+<summary>Show answer</summary>
+
+**Q(s_t, a_t) <- Q(s_t, a_t) + alpha * [ r_(t+1) + gamma * max_{a'} Q(s_(t+1), a') - Q(s_t, a_t) ]**. TD bootstrap on Q with a max over next-state actions in the target. The bracketed expression is the TD error on Q.
+
+</details>
+
+**2. What makes Q-learning off-policy?**
+
+<details>
+<summary>Show answer</summary>
+
+The target uses **max_{a'} Q(s_(t+1), a')** -- the value the agent would get acting greedily, regardless of the action the agent actually takes next. The agent's behavior policy (typically epsilon-greedy) can differ from the greedy target policy without breaking the update. SARSA, which uses Q at the **actual** next action, is on-policy.
+
+</details>
+
+**3. Write the SARSA update and say how it differs from Q-learning.**
+
+<details>
+<summary>Show answer</summary>
+
+**SARSA: Q(s_t, a_t) <- Q(s_t, a_t) + alpha * [ r_(t+1) + gamma * Q(s_(t+1), a_(t+1)) - Q(s_t, a_t) ]**. The target uses Q at the **actual** next action a_(t+1) chosen by the behavior policy, not the max over actions. SARSA learns the value of the policy actually being followed (on-policy); Q-learning learns the value of always-greedy (off-policy).
+
+</details>
+
+**4. Why is exploration (epsilon-greedy) required for Q-learning to converge to Q^*?**
+
+<details>
+<summary>Show answer</summary>
+
+Q-learning's convergence guarantee requires every (s, a) pair to be visited **infinitely often**. A pure-greedy behavior policy could lock onto one action at each state and never visit the alternatives, leaving their Q estimates stuck at the initial values forever. Random exploration (with rate epsilon > 0) ensures the visit condition is met.
+
+</details>
+
+**5. How is Q-learning related to value iteration?**
+
+<details>
+<summary>Show answer</summary>
+
+Q-learning IS value iteration's update applied to Q, with the exact expectation over P replaced by a **single observed transition**. Same Bellman optimality recursion (max over actions); planning becomes learning by swapping the expectation for a sample.
+
+</details>
+
+**6. What two engineering tricks does DQN add to tame Q-learning + neural networks?**
+
+<details>
+<summary>Show answer</summary>
+
+**Experience replay** (store transitions in a buffer; sample minibatches at random for training, breaking temporal correlations and reusing data) and a **target network** (a slowly-updated copy of Q used for the max in the target, to stabilize training). Both address the **deadly triad** of TD bootstrap + off-policy + function approximation.
+
+</details>
+
+## Try it yourself: five Q-learning steps on the L/R MDP
+
+Use the same L/R 2-state-2-action MDP from the L4 practice (deterministic transitions, gamma = 0.5):
+
+```
+States: {L, R}.  Actions: {hold, push}.
+
+From L:  hold -> L  (R = 0)     push -> R  (R = 3)
+From R:  hold -> R  (R = 5)     push -> L  (R = -2)
+```
+
+Initialize Q(s, a) = 0 everywhere; step size alpha = 0.5. The behavior policy will visit each (s, a) at least once over the trace. After the five steps, read off the greedy policy and compare with pi^* from the L4 practice (which was (push, hold), V^* = (8, 10), so Q^*(L, push) = 8 and Q^*(R, hold) = 10).
+
+Behavior trajectory (s, a) for the five steps: (L, push), (R, hold), (R, push), (L, hold), (L, push). Compute Q after each step.
+
+<details>
+<summary>Show answer</summary>
+
+**Step 1.** s = L, a = push. r = 3, s' = R.
+
+```
+target = 3 + 0.5 * max( Q(R, hold), Q(R, push) ) = 3 + 0.5 * max(0, 0) = 3
+delta  = 3 - Q(L, push) = 3 - 0 = 3
+Q(L, push) <- 0 + 0.5 * 3 = 1.5
+```
+
+**Step 2.** s = R, a = hold. r = 5, s' = R.
+
+```
+target = 5 + 0.5 * max( Q(R, hold), Q(R, push) ) = 5 + 0.5 * max(0, 0) = 5
+delta  = 5 - Q(R, hold) = 5 - 0 = 5
+Q(R, hold) <- 0 + 0.5 * 5 = 2.5
+```
+
+**Step 3.** s = R, a = push. r = -2, s' = L.
+
+```
+target = -2 + 0.5 * max( Q(L, hold), Q(L, push) ) = -2 + 0.5 * max(0, 1.5) = -2 + 0.75 = -1.25
+delta  = -1.25 - Q(R, push) = -1.25 - 0 = -1.25
+Q(R, push) <- 0 + 0.5 * (-1.25) = -0.625
+```
+
+**Step 4.** s = L, a = hold. r = 0, s' = L.
+
+```
+target = 0 + 0.5 * max( Q(L, hold), Q(L, push) ) = 0 + 0.5 * max(0, 1.5) = 0.75
+delta  = 0.75 - Q(L, hold) = 0.75 - 0 = 0.75
+Q(L, hold) <- 0 + 0.5 * 0.75 = 0.375
+```
+
+**Step 5.** s = L, a = push (revisit). r = 3, s' = R.
+
+```
+target = 3 + 0.5 * max( Q(R, hold), Q(R, push) ) = 3 + 0.5 * max(2.5, -0.625) = 3 + 1.25 = 4.25
+delta  = 4.25 - Q(L, push) = 4.25 - 1.5 = 2.75
+Q(L, push) <- 1.5 + 0.5 * 2.75 = 2.875
+```
+
+**After 5 steps:**
+
+```
+Q(L, hold) = 0.375     Q(L, push) = 2.875
+Q(R, hold) = 2.5       Q(R, push) = -0.625
+
+Greedy policy: pi(L) = argmax(0.375, 2.875)  = push
+               pi(R) = argmax(2.5,   -0.625) = hold
+```
+
+That is **pi^* = (push, hold)**, matching the L4 practice's policy-iteration answer exactly, after just five Q-learning updates. The Q **values** are still far from Q^*(L, push) = 8 and Q^*(R, hold) = 10, but the **policy ranking** is already correct. Many more updates would close the value gap; for control purposes the right policy is the win.
+
+Notice the off-policy max at work: at step 5 the target used Q(R, hold) = 2.5, the value Q-learning had already learned for the (R, hold) pair at step 2, even though the agent at step 5 was taking push at L. The agent's behavior does not constrain what the target reasons about.
+
+</details>
+
+## Try it yourself: Q-learning target vs SARSA target
+
+Suppose at state s' the current Q values are:
+
+```
+Q(s', a1) = 10,    Q(s', a2) = 5,    Q(s', a3) = 8
+```
+
+The agent observed a reward r = 2 transitioning into s'. Discount gamma = 0.9. The agent's **behavior** policy (epsilon-greedy with some exploration) then takes **a' = a2** at s' (not the greedy choice).
+
+```
+1. Compute the Q-LEARNING target for the previous (s, a) update.
+2. Compute the SARSA target for the previous (s, a) update.
+3. Could you do Q-learning with a fully-greedy behavior policy (epsilon = 0)?
+   Why or why not?
+```
+
+<details>
+<summary>Show answer</summary>
+
+```
+1. Q-learning target = r + gamma * max_{a'} Q(s', a')
+                     = 2 + 0.9 * max(10, 5, 8)
+                     = 2 + 0.9 * 10
+                     = 11
+
+2. SARSA target      = r + gamma * Q(s', a' the agent actually took)
+                     = 2 + 0.9 * Q(s', a2)
+                     = 2 + 0.9 * 5
+                     = 6.5
+```
+
+The two targets differ by 4.5 in this single step. Q-learning's max picks the best action (a1 with value 10) regardless of what the agent did; SARSA uses what the agent actually took (a2 with value 5). Over many updates, Q-learning learns the value of always-greedy; SARSA learns the value of epsilon-greedy (including the exploration cost).
+
+**3.** **No, you should not run Q-learning with epsilon = 0.** A fully-greedy behavior policy would always pick the current argmax at every state, never trying alternatives. Many (s, a) pairs would never be visited, so their Q estimates would stay at the initial values forever. Q-learning's convergence to Q^* requires every (s, a) to be visited infinitely often, which only exploration ensures. The standard recipe is to start with a high epsilon and anneal it down as Q matures.
+
+</details>
+
+## Flashcards
+
+Eight cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay out the full set as one card per page for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="Write the Q-learning update.">
+
+Q(s_t, a_t) <- Q(s_t, a_t) + alpha * [ r_(t+1) + gamma * max_{a'} Q(s_(t+1), a') - Q(s_t, a_t) ]. TD on Q with a max over next-state actions in the target.
+
+</Flashcard>
+
+<Flashcard question="What makes Q-learning off-policy?">
+
+The target uses max_{a'} Q(s_(t+1), a') -- the value of acting greedily -- regardless of which action the agent actually takes next. Behavior policy (e.g. epsilon-greedy) can differ from the greedy target policy.
+
+</Flashcard>
+
+<Flashcard question="SARSA vs Q-learning: what is the one difference?">
+
+SARSA's target is Q(s_(t+1), a_(t+1)) with the agent's ACTUAL next action (on-policy); Q-learning's target is max_{a'} Q(s_(t+1), a') (off-policy). Same shape, different action choice in the target.
+
+</Flashcard>
+
+<Flashcard question="Why does Q-learning need exploration to converge to Q^*?">
+
+Convergence requires every (s, a) to be visited infinitely often. Fully-greedy behavior may never visit some alternatives, leaving their Q estimates at the initial values forever. Epsilon-greedy (or another exploration scheme) keeps the visit condition met.
+
+</Flashcard>
+
+<Flashcard question="How is Q-learning related to value iteration?">
+
+Q-learning IS the VI update applied to Q, with the expectation over P replaced by ONE sampled transition. Same Bellman optimality recursion (max over actions); planning -> learning by swapping expectation for sample.
+
+</Flashcard>
+
+<Flashcard question="What is DQN, and what two tricks does it add to Q-learning?">
+
+DQN = Q-learning with a neural network approximating Q. The two key tricks are EXPERIENCE REPLAY (sample minibatches from a transition buffer) and a TARGET NETWORK (slowly-updated Q copy used for the max in the target). Both tame the deadly triad.
+
+</Flashcard>
+
+<Flashcard question="In the worked 5-step example, why was the greedy policy already pi^* after 5 updates even though Q was far from Q^*?">
+
+Because the policy depends on the RANKING of Q values at each state, not their absolute magnitudes. Once the ranking is correct (push > hold at L, hold > push at R), the greedy policy matches pi^* even if the Q values still need many more updates to converge numerically.
+
+</Flashcard>
+
+<Flashcard question="When can Q-learning learn from a replay buffer or another agent's logs?">
+
+Always (it is off-policy): the update does not depend on which behavior produced the data, only on the transition (s, a, r, s'). DQN's experience replay puts this property to work for data efficiency.
+
+</Flashcard>
+
+</FlashcardSet>

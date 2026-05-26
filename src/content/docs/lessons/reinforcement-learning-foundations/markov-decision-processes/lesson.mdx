@@ -1,0 +1,165 @@
+---
+title: "Markov Decision Processes"
+description: "The first lesson sketched the agent-environment loop informally. To do anything precise with it, algorithms, convergence arguments, computable updates, you need a formal object, and that object is the Markov Decision Process. This lesson lays out the MDP tuple (states, actions, transition probabilities, reward function, discount), explains the Markov property and why it matters, defines a trajectory and the discounted return, walks the return on a small two-state example at three discount values to make the role of gamma concrete, and connects all of it to how a real system has to engineer its state to keep the Markov property intact."
+track: reinforcement-learning-foundations
+order: 2
+phase: the-rl-setup
+phase_order: 2
+difficulty: standard
+estimated_read_minutes: 13
+estimated_practice_minutes: 16
+prerequisites:
+  - lessons/reinforcement-learning-foundations/what-reinforcement-learning-actually-is
+learning_outcomes:
+  - Write down the MDP tuple (S, A, P, R, gamma) and explain what each piece encodes
+  - State the Markov property and explain why it is what makes MDP algorithms tractable
+  - Define a trajectory under a policy and compute the discounted return on a small example
+  - Explain how the discount factor gamma controls myopic versus far-sighted behavior, and why an infinite-horizon problem needs gamma less than 1
+  - Recognize the engineering job of designing states that make a real problem actually Markov (the Atari-frame-stacking example)
+authors:
+  - clawdemy
+published_at: 2026-05-25
+last_reviewed: 2026-05-25
+status: draft
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+{/* COMPONENT PLACEHOLDER (Lead wires at promotion): <LessonFreshness lastReviewed={frontmatter.last_reviewed} /> */}
+{/* COMPONENT PLACEHOLDER (Lead wires at promotion): <SourceLecture url="https://davidstarsilver.wordpress.com/teaching/" title="David Silver, UCL Reinforcement Learning Course, Lecture 2: Markov Decision Processes" instructor="David Silver" /> */}
+
+The first lesson drew the loop, agent, environment, state, action, reward, and left it informal. That is fine for orientation, but the moment you want to compute anything you need a precise object underneath. That object is the **Markov Decision Process** (MDP), and it is the universal contract of reinforcement learning. Every algorithm in the rest of this track operates on an MDP, even, especially, when the agent does not know exactly which MDP it is in.
+
+This lesson is short on motivation and long on precision. The payoff is that with the MDP nailed down, the value functions in the next lesson and the algorithms in Phase 2 fall right out.
+
+## The MDP tuple
+
+A finite Markov Decision Process is specified by five pieces, conventionally written as a tuple:
+
+```
+MDP = ( S , A , P , R , gamma )
+```
+
+Each piece:
+
+- **S** is the **set of states**. A state encodes everything the agent needs to know about its situation. In chess, a state is a board position (plus whose turn it is). In a gridworld, the cell the agent is in. For an Atari agent, the pixels on the screen plus a small history (we will come back to this).
+- **A** is the **set of actions**. The choices available to the agent. Sometimes it depends on the state, written A(s); we will keep it simple and assume the same action set everywhere unless noted.
+- **P** is the **transition probability function**. P(s' | s, a) is the probability that the environment moves to state s' if the agent takes action a in state s. This is the **dynamics** of the world.
+- **R** is the **reward function**. R(s, a), or sometimes R(s, a, s'), is the reward the environment gives for taking action a in state s (and possibly landing in s'). It is a number, designed by you to express what the agent should care about.
+- **gamma** is the **discount factor**, a number in [0, 1). It controls how much the agent values rewards now versus rewards later, and it is what makes infinite-horizon problems mathematically well-defined.
+
+That is the whole specification. An MDP is just those five things, and most of the track is about what to do once you have them (or how to act well when you only have access to samples from them).
+
+## The Markov property
+
+The "Markov" in Markov Decision Process is a specific independence assumption, and it is the one that makes everything else tractable. It says:
+
+```
+P( s_(t+1), r_(t+1)  |  s_t, a_t, s_(t-1), a_(t-1), ... , s_0, a_0 )
+                       =
+P( s_(t+1), r_(t+1)  |  s_t, a_t )
+```
+
+In words: **the future depends only on the present state and the current action, not on how the agent got here**. The full history is summarized by the current state; nothing earlier matters.
+
+The Markov property is not a property of the world; it is a property of the state representation you choose. The same problem can be Markov under one state definition and not under another. A canonical example: a single frame of an Atari game is **not** Markov, because from one frame alone you cannot tell whether the ball is moving left or right. The Markov fix used by DQN was to define the state as the last **four** frames stacked, so velocity is implicit in the state. Same physical game, different state representation, and only the second one is Markov enough for the algorithms in this track to converge.
+
+So when you formalize a real problem as an MDP, half the engineering is **state design**: include enough in the state that the next-state and next-reward distributions actually depend only on it. Partial observability, where this is impossible, is its own field (POMDPs); the foundations track stays in the fully-observable Markov case.
+
+## A policy and a trajectory
+
+A **policy** pi tells the agent how to act. It can be:
+
+- **Deterministic**: pi(s) returns a single action.
+- **Stochastic**: pi(a | s) returns a probability distribution over actions.
+
+Once you fix a policy and an initial state, the policy and the environment together produce a **trajectory**, a sequence of state-action-reward triples:
+
+```
+s_0  --a_0-->  s_1  with reward r_1
+s_1  --a_1-->  s_2  with reward r_2
+s_2  --a_2-->  s_3  with reward r_3
+...
+```
+
+Each step is one execution of the loop from lesson 1. The convention used throughout this track is that the agent's action **a_t** is taken in state **s_t**, and the resulting reward **r_(t+1)** and next state **s_(t+1)** arrive on the next time step. Watch that subscript, off-by-one errors are the most common bookkeeping bug in RL.
+
+## The return and the discount factor
+
+The agent's goal is total reward, not per-step reward. The **return** from time t, written G_t, is the total reward accumulated from time t onward. There are two cases.
+
+**Finite horizon (episodic tasks).** The trajectory eventually ends in a terminal state at some time T (a chess game ends, a robot falls). The return is the plain sum of rewards from t onward:
+
+```
+G_t = r_(t+1) + r_(t+2) + ... + r_T
+```
+
+**Infinite horizon (continuing tasks).** The trajectory never terminates (a long-running scheduler, a continuing recommendation loop). Plain summing diverges, so we **discount** future rewards by a factor gamma in [0, 1):
+
+```
+G_t = r_(t+1) + gamma * r_(t+2) + gamma^2 * r_(t+3) + ...
+    = sum over k >= 0 of  gamma^k * r_(t+k+1)
+```
+
+Two reasons gamma matters:
+
+1. **Mathematical:** with bounded rewards, multiplying by powers of gamma less than 1 makes the infinite sum converge. Without it, the return is not even well-defined for continuing problems.
+2. **Behavioral:** gamma encodes how much the agent prefers earlier rewards. Near 0, the agent is **myopic**, only the immediate reward matters. Near 1, it is **far-sighted**, willing to take a hit now for a bigger reward many steps later. Standard choices are gamma = 0.99 for episodic games (still close to undiscounted but well-defined) and 0.9 for shorter-horizon problems.
+
+The unified view in this track is that every problem is treated as if it has discount gamma; for episodic problems with terminal states, you can use gamma = 1 safely because the sum is finite.
+
+## Worked example: a two-state MDP
+
+Make all of this concrete with the smallest interesting MDP. Two states, **H** (happy) and **S** (sad), and a single action "do" in each state. Transitions and rewards:
+
+```
+From H, action "do":
+  -> goes to H with probability 0.8 (reward +1)
+  -> goes to S with probability 0.2 (reward +1)
+  (so R(H, do) = +1 regardless of next state)
+
+From S, action "do":
+  -> goes to H with probability 0.5 (reward -1)
+  -> goes to S with probability 0.5 (reward -1)
+  (so R(S, do) = -1 regardless of next state)
+```
+
+Suppose a particular run produces the trajectory **H -> H -> S -> H** with corresponding rewards r_1 = +1 (taken from H), r_2 = +1 (taken from H), r_3 = -1 (taken from S), r_4 = +1 (taken from H). Compute the return G_0 at three discount values.
+
+```
+gamma = 0    (myopic):    G_0 = r_1 = 1
+gamma = 0.5:              G_0 = 1 + 0.5*1 + 0.25*(-1) + 0.125*1
+                              = 1 + 0.5 - 0.25 + 0.125 = 1.375
+gamma = 0.9 (far-sighted): G_0 = 1 + 0.9*1 + 0.81*(-1) + 0.729*1
+                              = 1 + 0.9 - 0.81 + 0.729 = 1.819
+```
+
+Three returns from the same trajectory, the only thing that changed is gamma. At gamma = 0 the agent treats every step in isolation; at gamma = 0.9 it weighs the four steps almost equally. The Bad reward in step 3 hurts more under high gamma (it counts at 0.81) but is more than offset by the +1 at step 4 (counting at 0.729). The discount is not optional; it is a behavioral knob.
+
+## Why this matters when you use AI
+
+The MDP is the universal language. Every RL algorithm in this track and beyond is, formally, a way to act well in an MDP, even when crucial pieces are unknown.
+
+- **The model (P, R) is usually unknown.** Phase 2 (lessons 4-5) treats the case where you do know P and R: you can *plan*. Phase 3 (lessons 6-8) is the much more common case where you must *learn* from samples without ever writing P down. The MDP is the contract both phases assume.
+- **State design is real engineering.** The DQN frame-stacking story is one of many. In a robot, the state has to include velocities (not just positions) to be Markov; in a dialogue system, enough of the conversation history; in a partially-observed game, an aggregated summary. Getting the state wrong silently violates Markov and breaks convergence.
+- **Discount gamma is a design choice.** The same MDP under different gamma produces different optimal behavior. Practitioners report gamma alongside the algorithm; reading an RL result without knowing gamma is reading a partial story.
+- **Markov is a strong assumption.** When it does not hold even after state engineering (true partial observability), you are in the world of POMDPs, which is a separate, harder field. The foundations track stays in the Markov case and is honest that "real life" sometimes is not.
+
+The next lesson defines the **value functions** V and Q on an MDP and writes the **Bellman equations** that link them. Everything afterward, planning, learning, function approximation, policy gradient, will be a different way to solve or approximate those equations.
+
+## Common pitfalls
+
+- **Confusing the Markov property with "history does not matter."** It means the state encodes enough that history adds nothing. If a single Atari frame is the state, history *does* matter (you cannot see velocity), so the representation is not Markov for that environment. The fix is a better state, not denial.
+- **Off-by-one on reward indexing.** With the convention used here, a_t is taken in s_t and the resulting r_(t+1) and s_(t+1) arrive on the next step. The first reward in a trajectory is r_1, not r_0. Mixing conventions is one of the most common bookkeeping errors in RL.
+- **Forgetting why gamma must be strictly less than 1 (continuing tasks).** With gamma = 1 and an unbounded trajectory of bounded rewards, the sum can diverge or be undefined. Episodic tasks can use gamma = 1 because the sum is finite; continuing tasks need gamma in [0, 1).
+- **Treating P and R as available in real problems.** They usually are not. The whole reason model-free methods exist (Phase 3) is that you only get to *sample* transitions and rewards, not look them up. Algorithms in this track assume P and R are known only in Phase 2.
+
+## What you should remember
+
+- A **Markov Decision Process** is the tuple **(S, A, P, R, gamma)**: a state space, an action space, transition probabilities, a reward function, and a discount factor.
+- The **Markov property** says the next state and reward depend only on the current state and action, not on prior history; this is what makes MDP algorithms tractable, and it is a property of the **state representation you choose**, not of the world.
+- A **trajectory** under a policy is a sequence s_0, a_0, r_1, s_1, a_1, r_2, ... The **return** is **G_t = r_(t+1) + gamma * r_(t+2) + gamma^2 * r_(t+3) + ...**, the discounted total reward from t on.
+- The **discount factor gamma** controls myopia (near 0) versus far-sightedness (near 1); gamma less than 1 is mathematically required to make infinite-horizon returns well-defined.
+- In real problems the model (P, R) is usually unknown, so the entire later part of the track learns from samples instead. The MDP is the universal contract those samples are samples from, and good state design is what keeps the Markov assumption honest.
