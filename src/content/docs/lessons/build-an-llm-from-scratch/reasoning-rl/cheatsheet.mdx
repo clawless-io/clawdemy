@@ -1,0 +1,95 @@
+---
+title: "Cheatsheet: Reasoning and alignment, RL with verifiable rewards"
+description: One-page reference. RLVR loop, GRPO, RL-as-systems, self-improvement loops, and the track-wide map.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## What reasoning models add
+
+```
+prompt -> THINKING (explicit step-by-step) -> ANSWER
+```
+
+Trained so the thinking actually improves the answer on multi-step problems (math, code with constraints, logic), where one-shotting often fails.
+
+## RLVR (RL with Verifiable Rewards)
+
+| | RLHF (lesson 13) | RLVR (this lesson) |
+| --- | --- | --- |
+| Reward | Human preference (learned reward model) | **Verifiable check**: math grader / code tests / puzzle validator |
+| Reward model needed? | Yes | **No** (checker IS the reward) |
+| Reward-model hacking? | Possible (policy games the model) | Eliminated (check is fixed) |
+| Best for | Open-ended response shaping | Multi-step problems with checkable answers |
+
+## The training loop
+
+```
+1. Sample k reasoning traces per prompt          (sample workers; inference)
+2. Score each trace with the verifier            (verifier workers; checker)
+3. Update the policy on the rewards              (train workers; gradient step)
+   + KL penalty to start-of-step policy
+```
+
+Modern RL algorithm: **GRPO** (Group Relative Policy Optimization). Normalizes rewards within each k-group; no separate value network. Lives in **TRL** alongside `SFTTrainer` and `DPOTrainer`.
+
+## Landscape anchors
+
+| Term | What it is |
+| --- | --- |
+| DeepSeek R1 | Model that showed reasoning-via-RL at scale |
+| Open R1 | Hugging Face community open reproduction |
+| GRPO | The RL algorithm; in TRL |
+
+## RL as a systems problem
+
+Three cost centers:
+
+| Stage | Workers | Tooling |
+| --- | --- | --- |
+| **Sample** | Many decode passes per prompt | Lesson 8: KV cache, continuous batching, paged attention, GQA, speculative decoding, quantization |
+| **Verify** | Run the checker (code executor, grader, sometimes an LLM judge) | Often a separate worker cluster |
+| **Train** | Gradient updates on rewarded traces | Lessons 6-7: kernels + parallelism (FSDP, TP) |
+
+**Coordinating sample + verify + train at scale is most of the engineering.** Algorithm is the easy part.
+
+## Self-improvement loops
+
+```
+attempt many verifiable problems  ->  filter correct traces
+  ->  new SFT (or preference) data  ->  retrain  ->  iterate
+```
+
+Verifier prevents blind-spot amplification on verifiable problems (no teacher drift; ground truth is the check).
+
+## Track-wide map (the capstone synthesis)
+
+```
+Phase 1 (model):     tokenizer (L1) -> accounting (L2) -> architecture (L3-L4)
+Phase 2 (systems):   hardware (L5) -> kernels (L6) -> parallelism (L7) -> inference (L8)
+Phase 3 (good):      scaling (L9) -> evaluation (L10) -> data (L11-L12) -> post-training (L13)
+Capstone (L14):      RLVR uses every layer above at once
+```
+
+The method that survives the next frontier:
+- Account for compute (FLOPs, memory, arithmetic intensity)
+- Exploit the hardware (kernels, parallelism, inference economics)
+- Scale honestly (Chinchilla + inference-cost adjustment)
+- Evaluate the portfolio (not any single benchmark)
+- Curate data (filter, dedup, mix, synthetic with verifier)
+- Post-train deliberately (SFT, preference tuning, RLVR for reasoning)
+
+## Words to use precisely
+
+- **RLVR**: RL with verifiable rewards; checker IS the reward.
+- **GRPO**: Group Relative Policy Optimization; modern reasoning RL algorithm.
+- **Sample / verify / train workers**: the three roles in production RL infrastructure.
+- **Self-improvement loop**: filter correct traces back into training data; verifier-grounded.
+- **Reasoning trace**: the explicit step-by-step thinking before the answer.
+
+## Source
+
+- Stanford CS336, Lectures 16-17 (Post-training RLVR, Alignment RL systems), by Hashimoto and Liang. `cs336.stanford.edu`. Independent structural mirror in original prose; see references.

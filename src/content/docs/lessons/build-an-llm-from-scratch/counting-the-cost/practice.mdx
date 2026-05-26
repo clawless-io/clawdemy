@@ -1,0 +1,175 @@
+---
+title: "Practice: Counting the cost"
+description: Self-check on FLOPs, the 6ND rule, training memory, and arithmetic intensity, a back-of-envelope cost-estimation exercise, and flashcards for retrieval.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Seven short questions. Answer each before opening the collapsible.
+
+**1. How many FLOPs does multiplying an m-by-k matrix with a k-by-n matrix cost, and why?**
+
+<details>
+<summary>Show answer</summary>
+
+About `2 * m * n * k`. There are m times n output elements, each a dot product of length k, and a dot product of length k is about k multiplies plus k adds, roughly 2k operations. The factor of 2 is the multiply-and-add. Since a Transformer is mostly matmuls, this formula is most of the counting.
+
+</details>
+
+**2. State the 6ND rule and what each part means.**
+
+<details>
+<summary>Show answer</summary>
+
+Training a model costs about `6 * N * D` FLOPs, where N is the number of parameters and D is the number of training tokens. The forward pass is about `2N` per token, the backward pass about twice that, so 6 total. It lets you scope a training run from just two numbers.
+
+</details>
+
+**3. Roughly how much memory does training a model take in fp32, per parameter, before activations?**
+
+<details>
+<summary>Show answer</summary>
+
+About `16N` bytes: parameters (4N) + gradients (4N) + Adam optimizer states (8N, a momentum and a variance per parameter, 4 bytes each). So a 1-billion-parameter model needs about 16 GB before any activations, which scale separately with batch size and sequence length.
+
+</details>
+
+**4. What is arithmetic intensity, and what do high and low values mean?**
+
+<details>
+<summary>Show answer</summary>
+
+Arithmetic intensity is FLOPs performed per byte moved from memory. High intensity means compute-bound: the GPU's arithmetic units stay busy and the hardware is well used (large matmuls). Low intensity means memory-bound: the arithmetic units sit idle waiting for data (elementwise ops like adds, activations, normalizations).
+
+</details>
+
+**5. Why can a GPU run far below its advertised peak FLOPs?**
+
+<details>
+<summary>Show answer</summary>
+
+Because the operation is memory-bound: it has low arithmetic intensity, so the arithmetic units stall waiting for data to arrive from memory rather than being limited by compute. The peak FLOPs number only applies when an operation is compute-bound. This is why fusing small memory-bound ops and using larger batches/matmuls (raising intensity) helps.
+
+</details>
+
+**6. What does einops give you over raw `.view`/`.permute`?**
+
+<details>
+<summary>Show answer</summary>
+
+Named dimensions. An expression like `rearrange(x, "b s (h d) -> b h s d", h=n_heads)` states exactly what the shape transformation does, instead of a puzzle of bare axis numbers. It is readable, self-documenting, and catches shape mistakes at the point you write them, which matters because shape bugs are among the most common in model code.
+
+</details>
+
+**7. Why does this accounting lesson come second, before the architecture lesson?**
+
+<details>
+<summary>Show answer</summary>
+
+Because efficiency is the track's through-line, and every later design decision (model size, training length, kernels, parallelism, scaling) is argued in terms of FLOPs and memory. Learning to count first gives the rest of the course a common currency; you decide the architecture knowing what each choice costs.
+
+</details>
+
+## Try it yourself: scope a training run
+
+About 12 minutes, paper or a calculator. You will estimate a real run's cost and feasibility.
+
+**Part A: compute and memory.** You plan to train a **7-billion-parameter** model on **2 trillion** tokens, in fp32.
+
+1. Estimate the total training FLOPs with the 6ND rule.
+2. Estimate the memory for parameters + gradients + optimizer states (ignore activations).
+
+<details>
+<summary>What you'll get</summary>
+
+1. `6 * 7e9 * 2e12 = 8.4e22` FLOPs. (Six times seven billion times two trillion.)
+2. `16 * 7e9 = 1.12e11` bytes, about **112 GB**. That already exceeds a single GPU's memory (commonly 40-80 GB), which tells you, before writing any code, that this model cannot be trained on one device. You will need to split it across several, which is exactly what the parallelism lesson is about. The accounting surfaced the constraint for free.
+
+</details>
+
+**Part B (reasoning).** Two operations: (i) a large matrix multiply, (ii) adding a bias and applying an activation function elementwise. Which is compute-bound, which is memory-bound, and what does that imply for optimizing them?
+
+<details>
+<summary>What you should notice</summary>
+
+The matmul is compute-bound (high arithmetic intensity, many FLOPs per byte), so the GPU is busy and there is little to gain beyond using it. The elementwise bias-and-activation is memory-bound (very few FLOPs per byte moved), so the arithmetic units stall on memory. The implication: you optimize the memory-bound op by *fusing* it with neighboring operations so the data is read once and several cheap operations happen while it is in fast memory, rather than making separate memory round-trips. That fusion idea is the heart of the kernels lesson.
+
+</details>
+
+**Part C (read the shapes).** What does `rearrange(x, "b (h d) -> b h d", h=8)` do to a tensor of shape `(4, 64)`?
+
+<details>
+<summary>What you should notice</summary>
+
+It splits the second dimension of size 64 into 8 heads of size 8 each, producing shape `(4, 8, 8)`: batch 4, then 8 heads, then 8 per head. The `(h d)` on the left says "this axis is heads times dim, with h=8," so d is inferred as 64/8 = 8. Reading it as a sentence ("b, h-times-d becomes b, h, d") is the whole point, and far less error-prone than computing a `.view(4, 8, 8)` and hoping the axis order is right.
+
+</details>
+
+## Flashcards
+
+Nine cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay the set out one card per page for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="FLOPs of an m-by-k times k-by-n matmul?">
+
+About 2*m*n*k. There are m*n outputs, each a length-k dot product (~2k ops: k multiplies + k adds). The model is mostly matmuls, so this is most of the counting.
+
+</Flashcard>
+
+<Flashcard question="State the 6ND rule.">
+
+Training costs about 6*N*D FLOPs (N = parameters, D = training tokens). Forward ~2N per token, backward ~2x forward, so 6 total. Scopes a run from two numbers.
+
+</Flashcard>
+
+<Flashcard question="Training memory per parameter (fp32)?">
+
+About 16N bytes: parameters (4N) + gradients (4N) + Adam optimizer states (8N: momentum + variance), before activations (which scale with batch and sequence length). Memory is often the binding constraint.
+
+</Flashcard>
+
+<Flashcard question="What is arithmetic intensity?">
+
+FLOPs performed per byte moved from memory. It decides whether an op is compute-bound (high: GPU busy) or memory-bound (low: GPU stalled waiting on memory).
+
+</Flashcard>
+
+<Flashcard question="Compute-bound vs memory-bound ops?">
+
+Compute-bound: high arithmetic intensity, GPU busy, e.g. large matmuls. Memory-bound: low intensity, GPU idle waiting on memory, e.g. elementwise adds/activations/norms.
+
+</Flashcard>
+
+<Flashcard question="Why does a GPU often run below peak FLOPs?">
+
+The op is memory-bound: low arithmetic intensity stalls the arithmetic units on memory transfers. Peak FLOPs only applies to compute-bound ops. Fusing ops and bigger batches raise intensity.
+
+</Flashcard>
+
+<Flashcard question="What does einops give you?">
+
+Named tensor dimensions. rearrange(x, 'b s (h d) -> b h s d', h=n_heads) states the shape transformation as a sentence, readable and self-documenting, catching shape bugs at write time vs opaque .view/.permute.
+
+</Flashcard>
+
+<Flashcard question="Why does the cost-accounting lesson come before architecture?">
+
+Efficiency is the track's through-line; every later choice (size, training length, kernels, parallelism, scaling) is argued in FLOPs and memory. Counting first gives the course a common currency.
+
+</Flashcard>
+
+<Flashcard question="What does fusion exploit about arithmetic intensity?">
+
+Memory-bound ops stall on memory round-trips. Fusing several into one reads the data once into fast memory and does the cheap ops there, raising effective intensity. The FlashAttention idea.
+
+</Flashcard>
+
+</FlashcardSet>

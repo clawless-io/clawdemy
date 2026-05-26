@@ -1,0 +1,25 @@
+---
+title: "Summary: How models run on hardware"
+description: The 5-minute scan version. SIMT and tensor cores, the memory hierarchy, TPU systolic arrays, and why hardware shapes architecture.
+sidebar:
+  order: 4
+  label: Summary
+artifact: summary
+---
+
+Phase 2 opens on the chip. A **GPU** runs many threads in lockstep (**SIMT**) across **streaming multiprocessors (SMs)**, with specialized **tensor cores** doing the matmuls. Its **memory hierarchy** (**HBM** large but slow, **SRAM** small but fast, **registers** tiny and fastest) decides whether those cores are fed: memory-bound ops stall waiting on HBM, compute-bound ops reuse data in SRAM and approach peak. A **TPU** makes a different bet: a **systolic array** of multiply-accumulate units through which data flows, reusing each value across many multiplies, designed for matmul-heavy workloads. The big takeaway: **hardware shapes design**, and the architecture choices from lesson 3 (big matmuls, mixed precision, tile-friendly shapes) are bargains struck against the physical reality of the chip. When a job runs below the spec sheet, the cause is low arithmetic intensity, wrong precision, or matmul shapes that miss tiles. This is the scan version; the lesson makes the chip itself legible.
+
+## Core ideas
+
+- **SIMT execution.** Threads run in lockstep groups (warps, ~32) across SMs, each with many arithmetic units. One instruction drives many ALUs.
+- **Tensor cores.** Specialized units doing small matmuls per cycle in fp16/bf16. Peak FLOPs comes mostly from them; reached only with large, tile-aligned matmuls in mixed precision.
+- **Memory hierarchy.** HBM (main memory, ~TB/s, holds weights/grads/activations), SRAM/shared (small per-SM, fast), registers (per-thread, fastest). Data must be staged into fast memory and reused.
+- **Arithmetic intensity is physical.** Low intensity = memory-bound (tensor cores idle on HBM). High intensity = compute-bound (data reused in SRAM, near peak). Lesson 2's number is describing this physical gap.
+- **TPU systolic array.** A 2D grid of multiply-accumulate units; values flow through and are reused across many multiplies. A hardware bet on matmul, used in pods with fast interconnect.
+- **Hardware shapes design.** The architecture's bias toward large matmul-heavy sublayers, mixed precision, and tile-friendly shapes is a *hardware* decision; modern LLMs are co-designed with their chips.
+
+## What changes for you
+
+Two instincts come out of this. First, diagnosis: when training or inference runs far below the GPU's published spec, you know exactly where to look, arithmetic intensity, precision (fp32 forgoes most of the tensor-core peak), and matmul shapes (small or misaligned matmuls miss tiles). Second, the lesson-3 architecture choices stop looking arbitrary: pre-norm and the rest are stability decisions; the bias toward big matmuls and tile-friendly hidden sizes is a hardware decision, because the chip's peak is on those workloads. With the chip understood, the next lesson turns "raise arithmetic intensity by keeping data near the compute" into code, by writing custom kernels with Triton and XLA.
+
+A GPU is many tensor cores fed (or starved) by a memory hierarchy, and a TPU is a systolic array making the same bet a different way. The takeaway is the same: hardware peaks only when the data is near the compute. Everything else in Phase 2 follows from that.

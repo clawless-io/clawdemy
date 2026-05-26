@@ -1,0 +1,191 @@
+---
+title: "Practice: Reasoning and alignment, RL with verifiable rewards"
+description: Self-check on RLVR, GRPO, RL-as-systems, and the capstone synthesis, a track-wide map exercise, and flashcards for retrieval.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Seven short questions. Answer each before opening the collapsible.
+
+**1. What gap do reasoning models address, and how?**
+
+<details>
+<summary>Show answer</summary>
+
+Ordinary LLMs struggle on multi-step problems (multi-step math, code with constraints, logic puzzles) where the answer depends on a chain of intermediate results. Reasoning models train the model to produce an explicit chain of **thinking** before the answer, and to make the thinking actually improve the answer rather than decorate it.
+
+</details>
+
+**2. What does RLVR change about the reward signal versus RLHF?**
+
+<details>
+<summary>Show answer</summary>
+
+RLHF uses human preferences (via a learned reward model). RLVR uses **verifiable correctness** as the reward: the math answer is right or wrong, the code tests pass or fail, the puzzle validator confirms or rejects. The checker is the reward, so no reward model is needed and reward-model hacking is eliminated (the checker is fixed and objective).
+
+</details>
+
+**3. Walk the RLVR training loop in three steps.**
+
+<details>
+<summary>Show answer</summary>
+
+(1) **Sample many traces per problem:** give the policy a prompt; generate `k` candidate reasoning traces, each ending with an answer. (2) **Score each trace with the verifier:** run the answer through the checker (math grader, code test suite, etc.); each trace gets a binary or graded reward. (3) **Update the policy** to favor high-reward traces and discourage low-reward ones, with a KL penalty back to the start-of-step policy. **GRPO** is the modern RL algorithm; it normalizes rewards within each `k`-group and avoids needing a separate value network.
+
+</details>
+
+**4. Why is RL at LLM scale called "mostly a systems problem"?**
+
+<details>
+<summary>Show answer</summary>
+
+Three cost centers compound. **Sample cost:** many traces per prompt mean many full decode passes (lesson 8's inference economics apply: batching, KV cache, GQA, speculative decoding all matter). **Verifier cost:** the reward step is often itself a model call (a code executor, a math grader, sometimes an LLM judge of intermediate steps); verifier throughput becomes a serious bottleneck. **Sample-train split:** modern infrastructure separates sample workers from train workers; coordinating them with stale-policy correction and queue management is most of the engineering.
+
+</details>
+
+**5. Place DeepSeek R1, Open R1, and GRPO in the landscape.**
+
+<details>
+<summary>Show answer</summary>
+
+**DeepSeek R1** is the model that demonstrated reasoning-via-RL working at scale, making the technique widely known. **Open R1** is the Hugging Face community open reproduction with public code, datasets, and recipes. **GRPO** (Group Relative Policy Optimization) is the RL algorithm both lines use, available in TRL (the same library as `SFTTrainer` and `DPOTrainer` from lesson 13).
+
+</details>
+
+**6. How does the self-improvement loop work, and what role does the verifier play?**
+
+<details>
+<summary>Show answer</summary>
+
+(1) Have the current best model attempt many verifiable problems. (2) Filter to traces that reach correct answers. (3) Use those traces as new SFT (or preference) data. (4) Re-train and iterate. The verifier prevents the worst form of synthetic-data drift: because the ground truth is the verifier's check, the loop cannot amplify the teacher's blind spots on verifiable problems. The model improves itself by concentrating training on its actual successes.
+
+</details>
+
+**7. What is the most durable lesson of the track, and why?**
+
+<details>
+<summary>Show answer</summary>
+
+The **method** outlasts the frontier. Reasoning is the headline now and something else will be next; particular model names go stale within months. But the working loop, account for compute, exploit the hardware, scale honestly, evaluate the portfolio, curate data, post-train deliberately, does not. That method is what this track was really teaching, with the build-from-scratch project as the worked example. Holding the method steady while the specifics churn is what keeps you useful as the field moves.
+
+</details>
+
+## Try it yourself: capstone synthesis
+
+About 12 minutes, no code. Demonstrate that the whole track connects.
+
+**Part A: place every Phase-2 tool in RLVR.** RLVR training is "mostly a systems problem." For each of these earlier tools, name what it does in an RLVR run.
+
+```
+a. KV cache (lesson 4)
+b. Continuous batching (lesson 8)
+c. Triton kernels (lesson 6)
+d. Tensor parallelism (lesson 7)
+e. Speculative decoding (lesson 8)
+```
+
+<details>
+<summary>What you'll get</summary>
+
+- **a. KV cache.** Reused across the many decode passes inside each sample worker; without it, each trace would recompute keys/values for every token, drastically increasing sample cost.
+- **b. Continuous batching.** Sample workers serve large numbers of in-flight trace generations across the prompt queue; continuous batching keeps them full for high throughput.
+- **c. Triton kernels.** Fused decode kernels (and FlashAttention) run inside sample workers; the same techniques that make inference fast in lesson 8 apply here.
+- **d. Tensor parallelism.** If the policy is too large for a single GPU, the sample workers (and the train workers) use TP within nodes; lesson 7's placement rules apply.
+- **e. Speculative decoding.** If applicable, the draft-and-verify pattern multiplies tokens per pass at the sample stage, dropping the per-trace cost further.
+
+The pattern: RLVR's sampling stage is decoding at scale; the inference toolkit from Phase 2 is the toolkit.
+
+</details>
+
+**Part B (reasoning).** A reasoning-model paper claims a 15-point improvement on MATH (a math benchmark) over its base model. Walk through the questions you would ask, using the track's discipline, before accepting the claim at face value.
+
+<details>
+<summary>What you should notice</summary>
+
+- **Contamination (lesson 10).** Has the MATH benchmark been seen during training? Are there held-out variants? Executable verification helps (math has a numeric ground truth that's harder to memorize as one token), but discussion of solutions can still leak.
+- **Format sensitivity (lesson 10).** What harness ran the eval? What prompt format? Reasoning models are particularly format-sensitive (chain-of-thought, structured output).
+- **Recipe vs algorithm.** Is the 15-point lift from a real algorithmic step (GRPO change, verifier change), or is it a recipe combining better data + more sampling + better evaluation harness? Both are valid; they imply different generalizability.
+- **Exponent vs prefactor (lesson 9).** Does the gain grow with model size, or shrink? A one-point at 7B that becomes 15 at 70B is a different (stronger) claim than a 15-point gain only at one size.
+- **Portfolio (lesson 10).** Does the model also improve on harder, freshly-generated, executable benchmarks? A single-benchmark headline is weaker than a coherent portfolio.
+
+The track's discipline says: ask all five before believing any headline.
+
+</details>
+
+**Part C (reasoning).** Why is it accurate to call this lesson the *capstone* of the track, beyond just being last?
+
+<details>
+<summary>What you should notice</summary>
+
+Because RLVR uses every layer the track built. The model has Phase 1's architecture and tokenizer. The training run uses Phase 2's parallelism (sample and train workers) and inference systems (the KV cache, batching, kernels, speculative decoding inside sample workers). The compute allocation is the scaling-laws thinking from Phase 3. The evaluation discipline checks whether the reasoning actually generalizes. The data is curated from lessons 11-12's funnel, expanded with the verifier-grounded self-improvement loop from this lesson. The starting model is the SFT-then-preference-tuned artifact of lesson 13. RLVR is the only training stage on the planet that touches all of them at once, which is exactly why it is the capstone and not just the last topic.
+
+</details>
+
+## Flashcards
+
+Nine cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay the set out one card per page for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="What gap do reasoning models address?">
+
+Ordinary LLMs struggle on multi-step problems (math, code-with-constraints, logic) where the answer depends on a chain of intermediate steps. Reasoning models generate explicit thinking before the answer and are trained to make it improve correctness.
+
+</Flashcard>
+
+<Flashcard question="What does RLVR change vs RLHF?">
+
+RLHF uses human preferences (via learned reward model). RLVR uses verifiable correctness (math grader, code tests, puzzle validator); the checker IS the reward. No reward model; no reward-model hacking.
+
+</Flashcard>
+
+<Flashcard question="Walk the RLVR training loop.">
+
+(1) Sample k reasoning traces per prompt. (2) Score each trace with the verifier (binary or graded reward). (3) Update the policy to favor high-reward traces with a KL penalty to the start-of-step policy. Modern algorithm: GRPO; lives in TRL.
+
+</Flashcard>
+
+<Flashcard question="Why is RL at LLM scale 'mostly a systems problem'?">
+
+Three compounding costs: sample cost (many decode passes; lesson-8 inference economics apply), verifier cost (often a model call), sample-train split (coordinating sample workers + train workers with stale-policy correction). Algorithm is the easy part.
+
+</Flashcard>
+
+<Flashcard question="DeepSeek R1, Open R1, and GRPO in the landscape?">
+
+DeepSeek R1 showed reasoning-via-RL at scale. Open R1 is the Hugging Face community open reproduction. GRPO is the RL algorithm both use; in TRL alongside SFTTrainer/DPOTrainer.
+
+</Flashcard>
+
+<Flashcard question="Self-improvement loop and what makes it safe?">
+
+Solve verifiable problems with current best model -> filter correct traces -> use as new SFT/preference data -> retrain -> iterate. The verifier IS the ground truth, so blind-spot amplification (the synthetic-data caveat) is constrained on verifiable problems.
+
+</Flashcard>
+
+<Flashcard question="Which Phase-2 tools come back inside RLVR?">
+
+KV cache, continuous batching, Triton/FlashAttention kernels, tensor parallelism, speculative decoding, all inside sample workers (since sampling = decoding at scale). The Phase-2 toolkit IS the RLVR sampling toolkit.
+
+</Flashcard>
+
+<Flashcard question="Most durable lesson of the track?">
+
+The method outlasts the frontier. Reasoning is today; something else will be next. Account for compute, exploit the hardware, scale honestly, evaluate the portfolio, curate data, post-train deliberately: that survives.
+
+</Flashcard>
+
+<Flashcard question="Why is this lesson the capstone?">
+
+RLVR uses every track layer: Phase-1 model, Phase-2 systems (sample + train workers, inference economics), Phase-3 scaling/evaluation/data/post-training all at once. The only training stage that touches all of them simultaneously.
+
+</Flashcard>
+
+</FlashcardSet>

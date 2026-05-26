@@ -1,0 +1,83 @@
+---
+title: "Cheatsheet: Post-training, SFT and RLHF"
+description: One-page reference. Pipeline, SFT mechanics, RLHF's three steps, DPO's simplification, and what changes in the model.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## The pipeline
+
+```
+pretrain (Phases 1-2)
+  -> SFT (instruction-following, format)
+  -> preference tuning (rank plausible outputs)
+       -> RLHF (3 steps, PPO)   OR   DPO (1 loss)
+```
+
+Each step is necessary; none replaces the others.
+
+## SFT (supervised fine-tuning)
+
+- **Data:** chat-formatted `(system, user, assistant)` messages; instruction-response pairs.
+- **Loss:** cross-entropy on assistant tokens (mask the user turn).
+- **Tools:** `SFTTrainer` (TRL) + LoRA / PEFT for affordable runs.
+- **Volume:** small + curated. Quality > quantity.
+- **Result:** model follows instructions, holds dialogue, uses the format you trained.
+- **Limit:** cannot rank two plausible responses.
+
+## Why SFT alone isn't enough
+
+SFT imitates the responses it sees -> teaches format + behavior.
+**Cannot encode "A is better than B"** for two plausible outputs.
+Preference tuning fills that gap.
+
+## RLHF (3 steps)
+
+| Step | What it does |
+| --- | --- |
+| 1. Preference data | Humans pick A vs B for the same prompt -> `(prompt, A, B, preferred)` triples |
+| 2. Reward model | `(prompt, response) -> scalar`; fit so higher = preferred |
+| 3. RL update of policy | Sample responses from SFT model, score with reward model, update with **PPO**, KL penalty to SFT init |
+
+Engineering pains: PPO instability at LLM scale, reward-model hacking, many moving parts.
+
+## DPO (the simpler successor)
+
+- **Skips:** the explicit reward model AND the RL step.
+- **Uses:** the closed-form relationship between optimal policy and preference data implied by the RLHF preference model.
+- **Pipeline:** one supervised-shaped loss on `(prompt, preferred, dispreferred)` pairs, with the SFT model as a KL reference.
+- **Result:** more stable, simpler hyperparameters, comparable or better quality on most preference benchmarks. **Modern default.**
+
+## Mechanical effect of preference tuning
+
+| | Before | After |
+| --- | --- | --- |
+| Output distribution | Spread over plausible responses | Concentrated on the **preferred** direction |
+| Model character | SFT-shaped | Opinionated in the **preference data's** direction |
+
+**In scope:** mechanics (data, training loops, distribution shifts).
+**Out of scope:** whether the resulting opinion is "aligned with human values" or "safe in deployment" (contested debates).
+
+## When to pick DPO vs RLHF
+
+| Situation | Reach for |
+| --- | --- |
+| Limited bandwidth / no RL expertise | **DPO** |
+| Want explicit reward shaping flexibility | **RLHF (PPO)** |
+| Default first try | **DPO** (simpler with the same target) |
+
+## Words to use precisely
+
+- **SFT** (supervised fine-tuning): cross-entropy on instruction-response pairs.
+- **Preference pair**: `(prompt, response_A, response_B, preferred)`.
+- **Reward model**: scores `(prompt, response)` to a scalar; fit on preference data.
+- **PPO** (Proximal Policy Optimization): the RL algorithm used in classic RLHF.
+- **DPO** (Direct Preference Optimization): trains the policy directly on preference pairs.
+- **KL penalty / SFT reference**: constrains the optimized policy to stay near the SFT initialization.
+
+## Source
+
+- Stanford CS336, Lecture 15 (Mid/post-training: SFT/RLHF), by Hashimoto and Liang. `cs336.stanford.edu`. Independent structural mirror in original prose; see references.

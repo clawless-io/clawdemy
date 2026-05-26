@@ -1,0 +1,84 @@
+---
+title: "Lesson: Data, part 1, sources and datasets"
+description: Where the trillions of training tokens actually come from. Major data sources (web crawls, code, books, wikis, social text), the open pretraining datasets (The Pile, RedPajama, FineWeb), the scale-and-shrink between raw crawl and final corpus, and how mixing different domains shapes capability.
+sidebar:
+  order: 2
+  label: Lesson
+artifact: lesson
+---
+
+Scaling laws say `D ~= 20 N`, and at frontier-model sizes that means **trillions** of training tokens. This lesson is about where those tokens actually come from. It is a data-engineering lesson, taught at the structural level: which sources, what shape, what scale, and how a final training corpus is assembled. The next lesson takes the same data through filtering, deduplication, and mixing.
+
+The framing here is technical throughout. Where the data comes from is, in some respects, also a legal and policy question with active debate around it. This lesson does not take a position on those debates; it describes the data-engineering mechanics. Treat that as the technical-not-legal discipline you have seen elsewhere in the fleet.
+
+## The major sources
+
+A modern pretraining corpus is almost never a single source. It is a **mix**, and the mix is intentional. The categories you will see again and again:
+
+- **Web crawls.** The largest single source by raw bytes, almost always derived from **Common Crawl**, a long-running public archive of crawled web pages. The web gives you general-domain text at scale, in many languages, but also enormous variance in quality, which the next lesson is mostly about.
+- **Wikis.** Wikipedia and related wikis. Smaller than the web by far, but high-density, well-edited, and broad-coverage. Almost every pretraining mix includes them.
+- **Books and long-form text.** Some open (Project Gutenberg, Open Library archives), some licensed. Long-form prose teaches the model coherent multi-paragraph structure that web snippets do not.
+- **Code.** Public source-code repositories (broadly: GitHub-class corpora; filtered open snapshots like The Stack). Including code in the mix substantially improves the model's coding ability and, interestingly, often improves reasoning on non-code tasks as well.
+- **Math and academic text.** Papers (e.g. open archives like arXiv), math problem sets, LaTeX corpora. Provides dense formal-reasoning text.
+- **Social and forum text.** Public posts from sites like Reddit, Stack Exchange, and similar. Conversational text, useful for instruction- and dialogue-shaped data.
+
+No single category is enough, and the practical art is in the mix.
+
+## The open pretraining datasets
+
+A handful of openly-released pretraining datasets, each a curated combination of the above, are the reference points for any from-scratch training run today:
+
+- **The Pile** (EleutherAI, 2020). ~800 GB across ~22 sub-datasets including web, code, papers, books. The earliest large open mix to be widely used and the first concrete picture of "what does a real pretraining corpus look like."
+- **RedPajama** (Together, 2023). An open reproduction of the data mix used in the original LLaMA paper; ~1.2 trillion tokens; well-documented and reproducible.
+- **FineWeb** (Hugging Face, 2024). A web-only dataset of ~15 trillion tokens from CC, with explicit, public filtering rules. The current reference open-web corpus.
+- **RefinedWeb** (Together, 2023). An earlier, cleaner open web dataset; influential for filtering recipes.
+
+These are publicly downloadable and trainable; they are what makes "build an LLM from scratch" actually doable without proprietary data.
+
+## Scale, and the funnel from raw to final
+
+The number "trained on N tokens" hides a much larger raw input. The typical funnel:
+
+1. **Raw web crawl** at the Common Crawl scale: petabytes of HTML and other content, much of it boilerplate, duplicate, or otherwise low value.
+2. **HTML-to-text** extraction, language filtering, basic quality filtering: often shrinks by **5-10x**.
+3. **Deeper quality filtering** (heuristics, classifiers): another **5-10x**.
+4. **Deduplication** across documents and across the corpus: another **2-10x**.
+5. **Final training corpus** of "clean" tokens, mixed with non-web sources.
+
+The implication is concrete: producing a 1-trillion-token training corpus from web data starts with **tens of trillions** of raw tokens (or more) at the top of the funnel. That funnel is most of what data-engineering for LLMs actually is, and the next lesson is about its later stages.
+
+## Mixing: not all sources weighted equally
+
+Once you have the sources, you do not pour them together uniformly. The model is trained on **mini-batches sampled from the mix**, and the sampling weights matter. A few well-supported observations:
+
+- **Heavier on code than its raw fraction.** Code is a smaller share of crawl, but giving it a larger sampling weight than its bytes-fraction implies usually improves both code and general reasoning. The exact ratio is tuned empirically.
+- **Up-weight high-density text.** Wikipedia, books, and curated archives are typically sampled at a higher weight than their bytes share because each token carries more information density than an average web token.
+- **Multi-epoch on small high-quality, single-epoch on large web.** A common pattern is to pass over the small, high-quality slices more than once while seeing the large web slice once or fewer times; this gets the structure-rich text more represented in the training trajectory without inflating the corpus.
+
+The right mix is empirical and model-dependent; teams typically run scaling-law-style fits on different mixes at small scale and pick the one that extrapolates best. There is no single canonical recipe.
+
+## Tradeoffs that show up later
+
+The choices in this lesson echo through the rest of the model:
+
+- **Code in the mix** improves coding (obviously) and reasoning (more surprisingly), and shows up at evaluation time in higher GSM8K, HumanEval, and similar scores.
+- **More web, less curated** tends to push the model toward chatty, web-styled prose but introduce more noise to filter through.
+- **More books and academic text** tends to improve long-form coherence and the model's command of formal register.
+- **Domain breadth**, in raw count, matters for languages, niche topics, and out-of-distribution generalization; the limits of a corpus tend to show up as limits of the model on those domains.
+
+These are not absolute rules. They are the kind of empirical regularities that the next lesson's filtering and mixing are designed to manage deliberately.
+
+## Why this matters when you build AI
+
+This lesson sets the structural picture: a frontier LLM is trained on a deliberate **mix** of several large slices, drawn from a few dominant categories of text, with the bulk of the bytes coming from web crawls and a long-tail of curated additions. The funnel from raw crawl to final training tokens is, in volume, most of the data work, and the mixing weights across categories are a real research dial that affects what the model becomes good at. Treating this as a pipeline you understand and tune is what separates a training run that produces a competent model from one that produces an opinionated one with mysterious gaps. The next lesson opens the filtering, deduplication, and mixing decisions in detail.
+
+## What you should remember
+
+- **A pretraining corpus is a mix of several categories of text:** web crawls (the largest by bytes; usually Common Crawl), wikis, books and long-form, code, math and academic text, and social/forum text. No single category is enough.
+- **The reference open mixes** are **The Pile**, **RedPajama**, **FineWeb**, and **RefinedWeb**. These make a from-scratch LLM trainable without proprietary data.
+- **The raw-to-final funnel** shrinks data by 50-1000x: HTML extraction, language and basic quality filtering, deeper quality filtering, deduplication. A trillion final tokens starts from tens of trillions raw.
+- **Sources are mixed with sampling weights**, not poured uniformly. Code is usually up-weighted; high-density text (wikis, books) is up-weighted; small high-quality slices may be seen multiple times while a large web slice is seen once or less.
+- **The mix shapes capability.** Code in the mix lifts both coding and reasoning; more web pushes prose toward web style; more academic text lifts formal register; domain breadth governs out-of-distribution behavior.
+- **This lesson is technical, not a legal/policy take.** Where the data comes from is also a legal and policy question with active debate; that is beyond this track's scope. Here we describe the data-engineering mechanics.
+
+A frontier LLM is trained on a deliberate mix of several large text slices, with web crawls as the bulk and curated sources tuning the rest. The funnel from raw crawl to final tokens is most of the data work, and the mixing weights are a real research dial. The next lesson does the filtering, deduplication, and mixing in detail.

@@ -1368,6 +1368,197 @@ export default defineConfig({
 					],
 				},
 				{
+					label: 'Track 15: Build an LLM from Scratch',
+					items: [
+						{
+							label: 'Phase 1\nThe model',
+							collapsed: true,
+							items: [
+								{
+									label: 'From scratch + tokenizer',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/build-an-llm-from-scratch/from-scratch-and-the-tokenizer/brief' },
+										{ label: 'Lesson', slug: 'lessons/build-an-llm-from-scratch/from-scratch-and-the-tokenizer/lesson' },
+										{ label: 'Practice', slug: 'lessons/build-an-llm-from-scratch/from-scratch-and-the-tokenizer/practice' },
+										{ label: 'Summary', slug: 'lessons/build-an-llm-from-scratch/from-scratch-and-the-tokenizer/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/build-an-llm-from-scratch/from-scratch-and-the-tokenizer/cheatsheet' },
+										{ label: 'References', slug: 'lessons/build-an-llm-from-scratch/from-scratch-and-the-tokenizer/references' },
+									],
+								},
+								{
+									label: 'Counting the cost',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/build-an-llm-from-scratch/counting-the-cost/brief' },
+										{ label: 'Lesson', slug: 'lessons/build-an-llm-from-scratch/counting-the-cost/lesson' },
+										{ label: 'Practice', slug: 'lessons/build-an-llm-from-scratch/counting-the-cost/practice' },
+										{ label: 'Summary', slug: 'lessons/build-an-llm-from-scratch/counting-the-cost/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/build-an-llm-from-scratch/counting-the-cost/cheatsheet' },
+										{ label: 'References', slug: 'lessons/build-an-llm-from-scratch/counting-the-cost/references' },
+									],
+								},
+								{
+									label: 'The architecture',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/build-an-llm-from-scratch/the-architecture/brief' },
+										{ label: 'Lesson', slug: 'lessons/build-an-llm-from-scratch/the-architecture/lesson' },
+										{ label: 'Practice', slug: 'lessons/build-an-llm-from-scratch/the-architecture/practice' },
+										{ label: 'Summary', slug: 'lessons/build-an-llm-from-scratch/the-architecture/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/build-an-llm-from-scratch/the-architecture/cheatsheet' },
+										{ label: 'References', slug: 'lessons/build-an-llm-from-scratch/the-architecture/references' },
+									],
+								},
+								{
+									label: 'Attention + MoE',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/build-an-llm-from-scratch/attention-alternatives-and-moe/brief' },
+										{ label: 'Lesson', slug: 'lessons/build-an-llm-from-scratch/attention-alternatives-and-moe/lesson' },
+										{ label: 'Practice', slug: 'lessons/build-an-llm-from-scratch/attention-alternatives-and-moe/practice' },
+										{ label: 'Summary', slug: 'lessons/build-an-llm-from-scratch/attention-alternatives-and-moe/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/build-an-llm-from-scratch/attention-alternatives-and-moe/cheatsheet' },
+										{ label: 'References', slug: 'lessons/build-an-llm-from-scratch/attention-alternatives-and-moe/references' },
+									],
+								},
+							],
+						},
+						{
+							label: 'Phase 2\nSystems and efficiency',
+							collapsed: true,
+							items: [
+								{
+									label: 'GPUs and TPUs',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/build-an-llm-from-scratch/gpus-and-tpus/brief' },
+										{ label: 'Lesson', slug: 'lessons/build-an-llm-from-scratch/gpus-and-tpus/lesson' },
+										{ label: 'Practice', slug: 'lessons/build-an-llm-from-scratch/gpus-and-tpus/practice' },
+										{ label: 'Summary', slug: 'lessons/build-an-llm-from-scratch/gpus-and-tpus/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/build-an-llm-from-scratch/gpus-and-tpus/cheatsheet' },
+										{ label: 'References', slug: 'lessons/build-an-llm-from-scratch/gpus-and-tpus/references' },
+									],
+								},
+								{
+									label: 'Kernels (Triton, XLA)',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/build-an-llm-from-scratch/kernels-triton-xla/brief' },
+										{ label: 'Lesson', slug: 'lessons/build-an-llm-from-scratch/kernels-triton-xla/lesson' },
+										{ label: 'Practice', slug: 'lessons/build-an-llm-from-scratch/kernels-triton-xla/practice' },
+										{ label: 'Summary', slug: 'lessons/build-an-llm-from-scratch/kernels-triton-xla/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/build-an-llm-from-scratch/kernels-triton-xla/cheatsheet' },
+										{ label: 'References', slug: 'lessons/build-an-llm-from-scratch/kernels-triton-xla/references' },
+									],
+								},
+								{
+									label: 'Parallelism',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/build-an-llm-from-scratch/parallelism/brief' },
+										{ label: 'Lesson', slug: 'lessons/build-an-llm-from-scratch/parallelism/lesson' },
+										{ label: 'Practice', slug: 'lessons/build-an-llm-from-scratch/parallelism/practice' },
+										{ label: 'Summary', slug: 'lessons/build-an-llm-from-scratch/parallelism/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/build-an-llm-from-scratch/parallelism/cheatsheet' },
+										{ label: 'References', slug: 'lessons/build-an-llm-from-scratch/parallelism/references' },
+									],
+								},
+								{
+									label: 'Inference',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/build-an-llm-from-scratch/inference/brief' },
+										{ label: 'Lesson', slug: 'lessons/build-an-llm-from-scratch/inference/lesson' },
+										{ label: 'Practice', slug: 'lessons/build-an-llm-from-scratch/inference/practice' },
+										{ label: 'Summary', slug: 'lessons/build-an-llm-from-scratch/inference/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/build-an-llm-from-scratch/inference/cheatsheet' },
+										{ label: 'References', slug: 'lessons/build-an-llm-from-scratch/inference/references' },
+									],
+								},
+							],
+						},
+						{
+							label: 'Phase 3\nScale, data, alignment',
+							collapsed: true,
+							items: [
+								{
+									label: 'Scaling laws',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/build-an-llm-from-scratch/scaling-laws/brief' },
+										{ label: 'Lesson', slug: 'lessons/build-an-llm-from-scratch/scaling-laws/lesson' },
+										{ label: 'Practice', slug: 'lessons/build-an-llm-from-scratch/scaling-laws/practice' },
+										{ label: 'Summary', slug: 'lessons/build-an-llm-from-scratch/scaling-laws/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/build-an-llm-from-scratch/scaling-laws/cheatsheet' },
+										{ label: 'References', slug: 'lessons/build-an-llm-from-scratch/scaling-laws/references' },
+									],
+								},
+								{
+									label: 'Evaluation',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/build-an-llm-from-scratch/evaluation/brief' },
+										{ label: 'Lesson', slug: 'lessons/build-an-llm-from-scratch/evaluation/lesson' },
+										{ label: 'Practice', slug: 'lessons/build-an-llm-from-scratch/evaluation/practice' },
+										{ label: 'Summary', slug: 'lessons/build-an-llm-from-scratch/evaluation/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/build-an-llm-from-scratch/evaluation/cheatsheet' },
+										{ label: 'References', slug: 'lessons/build-an-llm-from-scratch/evaluation/references' },
+									],
+								},
+								{
+									label: 'Data sources',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/build-an-llm-from-scratch/data-sources/brief' },
+										{ label: 'Lesson', slug: 'lessons/build-an-llm-from-scratch/data-sources/lesson' },
+										{ label: 'Practice', slug: 'lessons/build-an-llm-from-scratch/data-sources/practice' },
+										{ label: 'Summary', slug: 'lessons/build-an-llm-from-scratch/data-sources/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/build-an-llm-from-scratch/data-sources/cheatsheet' },
+										{ label: 'References', slug: 'lessons/build-an-llm-from-scratch/data-sources/references' },
+									],
+								},
+								{
+									label: 'Data filtering',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/build-an-llm-from-scratch/data-filtering/brief' },
+										{ label: 'Lesson', slug: 'lessons/build-an-llm-from-scratch/data-filtering/lesson' },
+										{ label: 'Practice', slug: 'lessons/build-an-llm-from-scratch/data-filtering/practice' },
+										{ label: 'Summary', slug: 'lessons/build-an-llm-from-scratch/data-filtering/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/build-an-llm-from-scratch/data-filtering/cheatsheet' },
+										{ label: 'References', slug: 'lessons/build-an-llm-from-scratch/data-filtering/references' },
+									],
+								},
+								{
+									label: 'Post-training (SFT, RLHF)',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/build-an-llm-from-scratch/post-training-sft-rlhf/brief' },
+										{ label: 'Lesson', slug: 'lessons/build-an-llm-from-scratch/post-training-sft-rlhf/lesson' },
+										{ label: 'Practice', slug: 'lessons/build-an-llm-from-scratch/post-training-sft-rlhf/practice' },
+										{ label: 'Summary', slug: 'lessons/build-an-llm-from-scratch/post-training-sft-rlhf/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/build-an-llm-from-scratch/post-training-sft-rlhf/cheatsheet' },
+										{ label: 'References', slug: 'lessons/build-an-llm-from-scratch/post-training-sft-rlhf/references' },
+									],
+								},
+								{
+									label: 'Reasoning RL',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/build-an-llm-from-scratch/reasoning-rl/brief' },
+										{ label: 'Lesson', slug: 'lessons/build-an-llm-from-scratch/reasoning-rl/lesson' },
+										{ label: 'Practice', slug: 'lessons/build-an-llm-from-scratch/reasoning-rl/practice' },
+										{ label: 'Summary', slug: 'lessons/build-an-llm-from-scratch/reasoning-rl/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/build-an-llm-from-scratch/reasoning-rl/cheatsheet' },
+										{ label: 'References', slug: 'lessons/build-an-llm-from-scratch/reasoning-rl/references' },
+									],
+								},
+							],
+						},
+					],
+				},
+				{
 					label: 'Track 13: Build Neural Networks from Scratch',
 					items: [
 						{

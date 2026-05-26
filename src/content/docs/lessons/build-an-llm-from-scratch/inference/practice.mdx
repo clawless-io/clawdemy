@@ -1,0 +1,181 @@
+---
+title: "Practice: Inference"
+description: Self-check on prefill/decode, the KV cache, batching, paged attention, speculative decoding, and quantization, a serving-stack diagnostic exercise, and flashcards for retrieval.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Seven short questions. Answer each before opening the collapsible.
+
+**1. What are inference's two phases, and how do their costs differ?**
+
+<details>
+<summary>Show answer</summary>
+
+**Prefill:** process the entire prompt in one parallel forward pass, building up keys and values for every token. Compute-bound, like training a single step on a big batch. **Decode (autoregressive):** generate one token at a time, each conditioned on all prior tokens. Memory-bound: per token, the model is loaded from HBM and the KV cache is read; the compute is tiny relative to the bytes moved. Most user-visible time on a long response is in decode.
+
+</details>
+
+**2. What is the KV cache, and what does it grow with?**
+
+<details>
+<summary>Show answer</summary>
+
+The stored keys and values for every previous token in every layer, computed once and reused at every later decode step (so they are not recomputed). It grows with `sequence_length * n_layers * n_kv_heads * head_dim`. At long contexts it can exceed the model's own weight memory, and reading it back at every decode step is the central memory-bandwidth cost.
+
+</details>
+
+**3. Why is batching the biggest single inference win?**
+
+<details>
+<summary>Show answer</summary>
+
+Loading the model's weights from HBM costs the same whether you produce one output token for one user or one for sixteen. Batching N requests' decodes together amortizes the weight load N times, so arithmetic intensity (FLOPs per byte moved) goes up by N, and decode moves from deeply memory-bound toward compute-bound. The big throughput numbers in real serving stacks come from this.
+
+</details>
+
+**4. What is continuous batching, and how is it different from naive batching?**
+
+<details>
+<summary>Show answer</summary>
+
+Continuous (or dynamic, in-flight) batching keeps the running batch full by adding new requests as they arrive and removing finished ones token-by-token, instead of waiting for a fixed-size batch to assemble. The GPU stays full as throughput varies. It is what modern serving stacks (the vLLM family) actually implement.
+
+</details>
+
+**5. What problem does paged attention solve?**
+
+<details>
+<summary>Show answer</summary>
+
+Naive batching has to allocate worst-case-length KV-cache memory for each request, wasting most of it because most requests are shorter. Paged attention treats the cache like virtual memory: each request's cache is split into small fixed-size pages allocated only as needed and released when the request finishes. The result is much higher cache utilization and many more concurrent users on the same hardware.
+
+</details>
+
+**6. How does speculative decoding speed up generation without changing the output distribution?**
+
+<details>
+<summary>Show answer</summary>
+
+A small fast "draft" model proposes the next few tokens; the big target model verifies them in a single parallel forward pass (compute-bound, like prefill). If most drafts are accepted, the big model emits several tokens per pass instead of one. A careful rejection step ensures the output distribution is identical to standard decoding from the target model, so quality is unchanged.
+
+</details>
+
+**7. Why does quantization help inference more than it helps training?**
+
+<details>
+<summary>Show answer</summary>
+
+Because inference's decode phase is memory-bound on HBM bandwidth (each step reads the weights and the KV cache), and quantization (int8, int4) shrinks bytes-per-parameter, which directly cuts the per-step HBM traffic. Training is compute-bound on big batches and benefits less from precision reduction beyond mixed precision (and lower precision can hurt convergence). Inference's cost profile makes quantization a much bigger lever.
+
+</details>
+
+## Try it yourself: read a serving claim
+
+About 10 minutes, no code. Diagnostic reasoning is the payoff.
+
+**Part A: dissect the speedup.** A serving stack claims "10x higher throughput than baseline." List four techniques from this lesson that are likely contributing and what each attacks.
+
+<details>
+<summary>What you'll get</summary>
+
+- **Continuous batching**: amortizes weight loads across many concurrent requests; raises arithmetic intensity; the single biggest contributor on most workloads.
+- **Paged attention**: uses cache memory only as each request needs it, so far more concurrent users fit on the same GPU.
+- **Quantization** (int8 / int4): shrinks per-step HBM traffic, the cost decode is bottlenecked on.
+- **Speculative decoding**: many tokens per big-model pass via a draft model + parallel verification.
+
+(Often **GQA** from lesson 4 is in the mix too, shrinking the KV cache itself.) A 10x number usually means a recipe combining several of these; reading the claim critically means asking *which* of them, in what proportions, and against what baseline.
+
+</details>
+
+**Part B (reasoning).** Why is pipeline parallelism less common at inference than at training, while tensor parallelism is comfortable in both?
+
+<details>
+<summary>What you should notice</summary>
+
+Pipeline parallelism introduces stage-by-stage processing with pipeline bubbles, which hurt **latency**: a user waits for the request to traverse every stage. Tensor parallelism, in contrast, splits each layer's compute across devices within a node and finishes a layer per step on all devices together, so per-request latency is preserved (or better, since the work is parallel). Training cares about throughput first; inference cares about latency, which changes the parallelism trade-off.
+
+</details>
+
+**Part C (reasoning).** A team reports their decode is running at very low GPU utilization. Walk them through where to look first, in order.
+
+<details>
+<summary>What you should notice</summary>
+
+1. **Are they batching?** If batch size is 1, decode is maximally memory-bound. Continuous batching with many concurrent requests is almost always the largest win.
+2. **What is the KV-cache memory situation?** If they are running out of cache memory and serving few concurrent users, paged attention would fix the utilization, often by an order of magnitude.
+3. **Could quantization help?** int8 weights are usually a free 2x on bandwidth-bound decode with small quality cost.
+4. **Could speculative decoding help?** If they have a smaller variant of the model or a small fine-tune to use as a draft, the parallel verification turns wasted decode capacity into multiple tokens per pass.
+
+The order matches expected impact: batching first, then cache management, then precision, then speculation.
+
+</details>
+
+## Flashcards
+
+Nine cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay the set out one card per page for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="Inference's two phases?">
+
+Prefill (process the prompt in parallel, compute-bound) and decode (generate one token at a time, memory-bound). Most user-visible time is in decode.
+
+</Flashcard>
+
+<Flashcard question="What is the KV cache and what does it grow with?">
+
+Stored keys/values for every previous token in every layer, computed once and reused per decode step. Grows with sequence_length x n_layers x n_kv_heads x head_dim; can exceed the weights at long context.
+
+</Flashcard>
+
+<Flashcard question="Why is batching the biggest inference win?">
+
+Loading model weights from HBM costs the same for 1 or 16 outputs. Batching amortizes the load N times; arithmetic intensity rises N-fold; decode moves from memory-bound toward compute-bound.
+
+</Flashcard>
+
+<Flashcard question="What is continuous (dynamic, in-flight) batching?">
+
+The serving stack keeps the running batch full by adding new requests as they arrive and removing finished ones token-by-token. GPU stays fed across varying load.
+
+</Flashcard>
+
+<Flashcard question="What does paged attention solve?">
+
+Naive batching allocates worst-case-length cache per request, wasting most of it. Paged attention pages the KV cache like virtual memory, allocating only what's needed, releasing on finish. Many more concurrent users.
+
+</Flashcard>
+
+<Flashcard question="How does speculative decoding work?">
+
+A small draft model proposes the next few tokens; the big target verifies them in one parallel pass. If accepted, multiple tokens per big-model pass. A rejection step keeps the output distribution identical to standard decoding.
+
+</Flashcard>
+
+<Flashcard question="Why is quantization a bigger lever at inference than training?">
+
+Decode is memory-bound on HBM bandwidth; quantization shrinks bytes-per-parameter, directly cutting per-step traffic. Training is compute-bound on big batches; lower precision helps less and can hurt convergence.
+
+</Flashcard>
+
+<Flashcard question="Why is PP less common at inference, TP comfortable?">
+
+PP adds stage-by-stage latency (pipeline bubbles hurt user wait). TP finishes a layer per step on all devices together, preserving per-request latency. Training optimizes throughput; inference optimizes latency.
+
+</Flashcard>
+
+<Flashcard question="Order to optimize a slow decode?">
+
+1) batching (biggest), 2) paged attention if cache memory limits users, 3) quantization (free-ish 2x on bandwidth), 4) speculative decoding with a draft model. Each attacks decode's bandwidth bottleneck differently.
+
+</Flashcard>
+
+</FlashcardSet>

@@ -1,0 +1,74 @@
+---
+title: "Lesson: Evaluation, measuring a language model"
+description: Scaling laws predict cross-entropy loss, but what you care about is whether the model can do useful things. This lesson is what it takes to measure that honestly, the standard benchmark formats, the four ways evaluation is hard (construct validity, contamination, format sensitivity, open-ended scoring), and the pragmatic stack modern teams actually use.
+sidebar:
+  order: 2
+  label: Lesson
+artifact: lesson
+---
+
+Scaling laws (lesson 9) predict **loss**. But loss is not what you actually want; you want capability, "can this model do the things I need." This lesson is what it takes to measure that, why measuring it is genuinely hard, and what a working modern evaluation stack looks like. It is the feedback loop the rest of this track has been optimizing toward, and the discipline that distinguishes "we made it bigger" from "we made it better."
+
+## The basic shape of a benchmark
+
+A language-model benchmark is, in its simplest form, a dataset of prompts paired with gold answers, plus a metric. You feed each prompt to the model, score the answer, and report the aggregate. The variations are familiar by now:
+
+- **Multiple-choice benchmarks** ask the model to pick `A`, `B`, `C`, or `D`. Scoring is unambiguous (accuracy). Examples: **MMLU** (multi-subject knowledge), **HellaSwag** (commonsense completion), **ARC** (reasoning over science questions), **TruthfulQA** (resistance to falsehoods). Cheap and reproducible.
+- **Executable benchmarks** check that produced output works when run. Examples: **HumanEval** (Python from a docstring; run the code and check it passes the tests), **GSM8K** and **MATH** (math problems with a final numeric answer to check). The result is much harder to fake.
+- **Instruction-following benchmarks** check adherence to format and constraints. Example: **IFEval** (prompts with explicit, checkable instructions like "give your answer as a JSON object with these keys").
+- **Open-ended benchmarks** ask a question with no single right answer (write an essay, plan a trip, summarize this document). These are the hardest to score and require either human judges or another model as judge.
+
+A modern LLM is evaluated on a **suite** of these, not one, because each captures only a slice of capability.
+
+## Why evaluation is hard, four reasons
+
+Beneath the calm tables of numbers in a model release are four problems that any working evaluator has to fight.
+
+### Construct validity: does the benchmark measure what you think?
+
+A benchmark measures performance on its specific dataset and format. Whether that performance reflects the **capability** you care about ("the model can reason," "the model is helpful," "the model is safe") is a separate question, and often the answer is "only partially." High MMLU does not mean a model is generally intelligent; it means the model is good at multiple-choice questions on academic subjects. The mismatch between **what the benchmark scores** and **what stakeholders care about** is called the construct-validity problem, and it is the deepest issue in LLM evaluation.
+
+### Contamination: did the model see the test set?
+
+Modern LLMs are trained on enormous web crawls. Many public benchmarks have leaked into those crawls, either as the original benchmark text or as discussions of the answers, and a model that memorized them scores well on them without actually being good at the underlying task. Contamination is hard to detect, often impossible to rule out, and means that a high score on an old public benchmark is weaker evidence than it looks. The strongest counters are private held-out benchmarks, executable tasks where the answer cannot be memorized as one token (run-the-code, solve-the-puzzle), and freshly generated benchmarks.
+
+### Format sensitivity: small choices, large score swings
+
+The same model evaluated on the same benchmark can score very differently depending on how the prompts are formatted (zero-shot vs few-shot, the exact phrasing of the question, whether chain-of-thought is enabled), how the answer is parsed, and which decoding settings are used. Reported numbers depend on the **evaluation harness** as much as the model. Two papers reporting "MMLU 65 vs 67" may be measuring under different conditions and not directly comparable; this is why community-maintained, version-pinned harnesses (the `lm-evaluation-harness`-class projects) exist and matter.
+
+### Open-ended scoring: no single right answer
+
+The most useful evaluations are open-ended (write a response, do a task), and these have no automatic ground truth. The two practical paths are:
+
+- **Pairwise human preference at scale**, the **Chatbot Arena**-style approach: show two anonymous model outputs side by side, ask people which is better, and Elo-rate the models from the resulting comparisons. Expensive but high-signal.
+- **LLM as judge**, where another (usually larger) model scores the responses. Cheap but biased: judge models tend to prefer outputs that look like their own, and they have systematic blind spots. Useful for relative comparison within a single project, less so for cross-team rankings.
+
+Neither is perfect. The honest move is to know which you are doing and to be cautious about the failure modes.
+
+## The pragmatic stack
+
+Real evaluation, at the level CS336-style teams actually run, looks like a layered stack:
+
+1. **Held-out perplexity** on a domain-matched held-out set during and after training. Smoke test; tells you the run is converging and not catastrophically broken.
+2. **A suite of multiple-choice benchmarks** (MMLU, ARC, HellaSwag, TruthfulQA, others) covering knowledge, reasoning, and reading comprehension. Cheap, reproducible, contamination-aware (use private versions where available).
+3. **Executable benchmarks** for code (HumanEval, MBPP, harder code suites) and math (GSM8K, MATH, harder ones). Harder to contaminate; the metric is "does it run / is the answer correct."
+4. **Instruction-following and format-control** (IFEval and similar). Important for assistants where format matters.
+5. **Open-ended evaluation** for capability beyond what multiple-choice can measure: pairwise preference (Arena-style or in-house human raters) for ranking; LLM-as-judge for cheaper relative checks.
+6. **Domain-specific evaluations** when you have them: customer-data tasks, internal benchmarks, A/B tests in production.
+
+Every layer has known weaknesses; the layered stack gets you signal because each one fails differently. No single score is the model's capability; the **portfolio** is.
+
+## Why this matters when you build AI
+
+Evaluation is the feedback loop that all the rest of the systems work has been optimizing. If you cannot measure progress, you cannot make it; if you measure the wrong thing, you optimize the wrong thing. The reason modern LLM teams spend significant engineering effort on evaluation infrastructure is that the difference between an honest evaluation stack and a credulous one shows up directly in product quality. The discipline this lesson asks for, treating a single benchmark number with suspicion, watching for contamination, pinning the harness, layering metrics, is what separates a serious training program from a release press kit. It is also what lets you tell the difference, in a paper or release, between a genuine capability advance and a contamination win or a benchmark that has saturated. The next two lessons turn to the data those models are trained on, where construct-validity-style questions return in a different shape.
+
+## What you should remember
+
+- **Loss is not capability.** Scaling laws predict cross-entropy; what you care about is downstream usefulness. The two are correlated but not identical, and some capabilities appear in jumps rather than smoothly.
+- **Benchmark formats:** multiple-choice (MMLU, ARC, HellaSwag, TruthfulQA), executable (HumanEval, GSM8K, MATH), instruction-following (IFEval), and open-ended (Arena, LLM-as-judge).
+- **Four reasons evaluation is hard:** construct validity (does the benchmark measure the capability?), contamination (did the model see the test set?), format sensitivity (harness/prompt choices swing scores), and open-ended scoring (no automatic ground truth).
+- **Contamination defenses:** private or freshly generated benchmarks, executable tasks (run the code, check the answer), and skepticism toward high scores on old public benchmarks.
+- **Open-ended evaluation has two practical paths:** pairwise human preference at scale (Chatbot Arena-style; high signal, expensive) and LLM-as-judge (cheap, biased toward judge style). Use them with the failure modes in mind.
+- **The pragmatic stack is layered:** held-out perplexity, multiple-choice suite, executable benchmarks, instruction-following, open-ended preference, plus domain-specific. No single number is the model; the portfolio is.
+
+If you cannot measure progress, you cannot make it. Evaluation is the unglamorous feedback loop the rest of this track has been optimizing, and the difference between honest evaluation and a credulous one shows up directly in product quality, not just in reports.

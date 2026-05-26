@@ -1,0 +1,183 @@
+---
+title: "Practice: Parallelism"
+description: Self-check on data, tensor, and pipeline parallelism plus FSDP/ZeRO, a pick-the-scheme exercise for a real config, and flashcards for retrieval.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Seven short questions. Answer each before opening the collapsible.
+
+**1. What does data parallelism do, and what is its hard limit?**
+
+<details>
+<summary>Show answer</summary>
+
+Put a full copy of the model on each device; split the batch across devices; do a forward/backward pass on each replica; all-reduce gradients so every replica updates the parameters the same way. Hard limit: every device must fit the full model in memory. If the model exceeds one device's memory, plain data parallelism cannot train it.
+
+</details>
+
+**2. What does tensor parallelism do, and what does it require of the interconnect?**
+
+<details>
+<summary>Show answer</summary>
+
+Split individual layers' tensors across devices (FFN width, attention heads), with each device computing its share and the partial results combined via all-reduce/all-gather inside every layer. Because it communicates inside every layer, it needs a very fast interconnect (NVLink/NVSwitch), so it is usually kept within a single node.
+
+</details>
+
+**3. What does pipeline parallelism do, and what are pipeline bubbles?**
+
+<details>
+<summary>Show answer</summary>
+
+Split the model's layers across devices (stages); a batch flows stage to stage. Communication only at stage boundaries, so it tolerates slower interconnects (typical across nodes). Pipeline bubbles are the idle time at the start and end of the batch while the pipeline fills and drains. The standard fix is microbatching, breaking each batch into many smaller pieces that overlap in the pipeline.
+
+</details>
+
+**4. What does FSDP / ZeRO shard, and why is it the modern default?**
+
+<details>
+<summary>Show answer</summary>
+
+It shards parameters, gradients, and optimizer states across the data-parallel ranks. When a layer needs to run, devices gather its parameters from shards just for that layer, compute, and discard the gathered parameters; gradients and optimizer states stay sharded. Memory savings of model splitting with the simplicity of data parallel. The cost is extra communication (parameter gather and release), largely overlapped with computation.
+
+</details>
+
+**5. By rough rule, when do you reach for tensor parallelism vs pipeline parallelism?**
+
+<details>
+<summary>Show answer</summary>
+
+Tensor parallelism within a node (where the interconnect is fast enough for per-layer communication). Pipeline parallelism across nodes (where the interconnect is slower; PP communicates only at stage boundaries). Combine them, plus data parallelism on top, when the model is too big for a single node.
+
+</details>
+
+**6. Why is "3D parallelism" the configuration for the largest training runs?**
+
+<details>
+<summary>Show answer</summary>
+
+Because each axis solves a different bottleneck: tensor parallelism splits individual layers (memory within a node), pipeline parallelism splits layers (across nodes, low communication), and data parallelism multiplies the effective batch (across replicas). At the largest scale, all three are needed; no single axis is enough.
+
+</details>
+
+**7. How does this lesson make the lesson-2 accounting actionable?**
+
+<details>
+<summary>Show answer</summary>
+
+Lesson 2 told you the model needed about `16N` bytes for parameters/gradients/optimizer states and would not fit on one device. This lesson tells you which scheme to add and why: if it does not fit on one GPU, add FSDP/ZeRO or tensor parallelism; if it does not fit on one node, add pipeline parallelism; in all cases data parallelism multiplies the work. The 112-gigabyte 7B example becomes a parallelism configuration, not a dead end.
+
+</details>
+
+## Try it yourself: pick the parallelism
+
+About 10 minutes, no setup. Match the scheme to the situation.
+
+**Part A: pick the strategy.** For each scenario, name the parallelism scheme (or combination) you would reach for first and why.
+
+```
+a. A 1B-parameter model. Cluster: 8 GPUs in one node, NVLink between them.
+b. A 30B-parameter model. Cluster: 8 GPUs in one node, NVLink between them.
+c. A 200B-parameter model. Cluster: 64 GPUs across 8 nodes, fast intra-node and slower inter-node interconnect.
+d. A 13B-parameter model where the team doesn't want the complexity of TP/PP. Cluster: 16 GPUs across 2 nodes.
+```
+
+<details>
+<summary>What you'll get</summary>
+
+- **a.** Data parallelism alone. A 1B model fits on one GPU (the 16N rule gives ~16 GB), so DP across 8 GPUs is the simplest and best.
+- **b.** Tensor parallelism within the node (the model is too big for one GPU, but the node's NVLink is fast enough for per-layer communication). Combine with data parallelism if a larger effective batch is wanted; FSDP is a reasonable alternative.
+- **c.** 3D parallelism: tensor parallelism within nodes (fast interconnect), pipeline parallelism across nodes (slower interconnect, stage-boundary communication only), data parallelism on top. The model is too big for one node, so all three axes are needed.
+- **d.** FSDP / ZeRO. The model is too big for one GPU's full-model memory but the team wants DP-like simplicity; FSDP shards the params/grads/optimizer states across all 16 ranks and avoids the layer-level surgery of TP/PP.
+
+The pattern: match the scheme to where the bottleneck is (memory, interconnect, complexity).
+
+</details>
+
+**Part B (reasoning).** Why is tensor parallelism rarely used across nodes, while pipeline parallelism is comfortable there?
+
+<details>
+<summary>What you should notice</summary>
+
+Tensor parallelism communicates inside every layer (an all-reduce or all-gather of partial matmul results). On a slower inter-node interconnect, that per-layer communication becomes the bottleneck and the GPUs sit idle waiting for it. Pipeline parallelism, in contrast, communicates only at stage boundaries (activations between stages), so its communication frequency is much lower, and it tolerates the slower inter-node fabric. The communication pattern matches the fabric speed.
+
+</details>
+
+**Part C (reasoning).** Why does combining DP, TP, and PP increase complexity, and what is the practical payoff that justifies it?
+
+<details>
+<summary>What you should notice</summary>
+
+Complexity: you have to choose three rank counts that multiply to your device count, coordinate the communication patterns of each (gradient all-reduces, layer all-gathers, stage pipelining), and tune microbatching for the pipeline. The payoff: at frontier scale, no single axis is enough. Tensor parallelism alone has a node-size ceiling; pipeline alone has bubble overhead and tight microbatch scheduling; data alone needs the model to fit per device. Combining them is how the largest open models actually get trained, with each axis attacking a different bottleneck.
+
+</details>
+
+## Flashcards
+
+Nine cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay the set out one card per page for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="Data parallelism: what and what limits it?">
+
+Full model on each device, batch split across devices, all-reduce gradients. Simple and scales effective batch size. Hard limit: every device must fit the full model in memory.
+
+</Flashcard>
+
+<Flashcard question="Tensor parallelism: what and what does it need?">
+
+Split each layer's tensors (FFN width, attention heads) across devices, partial results combined per layer. Needs very fast interconnect (NVLink/NVSwitch); usually kept within a single node.
+
+</Flashcard>
+
+<Flashcard question="Pipeline parallelism: what and what is the cost?">
+
+Split layers across devices (stages); microbatches flow through. Communicates only at stage boundaries (tolerates slower interconnect). Cost: pipeline bubbles (idle time at start/end), mitigated by microbatching.
+
+</Flashcard>
+
+<Flashcard question="FSDP / ZeRO: what does it shard?">
+
+Parameters, gradients, and optimizer states across the data-parallel ranks. Devices gather a layer's params just to compute it, then discard. Memory savings of model-splitting with DP simplicity; cost is extra (often overlapped) communication.
+
+</Flashcard>
+
+<Flashcard question="TP vs PP placement rule?">
+
+TP within a node (per-layer communication needs fast interconnect). PP across nodes (stage-boundary communication tolerates slower fabric). Combine, with DP on top, for the largest models.
+
+</Flashcard>
+
+<Flashcard question="What is 3D parallelism?">
+
+The combination of data + tensor + pipeline parallelism. Used at the largest scales because each axis attacks a different bottleneck: TP for per-layer memory within a node, PP for crossing nodes, DP for batch scale.
+
+</Flashcard>
+
+<Flashcard question="When do you reach for FSDP over TP/PP?">
+
+When you want memory savings without the per-layer surgery of TP or the pipeline-scheduling complexity of PP. FSDP keeps the DP programming model and gathers parameters per layer on demand.
+
+</Flashcard>
+
+<Flashcard question="How does parallelism make lesson 2's accounting actionable?">
+
+Lesson 2 says 16N often exceeds one device. This lesson maps "doesn't fit" to a scheme: doesn't fit on a GPU -> FSDP/TP; doesn't fit on a node -> add PP; in all cases DP scales batch.
+
+</Flashcard>
+
+<Flashcard question="What are pipeline bubbles, and what fixes them?">
+
+Idle time at the start/end of a batch while the pipeline fills and drains. Fix: microbatching, splitting each batch into many small pieces that overlap in the pipeline like an assembly line.
+
+</Flashcard>
+
+</FlashcardSet>

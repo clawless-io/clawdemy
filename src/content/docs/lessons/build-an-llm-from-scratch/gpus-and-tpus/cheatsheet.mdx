@@ -1,0 +1,69 @@
+---
+title: "Cheatsheet: How models run on hardware"
+description: One-page reference. GPU execution model, tensor cores, memory hierarchy, TPUs, and a diagnostic checklist.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## GPU execution model (SIMT)
+
+- **SMs** (streaming multiprocessors): tens to hundreds per chip, each with many arithmetic units.
+- **Warps**: groups of ~32 threads running the same instruction on different data (lockstep).
+- **Tensor cores**: per-SM units doing a small matmul per cycle in fp16/bf16; the bulk of the published peak FLOPs.
+
+Reach peak FLOPs only with **large, tile-aligned matmuls in mixed precision**.
+
+## Memory hierarchy (the bottleneck)
+
+| Tier | Size | Speed | Holds |
+| --- | --- | --- | --- |
+| **HBM** (main) | tens of GB | ~TB/s (slow vs compute) | weights, gradients, optimizer states, activations |
+| **SRAM** / shared | tens-100s KB / SM | ~10x HBM | tiles staged for tensor cores |
+| **Registers** | tiny / thread | fastest | per-thread scalars |
+
+**Arithmetic intensity = FLOPs per byte moved.**
+- Low (read once, multiply once) -> **memory-bound**, tensor cores idle on HBM.
+- High (tile reused in SRAM across many multiplies) -> **compute-bound**, near peak.
+
+## TPU: a systolic-array bet
+
+```
+2D grid of multiply-accumulate units (e.g. 128x128 or 256x256).
+Inputs and partial sums march across the grid each cycle;
+each loaded value is reused across many multiplies as it moves.
+```
+
+A hardware bet that matmul is the dominant op. Used in **pods** with fast interconnect. Same principle as GPU SRAM staging: reuse data in fast memory.
+
+## How hardware shapes architecture (lesson 3 in this light)
+
+- **Big matmuls** in attention (Q,K,V,O) and FFN: where peak FLOPs lives.
+- **Mixed precision (bf16/fp16)**: how peak FLOPs is reached.
+- **Tile-friendly hidden sizes** (multiples of 64/128): align to tensor-core tiles.
+- The choice of architecture is co-designed with the chip.
+
+## Diagnostic: "running at X% of peak"
+
+When a job runs far below the GPU spec:
+
+1. **Precision wrong** (fp32 instead of bf16/fp16) -> tensor cores not engaged.
+2. **Matmul shapes** small or misaligned -> miss tensor-core tiles.
+3. **Memory-bound surroundings** (many small ops between matmuls) -> stall on HBM.
+4. **Batch too small** to amortize data movement.
+
+Compute is rarely the bottleneck; **feeding it** is.
+
+## Words to use precisely
+
+- **SIMT / SM / warp**: GPU's lockstep execution model.
+- **Tensor core**: per-SM matmul unit (fp16/bf16); source of most published peak FLOPs.
+- **HBM / SRAM / registers**: GPU memory tiers; speed and size trade off.
+- **Systolic array**: TPU's 2D MAC grid; data flows through, reusing values.
+- **Mixed precision**: math in bf16/fp16, sensitive accumulations in fp32; near-free speedup.
+
+## Source
+
+- Stanford CS336, Lecture 5 (GPUs, TPUs), by Hashimoto and Liang. `cs336.stanford.edu`. Independent structural mirror in original prose; see references.

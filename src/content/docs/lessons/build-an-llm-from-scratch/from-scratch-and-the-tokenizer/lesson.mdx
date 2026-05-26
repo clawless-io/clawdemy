@@ -1,0 +1,84 @@
+---
+title: "Lesson: What \"from scratch\" means, and the tokenizer"
+description: The opening of the build-it-yourself track. What building an LLM from scratch actually entails end to end, why efficiency is the through-line, and the model's first component, the tokenizer, including why byte-level BPE is the standard choice.
+sidebar:
+  order: 2
+  label: Lesson
+artifact: lesson
+---
+
+Most of Clawdemy teaches you to use AI. This track teaches you to build it, the real thing, the way the people who train frontier models do it. That is a big claim, so this first lesson does two things: it lays out what "from scratch" actually entails, so you know the shape of the road ahead, and then it starts where a language model starts, with the component that turns human text into something a model can compute on, the tokenizer.
+
+This is the deepest tier on the site. The lessons assume you can read and write Python and PyTorch and that you are comfortable with the idea of training a neural network. The payoff is that, by the end, a frontier model is no longer a mystery box; it is a stack of decisions you have made yourself.
+
+## What "from scratch" actually means
+
+"From scratch" does not mean reinventing matrix multiplication. It means building every layer of the language-model stack yourself, instead of calling someone else's finished model. Concretely, the course this track mirrors has you implement the core pieces by hand:
+
+- a **tokenizer** that converts text to integers (this lesson),
+- the **Transformer architecture** itself, with its hyperparameters,
+- the **loss function** (cross-entropy) and the **optimizer** (AdamW),
+- and the **training loop** that ties them together into a model that learns.
+
+That is just the model. The harder, less-discussed half of building an LLM is making it **efficient enough to actually train**: writing fast GPU kernels, splitting the work across many devices (parallelism), and accounting carefully for every unit of compute and memory. Then comes the work that makes the model *good*: scaling laws to decide how big to go, data pipelines to feed it, evaluation to measure it, and post-training to turn a raw predictor into a usable assistant. This track walks all of it.
+
+The through-line, and the thing that makes this course different from a theory class, is **efficiency**. At every step you will ask: how many floating-point operations does this cost, how much memory does it need, and is the hardware actually busy? Building an LLM from scratch is, more than anything, a long sequence of precise decisions about compute and data. Hold that frame; it is the spine of the whole track.
+
+## The first component: the tokenizer
+
+A neural network operates on numbers, not characters. Before a model can do anything with the sentence you typed, that sentence has to become a sequence of integers. The **tokenizer** is the component that does this conversion, and it is the model's true first layer: everything downstream, every cost you will count, every context-length limit, is measured in the units the tokenizer produces.
+
+If you came from the practical track, you used a tokenizer as a finished object. Here you build it, which means confronting the design question it answers: what should the units, the tokens, actually be?
+
+## Why not characters, why not words
+
+There are two obvious choices, and both are bad:
+
+- **Characters** (or bytes) as tokens give a tiny vocabulary, but the sequences become enormous. A short paragraph is hundreds of characters, and since a Transformer's cost grows with sequence length, character-level models are expensive to run and struggle to model long-range structure.
+- **Words** as tokens give short sequences, but the vocabulary explodes (there are millions of word forms across a language), and you are helpless against any word you did not see in training, the **out-of-vocabulary** problem. A typo or a new name becomes an unknown token, and meaning is lost.
+
+The answer is to sit in between, with **subword** tokens: a vocabulary of frequent word-pieces, learned from data, so common words stay whole and rare words split into familiar parts. That keeps sequences reasonably short, the vocabulary bounded, and nothing truly unknown.
+
+## Byte-level BPE, the standard choice
+
+The dominant subword method is **byte-pair encoding (BPE)**, and modern implementations run it at the **byte level**. The byte-level start is a clean trick: represent the text as raw bytes first, which gives a base vocabulary of just 256 tokens and, crucially, means *any* possible string is representable. There is no out-of-vocabulary case at all, because the worst case is falling back to individual bytes.
+
+From that byte base, BPE builds up a larger vocabulary by **learning merges**. The training procedure is simple and worth holding in your head:
+
+1. Start with the text as a sequence of bytes (256 base tokens).
+2. Count every adjacent pair of tokens across the corpus.
+3. Merge the most frequent pair into a single new token, and record the merge rule.
+4. Repeat until you reach your target vocabulary size.
+
+The output is two things: a **vocabulary** (the tokens) and an ordered list of **merge rules**. Note what kind of process this is: it is deterministic statistics over a corpus, not gradient descent. Train BPE twice on the same data and you get the same tokenizer, every time, with no GPU involved. (If you took the practical track's tokenizer lesson, this is the same idea you saw there, now built rather than borrowed.)
+
+Using the trained tokenizer is then two operations:
+
+- **encode:** take text, split to bytes, and apply the learned merges in order to produce a sequence of token IDs.
+- **decode:** take token IDs, look them up, and concatenate the bytes back into text.
+
+Because everything bottoms out in bytes, encode-then-decode reproduces the original text exactly, which is a property you want.
+
+## The design choices you now own
+
+Building the tokenizer yourself means owning its knobs, and they are real trade-offs you will quantify in the next lesson's cost accounting:
+
+- **Vocabulary size.** A larger vocabulary means shorter token sequences (cheaper to process, more text per context window) but a larger embedding table (more parameters) and more rarely-seen tokens. Smaller is the opposite. Typical LLM vocabularies land in the tens of thousands.
+- **Special tokens.** You add tokens the text itself does not contain, an end-of-document marker, for example, so the model can learn document boundaries. These are reserved entries in the vocabulary.
+
+There is no single right answer; there is a trade-off you make deliberately, which is the recurring texture of this whole track.
+
+## Why this matters when you build AI
+
+The tokenizer is the foundation everything else sits on, and getting it wrong is expensive in ways that are hard to see later. The token is the unit your compute budget, your context length, and your data costs are all denominated in, so the tokenizer quietly sets the economics of the entire model. Building it yourself is also the first real demystification of the track: an LLM is not magic that consumes "language," it consumes a sequence of integers produced by a deterministic procedure you can now write in an afternoon. That shift, from "the model understands text" to "the model processes tokens that I defined," is the mental move the whole from-scratch project is built on. Everything that follows, the architecture, the training, the scaling, operates on these tokens, so this is where the building genuinely begins.
+
+## What you should remember
+
+- **"From scratch" means building the whole stack yourself:** tokenizer, architecture, loss, optimizer, and training loop, plus the systems (kernels, parallelism), scaling, data, evaluation, and post-training that make a model efficient and good.
+- **Efficiency is the through-line.** At every step you account for compute (FLOPs), memory, and whether the hardware is busy. Building an LLM is mostly precise decisions about compute and data.
+- **The tokenizer is the model's first component:** it converts text into the integer tokens everything downstream operates on, and it sets the units that cost and context length are measured in.
+- **Characters make sequences too long; words make the vocabulary explode and fail on unseen words.** Subword tokenization is the middle ground.
+- **Byte-level BPE is the standard:** start from bytes (256 tokens, so any string is representable, no out-of-vocabulary problem), then learn merges of the most frequent adjacent pairs up to a target vocabulary size. It is deterministic statistics, not training.
+- **You own the trade-offs:** vocabulary size (shorter sequences vs. a bigger embedding table) and special tokens. There is no single right answer, only a deliberate choice.
+
+A language model does not read text; it processes a sequence of integers that a tokenizer you can build produces. That is the first thing "from scratch" demystifies, and everything else in this track is built on top of those tokens.

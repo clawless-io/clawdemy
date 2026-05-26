@@ -1,0 +1,62 @@
+---
+title: "Lesson: Attention alternatives and mixture of experts"
+description: The two variations that make modern LLMs efficient. Why standard attention is costly, how multi-query and grouped-query attention shrink the KV cache, how sliding-window attention bounds long-context cost, and how mixture-of-experts decouples total parameters from compute per token.
+sidebar:
+  order: 2
+  label: Lesson
+artifact: lesson
+---
+
+Lesson 3 gave you the skeleton: a stack of blocks, each with an attention sublayer and a feed-forward (FFN) sublayer. This lesson, which closes Phase 1, covers the two places modern LLMs vary that skeleton to make it efficient, one for each sublayer. The attention sublayer gets cheaper variants that shrink its memory cost; the FFN sublayer gets the mixture-of-experts trick that lets a model be huge in parameters while staying cheap to run. Both are nearly universal in today's frontier and open models, and both follow directly from the cost accounting of lesson 2.
+
+## Why standard attention needs alternatives
+
+Standard multi-head attention has two cost problems that get worse as you scale:
+
+- **It is quadratic in sequence length.** Every token attends to every other, so compute and memory for the attention scores grow with the square of the sequence length. Long contexts get expensive fast.
+- **The KV cache dominates inference memory.** When generating text, the model caches the key and value vectors of every previous token so it does not recompute them (you will see this in the inference lesson). That **KV cache** grows with sequence length times the number of heads, and at long contexts it can exceed the model's own weights in memory, and reading it back is a memory-bandwidth bottleneck (a memory-bound operation, in lesson 2's terms).
+
+The alternatives below attack these two problems.
+
+## Cheaper attention: MQA, GQA, and windows
+
+The most important and widely-adopted alternatives change how keys and values are shared:
+
+- **Multi-Query Attention (MQA):** instead of each attention head having its own keys and values, *all* heads share a single set of keys and values (each head keeps its own queries). This shrinks the KV cache by a factor of the head count, a large saving, at some cost to quality.
+- **Grouped-Query Attention (GQA):** the middle ground that has become the modern default. Heads are divided into a few groups, and each group shares one set of keys and values. With, say, 8 groups instead of 32 heads, the KV cache shrinks fourfold while quality stays essentially intact. GQA is why you can serve long contexts affordably.
+
+A second lever targets the quadratic cost directly:
+
+- **Sliding-window (local) attention:** each token attends only to a fixed window of recent tokens rather than the whole sequence, making cost grow linearly with length instead of quadratically. Models often interleave windowed and full attention layers to keep some global reach while bounding cost.
+
+There is also active research on **sub-quadratic** attention and state-space alternatives that replace attention's quadratic core entirely, but for building a practical LLM today, GQA (for the KV cache) and windowing (for long context) are the levers that matter.
+
+## Mixture of experts: huge models, cheap to run
+
+The FFN variation is more dramatic. In a standard model, every token passes through the same single FFN, so total parameters and compute-per-token rise together: a bigger model is a more expensive model.
+
+**Mixture of experts (MoE)** breaks that coupling. It replaces the single FFN with **many expert FFNs** plus a small **router** that, for each token, picks just a few experts (top-k, often 2) to run. The other experts sit idle for that token. The consequence is the key idea:
+
+- **Total parameters** can be enormous (all the experts), which gives the model capacity.
+- **Active parameters** (the few experts actually run per token) stay small, which is what drives the per-token FLOPs via lesson 2's accounting.
+
+So an MoE model can have, say, 8x the total parameters of a dense model while costing roughly the same per token to run. This is why model cards increasingly quote two numbers, "total" and "active" parameters: the gap is the MoE trick. The costs are real, though: every expert must be stored in memory whether or not it runs (so MoE trades compute for memory), and the router must spread tokens across experts evenly (load balancing) or some experts starve while others bottleneck. A dense model is simpler; an MoE model is the choice when you want capacity without paying for it on every token.
+
+## How both tie back to the accounting
+
+Both variations are best understood through lesson 2. GQA and MQA attack **memory and memory-bandwidth** (the KV cache is a memory-bound cost at inference), trading a little quality for a much smaller cache. MoE attacks the **parameters-versus-compute** relationship: it deliberately separates total parameters (which set memory) from active parameters (which set the `6ND`-style compute). Neither changes the skeleton from lesson 3; they change which resource you spend, which is exactly the budget-allocation framing the architecture lesson set up.
+
+## Why this matters when you build AI
+
+These two variations explain most of what makes modern models practical, and they are the difference between a textbook Transformer and the ones actually shipping. When a model advertises a long context window at an affordable price, GQA (and often windowing) is why. When a model advertises a huge parameter count but runs surprisingly cheaply, MoE is why, and the "active parameters" number tells you the real per-token cost. Understanding them also sharpens the budget instinct from lesson 3: you are no longer just choosing depth versus width, you are choosing where to spend each resource, compute, memory, and memory bandwidth, independently. That is the level at which frontier models are actually designed, and with this lesson you can read those design choices off a model card. Phase 1 is now complete: you have the tokenizer, the cost accounting, the architecture, and the efficiency-minded variations. Phase 2 turns to making all of it run fast on real hardware.
+
+## What you should remember
+
+- **Standard attention has two scaling problems:** it is quadratic in sequence length, and its KV cache dominates inference memory and bandwidth at long contexts.
+- **MQA and GQA shrink the KV cache** by sharing keys and values across heads. MQA shares one set across all heads; GQA (the modern default) shares per group, cutting the cache severalfold with almost no quality loss.
+- **Sliding-window attention** bounds long-context cost by having each token attend only to a recent window, making cost linear rather than quadratic in length.
+- **Mixture of experts (MoE)** replaces the single FFN with many experts plus a router that runs only a few per token, decoupling **total parameters** (capacity, and memory) from **active parameters** (per-token compute).
+- **MoE trades compute for memory:** all experts must be stored even though few run per token, and the router needs load balancing so experts are used evenly. "Total vs active parameters" on a model card is the MoE gap.
+- **Both variations are resource-allocation moves** in lesson 2's terms: GQA/MQA target memory and bandwidth (the KV cache); MoE separates total parameters (memory) from active parameters (compute). The skeleton is unchanged.
+
+Modern LLMs keep the lesson-3 skeleton but vary its two sublayers to spend resources deliberately: grouped-query attention for a smaller KV cache, and mixture of experts for capacity without per-token cost. Read those two choices and you understand most of what makes a shipping model efficient.

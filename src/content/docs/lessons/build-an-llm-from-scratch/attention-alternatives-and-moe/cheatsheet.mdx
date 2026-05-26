@@ -1,0 +1,62 @@
+---
+title: "Cheatsheet: Attention alternatives and mixture of experts"
+description: One-page reference. Attention's cost problems, MQA/GQA/windowing, MoE and total-vs-active parameters, and the resource-allocation view.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## Standard attention's two cost problems
+
+- **Quadratic in sequence length:** every token attends to every other; attention compute/memory grow with length squared.
+- **KV cache dominates inference:** cached keys/values of all prior tokens grow with length x heads; can exceed the weights at long context; memory-bandwidth-bound to read.
+
+## Attention alternatives
+
+| Variant | What it does | Effect |
+| --- | --- | --- |
+| Multi-Query (MQA) | All heads share one key/value set | KV cache / head-count; some quality loss |
+| Grouped-Query (GQA) | Heads in a few groups share key/value sets | KV cache shrinks severalfold; ~no quality loss; **modern default** |
+| Sliding-window | Each token attends to a recent window | Cost linear (not quadratic) in length |
+
+(Sub-quadratic / state-space attention exists but is research; GQA + windowing are the practical levers.)
+
+## Mixture of experts (MoE)
+
+```
+Dense FFN:  every token -> the one FFN        (total params = compute params)
+MoE FFN:    router picks top-k of many experts per token
+            -> total params (capacity, MEMORY) decoupled from
+               active params (per-token COMPUTE, the 6ND driver)
+```
+
+| | Total params | Active params |
+| --- | --- | --- |
+| Sets | Capacity + memory (all experts stored) | Per-token compute (the few that run) |
+
+- **Costs:** all experts stored even if idle (trades compute for memory); router needs **load balancing**.
+- **"47B total, 13B active"** = MoE: dense-13B compute, dense-47B memory/capacity.
+
+## Resource-allocation view (lesson 2 terms)
+
+| Variation | Resource targeted |
+| --- | --- |
+| MQA / GQA | Memory + memory bandwidth (KV cache) |
+| Sliding-window | Compute (quadratic -> linear in length) |
+| MoE | Separates memory (total params) from compute (active params) |
+
+Neither changes the lesson-3 skeleton; each changes which resource you spend.
+
+## Words to use precisely
+
+- **KV cache**: stored keys/values of prior tokens, reused during generation; the main inference memory cost.
+- **MQA / GQA**: key/value sharing across all heads / per group.
+- **MoE**: many expert FFNs + a router running top-k per token.
+- **Total vs active parameters**: capacity/memory vs per-token compute.
+- **Load balancing**: keeping the router's token assignment even across experts.
+
+## Source
+
+- Stanford CS336, Lecture 4 (Attention alternatives and mixture of experts), by Hashimoto and Liang. `cs336.stanford.edu`. Independent structural mirror in original prose; see references.

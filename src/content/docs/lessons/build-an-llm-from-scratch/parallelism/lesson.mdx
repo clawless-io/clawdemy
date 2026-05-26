@@ -1,0 +1,59 @@
+---
+title: "Lesson: Training across many devices, parallelism"
+description: One GPU is rarely enough. The three classic schemes for splitting an LLM training run across devices, data, tensor, and pipeline parallelism, plus the modern sharded variant (FSDP/ZeRO) and why frontier models combine all of them.
+sidebar:
+  order: 2
+  label: Lesson
+artifact: lesson
+---
+
+Lesson 2's memory accounting made the limit concrete: a 7-billion-parameter model in fp32 needs roughly 112 gigabytes for parameters, gradients, and optimizer states, which already exceeds a single GPU's memory. Frontier models are far larger. This lesson is how you spread the work across many devices, and which scheme fits which problem. There are three classic schemes (data, tensor, and pipeline parallelism) and one modern sharded variant (FSDP / ZeRO) that has become a default. Real frontier training combines them.
+
+## Data parallelism: replicate the model, split the batch
+
+The simplest scheme. Put a **full copy of the model on each device**, give each one a different slice of the training batch, do a normal forward and backward pass, then **all-reduce the gradients** across devices so every replica updates the parameters the same way. Each device does its own work, then they synchronize.
+
+Data parallelism is easy to reason about and scales the effective batch size linearly with device count, which often helps training. Its limit is hard: every device must fit the full model in memory. The 112-gigabyte example above does not fit, so plain data parallelism alone cannot train it.
+
+## Tensor parallelism: split each tensor across devices
+
+When the model itself is too big for one device, the next move is to **split individual layers and weight tensors** across devices. The standard trick for the FFN, for example, is to split its hidden dimension: device 0 holds the first half of the FFN's expanded width, device 1 holds the second half, and they each compute their share of the matmul. The same idea applies to attention: split the heads across devices, with each device handling a subset of the attention heads.
+
+Tensor parallelism reduces each device's memory footprint proportionally, but it requires **communication inside every layer** (typically an all-reduce or all-gather of partial results), so it depends on a very fast interconnect between devices (NVLink, NVSwitch, or comparable). That is why tensor parallelism is usually confined to devices within a single node: the interconnect inside a server is far faster than between servers, and inter-node tensor parallelism stalls on communication.
+
+## Pipeline parallelism: split the layers across devices
+
+The third classic scheme **splits the model's layers** rather than individual tensors. Layers 1 through 8 might live on device 0, layers 9 through 16 on device 1, and so on. A batch flows through the pipeline stage by stage: device 0 processes its layers and hands its activations to device 1, which processes the next stage, and so on.
+
+The trade-off is **pipeline bubbles**, idle time at the start and end of the batch while the pipeline fills and drains. The standard fix is to break each batch into many **microbatches** that overlap in the pipeline, the way a factory assembly line stays busy. Pipeline parallelism communicates only at stage boundaries, so it tolerates slower interconnects (and is the natural scheme for going across nodes), but careful scheduling is needed to keep the bubbles small.
+
+## FSDP / ZeRO: sharded data parallel
+
+A more recent and now-default scheme combines the simplicity of data parallelism with the memory savings of model splitting. Instead of replicating the full model on every device, **FSDP** (Fully Sharded Data Parallel) and **ZeRO** (Zero Redundancy Optimizer) **shard the parameters, gradients, and optimizer states** across the data-parallel ranks. When a layer needs to run, the devices gather the parameters from their shards just for that layer, compute, and discard the gathered parameters; gradients and optimizer states stay sharded too, with only the activations replicated per local batch.
+
+The effect is dramatic for the lesson-2 memory: the `4N + 4N + 8N = 16N` parameter-plus-gradient-plus-optimizer-state cost is divided by the number of ranks, so a model that would not fit in one GPU's memory often fits across, say, eight ranks worth of memory without true tensor or pipeline parallelism. The cost is more communication (gather and release parameters during the forward and backward pass), which is largely overlapped with computation in modern implementations.
+
+## When to use which: matching the scheme to the problem
+
+A practical decision tree, from the lessons of dozens of large training runs:
+
+- **Model fits in one GPU?** Use **data parallelism** alone. Simplest and best.
+- **Model is too big for one GPU but fits across a node's GPUs?** Add **tensor parallelism** within the node (where the interconnect is fast), and data-parallel across nodes. Or use **FSDP/ZeRO** for the memory savings without sharding individual tensors.
+- **Model is too big for a single node?** Combine all three: tensor parallelism within nodes, **pipeline parallelism** across nodes, and data parallelism on top. This is "3D parallelism," the configuration used to train the largest open models.
+
+The point is not that one scheme is best; the point is each scheme buys different resources at different communication costs, and you mix them to match your model and your hardware topology.
+
+## Why this matters when you build AI
+
+The systems half of building an LLM is, at its core, this lesson. Once a model exceeds one device, every later choice (kernels, parallelism scheme, interconnect, microbatch size, gradient checkpointing) is a negotiation between memory, compute, and communication. Knowing the three classic schemes and their communication patterns is what lets you read a real training-run report and understand what is happening: a 70-billion-parameter model trained across 1024 GPUs is using some specific combination of these, and the combination is dictated by the model's size and the cluster's topology. It also makes the lesson-2 accounting actionable at scale: if 16N memory does not fit on one device, you know which scheme to add and why. The next lesson closes Phase 2 with inference, where parallelism comes back in a different shape, splitting the serving load rather than the training load, with the KV cache from lesson 4 as the central concern.
+
+## What you should remember
+
+- **One GPU is rarely enough.** Lesson 2's `16N` memory already says a 7B fp32 model exceeds a single device; frontier models are vastly larger.
+- **Data parallelism (DP):** full model on each device, batch split across devices, all-reduce gradients. Simple; limited by per-device memory.
+- **Tensor parallelism (TP):** split each layer's tensors (FFN width, attention heads) across devices. Communicates within every layer, so needs fast interconnect; usually within a node.
+- **Pipeline parallelism (PP):** split layers across devices; microbatches flow through stages. Communicates only at stage boundaries (tolerates slower interconnect); careful scheduling avoids pipeline bubbles.
+- **FSDP / ZeRO** shard parameters/gradients/optimizer-states across data-parallel ranks, gathering per layer. Modern default for memory savings without TP/PP; trades extra communication, mostly overlapped.
+- **3D parallelism** mixes all three: TP within nodes (fast interconnect), PP across nodes, DP on top. Decision rule: match the scheme to where the bottleneck is (memory, communication, or compute).
+
+The systems half of training an LLM is choosing which axes to split: data, tensors, or layers, and combining them to fit the model on the hardware you have. Each scheme buys different resources at different communication costs; the work is matching the combination to your model and your cluster.
