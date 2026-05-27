@@ -4,10 +4,19 @@
  *
  * Rule: if a lesson's brief.mdx has `source_material.type` set to anything
  * other than `original`, the corresponding `references.mdx` MUST include an
- * attribution block. CI blocks merge if it doesn't.
+ * attribution block.
  *
- * The attribution block is detected by the presence of the literal string
- * "Source material:" followed by at least one line describing the source.
+ * The attribution block is detected by either of two forms:
+ *   (a) the literal string "Source material:" (legacy inline form, used by
+ *       early Track 5 lessons), OR
+ *   (b) a Markdown heading "## Source material" (current convention adopted
+ *       in Phase C tracks — heading first, then a fenced code block with
+ *       the source curriculum lines below).
+ *
+ * Both forms render the same block of content to readers; the validator
+ * accepts either because the rule is presence-of-attribution, not literal
+ * formatting. Updated 2026-05-27 to match the heading convention used
+ * across T13/T15/T16/T20/T21 references files.
  *
  * This is deliberately permissive on format and strict on presence — we care
  * that the block *exists*, not that it matches a rigid template.
@@ -21,7 +30,9 @@ import matter from 'gray-matter';
 const ROOT = new URL('..', import.meta.url).pathname;
 const LESSONS_ROOT = join(ROOT, 'src/content/docs/lessons');
 
-const ATTRIBUTION_MARKER = /source\s+material\s*:/i;
+// Matches either "Source material:" (legacy inline form) or "## Source material"
+// (current heading form, possibly with trailing whitespace / colon / period).
+const ATTRIBUTION_MARKER = /(?:^|\n)\s*(?:#{1,6}\s+)?source\s+material\s*[:.]?\s*\n/i;
 
 interface Finding {
 	path: string;
