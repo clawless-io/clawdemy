@@ -1,0 +1,139 @@
+---
+title: "Practice: assembling and training the full GPT"
+description: Check your understanding of the transformer block and the full GPT, then size a multi-head attention layer and trace the shapes through a block.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+import Flashcard from '../../../../../components/Flashcard.astro';
+
+## Self-check
+
+Five short questions. Try to answer each in your head (or on paper) before opening the collapsible. Active retrieval is where the learning sticks; rereading is comfortable but does much less.
+
+**1. What are the two steps of a transformer block, and what does each do?**
+
+<details>
+<summary>Show answer</summary>
+
+Communication then computation. First, **multi-head self-attention**: every token gathers a causal blend of the other tokens (tokens talk). Then a **per-token feed-forward MLP**: each token independently processes what it gathered (tokens think). The block is this pair, and it is the unit repeated to make the model deep.
+
+</details>
+
+**2. What is multi-head attention, and does it make the network deeper?**
+
+<details>
+<summary>Show answer</summary>
+
+Several attention heads running **in parallel**, each with its own query/key/value projections, tracking different relationships; their outputs are concatenated and projected. It does **not** make the network deeper, the heads are parallel, splitting one attention step into several. Depth comes from stacking blocks, not from adding heads.
+
+</details>
+
+**3. Why are residual connections and layer normalization needed?**
+
+<details>
+<summary>Show answer</summary>
+
+To make a deep stack trainable. A residual connection (`output = x + sublayer(x)`) gives the gradient a highway straight back through the network (addition passes gradients through unchanged), preventing the vanishing gradients that would otherwise kill a deep network. Layer normalization keeps each token's representation in a healthy, trainable range before each sublayer. Without both, a deep transformer will not train.
+
+</details>
+
+**4. Why does a GPT need positional embeddings?**
+
+<details>
+<summary>Show answer</summary>
+
+Because self-attention is order-blind: a token's output is a weighted **sum** over the others, so attention sees a set, not a sequence. A learned position embedding is added to each token embedding so the input encodes "this token, at this position." Without it the model could not tell "dog bites man" from "man bites dog."
+
+</details>
+
+**5. What is a GPT, listed from input to output, and how is it trained?**
+
+<details>
+<summary>Show answer</summary>
+
+Token embedding + position embedding, then a stack of transformer blocks (each: multi-head attention + feed-forward, wrapped in residuals and layer norm), then a final layer norm, then a linear layer to vocabulary-sized logits, then softmax into next-token probabilities. It is trained on **cross-entropy** (negative log likelihood) against the actual next tokens, and generates by sampling autoregressively (predict, sample, append, repeat).
+
+</details>
+
+## Try it yourself
+
+Size a multi-head attention layer and trace the shapes through one block.
+
+**Setup.** A GPT with a representation width of **96**, using **6** attention heads, a window of **T** tokens, and a vocabulary of **65** characters.
+
+**Steps.**
+
+1. How many dimensions does each attention head work in? (`width / number of heads`)
+2. Confirm the heads' outputs concatenate back to the full width. (`head dimension x number of heads`)
+3. A transformer block takes a `(T, 96)` input. What shape does it output, and why does that matter for stacking?
+4. After the final block and layer norm, the linear head maps each token to vocabulary logits. What shape is the output for the whole window?
+
+**Expected outcome.**
+
+```
+1.  each head works in  96 / 6 = 16 dimensions
+2.  concatenated heads:  16 x 6 = 96  (back to the full width)
+3.  block output shape:  (T, 96)  -- same as the input
+    (every block preserves the width, which is exactly why blocks can be stacked
+     freely; the residual addition also requires the shapes to match)
+4.  final logits:        (T, 65)  -- 65 next-character scores per position,
+    then softmax turns each row into a probability distribution
+```
+
+The width stays `96` all the way up the stack and only changes at the very end, when the linear head projects to the `65`-character vocabulary. That constant shape is what lets you stack as many blocks as you like. Multi-head attention just divides the same `96` dimensions into `6` specialized `16`-dimensional views and recombines them.
+
+**Confirm it against the real thing (optional).** Andrej Karpathy's [nanoGPT](https://github.com/karpathy/nanoGPT) is the clean version of this architecture. Read `model.py` and find the four parts you assembled, the embedding tables, the block (attention + feed-forward with residuals and layer norm), the final norm, and the linear head, then run training and watch the loss fall and the samples sharpen.
+
+## Flashcards
+
+Seven cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay out the full set as one card per page, ready to print or save as a PDF for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="What are the two steps of a transformer block?">
+
+Communication then computation: multi-head self-attention (tokens gather a causal blend of each other), then a per-token feed-forward MLP (each token processes what it gathered). "Talk, then think." This block is the repeated unit.
+
+</Flashcard>
+
+<Flashcard question="What is multi-head attention, and does it add depth?">
+
+Several attention heads in parallel, each with its own query/key/value, tracking different relationships; outputs concatenated and projected. It does not add depth, heads are parallel. Depth comes from stacking blocks. With width 64 and 8 heads, each head works in 8 dimensions (concatenating back to 64).
+
+</Flashcard>
+
+<Flashcard question="What does a residual connection do, and why does it help training?">
+
+`output = x + sublayer(x)`: each sublayer adds to the representation instead of replacing it. Because addition passes gradients through unchanged, it gives the gradient a highway back to early blocks, preventing vanishing gradients. Each block then learns a small adjustment, which is easier to train.
+
+</Flashcard>
+
+<Flashcard question="What is layer normalization, and how does it relate to BatchNorm?">
+
+It normalizes each token's representation to a healthy mean and variance before each sublayer, keeping activations trainable through depth. It is the per-token cousin of the batch normalization from the activations lesson.
+
+</Flashcard>
+
+<Flashcard question="Why does a GPT need positional embeddings?">
+
+Self-attention is order-blind (a weighted sum sees a set, not a sequence). A learned position embedding added to each token embedding encodes "this token, at this position," so the model can tell "dog bites man" from "man bites dog."
+
+</Flashcard>
+
+<Flashcard question="List the full GPT from input to output.">
+
+Token embedding + position embedding -> a stack of transformer blocks (multi-head attention + feed-forward, each with residual + layer norm) -> final layer norm -> linear layer to vocabulary logits -> softmax into next-token probabilities.
+
+</Flashcard>
+
+<Flashcard question="How does the GPT you built relate to ChatGPT?">
+
+Same architecture: token + position embeddings, a deep stack of transformer blocks (attention + feed-forward, residuals, layer norm), a softmax head, trained on next-token cross-entropy. Commercial models differ only in scale, a larger token vocabulary, training data, and a fine-tuning stage, not in kind.
+
+</Flashcard>
+
+</FlashcardSet>

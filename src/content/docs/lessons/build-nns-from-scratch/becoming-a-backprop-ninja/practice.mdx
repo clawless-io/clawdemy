@@ -1,0 +1,131 @@
+---
+title: "Practice: becoming a backprop ninja"
+description: Check your understanding of the softmax-plus-cross-entropy gradient, then do your own manual backward pass through a tanh neuron and its linear step.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+import Flashcard from '../../../../../components/Flashcard.astro';
+
+## Self-check
+
+Four short questions. Try to answer each in your head (or on paper) before opening the collapsible. Active retrieval is where the learning sticks; rereading is comfortable but does much less.
+
+**1. What does "backpropagating by hand" actually mean, and how does it relate to the autograd engine?**
+
+<details>
+<summary>Show answer</summary>
+
+It is the same chain rule the engine runs, each operation's local derivative multiplied by the incoming gradient, walked backward, but done by you instead of by `backward()`. It is not a different algorithm. The point is to understand and be able to debug gradient flow, not to replace the engine: doing it by hand reveals what the engine was doing all along.
+
+</details>
+
+**2. State the softmax-plus-cross-entropy gradient on the logits, and read off what it tells the network to do.**
+
+<details>
+<summary>Show answer</summary>
+
+`dL/dz_i = p_i - y_i`: the predicted probability minus the true label (1 for the correct class, 0 otherwise). For the correct class the gradient is negative (`p_y - 1`), so gradient descent pushes that logit up; for wrong classes it is positive (`p_i`), so descent pushes them down. The size is proportional to the misplaced probability mass: confidently-wrong logits are corrected hardest.
+
+</details>
+
+**3. Why do softmax-plus-cross-entropy gradients on the logits always sum to zero?**
+
+<details>
+<summary>Show answer</summary>
+
+Because softmax probabilities always sum to 1, adding the same constant to every logit leaves all the probabilities (and so the loss) unchanged. That means the gradient in the "raise every logit equally" direction must be zero, which forces the components to sum to zero. It is a free sanity check: if your derived gradients do not sum to zero, you have a bug.
+
+</details>
+
+**4. Why is the sign "predicted minus true" and not "true minus predicted"?**
+
+<details>
+<summary>Show answer</summary>
+
+Because gradient descent steps *opposite* the gradient. With `p - y`, the correct class gets a negative gradient, so descent raises its logit (good). Flip the sign to `y - p` and descent would lower the correct logit, training the model to be confidently wrong. The sign is load-bearing.
+
+</details>
+
+## Try it yourself
+
+Now do the ninja work: backpropagate by hand through a `tanh` neuron and the linear step that feeds it. This is the same chain rule, on the operations from lesson 1.
+
+**Setup.** A neuron computes `h = tanh(z)` where `z = w*x + b`, with `w = 0.5`, `x = 2`, and `b = -0.5`. Backprop has already delivered the gradient flowing into the output: `dL/dh = 0.4`. Find the gradients on `z`, and then on `w`, `x`, and `b`.
+
+**Steps.**
+
+1. Forward pass: compute `z = w*x + b`, then `h = tanh(z)`.
+2. Through `tanh`: its local derivative is `1 - h^2`, so `dL/dz = dL/dh * (1 - h^2)`.
+3. Through `z = w*x + b`: multiplication hands each input the other's value, addition passes the gradient through. So `dL/dw = dL/dz * x`, `dL/dx = dL/dz * w`, and `dL/db = dL/dz * 1`.
+
+**Expected outcome.**
+
+```
+forward:  z = 0.5*2 + (-0.5) = 0.5      h = tanh(0.5) = 0.462
+
+through tanh:  1 - h^2 = 1 - 0.462^2 = 0.786
+               dL/dz = 0.4 * 0.786 = 0.314
+
+through the linear step:
+   dL/dw = dL/dz * x = 0.314 * 2   = 0.63
+   dL/dx = dL/dz * w = 0.314 * 0.5 = 0.16
+   dL/db = dL/dz * 1                = 0.31
+```
+
+Every number came from one rule: multiply the incoming gradient by the local derivative. You just backpropagated through two operations by hand, with no engine, exactly the skill the lecture is built around. Notice `dL/dw` is the largest because `x = 2` is the biggest local derivative in the chain: the input scales how much its weight matters.
+
+**Confirm it against the real thing (optional).** Andrej Karpathy's [makemore Part 4 notebook](https://github.com/karpathy/makemore) is the full version of this exercise: you fill in the by-hand gradient for every operation of the MLP language model, and the notebook checks each one against the autograd engine's answer. Doing even a few of those cells, and seeing your hand-derived gradient match the engine's to many decimal places, is the most convincing possible proof that the engine is no mystery.
+
+## Flashcards
+
+Seven cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay out the full set as one card per page, ready to print or save as a PDF for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="What is by-hand backpropagation?">
+
+The same chain rule the autograd engine runs, local derivative times incoming gradient, walked backward, done by hand. It reveals and lets you debug gradient flow; it does not replace the engine with a new algorithm.
+
+</Flashcard>
+
+<Flashcard question="What is the softmax-plus-cross-entropy gradient on the logits?">
+
+`dL/dz_i = p_i - y_i`: the predicted probability minus the true label (1 for the correct class, 0 otherwise). Correct class gets a negative gradient (pushed up); wrong classes get positive gradients (pushed down).
+
+</Flashcard>
+
+<Flashcard question="Why is the result p - y so intuitive?">
+
+It means: make the right class more likely and the wrong ones less likely, in proportion to how much probability is misplaced. Confidently-wrong predictions get corrected hardest.
+
+</Flashcard>
+
+<Flashcard question="What sanity check applies to softmax+cross-entropy logit gradients?">
+
+They always sum to zero (adding a constant to every logit doesn't change softmax, so the "raise all equally" direction has zero gradient). If your derived gradients don't sum to zero, you have a bug.
+
+</Flashcard>
+
+<Flashcard question="Backprop through tanh: if h = tanh(z), what is dL/dz?">
+
+`dL/dz = dL/dh * (1 - h^2)`. The local derivative of `tanh` is `1 - h^2`, so multiply the incoming gradient by it. Near the flat tails (`h` close to `+1` or `-1`) this is near zero, which is saturation.
+
+</Flashcard>
+
+<Flashcard question="Backprop through z = w*x + b: what are dL/dw, dL/dx, dL/db?">
+
+`dL/dw = dL/dz * x`, `dL/dx = dL/dz * w` (multiply hands each input the other's value), and `dL/db = dL/dz * 1` (addition passes the gradient through unchanged).
+
+</Flashcard>
+
+<Flashcard question="Why does knowing p - y by hand matter for real models?">
+
+It is the exact signal that trains every classifier and language model: next-token prediction is softmax+cross-entropy over the vocabulary, so "predicted minus true" sits at the top of the backward pass on every training step of a model like GPT. Knowing it lets you sanity-check and debug training.
+
+</Flashcard>
+
+</FlashcardSet>

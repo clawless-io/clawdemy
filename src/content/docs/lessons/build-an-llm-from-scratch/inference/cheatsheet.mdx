@@ -1,0 +1,73 @@
+---
+title: "Cheatsheet: Inference"
+description: One-page reference. Prefill vs decode, the KV cache, and the five techniques (batching, paged attention, speculative decoding, quantization, GQA).
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## The two phases
+
+| Phase | What it does | Cost profile |
+| --- | --- | --- |
+| **Prefill** | Process the whole prompt in one parallel forward pass; build initial KV cache | Compute-bound (like a training step) |
+| **Decode** | Generate one token at a time, autoregressively | **Memory-bound**: weights + KV cache read every step |
+
+Most user-visible time on long responses is in decode.
+
+## The KV cache (the central object)
+
+```
+KV-cache memory ~ sequence_length x n_layers x n_kv_heads x head_dim x bytes/value
+```
+
+- Stored **once** per token per layer; read at every later decode step.
+- At long contexts can exceed the model's own weights.
+- Reads are the bandwidth bottleneck of decode.
+
+## The five techniques
+
+| Technique | What it attacks | How |
+| --- | --- | --- |
+| **Continuous batching** | Per-token weight load | Amortize weight load across many concurrent requests; keep the running batch full by adding/removing requests live |
+| **Paged attention** | Wasted cache memory | KV cache as virtual-memory pages; allocate only as needed; release on finish |
+| **Speculative decoding** | Per-step autoregression | Small draft proposes -> big model verifies in **one parallel pass**; multiple tokens per pass, identical output distribution |
+| **Quantization** (int8/int4) | Bytes-per-step HBM traffic | Smaller weights/cache = less HBM bandwidth per decode step |
+| **GQA** (lesson 4) | KV-cache size itself | Share K/V across head groups; cache shrinks severalfold |
+
+## Inference parallelism (different from training)
+
+| Scheme | Training | Inference |
+| --- | --- | --- |
+| Data parallel | Replicate + batch-split | Replicas behind a load balancer |
+| **Tensor parallel** | Per-layer comm, within node | **Comfortable**, preserves per-request latency |
+| **Pipeline parallel** | Stages across nodes, microbatched | **Less common**: pipeline bubbles hurt latency |
+
+Inference optimizes **latency**, not just throughput.
+
+## Reading a serving-stack speedup claim
+
+A "10x throughput" claim is almost always a **recipe**:
+
+- continuous batching (biggest single contributor)
+- paged attention (concurrent users)
+- quantization (bandwidth)
+- speculative decoding (tokens/pass)
+- often GQA in the model itself
+
+Ask: which ingredients, and against what baseline?
+
+## Words to use precisely
+
+- **Prefill / decode**: the two inference phases (parallel prompt processing / autoregressive generation).
+- **KV cache**: stored keys/values for previous tokens, per layer.
+- **Continuous batching**: dynamic in-flight batching that keeps the GPU full.
+- **Paged attention**: KV cache as virtual memory pages.
+- **Speculative decoding**: draft + verify for many tokens per big-model pass.
+- **Quantization**: serve at lower precision (int8/int4) to cut HBM traffic.
+
+## Source
+
+- Stanford CS336, Lecture 10 (Inference), by Hashimoto and Liang. `cs336.stanford.edu`. Independent structural mirror in original prose; see references.

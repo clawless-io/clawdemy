@@ -1,0 +1,122 @@
+---
+title: "Lesson: The architectures that cracked vision, AlexNet to ResNet"
+description: "Lesson 5 introduced the conv layer. This lesson is the story of how it got stacked, between 2012 and 2015, into the architectures that finally cracked computer vision. We walk AlexNet (the inflection), VGG (depth + uniformity), GoogLeNet (smarter not bigger), and ResNet (skip connections, the unlock that let depth actually work), with their parameter counts and the patterns each landmark established. We close with a folded subsection on what it takes to train these networks at scale: data parallelism, model parallelism, mixed precision, and the modern reality that the architecture choice is now coupled with the training cluster's engineering budget."
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+Lesson 5 gave us a single conv layer. The natural next question is how many of them, arranged how, you actually want. That question has a clear answer for computer vision because the field ran an annual public bake-off (the ImageNet Large Scale Visual Recognition Challenge, ILSVRC) and the winners between 2012 and 2015 are now the textbook canon. Each year's winner introduced one structural idea that the next year's winner built on. By 2015 the question of "how deep, how arranged" had a working answer, and most vision architectures since are recognizable descendants.
+
+This lesson is that four-architecture story, with the parameter counts and headline ideas, plus a folded subsection on what it takes to actually train these things on the hardware that exists.
+
+## Why "deeper" was the wrong word at first
+
+Two pieces of context first. A conv layer is a small, local pattern detector; multiple stacked layers compose simple detectors into more complex ones (edges into corners into parts into whole-object templates), exactly the hopeful story you may have met in earlier tracks. So intuitively, more layers should mean more capacity, which should mean better accuracy.
+
+In practice, between roughly 2012 and 2015, "just add more layers" frequently *hurt* accuracy. The optimization got harder as depth grew: gradients vanished or exploded as they flowed back through many layers; the loss surface developed pathologies; very deep networks would train worse than shallower ones even on the training set, let alone the test set. The four architectures below are the story of figuring out, in stages, what to add or rearrange so depth would actually pay off.
+
+## AlexNet (2012): the inflection
+
+AlexNet's winning ImageNet entry in 2012 is conventionally treated as the moment deep learning won computer vision. CS231n notes the result directly: "16% [top-5 error] compared to runner-up with 26% error." A ten-percentage-point gap in a mature competition is not normal; that single result effectively ended the hand-engineered-features era we covered in lesson 4.
+
+Structurally, AlexNet was 8 weight layers (5 conv layers followed by 3 fully-connected layers), totalling about **60 million parameters**. The key innovations that made it train were not architectural in the deep sense; they were a bundle of choices that, together, let a network this big train at all on the hardware of the time:
+
+- **ReLU activations** instead of the older sigmoid or tanh, which sped up convergence dramatically and partly addressed the vanishing-gradient problem.
+- **Dropout** in the fully-connected layers (a regularization technique that randomly zeroes some hidden units during training), which countered the overfitting risk of having tens of millions of parameters.
+- **Training on two GPUs** in parallel, for about six days, which was unusual at the time and is one of the first concrete examples of training-as-engineering, a thread we will pick up again at the end of this lesson.
+
+The lesson the field took from AlexNet was less about the specific architecture and more about the demonstration: with enough data (ImageNet's million-plus labeled images) and enough compute, a deep CNN trained end-to-end could beat decades of hand-crafted feature engineering. The race to design better deep architectures was on.
+
+## VGG (2014): depth and uniformity
+
+Two years later VGG (from Oxford's Visual Geometry Group), runner-up at ILSVRC 2014, made a simpler argument: take the AlexNet recipe and **make it deeper and more uniform**. VGG-16 has 16 weight layers (CS231n: "16 CONV/FC layers") and uses essentially only **3 by 3 convolutions** stacked throughout (with the occasional 2 by 2 max-pooling for spatial downsampling). CS231n: "only performs 3x3 convolutions and 2x2 pooling from the beginning to the end."
+
+The structural insight VGG made explicit: a stack of small 3 by 3 filters has the same effective receptive field as one larger filter, but with more non-linearities and fewer parameters per layer. Three 3 by 3 layers cover the same input region as one 7 by 7 layer, but with three ReLUs in between and only 27 weights per stack (per channel) versus 49 for the 7 by 7. Many small layers beat fewer big ones.
+
+VGG's cost is that it is *enormous* in parameters: CS231n cites **140 million** for VGG-16, more than twice AlexNet, mostly in the giant fully-connected layers at the top. The win-rate improvement was real (single-digit top-5 error, down from AlexNet's 16 percent), but the model was hard to deploy and the field started asking whether so many parameters were really necessary.
+
+## GoogLeNet / Inception (2014): smarter, not bigger
+
+The 2014 ILSVRC winner went the other way. GoogLeNet (also called Inception v1) hit a slightly better top-5 error than VGG with **just 4 million parameters**, fully thirty-five times fewer than VGG-16. CS231n describes the headline directly: "development of an Inception Module that dramatically reduced the number of parameters" and "uses Average Pooling instead of Fully Connected layers at the top," which alone eliminated a large fraction of the parameter cost.
+
+The **Inception module** is the architectural piece. Instead of stacking one filter size per layer, each module computes several filter sizes in parallel on the same input (1 by 1, 3 by 3, 5 by 5, plus a pooling branch) and concatenates the results along the depth dimension. The network gets to "choose" which scales matter at each depth. To make this affordable, the module uses **1 by 1 convolutions** as a cheap way to reduce input depth before the more expensive 3 by 3 and 5 by 5 branches; a 1 by 1 conv is a depth-direction linear combination, and it's cheap because there is no spatial sliding cost.
+
+The takeaway pattern from GoogLeNet: parameter count is not the same as capability. A cleverer arrangement (sparse-feeling parallel paths, 1 by 1 dimensionality reduction, no giant FC tower at the top) can beat a brute-force one. The "smarter not bigger" lesson stuck; you will see Inception-style multi-path blocks recur throughout vision architectures since.
+
+## ResNet (2015): the skip connection unlock
+
+The biggest of the four landmarks is ResNet, the 2015 ILSVRC winner, and the architecture that finally answered "why doesn't just adding more layers help?" CS231n's case-study line: ResNet "features special skip connections and a heavy use of batch normalization," and "ResNets are currently by far state of the art." That status held for years.
+
+The key idea: instead of having a stack of layers compute a target function `H(x)` directly, have them compute the **residual** `F(x) = H(x) - x`, and recover `H(x) = F(x) + x` by adding the input back to the layer's output through a **skip connection** (also called an identity shortcut). Concretely, a residual block looks like:
+
+```
+y = F(x) + x
+```
+
+where `F(x)` is whatever the conv layers inside the block compute, and `+ x` is the identity shortcut adding the input straight through.
+
+Why this changed everything: when a deeper block does not need to do anything new, learning `F(x) = 0` is easy (the block just behaves as identity through the shortcut). When the block does need to add something, it learns whatever `F` is required. Either way, gradients flow back through the shortcut unimpeded, which directly addresses the vanishing-gradient problem that had capped pre-ResNet depth.
+
+The numerical headline: ResNet trained networks of **152 layers** (an order of magnitude deeper than VGG) and reached single-digit ImageNet top-5 error in the low-to-mid 3 percent range, the first time below the rough 5 percent human-baseline estimate widely cited at the time. Skip connections are now everywhere in deep learning, including (as we will see later) inside the transformer blocks of vision transformers and large language models.
+
+## What changed across the decade
+
+The four architectures, summarised:
+
+| Year | Architecture | Headline idea | Parameters (approx) |
+|---|---|---|---|
+| 2012 | AlexNet | First deep CNN to win ImageNet; ReLU, dropout, 2 GPUs | ~60M |
+| 2014 | VGG-16 | Depth + uniformity (all 3x3 convs); deeper beats wider | ~140M |
+| 2014 | GoogLeNet (Inception) | Inception modules + 1x1 dimensionality reduction; smarter beats bigger | ~4M |
+| 2015 | ResNet | Skip connections (residual blocks); makes very deep nets trainable | ResNet-50 ~25M, ResNet-152 ~60M |
+
+Three patterns settle out:
+
+- **Depth helps, but only if you can train it.** VGG showed depth matters; ResNet showed how to actually exploit it.
+- **Parameter count is not capability.** GoogLeNet hit better accuracy than VGG at 1/35th the parameters.
+- **Small structural ideas have large effects.** ReLU, dropout, 1 by 1 conv, identity shortcuts: each is a few lines of code; each shifted the field meaningfully.
+
+The post-2015 story (DenseNet's dense connections; EfficientNet's principled width / depth / resolution scaling; MobileNet's depthwise-separable convs for on-device deployment; vision transformers, which we will reach in lesson 7) is mostly variations and synthesis on top of what these four laid down.
+
+## Training at scale: how these architectures actually get trained
+
+We have spent the whole track so far on the *algorithm* of training (loss, gradient descent, backprop). To run a ResNet-152 on a real dataset you also need the *engineering* of training, which is what CS231n Lec 11 covers and what we fold in here as a short subsection.
+
+The basic problem is that modern models and datasets are too large for one GPU. There are two dominant strategies, often combined.
+
+**Data parallelism.** Replicate the *same* model on each of N GPUs. Split the mini-batch into N chunks and give one chunk to each GPU. Each GPU runs its own forward pass, computes its own gradient on its chunk, and then the gradients are averaged across GPUs (typically with a communication primitive called **AllReduce**). Every GPU then takes the same gradient descent step on its (now identical) copy of the model. This scales nearly linearly for many models and is the default for vision; ResNet's local residual blocks happen to AllReduce especially well.
+
+**Model parallelism.** When the model itself is too large to fit in one GPU's memory, split the *layers* across GPUs. Some go on GPU 0, some on GPU 1, and so on; the forward pass passes activations between GPUs, the backward pass passes gradients. More complex and slower-per-step than data parallelism (network latency between layers); reserved for genuinely huge models.
+
+Other engineering pieces matter in production. **Mixed-precision training** uses 16-bit floats for most operations (cutting memory and increasing throughput) with 32-bit accumulation where numerical precision matters. **Gradient accumulation** runs several mini-batches per gradient step, simulating a larger effective batch when memory is tight. **Learning-rate warmup** (start tiny, ramp up over the first few epochs) and the **linear scaling rule** (scale the learning rate proportionally to the batch size) keep training stable as you scale.
+
+Concretely: AlexNet trained on 2 GPUs for around 6 days in 2012. Modern foundation-scale vision and multimodal models routinely train on hundreds to thousands of accelerators for weeks. The *algorithm* you have learned in lessons 3-5 is the same; the engineering has expanded around it. One side effect is that architecture choice is now coupled with the cluster's communication budget: architectures whose gradient updates AllReduce cleanly (residual-style, modular) scale better than ones that do not.
+
+## Why this matters when you use AI
+
+You will see ResNet's skip connections, or close descendants of them, almost everywhere a deep network shows up. Vision transformers use them inside each block. Large language models (next track) use them too. The "X-billion-parameter" headline numbers you read are mostly the size of these stacked residual-style blocks; the training time is mostly the cost of the data-parallel loop above running for a long time on a big cluster. None of this is exotic, once the moving pieces are named.
+
+Knowing the four landmarks also helps you read modern computer-vision papers and product announcements. A new "EfficientNet variant," a new "ConvNeXt," a new "ViT-this-size" are all positioning themselves relative to ResNet's baseline numbers and structural idioms. The vocabulary of the field is built on this 2012-2015 sequence.
+
+## Common pitfalls
+
+**Treating parameter count as a quality score.** GoogLeNet is roughly thirty-five times smaller than VGG and was the better ImageNet model of the two. Parameter count is one cost dimension; capability is shaped by architecture, data, and training, not by raw size alone.
+
+**Thinking "skip connections" are exotic.** They are an `+ x`. The block's output is `F(x) + x` instead of just `F(x)`. The shocking thing is how much that one addition unlocks, not its complexity.
+
+**Confusing distributed training with a different algorithm.** Data parallelism does not change the gradient descent loop. It just averages gradients across GPUs and lets you take bigger effective steps in less wall-clock time. The loss, the gradient, the update rule are unchanged.
+
+**Reading too much into year-by-year ImageNet numbers.** Treat them as a directional trend (each landmark improved on the prior) rather than a precise leaderboard; small differences depend on training tricks and the exact evaluation protocol used.
+
+## What you should remember
+
+- **Four landmark architectures define the canon.** AlexNet (2012, 60M params, ReLU + dropout + 2 GPUs, 16 percent top-5 vs 26 percent runner-up). VGG (2014, 140M params, only 3x3 conv + 2x2 pool throughout, deeper-is-better-when-uniform). GoogLeNet / Inception (2014, ~4M params, Inception modules + 1x1 dimensionality reduction + avg-pool head, smarter-not-bigger). ResNet (2015, 152 layers, skip connections, residual blocks `y = F(x) + x` make very deep networks trainable).
+- **Depth helps only when you can train it.** Pre-ResNet, adding layers often hurt accuracy because of vanishing gradients and optimization difficulty. ResNet's identity shortcut directly fixed this; modern architectures inherit it.
+- **Parameter count is not capability.** GoogLeNet's 4M beat VGG's 140M on ImageNet. Architectural ideas (1 by 1 conv, parallel paths, residual blocks, no giant FC head) move the field more than raw size does.
+- **Training at scale is engineering, not a new algorithm.** Data parallelism replicates the model across GPUs and averages gradients (AllReduce); model parallelism splits the model itself across devices. Mixed precision, gradient accumulation, learning-rate warmup, and the linear scaling rule are standard production tricks. The gradient descent loop underneath is unchanged.
+
+Stack conv layers carefully and you get an image classifier; stack them with residual blocks and you get one that can be 152 layers deep and still trainable. That is the unlock of Phase 2, and most of what comes after is variations and combinations on top.
+
+Next: a single image is a static scene; videos and captions are sequences. The next lesson covers the sequence tools for vision, recurrence and attention, in their vision-specific use cases (image captioning, video understanding, the vision-transformer architecture). The deep transformer mechanics live in sister tracks; here we use them as applied to vision.

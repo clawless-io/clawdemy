@@ -1,0 +1,99 @@
+---
+title: "Cheatsheet: Run a model in a few lines"
+description: One-page reference. The pipeline() one-liner, common task strings, the three steps, the Auto class family, and the postprocessing recipe.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## The one-liner
+
+```python
+from transformers import pipeline
+classifier = pipeline("sentiment-analysis")
+classifier("I love this!")
+```
+
+Picks a default model, downloads and caches it, runs all three steps. Pass `model="checkpoint-name"` to override the default.
+
+## Common task strings for `pipeline()`
+
+| Task string | What it does |
+| --- | --- |
+| `sentiment-analysis` | Classify text as positive or negative |
+| `zero-shot-classification` | Classify into labels you supply at call time |
+| `text-generation` | Continue a prompt (decoder-only) |
+| `fill-mask` | Fill in a blanked token (encoder-only) |
+| `ner` | Named-entity recognition (label tokens) |
+| `question-answering` | Extract an answer span from a context |
+| `summarization` | Shorten a long text |
+| `translation` | Translate between languages |
+
+## The three steps a pipeline hides
+
+| Step | What happens | Class |
+| --- | --- | --- |
+| 1. Preprocess | Text becomes `input_ids` + `attention_mask` | `AutoTokenizer` |
+| 2. Model | Numbers run through the network, output logits | `AutoModelFor<Task>` |
+| 3. Postprocess | Logits become probabilities and labels | softmax + `id2label` |
+
+## The tokenizer step
+
+```python
+from transformers import AutoTokenizer
+tokenizer = AutoTokenizer.from_pretrained(checkpoint)
+inputs = tokenizer(texts, padding=True, truncation=True, return_tensors="pt")
+# inputs -> {"input_ids": ..., "attention_mask": ...}
+```
+
+- `padding=True`: pad a batch to equal length
+- `truncation=True`: cut over-long inputs
+- `return_tensors="pt"`: return PyTorch tensors
+
+## The model step: pick the head by class name
+
+| Class | Head / output |
+| --- | --- |
+| `AutoModel` | None; raw hidden states (a vector per token) |
+| `AutoModelForSequenceClassification` | Classify the whole input |
+| `AutoModelForTokenClassification` | Label each token (NER) |
+| `AutoModelForQuestionAnswering` | Answer-span start/end |
+| `AutoModelForCausalLM` | Next-token generation (decoder-only) |
+| `AutoModelForMaskedLM` | Fill blanks (encoder-only) |
+
+```python
+from transformers import AutoModelForSequenceClassification
+model = AutoModelForSequenceClassification.from_pretrained(checkpoint)
+outputs = model(**inputs)   # outputs.logits
+```
+
+## The postprocessing recipe
+
+```python
+import torch
+probs = torch.nn.functional.softmax(outputs.logits, dim=-1)
+labels = model.config.id2label   # {0: 'NEGATIVE', 1: 'POSITIVE'}
+```
+
+Models output **logits** (raw scores), not probabilities. Softmax normalizes; `id2label` names the columns.
+
+## The one idiom
+
+```
+SomeAutoClass.from_pretrained(checkpoint)
+```
+
+Loads tokenizers, base models, and task heads alike. Change the checkpoint string to change the model; change the head class to change the task.
+
+## Words to use precisely
+
+- **Checkpoint**: a model's name on the Hub (e.g. `distilbert-base-uncased-finetuned-sst-2-english`), passed to `from_pretrained`.
+- **Hidden states / features**: the base transformer's per-token output vectors, before any task head.
+- **Head**: the small layer(s) on top of the base model that produce task-specific output.
+- **Logits**: raw unnormalized model scores; softmax turns them into probabilities.
+
+## Recommended further study
+
+- Hugging Face LLM Course, Chapter 2: "Using Transformers." `huggingface.co/learn/llm-course/chapter2`. Released under Apache 2.0; this lesson mirrors its structure with original prose.

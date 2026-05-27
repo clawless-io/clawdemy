@@ -1,0 +1,173 @@
+---
+title: "Practice: Data filtering, deduplication, mixing, synthetic"
+description: Self-check on filtering layers, dedup levels, mixing strategies, and synthetic data, a diagnose-the-pipeline exercise, and flashcards for retrieval.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Seven short questions. Answer each before opening the collapsible.
+
+**1. What are the two layers of filtering, and what does each catch?**
+
+<details>
+<summary>Show answer</summary>
+
+**Heuristic filters** are cheap rules with no learning (minimum/maximum document length, letter ratio, repetition ratio, stop-word ratio, language ID). They catch the obvious junk: placeholder pages, scraping artifacts, content-farm filler. **Classifier filters** train a small model to predict "is this high-quality text?" using a curated positive set (wikis, books, long-form prose) versus negative web; they catch subtler issues heuristics miss. Together they typically shrink the corpus 5-10x.
+
+</details>
+
+**2. What are the three levels of deduplication, and what does each catch?**
+
+<details>
+<summary>Show answer</summary>
+
+**Exact** (hash every document; drop repeated hashes; catches identical mirrors, cheap). **Near-duplicate** (MinHash + LSH to find approximate matches; catches re-published articles with edits, templates, slightly-shuffled content, the standard modern technique). **Substring or n-gram** (drop or thin matches of long token spans repeated across many documents; catches partial duplication at the high quality end).
+
+</details>
+
+**3. Why does deduplication often matter more than engineers initially expect?**
+
+<details>
+<summary>Show answer</summary>
+
+The web has enormous repeated content: re-published articles, scraped mirrors, identical templates and paragraphs. Training on duplicates wastes compute (re-teaches the model the same thing) and skews it toward whatever was duplicated, which is rarely the most useful content. Dedup shrinks the corpus 2-10x on top of filtering, and the resulting model is usually noticeably better at the same final token count.
+
+</details>
+
+**4. What is "learning the mix," and why is it replacing hand-tuned ratios?**
+
+<details>
+<summary>Show answer</summary>
+
+Methods like DoReMi train tiny proxy models on candidate source mixes, fit how loss responds to per-source sampling weights, and propose a final mix tuned for the target distribution you care about. It is replacing hand-tuned ratios because, like scaling laws, it lets you make a decision with evidence at small scale and extrapolate, rather than guessing ratios from intuition.
+
+</details>
+
+**5. What is the typical multi-epoch policy across slices?**
+
+<details>
+<summary>Show answer</summary>
+
+Pass once over the large web slice (or less), several times over small high-quality slices (wikis, books, code). The asymmetry over-represents high-density text in the training stream without inflating the corpus size, getting density-aware exposure for free.
+
+</details>
+
+**6. Name four uses of synthetic data and one technical caveat that applies to all of them.**
+
+<details>
+<summary>Show answer</summary>
+
+(1) Teacher-student distillation (a strong teacher generates target outputs; student trains on the pairs). (2) Textbook-style synthetic (Phi-class: deliberately clean, structured pretraining text). (3) Instruction-and-dialogue synthetic for SFT (large numbers of generated prompt-response pairs). (4) Self-improvement loops (filter the model's best outputs and re-train). **Caveat:** synthetic data carries the teacher's blind spots and characteristic phrasing into the student; the same filtering and dedup ideas apply.
+
+</details>
+
+**7. Restate the lesson's bottom-line about data engineering vs raw scale.**
+
+<details>
+<summary>Show answer</summary>
+
+Less data, cleaner and well-mixed, often beats more data poorly handled. The same compute spent on a better corpus produces a noticeably better model, and at fixed compute the data pipeline is increasingly the difference between a strong model and an average one. The architectural and systems work is the platform; the data work is the lever modern teams turn the most.
+
+</details>
+
+## Try it yourself: diagnose the pipeline
+
+About 10 minutes, no setup. Apply the engineering instincts.
+
+**Part A: where would you look first?** A team's model trained on a freshly-built 1-trillion-token corpus underperforms a published baseline trained on a similar token count. Name three pipeline-side things to check before retraining at larger scale.
+
+<details>
+<summary>What you'll get</summary>
+
+(1) **Deduplication.** Did they actually dedup at near-duplicate and substring level, not just exact? Insufficient dedup is one of the most common silent failure modes; the corpus may "look like" 1T tokens but contain 200B of effective unique content. (2) **Mixing.** Is code, math, and high-density text over-weighted compared to web bytes? A pure-proportional mix often underperforms an empirically tuned one by a wide margin. (3) **Quality filtering.** Is there a classifier-quality filter on top of heuristic filters, or only heuristic? On modern recipes, the educational-quality-classifier layer (FineWeb-Edu-style) measurably helps.
+
+A retraining at larger scale before fixing these would compound the problem.
+
+</details>
+
+**Part B (reasoning).** You are evaluating synthetic data generated by a strong teacher model for inclusion in a pretraining mix. What is one technical reason to be cautious, and what mitigation would you reach for?
+
+<details>
+<summary>What you should notice</summary>
+
+The teacher's blind spots, errors, and characteristic phrasing become the student's. If the teacher gets a particular kind of math problem subtly wrong, the student will learn the wrong patterns. Mitigations: filter the synthetic data with quality classifiers (often a different model), dedup it (synthetic data can be repetitive in patterns), validate a sample against a held-out gold set, and **mix** synthetic with non-synthetic rather than relying on it exclusively. Treat synthetic as another source with its own funnel.
+
+</details>
+
+**Part C (reasoning).** Why is the modern phrase "data is the moat" really a statement about the **pipeline**, not the sources?
+
+<details>
+<summary>What you should notice</summary>
+
+The major sources (Common Crawl, GitHub, Wikipedia, arXiv) are largely the same across teams; you cannot get a moat from the sources themselves. The moat is in the **pipeline**: filter recipes, dedup methods, mixing weights (often learned with DoReMi-class methods), and synthetic-data strategies. Teams that publish the dataset *and* withhold details of the pipeline are saying exactly this. The competitive surface in pretraining data is engineering, not collection.
+
+</details>
+
+## Flashcards
+
+Nine cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay the set out one card per page for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="Two filtering layers and what they catch?">
+
+Heuristic (cheap rules: length, ratios, repetition, language ID; catches obvious junk) and classifier (small model trained on curated positive/negative sets; catches subtler quality issues). Together: ~5-10x shrink.
+
+</Flashcard>
+
+<Flashcard question="Three dedup levels?">
+
+Exact (hash), near-duplicate (MinHash + LSH; the standard), substring/n-gram (long-span matches across docs). Used in combination; ~2-10x more shrink. Catches mirrors, edits, templates, partial overlap.
+
+</Flashcard>
+
+<Flashcard question="Why is dedup so impactful?">
+
+The web has massive repetition (mirrors, templates, re-publishing). Training on dupes wastes compute and skews the model. Less data, cleaner and unique, often beats more data with duplicates at the same final token count.
+
+</Flashcard>
+
+<Flashcard question="What is 'learning the mix'?">
+
+Methods like DoReMi train tiny proxy models on candidate source mixes, fit how loss responds to per-source weights, propose an empirically-tuned final mix. Replaces hand-tuned ratios; same small-scale-fit-then-extrapolate idea as scaling laws.
+
+</Flashcard>
+
+<Flashcard question="Typical multi-epoch policy across slices?">
+
+Once over the large web slice (or less), several times over small high-quality slices (wikis, books, code). Over-represents high-density text without inflating the corpus.
+
+</Flashcard>
+
+<Flashcard question="Four uses of synthetic data?">
+
+Teacher-student distillation, textbook-style synthetic (Phi-class), instruction/dialogue pairs for SFT, self-improvement loops for RL. A fast-growing category alongside web/wiki/code.
+
+</Flashcard>
+
+<Flashcard question="Caveat that applies to all synthetic data?">
+
+Carries the teacher's blind spots, errors, and characteristic phrasing into the student. Mitigate with quality filtering of the synthetic stream, dedup, validation against gold, and mixing with non-synthetic.
+
+</Flashcard>
+
+<Flashcard question="Diagnose: model underperforms baseline at similar token count, what to check?">
+
+(1) Dedup level (exact + near-duplicate + substring?). (2) Mixing weights (code/math/high-density over-weighted vs raw bytes?). (3) Filtering depth (heuristic + classifier-quality layer, or only heuristic?). Fix before retraining at larger scale.
+
+</Flashcard>
+
+<Flashcard question="Why is 'data is the moat' about the pipeline, not sources?">
+
+Sources (CC, Wikipedia, GitHub, arXiv) are largely shared; the moat is in filter recipes, dedup methods, learned mixing weights, and synthetic-data strategies. Competitive surface in pretraining data is engineering, not collection.
+
+</Flashcard>
+
+</FlashcardSet>

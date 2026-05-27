@@ -1,0 +1,87 @@
+---
+title: "Cheatsheet: Function approximation and deep RL"
+description: "One-page reference. The squared-TD-error loss, the semi-gradient update, the worked linear-Q one-step, the deadly triad and DQN's two fixes, and terms to use precisely."
+sidebar:
+  order: 5
+  label: Cheatsheet
+artifact: cheatsheet
+tableOfContents: false
+---
+
+## The one idea
+
+Replace the table with a parameterized function Q_theta. Minimize the squared TD error against the Bellman target with a semi-gradient step. Deal with the deadly triad (TD + off-policy + function approximation) via DQN's experience replay and target network.
+
+## The objective and update
+
+```
+Loss(theta) = E[ ( target - Q_theta(s, a) )^2 ],
+              target = r + gamma * max_{a'} Q_theta(s', a')   (Q-learning)
+
+Semi-gradient update (target treated as fixed when computing gradient):
+  delta  = target - Q_theta(s, a)
+  theta <- theta + eta * delta * grad_theta Q_theta(s, a)
+```
+
+## Worked one-step (linear Q)
+
+```
+Q_theta(x) = theta_0 + theta_1 * x.   theta = (0, 0).
+Observe (x = 2, r = 1, x' = 3), gamma = 0.9, eta = 0.1.
+
+Q(2) = 0, Q(3) = 0.
+target = 1 + 0.9 * 0 = 1.
+delta  = 1 - 0 = 1.
+grad   = (1, x) = (1, 2).
+theta  <- (0 + 0.1*1*1, 0 + 0.1*1*2) = (0.1, 0.2).
+
+After update: Q(2) = 0.5, Q(3) = 0.7, Q(0) = 0.1.
+=> ONE transition moves Q at EVERY x via the two shared parameters.
+```
+
+## The deadly triad
+
+```
+ANY TWO are usually fine.  ALL THREE together can diverge:
+
+  TD bootstrap          -- target uses an estimate Q_theta(s')
++ off-policy            -- target uses max over actions, not what was taken
++ function approximation -- updates change Q everywhere via shared parameters
+
+=> Updates can chase moving targets that they themselves move.
+```
+
+## DQN's two fixes
+
+| Fix | What it does | Why it helps |
+| --- | --- | --- |
+| **Experience replay** | Store transitions in a buffer; sample random minibatches | Decorrelation (closer to i.i.d. for SGD) + data reuse (each transition contributes to many updates) |
+| **Target network** | Slowly-updated frozen copy theta-minus used in the target | Live Q is not chasing its own tail; stable regression goal for a while, then sync |
+
+**DQN recipe = Q-learning + (C)NN + experience replay + target network.** Atari-at-human-level (Mnih et al. 2015) is this combination.
+
+## Step-size caveat (function approximation makes this delicate)
+
+```
+grad_theta Q includes the feature value (linear Q: d/d_theta_1 = x).
+-> Large features amplify updates.
+-> Too-large eta can overshoot the target dramatically.
+=> Feature scaling and careful eta selection matter.
+```
+
+## Pitfalls to dodge
+
+- Believing the Bellman recursion changes with function approximation (it doesn't).
+- Using full residual-gradient instead of semi-gradient (theoretically nicer, empirically worse).
+- Running deep Q-learning without target net or experience replay (deadly triad bites).
+- Treating function approximation as just a "scaling" issue (it introduces real algorithmic challenges).
+- Confusing the target network with a separate behavior or target policy (it's the same Q network, weights frozen).
+
+## Words to use precisely
+
+- **Q_theta(s, a)**: parameterized action-value function (linear features or NN).
+- **Semi-gradient**: gradient of the loss treating the target as fixed.
+- **Deadly triad**: TD bootstrap + off-policy + function approximation; potential divergence.
+- **Experience replay**: buffer + random minibatches; decorrelation + data reuse.
+- **Target network theta-minus**: frozen Q copy for the target; stabilizes training.
+- **DQN**: Q-learning + NN + experience replay + target network.

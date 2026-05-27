@@ -1,0 +1,88 @@
+---
+title: "Your first language model: makemore (the bigram model)"
+description: "A language model assigns probabilities to what comes next. This lesson builds the simplest one from scratch, a character-level bigram model that learns the statistics of names and generates new ones, two ways: by counting letter pairs and normalizing, and as a one-layer neural network trained by gradient descent. The two reach the same answer, and the model is the distant ancestor of every large language model: predict the next token, sample, repeat."
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+You can now build a network from nothing and train it: an autograd engine, neurons wired into a multilayer perceptron, a loss, and gradient descent. So far the network has only learned to fit a handful of made-up numbers. This lesson points the same machinery at something that feels much more like real AI: **language**. You will build a model that reads a list of names and learns to generate new ones, character by character. It is called `makemore`, because that is what it does, it makes more of the things you feed it.
+
+The contract still holds: nothing inside is a mystery. By the end, "a model that generates text" will be a probability table you could fill in by hand, and the leap to a real large language model will be a change of scale, not of kind.
+
+## What a language model actually does
+
+Strip away the mystique and a language model does one narrow thing: given some text so far, it assigns a **probability** to each possible next piece. Feed it `th` and it should think `e` is likely, `q` is not. That is the whole job. Everything a chatbot does is built on this single ability, applied over and over: predict what comes next, pick one, append it, predict again.
+
+To make this concrete and buildable by hand, we shrink the problem in two ways. We work at the level of **characters** rather than words, and we train on a simple corpus: a list of about thirty thousand names. The model's job becomes "given the characters of a name so far, predict the next character," and generating a new name means doing that repeatedly until the name ends.
+
+## The bigram simplification
+
+The boldest simplification is this: predict the next character from **only the single current character**, ignoring everything before it. A model that looks at one character to guess the next is called a **bigram** model (a bigram is just a pair of adjacent characters). It is crude (one character is very little context), but it is a complete, working language model, and it is small enough to understand completely.
+
+We need one more trick: a special token, written `.`, that marks both the start and the end of a name. So the name `ava` becomes the sequence `.ava.`, which contains the bigrams `.a`, `av`, `va`, and `a.`. The starting `.` lets the model learn which characters tend to begin a name; the ending `.` lets it learn when to stop. With 26 letters plus the `.` token, there are 27 possible characters.
+
+## Building it by counting
+
+The first way to build the model needs no neural network at all, just counting. Make a table with one row and one column for each of the 27 characters, and walk through every name in the dataset, tallying how often each character is followed by each other character. The cell at row `a`, column `n` holds the number of times `a` was immediately followed by `n` across all the names.
+
+That table of counts is the model in raw form. To turn a row into predictions, **normalize** it: divide each count by the row's total, so the row becomes a set of probabilities that sum to 1. Suppose, after the character `a`, the data contained `n` four times and `b` once and nothing else:
+
+```
+counts after 'a':   n: 4    b: 1            (row total = 5)
+probabilities:      P(n|a) = 4/5 = 0.8      P(b|a) = 1/5 = 0.2
+```
+
+Now you can **generate**. Start with the `.` token, look at its row of probabilities, and draw a character at random weighted by those probabilities (the letters that often start names get picked more often). Append it, move to that character's row, draw again, and keep going until you draw the `.` token, which ends the name. Run this loop and out come name-like strings the model invented. With one character of context they look only roughly like names, but they are unmistakably more name-like than random letters, which means the model learned something real.
+
+## Measuring how good the model is
+
+You need a single number that says how well the model fits the data, both to compare models and (soon) to train one. The standard measure is the **negative log likelihood** (NLL).
+
+The idea: a good model assigns high probability to the character pairs that actually occur. The likelihood of the data is the product of the probabilities the model gave to every real bigram. Probabilities are small and multiplying thousands of them underflows to zero, so we take the **log** of each (turning the product into a sum) and negate it (so that lower is better, which is what we want from a loss). For a single bigram, the loss is `-log(probability the model gave it)`. Using the row above:
+
+```
+loss on 'a' -> 'n':   -log(0.8) = 0.223
+loss on 'a' -> 'b':   -log(0.2) = 1.609
+average over these two:  (0.223 + 1.609) / 2 = 0.916
+```
+
+Read those numbers and the measure makes sense: a confident, correct prediction (0.8) earns a small loss, a less likely one (0.2) earns a bigger loss, and a prediction the model thought was impossible would earn an infinite one. The model's quality is the **average NLL over every bigram in the dataset**, and a lower number means a better model. Driving that number down is exactly what training will do.
+
+## The same model as a neural network
+
+Here is where Phase 1 pays off. We can build the identical bigram model as a tiny neural network and train it with the engine you already built. Represent the current character as a **one-hot vector**: a length-27 vector that is all zeros except a single 1 in the slot for that character. Feed it into a single linear layer, a 27-by-27 grid of weights, with no bias and no `tanh`. The output is 27 numbers, one per possible next character.
+
+Those 27 outputs are interpreted as **log-counts**: exponentiate them to get positive numbers that act like counts, then normalize them to sum to 1. That exponentiate-and-normalize step is called **softmax**, and it turns any 27 numbers into a probability distribution. So the network maps the current character to a probability for each next character, exactly like a row of the count table.
+
+Now train it the usual way: run names through, compute the average negative log likelihood as the loss, call `backward()` to get the gradient on every weight, and nudge the weights downhill. Run the loop and something satisfying happens: the network's softmax outputs converge to the same probabilities the counting method produced directly. Two routes, counting and gradient descent, arrive at one answer. The counting method is faster here, but the neural-network framing is the one that generalizes, because you can grow it (more context, more layers) in ways a fixed count table cannot.
+
+## Why one character is not enough
+
+The bigram model's weakness is built into its definition: it sees only the current character, so it cannot know that `em` is more likely to continue to `ma` in a name that started `emm` than in one that started `xqem`. One character of memory throws away almost all the context. That is precisely the limitation the rest of this track chips away at: the next lesson keeps the predict-the-next-character framing but feeds the model several previous characters at once, through a multilayer perceptron, so it can use more context and generate better names.
+
+## Why this matters when you use AI
+
+This toy is the genuine skeleton of a large language model. ChatGPT and its kin do exactly what `makemore` does: assign a probability to every possible next piece of text, sample one according to those probabilities, append it, and repeat. When a chatbot streams a reply token by token, you are watching this loop run.
+
+What separates a frontier model from this bigram table is scale and reach along three axes, not a different idea. The unit is a **token** (a chunk of text) rather than a single character. The **context** is thousands of tokens of preceding text rather than one character. And the **model** mapping context to next-token probabilities is a giant transformer rather than a single linear layer. Swap those three in and the bigram model becomes, in outline, a modern language model. The "sample from a probability distribution over what comes next" core is unchanged. That is why a language model can surprise you (it samples, it does not look up a fixed answer) and why the same prompt can give different replies.
+
+## Common pitfalls
+
+**Thinking the model understands names.** It does not. It learned a table of "which character tends to follow which," nothing more. The generated names look plausible because letter-pair statistics carry a surprising amount of a language's flavor, not because the model knows what a name is.
+
+**Confusing the count table with the neural network.** They are two implementations of the same model. Counting fills the probabilities in directly; the network learns them by gradient descent. For a bigram they match; the network's value is that it extends to richer models where no simple table exists.
+
+**Forgetting why we take the log.** The likelihood is a product of many small probabilities, which underflows to zero and is awkward to differentiate. Taking the log turns the product into a sum, and negating makes "better" mean "smaller," which is what a loss needs.
+
+**Expecting great names from one character of context.** A bigram model is deliberately weak. Its outputs are only roughly name-like, and that is the motivation for everything that follows, not a bug to fix here.
+
+## What you should remember
+
+- **A language model assigns a probability to each possible next piece of text; generating is just predict, sample, append, repeat.** A bigram model makes this buildable by hand by predicting the next character from only the current one, with a `.` token marking the start and end of each name.
+- **You can build it two equivalent ways.** Count every character pair and normalize each row into probabilities, or feed a one-hot character into a single linear layer, softmax the outputs into probabilities, and train on negative log likelihood with the engine from Phase 1. Both converge to the same table; the network is the version that generalizes.
+- **Quality is the average negative log likelihood, and lower is better.** A correct, confident prediction earns a small loss; an unlikely one earns a large loss. Training drives this number down.
+- **This is the real skeleton of a large language model.** Swap characters for tokens, one character of context for thousands, and a single linear layer for a transformer, and the bigram model becomes, in outline, ChatGPT. The predict-and-sample core does not change.
+
+You now have a working language model and the two ways to see it. Its weakness, one character of context, is the doorway to the next lesson, which feeds several previous characters through a multilayer perceptron so the model can use real context and the generated names start to look like names.

@@ -1,0 +1,199 @@
+---
+title: "Practice: Value iteration"
+description: "A self-check on the value-iteration update, the contraction property, and the greedy-stabilizes-early trick, a run-value-iteration exercise on a fresh small MDP, a stopping-rule and PI-vs-VI comparison drill, and flashcards built for retrieval."
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+The skills: writing the VI update correctly (max over actions, not sum under a policy), running it sweep-by-sweep, and using the greedy policy as the practical stopping rule rather than full V convergence. Keep a scratchpad.
+
+## Self-check
+
+Six short questions. Answer each in your head before opening the collapsible.
+
+**1. Write the value-iteration update for V_(k+1)(s).**
+
+<details>
+<summary>Show answer</summary>
+
+**V_(k+1)(s) = max over a of  [ R(s, a) + gamma * sum over s' of  P(s' | s, a) * V_k(s') ]**. The Bellman optimality equation applied as a direct assignment. Sweep all states, repeat until V (or the greedy policy) stops moving.
+
+</details>
+
+**2. What makes value iteration converge, and what is the rate?**
+
+<details>
+<summary>Show answer</summary>
+
+The Bellman optimality operator T^* is a **contraction in the sup-norm with constant gamma**: || T^* U - T^* V ||_inf `<=` gamma * || U - V ||_inf. So errors shrink by a factor of gamma each iteration, and V_k converges to V^* **geometrically at rate gamma** from any starting V_0.
+
+</details>
+
+**3. How does the VI update differ from the policy-evaluation update?**
+
+<details>
+<summary>Show answer</summary>
+
+Evaluation uses **sum over actions weighted by a given policy pi**: V_(k+1)(s) = sum_a pi(a|s) [R(s, a) + gamma * sum_s' P(s'|s, a) V_k(s')]. VI uses **max over actions**: V_(k+1)(s) = max_a [...]. Same sweep over states; only the per-state operator differs. Evaluation computes V^pi for a given pi; VI computes V^* directly.
+
+</details>
+
+**4. What is the early-stopping trick and why does it work?**
+
+<details>
+<summary>Show answer</summary>
+
+Stop VI when the **greedy policy** (argmax over actions w.r.t. the current V) stops changing, even if V is still numerically moving. For control purposes you only need the right policy, not the exact value, and the greedy policy typically stabilizes long before V converges (geometric value convergence is slow when gamma is near 1). Standard trick.
+
+</details>
+
+**5. How does value iteration fit on the generalized-policy-iteration (GPI) spectrum?**
+
+<details>
+<summary>Show answer</summary>
+
+VI is the **extreme case** of GPI: exactly one Bellman sweep per "improvement" (with the improvement baked into the max). Full policy iteration is the other end (many evaluation sweeps per improvement); truncated PI sits in the middle. All three converge by closely related arguments.
+
+</details>
+
+**6. Sketch how Q-learning will reuse the VI update without a model.**
+
+<details>
+<summary>Show answer</summary>
+
+When P and R are unknown, you cannot compute the expectation inside the VI max. Replace it with a **sample**: from an observed transition (s, a, r, s'), bootstrap a target r + gamma * max_a' Q(s', a') and nudge Q(s, a) toward it. That is the VI update with the expectation replaced by a single-sample estimate (lesson 8 develops it).
+
+</details>
+
+## Try it yourself: run value iteration
+
+Use the same MDP from the previous lesson's practice (L/R with hold/push, deterministic transitions, gamma = 0.5):
+
+```
+States: {L, R}.  Actions: {hold, push}.
+
+From L:  hold -> L  (R = 0)     push -> R  (R = 3)
+From R:  hold -> R  (R = 5)     push -> L  (R = -2)
+```
+
+Starting from V_0(L) = V_0(R) = 0, run **three** value-iteration sweeps. At each iteration, also write down the greedy policy implied by the current V. Then compare with what policy iteration found in the previous lesson's practice (pi^* = (push, hold), V^* = (8, 10)).
+
+<details>
+<summary>Show answer</summary>
+
+**Iteration 1.** Using V_0 = (0, 0):
+
+```
+V_1(L) = max{ 0 + 0.5 * 0,  3 + 0.5 * 0 } = max{ 0, 3 } = 3
+V_1(R) = max{ 5 + 0.5 * 0, -2 + 0.5 * 0 } = max{ 5, -2 } = 5
+
+Greedy at L: push (3 > 0).      Greedy at R: hold (5 > -2).
+=> pi_greedy = (push, hold)   -- already pi^* !
+```
+
+**Iteration 2.** Using V_1 = (3, 5):
+
+```
+V_2(L) = max{ 0 + 0.5 * 3,  3 + 0.5 * 5 } = max{ 1.5, 5.5 } = 5.5
+V_2(R) = max{ 5 + 0.5 * 5, -2 + 0.5 * 3 } = max{ 7.5, -0.5 } = 7.5
+
+Greedy: still (push, hold).   No change.
+```
+
+**Iteration 3.** Using V_2 = (5.5, 7.5):
+
+```
+V_3(L) = max{ 0 + 0.5 * 5.5,  3 + 0.5 * 7.5 } = max{ 2.75, 6.75 } = 6.75
+V_3(R) = max{ 5 + 0.5 * 7.5, -2 + 0.5 * 5.5 } = max{ 8.75, 0.75 } = 8.75
+
+Greedy: still (push, hold).   No change.
+```
+
+**Comparison with policy iteration's answer.** PI converged exactly in two outer rounds to V^* = (8, 10) and pi^* = (push, hold). Value iteration has the **correct policy from iteration 1** but is still creeping toward V^* = (8, 10) after three sweeps (currently at (6.75, 8.75)). It would take several more sweeps for V to converge numerically, but for control purposes you could stop at iteration 1 and act on pi^* immediately.
+
+</details>
+
+## Try it yourself: stopping rule and PI vs VI
+
+```
+Mark each statement TRUE or FALSE.
+
+A. In the worked exercise above, you must run VI until V_k matches PI's V^*
+   exactly (8, 10) before extracting a usable policy.
+B. The greedy policy stabilized from iteration 1 in the worked exercise, so
+   stopping there and acting on pi = (push, hold) would already give you pi^*.
+C. VI is always faster than PI in total work, regardless of MDP.
+D. VI and PI converge to the same V^* and pi^* on any MDP, just by different
+   amounts of work per outer step.
+```
+
+<details>
+<summary>Show answer</summary>
+
+- **A: FALSE.** You only need the right policy for control, and the greedy policy w.r.t. V_1 was already pi^*. Stopping early on policy stabilization is the standard practical trick.
+- **B: TRUE.** That is exactly the early-stopping case.
+- **C: FALSE.** Each VI sweep is much cheaper than a full evaluation, but VI typically takes more outer iterations than PI. The two trade off; which is faster in total work depends on the MDP (especially gamma and structure). On small problems either is fine.
+- **D: TRUE.** Both algorithms compute the same V^* and pi^* on any finite MDP with bounded rewards; they are different points on the GPI spectrum with the same fixed point.
+
+</details>
+
+## Flashcards
+
+Eight cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay out the full set as one card per page for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="Write the value-iteration update.">
+
+V_(k+1)(s) = max_a [ R(s, a) + gamma * sum_(s') P(s'|s, a) V_k(s') ]. The Bellman optimality equation used as a direct assignment. Sweep all states, repeat.
+
+</Flashcard>
+
+<Flashcard question="What guarantees value iteration converges, and at what rate?">
+
+The Bellman optimality operator T^* is a contraction in the sup-norm with constant gamma. So V_k converges to V^* geometrically at rate gamma, from any starting V_0.
+
+</Flashcard>
+
+<Flashcard question="VI update vs policy-evaluation update: what is the one difference?">
+
+Evaluation uses sum over actions weighted by pi (Bellman expectation). VI uses max over actions (Bellman optimality). Same sweep over states; only the per-state operator differs.
+
+</Flashcard>
+
+<Flashcard question="What is the early-stopping trick for value iteration?">
+
+Stop when the greedy policy (argmax over actions w.r.t. current V) stops changing, not when V fully converges. The greedy policy usually stabilizes much earlier; for control you only need the right policy.
+
+</Flashcard>
+
+<Flashcard question="Where does VI fit on the GPI spectrum?">
+
+VI is the extreme: exactly one Bellman sweep per "improvement" (with improvement baked into the max). Full PI does many evaluation sweeps per improvement; truncated PI sits in between. All are GPI.
+
+</Flashcard>
+
+<Flashcard question="How is Q-learning related to value iteration?">
+
+Q-learning is VI's update on Q with the expectation replaced by a sample: from (s, a, r, s'), nudge Q(s, a) toward r + gamma * max_a' Q(s', a'). Same recursion; one observed transition instead of P.
+
+</Flashcard>
+
+<Flashcard question="How is DQN related to value iteration?">
+
+DQN approximates Q with a neural network and uses gradient descent to make Q(s, a) close to the Bellman optimality target r + gamma * max_a' Q(s', a'). Same recursion; the table is replaced by a function approximator.
+
+</Flashcard>
+
+<Flashcard question="Does VI maintain an explicit policy during the loop?">
+
+No. The implicit policy at iteration k is greedy w.r.t. V_k, and you can read it off at any time without storing it. The policy comes for free at the end (or whenever you ask).
+
+</Flashcard>
+
+</FlashcardSet>

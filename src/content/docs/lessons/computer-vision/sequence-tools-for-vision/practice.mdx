@@ -1,0 +1,202 @@
+---
+title: "Practice: Sequence tools for vision"
+description: Self-check on recurrence + attention as applied to vision, a fresh worked attention example, an architecture-matching exercise, and flashcards.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Seven short questions. Answer each before opening the collapsible.
+
+**1. Why does a CV track need sequence tools at all?**
+
+<details>
+<summary>Show answer</summary>
+
+Many vision tasks involve sequences. The output can be a sequence (image captioning, where the caption is a sequence of words). The input can be a sequence (video understanding, where frames are sequential). And in the vision-transformer setup the image itself is treated as a sequence (a grid of patches turned into a flattened token stream).
+
+</details>
+
+**2. Write the basic RNN update rule and name what each symbol is.**
+
+<details>
+<summary>Show answer</summary>
+
+`h_t = f(W · x_t + U · h_{t-1} + b)`. `x_t` is the input at time `t`; `h_{t-1}` is the hidden state from the previous step (the network's running memory); `W` and `U` are learned weight matrices; `b` is a learned bias; `f` is a non-linearity. The output at step `t` is read off `h_t`, optionally through another linear layer.
+
+</details>
+
+**3. State the two structural limits of basic RNNs.**
+
+<details>
+<summary>Show answer</summary>
+
+(1) Sequential by construction: step `t` depends on step `t-1`'s hidden state, so steps cannot be computed in parallel on a GPU. (2) Weak at long-range dependencies: information tends to fade across many steps; LSTM/GRU gating helps but does not fully solve it.
+
+</details>
+
+**4. Write the standard attention formula and explain the role of each piece.**
+
+<details>
+<summary>Show answer</summary>
+
+`Attention(Q, K, V) = softmax( Q · K^T / sqrt(d_k) ) · V`. `Q` (queries), `K` (keys), `V` (values) are matrices derived from the input. `Q · K^T` gives compatibility scores (each query vs each key). Dividing by `sqrt(d_k)` keeps scores stable at large key dimension. `softmax` turns each row of scores into a probability distribution over input positions. Multiplying by `V` produces, for each query, a weighted average of values with those probabilities as weights.
+
+</details>
+
+**5. What two lifts does attention give vs RNNs, and what change in the architecture causes both?**
+
+<details>
+<summary>Show answer</summary>
+
+(1) **Parallelism**: all positions are computed in parallel because there is no sequential hidden-state dependency. (2) **Long-range dependencies**: every output position attends directly to every input position, with no distance penalty. Both lifts come from the same change: replacing "step through with a hidden state" with "weighted average over all positions, weights from compatibility."
+
+</details>
+
+**6. What is the Vision Transformer's (ViT's) core architectural choice?**
+
+<details>
+<summary>Show answer</summary>
+
+Replace convolution entirely with attention. Cut the input image into a grid of small fixed-size patches (commonly 16 by 16), flatten each patch into a vector, treat the patches as a sequence (with learned position embeddings so the model knows where each patch sat), and run a standard transformer encoder over that sequence. Output is a representation of the image; a linear classifier on top produces class scores.
+
+</details>
+
+**7. Where in the sister tracks does each tool's deep mechanics live?**
+
+<details>
+<summary>Show answer</summary>
+
+Recurrence (RNN, LSTM, GRU): Track 12 lesson 2 (Why sequences need memory). Attention and transformer blocks: Track 5 (AI Foundations) has a multi-lesson attention/transformer sequence; Track 14 (practical transformers) will cover it end to end with code. Track 11 (Neural Network Intuition) lessons 3-4 establish the linear-plus-non-linearity-plus-backprop machinery both tools run on top of.
+
+</details>
+
+## Try it yourself: compute one attention head, match the architecture
+
+Three exercises, about 15 minutes.
+
+**Part A: a fresh attention computation.** Use the standard formula with `d_k = 2`. Suppose one query `q = [0, 1]`, three keys `K = [[1, 0], [0, 1], [-1, 0]]` and three values `V = [[2, 0], [0, 2], [1, 1]]`. Compute: the raw scores, the scaled scores (÷ sqrt(2) ≈ 1.414), the softmax probabilities (use `exp(0.707) ≈ 2.028`, `exp(0) = 1`, `exp(-0.707) ≈ 0.493`), and the final attention output.
+
+<details>
+<summary>Worked answer</summary>
+
+```
+Scores (q · K^T):
+  q·k1 = (0)(1) + (1)(0)   = 0
+  q·k2 = (0)(0) + (1)(1)   = 1
+  q·k3 = (0)(-1) + (1)(0)  = 0
+  Raw: [0, 1, 0]
+
+Scaled (÷ sqrt(2) ≈ 1.414):
+  [0, 0.707, 0]
+
+exp(scaled):
+  [exp(0), exp(0.707), exp(0)] = [1.000, 2.028, 1.000]
+  sum = 4.028
+
+softmax:
+  [1.000/4.028, 2.028/4.028, 1.000/4.028] ≈ [0.248, 0.503, 0.248]
+
+Output (weighted V):
+  0.248 · [2, 0] + 0.503 · [0, 2] + 0.248 · [1, 1]
+  = [0.497 + 0 + 0.248,  0 + 1.007 + 0.248]
+  ≈ [0.745, 1.255]
+```
+
+The query `[0, 1]` matched key 2 (`[0, 1]`) most strongly (raw score 1) and the other two keys equally (raw score 0). After softmax, key 2 got ~50% of the weight and the others ~25% each. The output is the corresponding weighted average of `V`. That four-step recipe scaled to dozens of queries and keys is the whole attention mechanism.
+
+</details>
+
+**Part B: match the vision architecture.** For each description, name what kind of system it is (CNN-RNN captioning, CNN-attention captioning, CNN-RNN video, or Vision Transformer).
+
+1. Cut the image into 16-by-16 patches, embed each as a vector, treat as a sequence, run a transformer encoder over the sequence, read off a class token.
+2. CNN encodes the image into a feature vector; an RNN decoder generates a caption word by word, with no per-region focus.
+3. Each video frame goes through a CNN; the resulting feature sequence is processed by an RNN to recognize the action.
+4. CNN extracts feature maps from the image; a decoder generates each caption word while attending to different regions of those feature maps, lighting up the cat when generating "cat" and the chair when generating "chair."
+
+<details>
+<summary>Answers</summary>
+
+1. **Vision Transformer (ViT).** Image-as-sequence-of-patches; transformer encoder; class-token readout. No convolution at all.
+2. **CNN-RNN captioning (classic).** CNN encoder + RNN decoder, image is summarized once into a feature vector that initializes the decoder, no per-region focus.
+3. **CNN-RNN video understanding.** Per-frame CNN features fed into an RNN over time, the standard 2015-era video-action-recognition shape.
+4. **CNN-attention captioning.** The cleaner modern version: CNN features but an attention-based decoder that can attend to different image regions per generated word. The attention map is one of the few directly inspectable behaviours in a deep vision system.
+
+</details>
+
+**Part C: reasoning.** A captioning system uses an attention-based decoder. When it generates the word "cat," its attention map over the image is sharply peaked on the cat region. When it generates the word "the," the attention map is much flatter, spread across many regions. Briefly explain why this difference makes sense.
+
+<details>
+<summary>What a good answer looks like</summary>
+
+Content words like "cat" depend strongly on a specific visual region (the cat), so the attention probabilities concentrate on the cat's feature-map positions; the model's output there is essentially "the value vectors of the cat region weighted heavily." Function words like "the" depend much less on a specific visual region (they are determined more by the previously-generated words than by any one image area), so the attention distribution flattens and pulls from many positions. The shape of the attention map directly reflects how much the current decoding step actually needs visual evidence, which is one reason attention maps are useful for inspecting model behaviour.
+
+</details>
+
+## Flashcards
+
+Nine cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay out the full set as one card per page, ready to print or save as a PDF for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="Three places sequences enter computer vision?">
+
+(1) Output: image captioning produces a sequence of words. (2) Input: video understanding processes a sequence of frames. (3) Both/internal: Vision Transformer treats an image as a sequence of patches.
+
+</Flashcard>
+
+<Flashcard question="Basic RNN update rule?">
+
+`h_t = f(W · x_t + U · h_{t-1} + b)`. Carry hidden state forward step by step; output at each step is read from the hidden state.
+
+</Flashcard>
+
+<Flashcard question="Two structural limits of basic RNNs?">
+
+(1) Sequential by construction; cannot parallelize across timesteps. (2) Weak at long-range dependencies; later steps tend to forget far-back information even with LSTM gating.
+
+</Flashcard>
+
+<Flashcard question="Standard attention formula?">
+
+`Attention(Q, K, V) = softmax( Q · K^T / sqrt(d_k) ) · V`. Compatibility scores → scaled → softmax → weighted average of values.
+
+</Flashcard>
+
+<Flashcard question="Two lifts attention gives over RNNs?">
+
+(1) Parallelism: all positions in parallel (no sequential dependency). (2) Long-range: every output position attends directly to every input position, no distance penalty. Both from the same change.
+
+</Flashcard>
+
+<Flashcard question="Vision Transformer (ViT) in one sentence?">
+
+Cut image into patches, embed each as a vector, treat as a sequence, run a standard transformer encoder, read off a class-token representation, with no convolution at all.
+
+</Flashcard>
+
+<Flashcard question="Classic CNN-RNN image captioning?">
+
+CNN encoder produces a feature vector; RNN decoder generates the caption word by word, conditioned on that vector. Modern variants replace the RNN with attention so each word can attend to specific image regions.
+
+</Flashcard>
+
+<Flashcard question="Why might transformer outperform CNN at scale but not at moderate scale?">
+
+CNNs have strong vision-specific inductive biases (locality, translation equivariance) that help when data is limited. Transformers have weaker inductive biases but scale further with more data and compute; given enough of both, the transformer's flexibility wins. Below that threshold, CNNs remain competitive.
+
+</Flashcard>
+
+<Flashcard question="Where are the deep mechanics for recurrence and attention covered?">
+
+Recurrence: Track 12 lesson 2 (Why sequences need memory). Attention + transformer blocks: Track 5 multi-lesson sequence and Track 14 (practical transformers). T16 L7 stays at the applied-to-vision level by design.
+
+</Flashcard>
+
+</FlashcardSet>

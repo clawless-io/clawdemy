@@ -1,0 +1,204 @@
+---
+title: "Practice: Fine-tune a pretrained model"
+description: Self-check on the data collator, the head-swap warning, TrainingArguments, the Trainer, and evaluation, a hands-on fine-tuning run on MRPC, and flashcards for retrieval.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Seven short questions. Answer each before opening the collapsible.
+
+**1. What does `DataCollatorWithPadding` do, and why is it better than padding the whole dataset to one length?**
+
+<details>
+<summary>Show answer</summary>
+
+It does dynamic padding: it pads each batch only to the length of the longest example in that batch, at the moment the batch is assembled. Padding the whole dataset to one length forces every batch to match the single longest example anywhere in the data, which wastes compute on padding tokens. Dynamic padding keeps short batches short.
+
+</details>
+
+**2. You load `AutoModelForSequenceClassification.from_pretrained(checkpoint, num_labels=2)` and get a warning about discarded and randomly initialized weights. Is something wrong?**
+
+<details>
+<summary>Show answer</summary>
+
+No, it is expected and is the point. The base model's pretraining head is the wrong shape for your task, so the library discards it and adds a fresh classification head with random weights. The warning reports exactly that and tells you to train the model, which is what fine-tuning does. Seeing the warning means the setup worked.
+
+</details>
+
+**3. What is the only required argument to `TrainingArguments`, and what does the object hold?**
+
+<details>
+<summary>Show answer</summary>
+
+The only required argument is an output directory (where the model and checkpoints are saved). The object holds every hyperparameter for the run: learning rate, batch size, number of epochs, evaluation strategy, and speed options like mixed precision. Defaults handle the rest for a basic fine-tune.
+
+</details>
+
+**4. What objects does the `Trainer` take, and what launches training?**
+
+<details>
+<summary>Show answer</summary>
+
+The model, the `TrainingArguments`, the train and validation datasets, a data collator, and the tokenizer (passed as `processing_class`). Optionally a `compute_metrics` function. Calling `trainer.train()` runs the fine-tuning loop.
+
+</details>
+
+**5. After `trainer.train()`, why is a falling training loss not enough to trust the model?**
+
+<details>
+<summary>Show answer</summary>
+
+Training loss only tells you the model is fitting the training data, not whether it generalizes to data it has not seen. To know if it is actually good you evaluate on a held-out validation set, which means setting an `eval_strategy` and giving the Trainer a `compute_metrics` function that reports an interpretable metric like accuracy or F1.
+
+</details>
+
+**6. The Trainer's predictions come back as logits of shape (408, 2). How do you turn those into label predictions?**
+
+<details>
+<summary>Show answer</summary>
+
+Take the index of the maximum value along the last axis: `np.argmax(predictions, axis=-1)`. That collapses each row of two logits into a single predicted class (0 or 1), which you can then compare to the true labels with a metric.
+
+</details>
+
+**7. What does a `compute_metrics` function receive and return?**
+
+<details>
+<summary>Show answer</summary>
+
+It receives the model's predictions (logits) and the true labels, and returns a dictionary mapping metric names to values, for example `{"accuracy": 0.86, "f1": 0.90}`. Inside, you `argmax` the logits into predictions and score them with a metric loaded from the `evaluate` library.
+
+</details>
+
+## Try it yourself: fine-tune BERT on MRPC
+
+About 15 minutes including training (use a GPU; Colab's free tier is fine). You will take a model that cannot classify sentence pairs and train it to about 86% accuracy.
+
+**Part A: prepare, load, configure, train.** Run this end to end:
+
+```python
+from datasets import load_dataset
+from transformers import (AutoTokenizer, AutoModelForSequenceClassification,
+                          DataCollatorWithPadding, TrainingArguments, Trainer)
+import numpy as np
+import evaluate
+
+raw_datasets = load_dataset("glue", "mrpc")
+checkpoint = "bert-base-uncased"
+tokenizer = AutoTokenizer.from_pretrained(checkpoint)
+
+def tokenize_function(example):
+    return tokenizer(example["sentence1"], example["sentence2"], truncation=True)
+
+tokenized = raw_datasets.map(tokenize_function, batched=True)
+data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
+
+def compute_metrics(eval_preds):
+    metric = evaluate.load("glue", "mrpc")
+    logits, labels = eval_preds
+    return metric.compute(predictions=np.argmax(logits, axis=-1), references=labels)
+
+args = TrainingArguments("test-trainer", eval_strategy="epoch")
+model = AutoModelForSequenceClassification.from_pretrained(checkpoint, num_labels=2)
+trainer = Trainer(model, args,
+                  train_dataset=tokenized["train"],
+                  eval_dataset=tokenized["validation"],
+                  data_collator=data_collator,
+                  processing_class=tokenizer,
+                  compute_metrics=compute_metrics)
+trainer.train()
+```
+
+<details>
+<summary>What you should see, and why</summary>
+
+The head-swap warning when the model loads (expected), then training loss falling, then at the end of each epoch a validation accuracy and F1 in the mid-to-high 80s. Exact numbers vary run to run because the new head starts from random weights, so the same code can land a point or two apart each time. The takeaway: you fine-tuned a real model and measured it on held-out data, which is the full loop.
+
+</details>
+
+**Part B (reasoning).** You run the exact same training script twice and get accuracy 0.857 the first time and 0.869 the second. Did you do something wrong?
+
+<details>
+<summary>What you should notice</summary>
+
+No. The classification head is initialized with random weights each time you load the model, so two runs start from slightly different points and land in slightly different places. Small run-to-run variation is normal and expected. It is also why a single number is weak evidence: if you need a trustworthy comparison between two approaches, you average over several runs rather than trusting one.
+
+</details>
+
+**Part C (try a switch).** Add `fp16=True` to your `TrainingArguments` and rerun. What is it for, and what should you notice?
+
+<details>
+<summary>What you should notice</summary>
+
+`fp16=True` turns on mixed-precision training. On a capable GPU the run should be faster and use less memory, with metrics in the same ballpark. It is one of several best-practice switches the Trainer exposes as a single keyword (alongside `gradient_accumulation_steps` and `lr_scheduler_type`), which is what lets the same simple setup scale to serious training jobs.
+
+</details>
+
+## Flashcards
+
+Nine cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay the set out one card per page for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="What is fine-tuning?">
+
+Continuing to train a pretrained model on a task-specific labeled dataset, so it learns a task the base model could not do. The cheap part: minutes on a single GPU, versus weeks of pre-training.
+
+</Flashcard>
+
+<Flashcard question="What does a data collator (DataCollatorWithPadding) do?">
+
+Dynamic padding: it pads each batch only to the longest example in that batch, assembled on the fly, instead of padding the whole dataset to one fixed length. Saves compute on padding tokens.
+
+</Flashcard>
+
+<Flashcard question="Why do you get a warning when loading AutoModelForSequenceClassification on a base model?">
+
+The base model's pretraining head is discarded and a fresh, randomly initialized classification head is added. The warning reports this and is expected; training makes the new head useful.
+
+</Flashcard>
+
+<Flashcard question="What is TrainingArguments, and what is required?">
+
+A single object holding every hyperparameter for a run (learning rate, batch size, epochs, eval strategy, speed options). Only an output directory is required; defaults cover the rest.
+
+</Flashcard>
+
+<Flashcard question="What does the Trainer take, and what starts training?">
+
+Model, TrainingArguments, train and validation datasets, a data collator, the tokenizer (as processing_class), and optionally compute_metrics. trainer.train() runs the loop.
+
+</Flashcard>
+
+<Flashcard question="Why is a falling training loss not enough?">
+
+It only shows the model fitting the training data, not generalizing. Measure quality on held-out data via an eval_strategy plus a compute_metrics function reporting an interpretable metric.
+
+</Flashcard>
+
+<Flashcard question="How do you turn Trainer logits into predictions?">
+
+np.argmax(logits, axis=-1) takes the index of the largest logit in each row, collapsing per-label scores into a single predicted class to compare against the labels.
+
+</Flashcard>
+
+<Flashcard question="What does compute_metrics receive and return?">
+
+It receives predictions (logits) and true labels, and returns a dict of named metrics, e.g. `{'accuracy': 0.86, 'f1': 0.90}`. It argmaxes the logits and scores them with the evaluate library.
+
+</Flashcard>
+
+<Flashcard question="Name two Trainer switches for efficient training.">
+
+fp16=True (mixed precision: faster, less memory) and gradient_accumulation_steps (simulate a larger batch when GPU memory is tight). Also lr_scheduler_type for learning-rate decay.
+
+</Flashcard>
+
+</FlashcardSet>

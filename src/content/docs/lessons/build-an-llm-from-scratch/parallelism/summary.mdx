@@ -1,0 +1,25 @@
+---
+title: "Summary: Parallelism"
+description: The 5-minute scan version. Data, tensor, and pipeline parallelism, plus FSDP/ZeRO, and how to mix them.
+sidebar:
+  order: 4
+  label: Summary
+artifact: summary
+---
+
+Lesson 2 said `16N` bytes often exceed one GPU's memory. This lesson is how you spread the work. **Data parallelism (DP)** replicates the full model on each device, splits the batch, all-reduces the gradients, simple and scales the effective batch, but every device must fit the full model. **Tensor parallelism (TP)** splits individual layers' tensors across devices (FFN width, attention heads), communicating inside every layer, so it needs a fast interconnect and lives within a single node. **Pipeline parallelism (PP)** splits the layers across devices as stages; microbatches flow through; it communicates only at stage boundaries, so it tolerates slower inter-node interconnects (with pipeline bubbles managed by microbatching). The modern default for memory savings without TP/PP is **FSDP / ZeRO**, which shards parameters, gradients, and optimizer states across the DP ranks. Frontier training combines all three (**3D parallelism**): TP within nodes, PP across nodes, DP on top. This is the scan version; the lesson tells you which scheme to add when, and why.
+
+## Core ideas
+
+- **One GPU is rarely enough.** Lesson 2's `16N` rule already exceeds a single device for a 7B fp32 model; frontier models are far larger.
+- **Data parallelism (DP):** full model per device, split the batch, all-reduce gradients. Simple; limited by per-device memory.
+- **Tensor parallelism (TP):** split each layer's tensors across devices; communicate inside every layer (all-reduce/all-gather). Needs fast interconnect; usually within a node.
+- **Pipeline parallelism (PP):** split layers across devices (stages); microbatches flow through. Communication only at stage boundaries (tolerates slower interconnect). Manage pipeline bubbles via microbatching.
+- **FSDP / ZeRO:** shard parameters/gradients/optimizer states across DP ranks; gather per layer on demand. Memory savings of model-splitting with DP simplicity. Cost: extra (often overlapped) communication.
+- **3D parallelism:** TP within nodes, PP across nodes, DP on top. The largest open models train this way; each axis attacks a different bottleneck.
+
+## What changes for you
+
+This lesson makes the lesson-2 memory accounting actionable at scale. A model that does not fit in one GPU is no longer a dead end; it is a parallelism configuration. The rule of thumb falls out naturally: if it does not fit on one device, add FSDP/ZeRO or tensor parallelism within the node; if it does not fit on one node, add pipeline parallelism across nodes; in every case, data parallelism multiplies the batch. The systems half of an LLM build is, at its core, this negotiation between memory, compute, and communication, mixed against the topology of your cluster. With it, you can read a real training-run configuration ("64 GPUs across 8 nodes, TP=8, PP=4, DP=2") and know what each number means and why it was chosen. The next lesson closes Phase 2 with the other half of the systems story, inference, where parallelism returns in a different shape and the KV cache from lesson 4 is the central concern.
+
+The systems half of training an LLM is choosing which axes to split, data, tensors, or layers, and combining them to fit the model on the hardware you have. Each scheme buys different resources at different communication costs; the work is matching the combination to your model and your cluster.

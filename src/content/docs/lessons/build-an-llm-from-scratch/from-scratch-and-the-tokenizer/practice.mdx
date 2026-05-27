@@ -1,0 +1,181 @@
+---
+title: "Practice: What \"from scratch\" means, and the tokenizer"
+description: Self-check on the from-scratch scope, why subword, and byte-level BPE, a trace-the-merges-by-hand exercise, and flashcards for retrieval.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Seven short questions. Answer each before opening the collapsible.
+
+**1. What does building an LLM "from scratch" actually entail?**
+
+<details>
+<summary>Show answer</summary>
+
+Building every layer of the stack yourself instead of calling a finished model: the tokenizer, the Transformer architecture, the loss (cross-entropy) and optimizer (AdamW), and the training loop, plus the systems that make training efficient (kernels, parallelism), and the scaling laws, data pipelines, evaluation, and post-training that make the model good. Not reinventing matrix multiplication; building the language-model-specific layers.
+
+</details>
+
+**2. What is the through-line of the whole track, and what does it mean in practice?**
+
+<details>
+<summary>Show answer</summary>
+
+Efficiency. At every step you account for the cost: how many floating-point operations (FLOPs) something takes, how much memory it needs, and whether the hardware is actually busy. Building an LLM is largely a long sequence of precise decisions about compute and data.
+
+</details>
+
+**3. Why is the tokenizer called the model's first component?**
+
+<details>
+<summary>Show answer</summary>
+
+A neural network operates on numbers, not characters, so text must become a sequence of integers before the model can do anything. The tokenizer performs that conversion, and everything downstream (every compute cost, every context-length limit) is measured in the tokens it produces.
+
+</details>
+
+**4. Why are characters and words both poor choices for tokens?**
+
+<details>
+<summary>Show answer</summary>
+
+Characters (or bytes) give a tiny vocabulary but enormous sequences, and since a Transformer's cost grows with sequence length, that is expensive and weak at long-range structure. Words give short sequences but an exploding vocabulary and the out-of-vocabulary problem (any unseen word becomes unknown). Subword tokenization sits in between.
+
+</details>
+
+**5. Why start byte-pair encoding at the byte level?**
+
+<details>
+<summary>Show answer</summary>
+
+Starting from raw bytes gives a base vocabulary of just 256 tokens and means any possible string is representable, so there is no out-of-vocabulary case at all: the worst case is falling back to individual bytes. From that byte base, BPE learns merges to build a larger subword vocabulary.
+
+</details>
+
+**6. Describe the BPE training procedure, and what kind of process it is.**
+
+<details>
+<summary>Show answer</summary>
+
+Start with the corpus as bytes; count every adjacent pair of tokens; merge the most frequent pair into a new token and record the merge rule; repeat until you reach the target vocabulary size. The output is a vocabulary plus an ordered list of merge rules. It is deterministic statistics over a corpus, not gradient descent: same data gives the same tokenizer every time, with no GPU.
+
+</details>
+
+**7. What is the main trade-off in choosing the vocabulary size?**
+
+<details>
+<summary>Show answer</summary>
+
+A larger vocabulary means shorter token sequences (cheaper to process, more text per context window) but a larger embedding table (more parameters) and more rarely-seen tokens. A smaller vocabulary is the reverse. There is no single right answer; it is a deliberate trade-off, typically landing in the tens of thousands for an LLM.
+
+</details>
+
+## Try it yourself: trace the merges by hand
+
+About 12 minutes, paper only. You will run the BPE training procedure manually to feel exactly what it does.
+
+**Part A: merge by hand.** Here is a tiny "corpus" as a sequence of symbols:
+
+```
+a a a b d a a a b a c
+```
+
+Apply BPE: repeatedly find the most frequent adjacent pair and merge it into a new symbol, three times. Track the sequence after each merge.
+
+<details>
+<summary>What you'll get</summary>
+
+- **Merge 1:** the pair `a a` is most frequent. Replace it with `Z`. Sequence becomes `Z a b d Z a b a c`.
+- **Merge 2:** now `Z a` is most frequent (it appears twice). Replace with `Y`. Sequence becomes `Y b d Y b a c`.
+- **Merge 3:** now `Y b` is most frequent (twice). Replace with `X`. Sequence becomes `X d X a c`.
+
+The sequence went from 11 symbols to 5, and you learned three merge rules (`Z=aa`, `Y=Za`, `X=Yb`) plus the new vocabulary entries. That is BPE training in miniature: count pairs, merge the most frequent, repeat. Your "encode" of new text would apply these same merges in order.
+
+</details>
+
+**Part B (reasoning).** After training, you encode a brand-new string that contains a character the corpus never had. With a byte-level tokenizer, what happens, and why is that a feature?
+
+<details>
+<summary>What you should notice</summary>
+
+Nothing breaks. Because the tokenizer's base is the 256 possible bytes, any character (even one unseen in training) decomposes into bytes that are already in the vocabulary. The merges that apply, apply; the rest stays as individual byte tokens. There is no "unknown token," which is exactly the out-of-vocabulary problem that word-level tokenizers suffer. Byte-level coverage is the feature.
+
+</details>
+
+**Part C (reasoning).** Your colleague proposes doubling the vocabulary size to make sequences shorter and training cheaper. What did they get right, and what cost did they ignore?
+
+<details>
+<summary>What you should notice</summary>
+
+Right: a bigger vocabulary does shorten token sequences, which lowers the per-token compute and fits more text per context window. Ignored: the embedding table grows with the vocabulary, adding parameters (and memory), and the extra tokens are individually rarer, so the model sees fewer examples of each. It is a genuine trade-off, not a free win, and it is exactly the kind of cost you will learn to quantify in the next lesson's FLOP-and-memory accounting.
+
+</details>
+
+## Flashcards
+
+Nine cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay the set out one card per page for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="What does building an LLM 'from scratch' entail?">
+
+Building the whole language-model stack yourself: tokenizer, architecture, loss, optimizer, training loop, plus the systems (kernels, parallelism), scaling laws, data pipelines, evaluation, and post-training that make it efficient and good.
+
+</Flashcard>
+
+<Flashcard question="What is the track's through-line?">
+
+Efficiency. At every step you account for FLOPs, memory, and whether the hardware is busy. Building an LLM is mostly precise decisions about compute and data.
+
+</Flashcard>
+
+<Flashcard question="Why is the tokenizer the model's first component?">
+
+A network operates on numbers, not text, so the tokenizer converts text to integer tokens before anything else. Everything downstream, including cost and context limits, is measured in those tokens.
+
+</Flashcard>
+
+<Flashcard question="Why not characters or words as tokens?">
+
+Characters: tiny vocabulary but enormous sequences (expensive, since cost grows with length). Words: short sequences but an exploding vocabulary and the out-of-vocabulary problem. Subword tokens sit in between.
+
+</Flashcard>
+
+<Flashcard question="Why start BPE at the byte level?">
+
+Bytes give a 256-token base and make any string representable, so there is no out-of-vocabulary case, the worst case is individual byte tokens. BPE then learns merges on top of the byte base.
+
+</Flashcard>
+
+<Flashcard question="What is the BPE training procedure?">
+
+Start with bytes; count adjacent token pairs; merge the most frequent pair into a new token and record the rule; repeat to the target vocab size. Output: a vocabulary plus ordered merge rules.
+
+</Flashcard>
+
+<Flashcard question="Is BPE training the same as model training?">
+
+No. It is deterministic statistics over a corpus (count pairs, merge the most frequent), not gradient descent. Same data gives the same tokenizer every time, with no GPU.
+
+</Flashcard>
+
+<Flashcard question="What does the vocabulary-size choice trade off?">
+
+Larger vocab = shorter sequences (cheaper, more text per context window) but a bigger embedding table (more parameters) and rarer tokens. Smaller is the reverse. A deliberate trade-off, usually tens of thousands.
+
+</Flashcard>
+
+<Flashcard question="What does encode vs decode do in a BPE tokenizer?">
+
+Encode: split text to bytes and apply the learned merges in order to get token IDs. Decode: look up the IDs and concatenate the bytes back to text. Byte-level means encode-then-decode reproduces the text exactly.
+
+</Flashcard>
+
+</FlashcardSet>

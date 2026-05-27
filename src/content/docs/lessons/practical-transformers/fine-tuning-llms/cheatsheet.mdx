@@ -1,0 +1,84 @@
+---
+title: "Cheatsheet: Fine-tuning LLMs"
+description: One-page reference. Task vs SFT, when to use SFT, chat templates, the SFTTrainer, LoRA, and the assistant-building pipeline.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## Two kinds of fine-tuning
+
+| | Task fine-tuning (lesson 3) | Supervised fine-tuning (SFT) |
+| --- | --- | --- |
+| Head | A task head (classifier) | The language-modeling head |
+| Trains for | One narrow task | Following instructions broadly |
+| Output | A label | Text (assistant-style) |
+| Makes the model | Good at a task | Good at being an assistant |
+
+## Decision order
+
+1. **Prompt** an existing instruction-tuned model. If it works, stop.
+2. **SFT** only when prompting is not enough:
+   - Template control (strict output format)
+   - Domain adaptation (specialized terms/style)
+   - Cost (a smaller fine-tuned model is cheaper to run)
+
+## SFT data: conversations + chat template
+
+- Data is role-tagged messages: `system`, `user`, `assistant`.
+- The model's **chat template** lays them out the way it expects.
+- Apply with `tokenizer.apply_chat_template(messages)`.
+- Wrong template -> broken behavior (markers no longer match).
+
+## SFTTrainer (TRL)
+
+```python
+from trl import SFTConfig, SFTTrainer
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+model = AutoModelForCausalLM.from_pretrained(model_name)
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+
+args = SFTConfig(output_dir="./sft_output", max_steps=1000,
+                 per_device_train_batch_size=4, learning_rate=5e-5,
+                 eval_strategy="steps", eval_steps=50)
+
+trainer = SFTTrainer(model=model, args=args,
+                     train_dataset=dataset["train"],
+                     eval_dataset=dataset["test"],
+                     processing_class=tokenizer)
+trainer.train()
+```
+
+Same loop as lesson 3, specialized for generative SFT. Auto-applies the chat template when the dataset has a `messages` field. `packing=True` packs short examples for efficiency.
+
+## LoRA / PEFT (make it affordable)
+
+- Full fine-tuning of a large model needs huge memory.
+- **LoRA** freezes the base weights and trains small added low-rank matrices.
+- Big memory savings; pretrained knowledge preserved; fits on a modest GPU.
+- One of the **PEFT** (parameter-efficient fine-tuning) methods; the standard choice for large models. Configure with a `LoraConfig`.
+
+## The assistant-building pipeline
+
+```
+Pretrain  ->  SFT  ->  (optional) preference tuning
+(learn       (learn      (RLHF / DPO: refine which
+ language)    to follow   responses are preferred)
+              instructions)
+```
+
+This lesson stops at SFT; preference tuning is named only to place SFT in the pipeline.
+
+## Words to use precisely
+
+- **SFT**: training a generative model on instruction/response data to follow instructions.
+- **Chat template**: the role-marker text layout a chat model expects.
+- **LoRA / PEFT**: fine-tune by training a few added parameters, not all weights.
+- **TRL**: the library providing `SFTTrainer`, built on `transformers`.
+
+## Recommended further study
+
+- Hugging Face LLM Course, Chapter 11: "Supervised Fine-Tuning." `huggingface.co/learn/llm-course/chapter11`. Released under Apache 2.0; this lesson mirrors its structure with original prose.

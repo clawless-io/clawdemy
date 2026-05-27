@@ -1,0 +1,151 @@
+---
+title: 'Lesson: How tool use turns a model into an agent'
+description: "Lesson 1 said an agent is a model in a loop with tools. This lesson opens up the move that powers it. A language model cannot run code, so how does it call a tool? It does not. It emits a structured request, and code on the outside runs it and feeds the result back. We trace that four-step exchange end to end, watch the model pick between tools, and show why this one mechanism is what every agent is built on."
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+
+import ReadAlongDim from '../../../../../components/ReadAlongDim.astro';
+import LessonStar from '../../../../../components/LessonStar.astro';
+
+<LessonStar slug="how-tool-use-turns-a-model-into-an-agent" />
+
+<ReadAlongDim
+  src="https://audio.clawdemy.org/lessons/how-tool-use-turns-a-model-into-an-agent-lesson.mp3"
+  slug="how-tool-use-turns-a-model-into-an-agent"
+  cacheVersion="20260526c"
+  approxMinutes={10}
+/>
+
+In the last lesson, every example turned on one move: the agent "calls a tool." The weather agent called a weather tool. The meeting agent called a calendar tool. The loop kept working because each trip around it could reach out and do something in the world.
+
+That should have left you with a nagging question. A language model predicts text. It cannot run code, query a database, or send an email. So when we say the model "calls" a tool, what is actually happening? Something has to bridge a thing that only produces words and a thing that actually runs.
+
+This lesson opens up that bridge. We will trace a model emitting a tool call, reading the result, and choosing the next step, so the mechanism behind every example in Lesson 1 becomes concrete. The answer is simpler than it sounds, and once you see it, the whole agent loop stops being hand-wavy.
+
+## The key move: the model does not run the tool
+
+Here is the resolution, stated plainly: the model never executes anything. It only writes down a request.
+
+When an agent "calls" a weather tool, the model does not reach out to a weather service. It produces a small, structured piece of text that means "please run the get-weather tool with city set to Seattle." That text goes back to the plain code wrapped around the model, the loop from Lesson 1. The loop reads the request, actually runs the weather lookup, and hands the result back to the model as more input. The model then continues, now knowing the weather.
+
+The model proposes; the loop disposes. That division of labor is the entire trick. The "intelligence" decides what to do and writes the request; the surrounding code does the doing. Hold onto that split, because every step below is just a detail of how the request and result travel back and forth.
+
+## The four-step exchange
+
+One tool call is a four-step round trip between the model and the loop.
+
+**Step 1: the loop tells the model which tools exist.** Before the model can request a tool, it has to know what is available. The loop includes a description of each tool in what it sends the model: the tool's name, what it does, and what inputs it expects. This description is usually called a tool schema. Think of it as a menu handed to the model: here is what you can order and what each dish needs.
+
+**Step 2: the model emits a tool call instead of an answer.** Given the goal and the menu, the model decides a tool would help and produces a structured request naming the tool and its arguments. The important part: it returns the request, not a final answer to the user. The model has effectively said "I am not done; run this first."
+
+**Step 3: the loop executes the tool and returns the result.** The loop reads the request, runs the real function (the actual weather lookup, database query, or email send), and captures whatever comes back. It then feeds that result to the model as new input, the way it would feed in any other text.
+
+**Step 4: the model reads the result and chooses the next step.** Now holding the result, the model decides again. Either it has what it needs and writes the final answer, or it decides another tool call is required and the exchange repeats from step 2.
+
+That is the whole mechanism. Steps 2 through 4 trace Lesson 1's perceive-decide-act loop entered at the "decide" point: the model decides what to call (step 2), the loop acts (step 3), and the model perceives the result (step 4) before deciding what comes next.
+
+## Worked example: one tool call, end to end
+
+Trace the weather request all the way through. The pseudocode is framework-agnostic on purpose; real systems dress it up, but the bones are these.
+
+**Step 1, the loop gives the model its menu:**
+
+```
+TOOLS AVAILABLE:
+  get_weather(city: string, day: string)
+    "Return the forecast (high, low, condition) for a city on a given day."
+```
+
+**Step 2, the model emits a tool call** (not an answer):
+
+```
+USER: What is the weather in Seattle tomorrow?
+
+MODEL OUTPUT (a tool call, not a reply):
+  call: get_weather
+  arguments: { city: "Seattle", day: "tomorrow" }
+```
+
+**Step 3, the loop runs it and returns the result:**
+
+```
+LOOP executes get_weather("Seattle", "tomorrow")
+  -> { high: 58°F, low: 47°F, condition: "rain" }
+LOOP feeds that result back to the model as new input.
+```
+
+**Step 4, the model reads the result and answers:**
+
+```
+MODEL OUTPUT (now a real reply):
+  "Tomorrow in Seattle: rain, with a high of 58°F and a low of 47°F."
+```
+
+Four steps, one round trip. The model decided what to fetch and how to phrase the answer; the loop did the fetching. Neither could have produced that reply alone.
+
+## Worked example: choosing between tools
+
+The menu usually has more than one item, and picking the right one is part of what the model does. Give it two tools and a request that needs both:
+
+```
+TOOLS AVAILABLE:
+  get_weather(city, day)        "forecast for a city on a day"
+  get_calendar(person, range)   "free/busy times for a person"
+
+USER: Am I free tomorrow afternoon, and will I need an umbrella?
+
+ROUND 1
+  MODEL -> call: get_calendar { person: "me", range: "tomorrow PM" }
+  LOOP  -> { free: "2:00-5:00pm" }
+
+ROUND 2
+  MODEL -> call: get_weather { city: "Seattle", day: "tomorrow" }
+  LOOP  -> { condition: "rain" }
+
+ROUND 3
+  MODEL -> reply: "You are free 2 to 5pm, and yes, bring an umbrella;
+                   rain is forecast."
+```
+
+The model read the request, saw it needed two different facts, and called the right tool for each before answering. Nobody wrote a rule that said "for umbrella questions, check weather." The model worked that out from the tool descriptions and the request. That flexibility is exactly the language-driven decision-making Lesson 1 pointed to.
+
+## What happens when a tool fails
+
+Real tools fail. The weather service times out, the calendar lookup finds nobody by that name, the database rejects the query. The mechanism handles this without any new machinery: a failure is just another result. The loop runs the tool, the tool returns an error instead of data, and the loop feeds that error back to the model as the step-3 result.
+
+```
+MODEL -> call: get_weather { city: "Seattle", day: "tomorrow" }
+LOOP  -> runs it -> ERROR: "request timed out after 5s"
+MODEL -> call: get_weather { city: "Seattle", day: "tomorrow" }   (retried)
+LOOP  -> { high: 58°F, low: 47°F, condition: "rain" }
+MODEL -> "Tomorrow in Seattle: rain, high 58°F, low 47°F."
+```
+
+The model read the error, recognized a transient failure, and retried. Nothing special made that recovery happen; the error simply became input, and the model decided what to do with it the same way it decides anything. This is why feeding results back matters so much: it is also how the model learns that something went wrong and gets a chance to react. An agent that never sees its failures cannot react to them.
+
+## Why the model's output is still just text
+
+It is worth being precise about what a "tool call" really is, because it is less magical than it looks. The model's output is always text. A tool call is just text in a specific shape that the loop has agreed to recognize. When the model writes a get-weather request, it is still doing the only thing it ever does, predicting a sequence of tokens. The difference is that the loop scans the output, notices it matches the agreed tool-call shape, and acts on it instead of showing it to the user.
+
+This is why the same model can be a plain chatbot one moment and an agent the next. Nothing inside the model changed. What changed is that someone gave it a menu of tools, asked it to format requests a certain way, and wrapped it in code that watches for those requests. Many model providers now expose this as a built-in "function calling" or "tool use" feature. Agent frameworks go further: they automate the menu-building and the watch-and-execute loop so you do not write that plumbing by hand, often letting you mark a function as a tool with one line of code. We will compare them in the next lesson.
+
+## Common pitfalls
+
+- **Thinking the model runs the tool.** It never does. It writes a request; the surrounding code runs the tool. If you remember one thing from this lesson, make it this.
+- **Expecting a tool call and a final answer at once.** In a given step the model does one or the other: it either requests a tool or replies. The answer comes on a later trip around the loop, after the results are in.
+- **Assuming the model always picks the right tool.** It picks based on the tool descriptions and the request. Vague descriptions lead to wrong or skipped calls. Writing good tool descriptions is a real skill, and the focus of a later lesson.
+- **Forgetting the result has to be fed back.** A tool that runs but whose output never returns to the model leaves the model blind. The "return the result as new input" step is not optional; it is how the model learns what happened.
+
+## What you should remember
+
+- **The model does not execute tools. It emits a structured request, and the loop runs it.** The model proposes, the surrounding code disposes.
+- **One tool call is a four-step exchange:** the loop describes the available tools, the model emits a tool call instead of an answer, the loop runs the tool and returns the result, the model reads the result and either answers or calls again.
+- **Those steps trace Lesson 1's perceive-decide-act loop entered at the decide point.** Tool use is the mechanism that makes the loop able to act.
+- **A tool call is just text in an agreed shape.** The model is still only predicting tokens; the loop recognizes the shape and acts on it. That is why one model can be a chatbot or an agent depending only on the scaffolding around it.
+- **A failure is just another result.** When a tool errors, the loop feeds the error back like any other output, and the model can react: retry, try a different tool, or tell the user. An agent that never sees its failures cannot correct them.
+
+The next lesson steps back out to a practical question: if the loop, the menu, and the watch-and-execute machinery are always the same shape, should you build them yourself or use a framework that provides them? We will weigh hand-rolling the loop against the agent frameworks that package it, and figure out how to choose.

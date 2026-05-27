@@ -1,0 +1,203 @@
+---
+title: "Practice: Agents"
+description: Self-check on the agent loop, the patterns, the failure modes, and the build discipline, an agent-or-not scenario exercise, and flashcards for retrieval.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Seven short questions. Answer each before opening the collapsible.
+
+**1. State the minimum useful definition of an LLM agent in one sentence.**
+
+<details>
+<summary>Show answer</summary>
+
+An LLM agent is the lesson-4 tool-use loop with the model deciding when to stop. The model is called once per step (not once total), it decides what to do next (including whether to emit a final answer), and the loop continues until it does. Calling something an "agent" does not change what the model is; it changes the interaction shape.
+
+</details>
+
+**2. Name the three foundational agent patterns and when to reach for each.**
+
+<details>
+<summary>Show answer</summary>
+
+(1) **Function-calling agents**: the model emits either a structured tool call (JSON schema enforced by the hosted API) or a final answer. **Reliable default in 2026**; reach for this first. (2) **ReAct**: free-text "Thought / Action / Observation" loop; pre-dates structured function calling, messier to parse, still appears in literature. (3) **Plan-and-execute**: a plan is produced up front, then executed step by step; reach for this when each action has real-world cost and you want to inspect intent before letting the agent act.
+
+</details>
+
+**3. State the three tests for "should this be an agent?" (all should be yes).**
+
+<details>
+<summary>Show answer</summary>
+
+(1) **Variable shape**: the steps depend on what comes back from earlier steps (you cannot write them down ahead of time). (2) **Real and bounded tools**: a small set (3 to 10) of well-defined tools with clear contracts (not a vague "browse the web" tool). (3) **Acceptable cost and latency**: agents multiply lesson 2's three productive limits (context, cost, latency); either the user is willing to wait, or the agent's work is hidden from the user. If any test fails, a single call / RAG / hand-coded sequence is almost always better.
+
+</details>
+
+**4. Name the five engineering failure modes for production agents.**
+
+<details>
+<summary>Show answer</summary>
+
+(1) **Loops**: model calls the same tool with the same args, gets the same result, calls it again. (2) **Wrong paths**: an early bad decision commits the agent through several more steps before recovering. (3) **Compound cost**: history grows with every step, so later calls process far more tokens than earlier ones. (4) **Harder evaluation**: behavior is a tree of step sequences, not one input-one output; correctness lives at the trajectory level. (5) **Brittle tool boundaries**: the model is sensitive to tool names, descriptions, and JSON schemas, small changes shift the success rate.
+
+</details>
+
+**5. Why does evaluation get strictly harder for agents than for single-call apps?**
+
+<details>
+<summary>Show answer</summary>
+
+A single call has one input and one output, so the eval is "did the output match expectations." An agent's behavior is a tree: the same task can take 3 steps or 12 steps depending on what tools return, and "correct" is a property of the full trajectory (which tools, in what order, with what arguments, reaching what final answer). The held-out test set needs trajectory-level expectations, not just per-step expectations, which costs more to build but is the only way to catch regressions. Lesson 7's LLMOps discipline scales here, with the test set strictly more expensive.
+
+</details>
+
+**6. What are the two essential safety caps every production agent should have?**
+
+<details>
+<summary>Show answer</summary>
+
+(1) **Max iterations cap** (`max_steps`, typically 6 to 12): the loop terminates after that many steps regardless of whether the model emits a final answer. Prevents a misbehaving agent from burning thousands of calls. (2) **No-identical-call guard**: the agent cannot call the same tool with the same arguments twice in a row (or in any short window); prevents the most common loop failure mode. Both caps should error visibly, not silently truncate; surface them to the model when reasonable so it can adjust strategy.
+
+</details>
+
+**7. Why does this lesson stay strictly at WHAT/WHEN/WHAT-GOES-WRONG/HOW and explicitly exclude agent-autonomy and agent-safety debates?**
+
+<details>
+<summary>Show answer</summary>
+
+Because the engineering decision (when to use an agent, how to build one, how to evaluate one, the five engineering failure modes) and the broader debates (agent autonomy, agent safety, agent alignment, what agents should be allowed to do, sector-specific compliance for agent deployment) live in different forums with different stakeholders. Conflating them helps neither. A production engineer needs a clear answer to "should this be an agent, and how do I build it"; that is what this lesson delivers. The broader debates are real and important, but they belong with the right people (legal, policy, ethics, security), with their own framing. Same discipline as Track 14 lesson 12 and Track 15 lesson 14.
+
+</details>
+
+## Try it yourself: agent or not?
+
+About 10 minutes, no code. Apply the three-tests rule and the loop-cost math.
+
+**Part A: four scenarios.** For each, decide whether the team should (a) use a single LLM call, (b) use RAG (lesson 4's retrieval pattern), (c) use a hand-coded pipeline of steps, or (d) build an agent. Defend each pick in one sentence using the three tests.
+
+```
+1. A SaaS product wants a feature that summarizes a user's most recent
+   support ticket. Input: ticket text. Output: 3-sentence summary.
+2. A customer support tool wants to answer questions like "where is my
+   order?" by looking up the order, checking shipment status, and
+   summarizing in natural language. Volume: 50K queries per day.
+3. An internal data team wants a tool where an analyst types a natural-
+   language question and gets an answer that may need a database query,
+   a calculation, a chart, or a combination. The analyst will wait
+   30 seconds.
+4. A research project wants an "open-ended web research assistant" that
+   can answer any question by browsing the entire web freely with no
+   tool constraints. The user will wait minutes.
+```
+
+<details>
+<summary>What you'll get</summary>
+
+1. **Single LLM call.** Variable shape: NO (always the same: text in, summary out). Real and bounded tools: not needed. Latency: a single call is fast. Building an agent here is the canonical "agent where a single call would do" mistake. Just call the model.
+
+2. **Hand-coded pipeline (with possibly one LLM call inside).** Variable shape: borderline (the steps are predictable: look up order → check shipment → format answer). Real and bounded tools: yes. Volume is high (50K/day), and the steps are knowable in advance. A hand-coded "lookup → check → format" pipeline runs faster, costs less, and is far easier to evaluate. Use a single LLM call only for the final natural-language summarization step. **Resist** the urge to make this an agent just because it involves multiple data sources; multiple data sources do not mean variable shape.
+
+3. **Agent (function-calling).** Variable shape: YES (the steps depend on the question, may be one query, may be a query + a calculation + a chart). Real and bounded tools: YES if the team designs the toolkit well (`run_query(sql)`, `calculate(expression)`, `make_chart(data, type)`). Cost/latency: acceptable (30 seconds, internal users). This is the canonical agent case: variable-shape task with a clear toolkit and a tolerant user.
+
+4. **Reject the design; tighten scope first.** "Browse the entire web freely with no tool constraints" fails test 2 (real and bounded tools). Vague unbounded tools produce vague unbounded failures. The right move is to push back on the scope: what specific kinds of questions, with what specific sources, at what depth? Once that is bounded, it may become a viable function-calling agent with a defined web-search + page-read toolkit. Until then, building it is signing up to debug a runaway loop in production.
+
+</details>
+
+**Part B (reasoning).** A team is planning a 6-step agent. A single call costs $0.005 and processes 1,000 tokens of context. By step 6, the context has grown to ~8,000 tokens (each tool result and reasoning step accumulates). Hosted pricing is roughly linear in tokens. Estimate the cost of one full agent run versus 6 independent single calls of 1,000 tokens each. Why does this matter?
+
+<details>
+<summary>What the math says</summary>
+
+Six independent calls: `6 × $0.005 = $0.030` per task.
+
+Six-step agent: each step's cost is proportional to its context size. Approximating linearly:
+- Step 1: ~1,000 tokens → ~$0.005
+- Step 2: ~2,000 tokens → ~$0.010
+- Step 3: ~3,500 tokens → ~$0.018
+- Step 4: ~5,000 tokens → ~$0.025
+- Step 5: ~6,500 tokens → ~$0.033
+- Step 6: ~8,000 tokens → ~$0.040
+- **Total: ~$0.131 per task** (roughly 4 to 5x the naive "6 calls" number)
+
+Why it matters: agents do not cost (number of steps) × (single-call cost); they cost something closer to (number of steps)² because of accumulating context. At 10,000 agent runs per day, the naive estimate of `$300/day` is actually `$1,310/day`, and lesson 2's productive limits (context, cost, latency) all multiply in lockstep. Mitigations from the lesson: summarize older history rather than feeding it verbatim, cap maximum context, use smaller models for inner steps where capability is not the bottleneck.
+
+</details>
+
+**Part C (reasoning).** Why is this lesson framed strictly as an engineering primer, with agent-autonomy and agent-safety debates explicitly out of scope?
+
+<details>
+<summary>What you should notice</summary>
+
+Because the engineering decision (when an agent is the right tool, how to build one, how to evaluate one, the five engineering failure modes) and the broader debates (autonomy, safety, alignment, what agents should be allowed to do, sector-specific compliance for deployment) live in different forums with different stakeholders, and conflating them helps neither. A production engineer needs a clear answer to "should this be an agent, and how do I build it"; this lesson delivers that. The broader debates are real and important, but they belong with the right people (legal, policy, ethics, security teams), with their own framing. Same discipline as Track 14 lesson 12 and Track 15 lesson 14, and the same discipline we have applied across lessons 6, 7, and 9 of this track.
+
+</details>
+
+## Flashcards
+
+Nine cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay the set out one card per page for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="Minimum useful definition of an LLM agent?">
+
+The lesson-4 tool-use loop with the model deciding when to stop. Model called once per step (not once total); model decides what to do next, including whether to emit a final answer; loop continues until it does. "Agent" names the interaction shape, not a new kind of model.
+
+</Flashcard>
+
+<Flashcard question="Three foundational agent patterns?">
+
+(1) **Function-calling** (structured tool call or final answer; reliable default in 2026; reach for first). (2) **ReAct** (free-text Thought/Action/Observation; predecessor; messier parser; still in literature). (3) **Plan-and-execute** (produce plan first, then execute step by step; for actions with real-world cost where you want to verify intent first).
+
+</Flashcard>
+
+<Flashcard question="Three tests for 'should this be an agent?' (all yes)?">
+
+(1) Variable shape (steps depend on earlier results; cannot be written in advance). (2) Real and bounded tools (3 to 10 with clear contracts; not vague unbounded "browse the web"). (3) Acceptable cost and latency (agents multiply L2 productive limits; user is willing to wait, or work is hidden from user).
+
+</Flashcard>
+
+<Flashcard question="Five engineering failure modes for production agents?">
+
+(1) **Loops** (same tool same args repeated). (2) **Wrong paths** (early bad decision commits agent through more steps). (3) **Compound cost** (history grows each step; later calls process more tokens). (4) **Harder evaluation** (behavior is a tree; correctness is trajectory-level). (5) **Brittle tool boundaries** (sensitive to tool names/descriptions/schemas).
+
+</Flashcard>
+
+<Flashcard question="Why is agent evaluation strictly harder than single-call evaluation?">
+
+Single call: one input, one output, eval is "did output match." Agent: behavior is a tree (same task may take 3 or 12 steps); correctness lives at trajectory level (which tools, what order, what arguments, what final answer). Eval set is strictly more expensive to build. L7 discipline scales but costs more.
+
+</Flashcard>
+
+<Flashcard question="Two essential safety caps for every production agent?">
+
+(1) `max_steps` cap (typically 6 to 12): loop terminates regardless. (2) No-identical-call guard: cannot call same tool with same args twice in a row. Both error visibly (not silently); surface to model when reasonable. Prevents the runaway-loop failure that burns thousands of calls.
+
+</Flashcard>
+
+<Flashcard question="Why agents cost roughly steps-squared, not steps × single-call?">
+
+Context grows with each step (each tool result and reasoning step accumulates). Step 6 may process 8x the tokens of step 1, and hosted pricing is roughly linear in tokens. A 6-step agent is closer to 4-5x naive "6 × single-call" cost. Mitigations: summarize older history; cap max context; smaller models for inner steps.
+
+</Flashcard>
+
+<Flashcard question="Five build practices for production agents?">
+
+(1) Start with function-calling + 3-5 well-defined tools. (2) Cap iterations and identical calls. (3) Log every step (trajectory-level), not just final answer. (4) Evaluate at trajectory level (success rate, avg steps, cost over time). (5) Observability before scale (live trajectory dashboard).
+
+</Flashcard>
+
+<Flashcard question="What's out of scope in this lesson, and why?">
+
+Agent autonomy, agent safety, agent alignment, what agents should be allowed to do, sector-specific compliance for deployment. Engineering decisions (when/how/eval/failures) and broader debates live in different forums with different stakeholders (legal, policy, ethics, security). Same discipline as T14 L12 + T15 L14.
+
+</Flashcard>
+
+</FlashcardSet>

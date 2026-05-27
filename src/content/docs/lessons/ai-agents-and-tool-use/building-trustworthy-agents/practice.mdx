@@ -1,0 +1,219 @@
+---
+title: 'Practice: Building trustworthy agents'
+description: A self-check on the trustworthy-versus-secure line, a classify-the-failure-mode-and-name-the-guardrail exercise across all six own-failure modes, a blast-radius judgment exercise, and flashcards built for retrieval.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+Every scenario in this practice assumes **no attacker**. This lesson is about the ways an agent fails on its own; defending against a malicious input is the next lesson's subject. Keep that line in mind as you work.
+
+## Self-check
+
+Seven short questions. Answer each in your head before opening the collapsible. Active retrieval is where the learning sticks.
+
+**1. What is the difference between a trustworthy agent and a secure one?**
+
+<details>
+<summary>Show answer</summary>
+
+Trustworthiness is about how the agent behaves when it fails on its own, with no adversary involved. Security is about how the agent holds up when someone attacks it, bending it with a malicious input to a purpose it was not meant to serve. They are different threats with different defenses, which is why they get separate lessons. A reflection step makes an agent more trustworthy; it does nothing against a malicious input.
+
+</details>
+
+**2. Name the six characteristic ways an agent fails on its own.**
+
+<details>
+<summary>Show answer</summary>
+
+Hallucinated tool calls, runaway loops, confidently wrong answers, mishandled tool failures, missing context (silently incomplete work), and data over-exposure. Each has a guardrail that contains it.
+
+</details>
+
+**3. Why is the confidently-wrong-answer mode called the most dangerous?**
+
+<details>
+<summary>Show answer</summary>
+
+Because it is silent. A runaway loop announces itself (it spins, it runs up a bill), but a confidently wrong answer looks exactly like a correct one. There is no signal that anything is off, so the error ships unnoticed. Confidence is not evidence of correctness.
+
+</details>
+
+**4. What is the organizing principle behind which guardrail to use where?**
+
+<details>
+<summary>Show answer</summary>
+
+Match the guardrail to the blast radius of the action. A read-only lookup that is wrong costs a re-query, so it needs light guardrails. An action that is hard to reverse (sending money, deleting data, emailing a customer, placing an order) deserves a human-in-the-loop checkpoint. The more irreversible the action, the more a human confirmation earns its friction. You gate the actions whose mistakes you cannot take back, not every action.
+
+</details>
+
+**5. The strongest guardrail is human-in-the-loop. Why not put it on every action?**
+
+<details>
+<summary>Show answer</summary>
+
+Human review on every trivial action is friction nobody will tolerate, and it defeats the point of an agent. Human review on no action is negligence. The answer is to gate by blast radius: cheap, reversible actions flow freely; hard-to-reverse actions get the checkpoint.
+
+</details>
+
+**6. "We added guardrails, so our agent cannot fail anymore." What is wrong with that?**
+
+<details>
+<summary>Show answer</summary>
+
+Guardrails reduce the rate and cost of failures; they do not erase them. A loop budget stops infinite loops but not a wrong answer produced in three steps. Output validation catches checkable errors but not judgment calls. A human checkpoint is only as good as the human's attention. Trustworthy means failures are rare, bounded, and visible, not impossible.
+
+</details>
+
+**7. An agent sends a correct, complete answer to a billing question, but the reply also includes a second customer's account note that a retrieval step pulled in. No attacker was involved. Which failure mode is this, and which is it NOT?**
+
+<details>
+<summary>Show answer</summary>
+
+It is **data over-exposure** (failure mode 6): the work was correct and complete, but it revealed something it should not have, because the agent over-fetched on its own. It is **not** a confidently wrong answer (the answer was right) and **not** silently incomplete work (nothing was missing). It is also **not** the data exfiltration from the next lesson, because there is no attacker pulling data out on purpose; the agent over-shared by itself.
+
+</details>
+
+## Try it yourself: classify the failure mode, name the guardrail
+
+This is the heart of the lesson. For each agent behavior below, all of them own-failures with no attacker involved, name which of the six failure modes it is and the guardrail that contains it. Then check.
+
+```
+A. An agent calls issue_refund(order_id), but there is no issue_refund tool in
+   its toolset. It invented the tool name.
+
+B. An agent's get_inventory call times out and returns an error. The agent
+   tells the user "all 50 units are in stock" as if the call had succeeded.
+
+C. An agent computes a quarterly total, makes an arithmetic slip, and reports
+   "Q3 revenue was $4.2M, done" with full confidence. The real figure differs.
+
+D. An agent keeps re-calling a payment API that keeps failing, the same call,
+   over and over, never stopping and never finishing, running up cost.
+
+E. Asked to "notify all affected customers about the recall," the agent's
+   lookup returns 8 of the 12 affected customers. It emails those 8 and
+   reports "all affected customers notified."
+
+F. An agent answers a customer's billing question correctly and completely,
+   but the reply also includes the customer's full card number and an internal
+   risk note that the task never needed.
+```
+
+<details>
+<summary>Show answer</summary>
+
+- **A: hallucinated tool call.** The agent called a tool that does not exist. **Guardrail:** validate every tool call before running it (the named tool exists, the arguments match its expected shape), and reject it if not. Good tool descriptions (Lesson 4) reduce these at the source.
+- **B: mishandled tool failure.** The tool errored, and the agent ignored the error and proceeded as if it had succeeded. **Guardrail:** make the agent read and act on tool results, never assume success. The error has to flow back into the loop so the agent can retry, try an alternative, or surface the failure.
+- **C: confidently wrong answer.** A wrong result presented as correct, with no signal anything is off. **Guardrail:** a reflection step (Lesson 9) to catch what a critical re-read would catch, plus output validation against what a correct result must satisfy; human review for high-stakes results.
+- **D: runaway loop.** The agent retries without making progress and never stops. **Guardrail:** put a budget on the loop, cap the steps, retries, time, or cost, and fail cleanly with a clear message when the cap is hit.
+- **E: missing context, silently incomplete work.** The agent acted on partial information (8 of 12) and was silent about the gap. **Guardrail:** require and validate the inputs the task needs, and design the agent to flag the gap ("I could only reach 8 of 12") rather than report the job done.
+- **F: data over-exposure.** The answer was correct and complete, but it disclosed sensitive fields the task never needed. **Guardrail:** scope output to the requester, give the agent least-privilege data access, and redact fields the task does not require before they reach the output.
+
+The discipline: B is not a runaway loop (it stopped, it just trusted a failed call); C is not over-exposure (the answer was wrong, not over-shared); E is not a wrong answer (nothing was wrong, the work was partial and the silence is the problem); F is not a wrong or incomplete answer (it was right and complete, just over-shared). Naming the exact mode is what points you at the right guardrail.
+
+</details>
+
+## Try it yourself: gate by blast radius
+
+Human-in-the-loop is the strongest guardrail, reserved for hard-to-reverse actions. For each action below, decide whether it warrants a human-in-the-loop checkpoint or can flow freely with lighter guardrails, and say why in one line.
+
+```
+1. Look up the current status of an order (read-only).
+2. Delete a customer's account and all its data.
+3. Send a $5,000 refund to a customer's card.
+4. Summarize an internal document for the user who asked for it.
+5. Place a purchase order with a supplier.
+```
+
+<details>
+<summary>Show answer</summary>
+
+- **1: flows freely (light guardrails).** Read-only; a wrong lookup costs a re-query. Nothing to take back.
+- **2: human-in-the-loop.** Deletion is hard to reverse; a mistaken deletion may be unrecoverable.
+- **3: human-in-the-loop.** Sending money is hard to reverse, and a wrong amount or recipient is costly to claw back.
+- **4: flows freely (light guardrails), with output scoped to the requester.** Low blast radius; the main care is that it goes only to the user who asked (the over-exposure guardrail), not a human approval on the summary itself.
+- **5: human-in-the-loop.** Placing an order commits money and is hard to undo cleanly.
+
+The rule: gate by blast radius. Reversible, low-cost actions flow; actions whose mistakes you cannot take back (money, deletion, outbound commitments) get the checkpoint. The point is not to gate everything, it is to spend the friction where an error is unrecoverable.
+
+</details>
+
+## Flashcards
+
+Eleven cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay out the full set as one card per page for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="Trustworthy vs secure: what is the difference?">
+
+Trustworthy is how an agent behaves when it fails on its own (no attacker). Secure is how it holds up when someone attacks it. Different threats, different defenses, separate lessons.
+
+</Flashcard>
+
+<Flashcard question="What are the six own-failure modes of an agent?">
+
+Hallucinated tool calls, runaway loops, confidently wrong answers, mishandled tool failures, missing context (silently incomplete work), and data over-exposure.
+
+</Flashcard>
+
+<Flashcard question="Failure mode: an agent calls a tool that does not exist, or invents arguments. Name it and its guardrail.">
+
+Hallucinated tool call. Guardrail: validate every call against real tools and expected argument shapes before running it; good tool descriptions reduce these at the source.
+
+</Flashcard>
+
+<Flashcard question="Failure mode: an agent retries a failing tool over and over, never stopping. Name it and its guardrail.">
+
+Runaway loop. Guardrail: budget the loop, cap steps, retries, time, or cost, and fail cleanly when the cap is hit.
+
+</Flashcard>
+
+<Flashcard question="Failure mode: an agent reports a wrong result as correct, with no signal anything is off. Name it and why it is the most dangerous.">
+
+Confidently wrong answer. Most dangerous because it is silent: it looks exactly like a correct answer. Guardrail: a reflection step plus output validation, and human review for high stakes.
+
+</Flashcard>
+
+<Flashcard question="Failure mode: a tool errors and the agent proceeds as if it succeeded. Name it and its guardrail.">
+
+Mishandled tool failure. Guardrail: make the agent read and act on tool results, never assume success; the error flows back into the loop so it can retry, try an alternative, or surface the failure.
+
+</Flashcard>
+
+<Flashcard question="Failure mode: an agent acts on partial information and reports the job done. Name it and its guardrail.">
+
+Missing context / silently incomplete work. Guardrail: require and validate the inputs the task needs, and flag the gap instead of papering over it.
+
+</Flashcard>
+
+<Flashcard question="Failure mode: a correct, complete answer that discloses fields the task never needed. Name it and its guardrail.">
+
+Data over-exposure. Guardrail: scope output to the requester, give least-privilege data access, and redact unneeded fields. (No attacker; that would be the next lesson's exfiltration.)
+
+</Flashcard>
+
+<Flashcard question="What is the single organizing principle for choosing guardrails?">
+
+Match the guardrail to the blast radius of the action. Reversible, low-cost actions get light guardrails; hard-to-reverse actions get a human-in-the-loop checkpoint.
+
+</Flashcard>
+
+<Flashcard question="When does human-in-the-loop confirmation belong on an action?">
+
+On hard-to-reverse actions (sending money, deleting data, outbound messages, placing orders), not on every read-only lookup. Gate by blast radius, not by default everywhere or nowhere.
+
+</Flashcard>
+
+<Flashcard question="Do guardrails make an agent unable to fail?">
+
+No. They reduce the rate and cost of failures, not the possibility. A trustworthy agent is one whose failures are rare, bounded, and visible, not one that cannot fail.
+
+</Flashcard>
+
+</FlashcardSet>

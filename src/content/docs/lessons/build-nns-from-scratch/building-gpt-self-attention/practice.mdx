@@ -1,0 +1,135 @@
+---
+title: "Practice: self-attention from scratch"
+description: Check your understanding of self-attention and the causal mask, then run a masked attention step by hand.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+import Flashcard from '../../../../../components/Flashcard.astro';
+
+## Self-check
+
+Five short questions. Try to answer each in your head (or on paper) before opening the collapsible. Active retrieval is where the learning sticks; rereading is comfortable but does much less.
+
+**1. What is the one hard constraint that makes this a GPT, and why does it exist?**
+
+<details>
+<summary>Show answer</summary>
+
+Attention must be **causal**: a token may attend only to itself and the tokens before it, never the ones after. It exists because the model is trained to predict the next token, so letting a token see future tokens would let it see the answer. The past-only rule is what makes the model autoregressive (able to generate one token at a time).
+
+</details>
+
+**2. What is the crude "average the past" version, and what does self-attention change about it?**
+
+<details>
+<summary>Show answer</summary>
+
+Each token becomes the uniform average of itself and all previous tokens, a causal weighted sum where every past token gets equal weight. It has the right shape but dumb weights. Self-attention keeps the causal-weighted-sum shape but makes the weights **learned and data-dependent** (via query-key affinities) instead of uniform.
+
+</details>
+
+**3. What are the query, key, and value, and what is each for?**
+
+<details>
+<summary>Show answer</summary>
+
+Three learned linear projections of a token. The **query** is "what am I looking for?", the **key** is "what do I contain?" (used for matching), and the **value** is "what I will contribute if attended to." The attention weight between tokens `i` and `j` comes from `query_i · key_j`; the weighted sum is over the **values**. Key is for matching; value is what gets summed.
+
+</details>
+
+**4. How does the causal mask actually work in the computation?**
+
+<details>
+<summary>Show answer</summary>
+
+Before the softmax, every affinity from a token to a future position is set to negative infinity. When softmax exponentiates, `e^(-inf) = 0`, so those future positions get exactly zero weight. A future token is invisible no matter how high its raw affinity was.
+
+</details>
+
+**5. Why are the affinities scaled by `1/sqrt(dimension)` before softmax?**
+
+<details>
+<summary>Show answer</summary>
+
+To keep softmax out of its saturated regime. Large dot products would make softmax nearly one-hot (one weight near 1, the rest near 0), which starves the gradient, the same saturation problem from the initialization/BatchNorm lesson. Dividing by `sqrt(key dimension)` keeps the affinities at a scale where softmax stays soft and trainable.
+
+</details>
+
+## Try it yourself
+
+Run one masked self-attention step by hand and watch the causal mask erase a high-affinity future token.
+
+**Setup.** A sequence of four tokens. You are computing the output for **token 3**, whose raw affinities to tokens 1, 2, 3, and 4 are `[1, 1, 1, 8]`. Tokens 1, 2, 3 carry values `v1 = 3`, `v2 = 6`, `v3 = 0`.
+
+**Steps.**
+
+1. Apply the causal mask: token 3 may attend to tokens 1, 2, 3 but not token 4 (the future), so set token 4's affinity to `-inf`.
+2. Softmax the masked affinities into weights (exponentiate, then normalize so they sum to 1).
+3. Take the weighted sum of the values to get token 3's output.
+
+**Expected outcome.**
+
+```
+masked affinities:  [1, 1, 1, -inf]
+exponentiate:       [e^1, e^1, e^1, 0] = [2.718, 2.718, 2.718, 0]
+normalize (sum 8.155): weights = [0.333, 0.333, 0.333, 0]
+output = 0.333*3 + 0.333*6 + 0.333*0 + 0 = (3 + 6 + 0)/3 = 3
+```
+
+Token 4 had by far the highest raw affinity (`8`), but the causal mask gave it weight zero, so it contributed nothing. The three visible tokens had equal affinities, so they shared attention equally (one third each), and the output is just their average value. Change the affinities and the weights would tilt toward whichever past token matched best, but the future would still be unreachable.
+
+**Confirm it against the real thing (optional).** Andrej Karpathy's [nanoGPT](https://github.com/karpathy/nanoGPT) and the lecture's companion code build exactly this attention on a character-level Shakespeare dataset. Run it, print the attention weight matrix, and confirm it is lower-triangular (every row's future entries are zero), then watch the generated text sharpen once attention replaces the bigram baseline.
+
+## Flashcards
+
+Seven cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay out the full set as one card per page, ready to print or save as a PDF for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="What does self-attention let each token do?">
+
+Gather information from the earlier tokens with learned, data-dependent weights: each token pulls in a weighted blend of the previous tokens' values, where the weights come from how well its query matches each token's key.
+
+</Flashcard>
+
+<Flashcard question="What makes attention 'causal,' and why does GPT need it?">
+
+A token may attend only to itself and the tokens before it; future affinities are masked to `-inf` so they get zero weight after softmax. GPT needs it because the model predicts the next token, so seeing future tokens would be seeing the answer. Causal masking makes the model autoregressive.
+
+</Flashcard>
+
+<Flashcard question="What are query, key, and value?">
+
+Three learned linear projections of a token. Query = "what am I looking for?"; key = "what do I contain?" (used for matching); value = "what I contribute if attended to." Affinity is `query_i · key_j`; the output is a weighted sum of values.
+
+</Flashcard>
+
+<Flashcard question="How is an attention weight computed, start to finish?">
+
+`affinity(i,j) = query_i · key_j`; scale by `1/sqrt(key dimension)`; mask future positions to `-inf`; softmax each token's row into weights that sum to 1; take the weighted sum of values.
+
+</Flashcard>
+
+<Flashcard question="What is the difference between a token's key and its value?">
+
+The key is how a token advertises itself for matching (it sets the attention weight); the value is what the token actually contributes once attended to. They are separate learned projections: "why listen to me?" versus "what do I say?"
+
+</Flashcard>
+
+<Flashcard question="Why scale affinities by 1/sqrt(dimension) before softmax?">
+
+Large dot products push softmax into a near-one-hot, saturated state where the gradient vanishes (the saturation problem from the BatchNorm lesson). Scaling keeps softmax soft enough to train.
+
+</Flashcard>
+
+<Flashcard question="Why did self-attention beat the earlier approaches?">
+
+It replaces a fixed rule for combining context (a uniform average, WaveNet's fixed tree, an RNN's sequential decay) with learned, content-based routing: each token decides from the data which earlier tokens are relevant. That flexibility is the core of every large language model.
+
+</Flashcard>
+
+</FlashcardSet>

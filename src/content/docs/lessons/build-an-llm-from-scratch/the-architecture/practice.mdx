@@ -1,0 +1,174 @@
+---
+title: "Practice: The Transformer architecture"
+description: Self-check on the decoder-only skeleton, the converged design choices, and the sizing hyperparameters, a parameter-count exercise, and flashcards for retrieval.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Seven short questions. Answer each before opening the collapsible.
+
+**1. Describe the skeleton of a modern decoder-only Transformer.**
+
+<details>
+<summary>Show answer</summary>
+
+A token embedding turns IDs into vectors of width `d_model`; then N identical blocks, each with a self-attention sublayer and a feed-forward (FFN) sublayer, each wrapped with a normalization and added back via a residual connection; then a final normalization and an output projection to vocabulary-sized logits (often weight-tied to the embedding).
+
+</details>
+
+**2. What is the residual stream, and what do the two sublayers each do to it?**
+
+<details>
+<summary>Show answer</summary>
+
+The residual stream is the width-`d_model` vector that flows from the embedding to the output. Each sublayer reads from it and adds its contribution back. Attention moves information between positions; the FFN processes each position independently.
+
+</details>
+
+**3. What is pre-norm versus post-norm, and which do modern models use?**
+
+<details>
+<summary>Show answer</summary>
+
+Post-norm (the original) normalizes after each sublayer; pre-norm normalizes the input before each sublayer. Modern models use pre-norm because it keeps the residual stream clean and lets very deep models train stably.
+
+</details>
+
+**4. Name three other choices modern LLMs converged on beyond pre-norm.**
+
+<details>
+<summary>Show answer</summary>
+
+Any three of: RMSNorm instead of LayerNorm (cheaper, no mean-subtraction or bias); gated FFN activations like SwiGLU (with a smaller hidden ratio, ~`8/3 * d_model`, to keep params matched); RoPE for position (rotating query/key vectors by a position-dependent angle, encoding relative position) instead of learned absolute embeddings; dropping bias terms; and weight tying (input embedding and output projection share a matrix).
+
+</details>
+
+**5. List the main hyperparameters that size a Transformer.**
+
+<details>
+<summary>Show answer</summary>
+
+`d_model` (residual width), `n_layers` (depth), `n_heads` (and `head_dim = d_model / n_heads`), `d_ff` (FFN hidden width, ~`4 * d_model` non-gated or `8/3 * d_model` gated), the vocabulary size, and the context length.
+
+</details>
+
+**6. Why is `d_model` the dominant size dial?**
+
+<details>
+<summary>Show answer</summary>
+
+Because parameters scale as about `12 * n_layers * d_model^2` (per block: ~`4 * d_model^2` for attention's four projections plus ~`8 * d_model^2` for the FFN). `d_model` enters squared, so widening the model grows parameters far faster than deepening it.
+
+</details>
+
+**7. Why does choosing the architecture amount to a budget-allocation problem?**
+
+<details>
+<summary>Show answer</summary>
+
+Because the hyperparameters set the parameter count, the parameter count sets the FLOP and memory cost (lesson 2), and you have a fixed compute budget. So the real questions, depth versus width, how many heads, how much data, are about how to spend that budget. There is no single optimum; the scaling-laws lesson decides it with evidence.
+
+</details>
+
+## Try it yourself: count the parameters
+
+About 12 minutes, calculator. You will size a model from its config.
+
+**Part A: parameter count.** A model has `d_model = 4096`, `n_layers = 32`, vocabulary `50000`. Estimate (1) the non-embedding parameters and (2) the embedding parameters.
+
+<details>
+<summary>What you'll get</summary>
+
+1. Non-embedding: `12 * n_layers * d_model^2 = 12 * 32 * 4096^2 = 12 * 32 * 1.677e7 ~= 6.4e9`, about **6.4 billion** parameters.
+2. Embedding: `vocab * d_model = 50000 * 4096 ~= 2.05e8`, about **0.2 billion**.
+
+So this is roughly a 6.6-billion-parameter model, and the layers (not the embedding) dominate, which is typical once `d_model` and `n_layers` are large. From here, lesson 2's `6ND` and `16N` rules give you the training cost and memory directly.
+
+</details>
+
+**Part B (reasoning).** You have a fixed parameter budget and consider (i) doubling `n_layers` or (ii) increasing `d_model` by about 40%. Roughly how do these compare in added parameters, and what is the qualitative trade-off?
+
+<details>
+<summary>What you should notice</summary>
+
+Doubling `n_layers` doubles the per-block parameters (linear in depth). Increasing `d_model` by ~40% multiplies `d_model^2` by ~`1.4^2 ~= 2`, also about doubling, since parameters go as `d_model^2`. So both roughly double the count, but they are different bets: more depth adds sequential processing stages (more steps of refinement), more width adds representational capacity per position (and, helpfully, higher arithmetic intensity in the matmuls). Which is better is exactly what scaling laws are for; the point here is that `d_model`'s squared scaling makes width expensive fast.
+
+</details>
+
+**Part C (read a config).** You open a model config with fields `hidden_size: 4096`, `num_hidden_layers: 32`, `num_attention_heads: 32`, `intermediate_size: 11008`, `rms_norm_eps`, `rope_theta`. Map each to this lesson's vocabulary and say what the last two imply.
+
+<details>
+<summary>What you should notice</summary>
+
+`hidden_size` = `d_model` (4096); `num_hidden_layers` = `n_layers` (32); `num_attention_heads` = `n_heads` (32, so `head_dim = 4096/32 = 128`); `intermediate_size` = `d_ff` (11008, which is ~`8/3 * 4096`, signaling a gated FFN). `rms_norm_eps` tells you it uses RMSNorm; `rope_theta` tells you it uses RoPE for position. You just read the architecture off the config, which is the practical payoff of the lesson.
+
+</details>
+
+## Flashcards
+
+Nine cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay the set out one card per page for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="What is the skeleton of a modern decoder-only Transformer?">
+
+Token embedding -> N identical blocks (each: attention sublayer + FFN sublayer, each with a norm and a residual connection) -> final norm -> output projection (often weight-tied to the embedding).
+
+</Flashcard>
+
+<Flashcard question="What is the residual stream?">
+
+The width-d_model vector flowing from embedding to output. Each sublayer reads from it and adds its contribution back. Attention moves info across positions; the FFN processes each position.
+
+</Flashcard>
+
+<Flashcard question="Pre-norm vs post-norm?">
+
+Post-norm (original) normalizes after each sublayer; pre-norm normalizes before. Modern models use pre-norm: it keeps the residual stream clean and makes deep models train stably.
+
+</Flashcard>
+
+<Flashcard question="RMSNorm vs LayerNorm?">
+
+RMSNorm normalizes by the root-mean-square only (no mean-subtraction, no bias). Cheaper and works as well, so it largely replaced LayerNorm.
+
+</Flashcard>
+
+<Flashcard question="What are gated FFN activations (SwiGLU)?">
+
+A gated variant where one linear projection gates another; performs better than plain GeLU/ReLU. The added gate matrix means the hidden dim shrinks to ~8/3*d_model to keep params matched.
+
+</Flashcard>
+
+<Flashcard question="What is RoPE and why use it?">
+
+Rotary position embeddings: inject position by rotating query/key vectors by a position-dependent angle inside attention. Encodes relative position naturally and generalizes to longer sequences better than learned absolute embeddings.
+
+</Flashcard>
+
+<Flashcard question="Name the model-sizing hyperparameters.">
+
+d_model (residual width), n_layers (depth), n_heads (and head_dim = d_model/n_heads), d_ff (FFN hidden, ~4*d_model or 8/3*d_model gated), vocabulary size, context length.
+
+</Flashcard>
+
+<Flashcard question="How many parameters does a Transformer have (non-embedding)?">
+
+About 12 * n_layers * d_model^2 (per block: ~4*d_model^2 attention + ~8*d_model^2 FFN). d_model dominates because it enters squared. Plus embedding = vocab * d_model.
+
+</Flashcard>
+
+<Flashcard question="Why is choosing the architecture a budget problem?">
+
+Hyperparameters set the parameter count, which sets FLOP/memory cost (lesson 2), against a fixed compute budget. Depth vs width vs data are budget-allocation choices, decided by scaling laws.
+
+</Flashcard>
+
+</FlashcardSet>

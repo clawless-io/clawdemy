@@ -1,0 +1,65 @@
+---
+title: "Lesson: Data, part 2, filtering, deduplication, mixing, synthetic"
+description: The later stages of the funnel from lesson 11. Heuristic and classifier filtering, exact and near-duplicate deduplication, mixing weights tuned with small-scale fits, and the increasingly important role of synthetic data, all taught as data engineering rather than policy.
+sidebar:
+  order: 2
+  label: Lesson
+artifact: lesson
+---
+
+Lesson 11 ended at the top of a funnel: raw Common Crawl and a few other sources, sized at trillions of tokens. This lesson opens the rest of the funnel, the filtering and deduplication that shrink raw data into a usable training corpus, the mixing that decides what the model gets exposed to, and the newer category of synthetic data. Like the previous lesson, this is taught at the data-engineering level: what the steps do, why they matter, how to reason about their trade-offs. Legal and policy debates about training data are out of scope here.
+
+## Filtering: heuristic, then classifier
+
+Most raw web text is not worth training on. **Filtering** is the family of decisions that drops the worst of it. Two layers in practice:
+
+- **Heuristic filters.** Cheap, fast rules with no learning. Examples: minimum and maximum document length, ratio of letters to symbols, ratio of stop-words, fraction of repeated lines or n-grams, fraction of bullet-point or boilerplate text, fraction of non-target languages. These eliminate the obvious junk (placeholder pages, scraping artifacts, content-farm filler) at low cost. The exact ruleset varies by dataset; FineWeb and RefinedWeb publish theirs explicitly.
+- **Classifier filters.** A small model trained to predict "is this high-quality text?" The classifier is trained on a curated positive set (Wikipedia, books, vetted long-form prose) and a negative set (raw web), then applied to score every document; everything below a threshold is dropped. This is more expensive but catches subtler issues heuristics miss. Some recipes (RefinedWeb-style) keep a tight heuristic stack; others (FineWeb-Edu-style) layer in a classifier-based "educational quality" filter on top.
+
+The combined effect of the two layers is typically the 5-10x shrink that lesson 11's funnel attributed to deeper quality filtering.
+
+## Deduplication: exact, near, and substring
+
+Once filtering reduces the corpus, **deduplication** removes redundancy, and it matters more than most engineers expect. The web contains enormous amounts of repeated content: re-published articles, scraped mirrors, boilerplate templates, identical paragraphs across thousands of pages. Training on duplicates wastes compute (you teach the model the same thing many times) and skews the model toward whatever was duplicated, which is rarely the most useful content.
+
+Three levels, used in combination:
+
+- **Exact deduplication.** Hash every document; drop hashes that appear more than once. Catches identical mirrors. Cheap.
+- **Near-duplicate deduplication.** Compute MinHash signatures of each document and use locality-sensitive hashing (LSH) to find approximate matches. Catches re-published articles with small edits, near-identical templates, and slightly-shuffled content. The standard technique in modern open dataset pipelines.
+- **Substring or n-gram deduplication.** Operate at the level of phrases (e.g. dropping or thinning matches of >100-token spans that appear in many documents). Useful at the high end of quality, where even partial duplication carries signal that the rest of the dataset already contains.
+
+Empirically, deduplication shrinks corpora by 2-10x on top of filtering, and the perplexity/quality of the resulting model often improves at the same final token count. **Less data trained on cleaner unique content beats more data trained on duplicates.**
+
+## Mixing: turning sources into a sampling stream
+
+After filtering and dedup you have *sources*. Mixing decides *what the model sees, in what proportions, in what order*. The basics from lesson 11 hold: sampling weights are not byte-fractions; code and high-density text are over-weighted relative to raw bytes; small high-quality slices may be seen multiple times.
+
+The newer development is **learning the mix automatically.** Approaches like DoReMi (and successors) train tiny "proxy" models on candidate mixes, fit how loss responds to per-source weights, and propose a final mix tuned for the loss-on-target-mix that you actually care about. The trend is away from "hand-tuned ratios" and toward "small-scale empirical fits, just like scaling laws." The whole machinery from lesson 9 (fit a curve at small scale, extrapolate) applies here.
+
+A related decision is **how many epochs each slice gets.** Modern recipes typically pass once over the large web slice (or less) and several times over small, high-quality slices, the asymmetry that makes high-density text effectively over-represented without inflating the corpus.
+
+## Synthetic data: an increasingly large category
+
+A more recent and rapidly growing category is **synthetic data**: training data generated by another (typically strong) LLM, on purpose, to fill a gap.
+
+- **Distillation / teacher-student.** A strong "teacher" model generates target outputs for prompts in a domain; the student model trains on those pairs. Used widely for code, math, and reasoning.
+- **Textbook-style synthetic.** The Phi-3-class line: deliberately generate clean, structured, "textbook-style" pretraining text on chosen subjects. Smaller models trained on such data can rival much larger models trained on raw web at similar evaluation scores, when the synthetic data is well-targeted.
+- **Instruction- and dialogue-shaped synthetic.** Generate large numbers of (instruction, response) pairs to feed supervised fine-tuning (the topic of the next lesson).
+- **Self-improvement loops.** Use the model's own best outputs (filtered, scored, sometimes re-generated) to expand its training set. Used in reasoning-RL pipelines (capstone lesson).
+
+Two technical caveats worth taking seriously, both staying out of legal/policy territory: synthetic data **carries the teacher's blind spots** (errors, biases in the technical/statistical sense, characteristic phrasing) into the student, and **scale-vs-quality** still matters, generating ten times more synthetic data without quality controls dilutes the signal. The same filtering and deduplication ideas from earlier in this lesson apply to synthetic data; it is data, with the same engineering needs.
+
+## Why this matters when you build AI
+
+Two threads come together. First, the difference between a strong model and an average one at equal compute is increasingly **the data pipeline**, not the architecture. Filtering and dedup recipes, mixing weights, and synthetic-data choices are the dials modern teams turn the hardest, and the open datasets (FineWeb, etc.) compete on these recipes more than on raw sourcing. Second, the discipline this lesson asks for is the same one that ran through lessons 9 and 10: **decide with evidence**, fit small-scale runs, extrapolate, and trust the portfolio over any single number. Hand-tuned ratios are quickly being replaced by mixes learned from data, and the practical implication is that data engineering is, more and more, a research activity with its own scaling laws and benchmarks. The next two lessons turn from pretraining data to **post-training**, the SFT and RL steps that turn a pretrained model into something users actually talk to.
+
+## What you should remember
+
+- **Filtering has two layers.** Heuristic (cheap rules: length, ratios, repetition, language ID) and **classifier** (a small model scoring "is this high-quality text?"). Together they shrink the corpus 5-10x.
+- **Deduplication matters more than people expect.** Exact (hash), **near-duplicate (MinHash + LSH)**, and substring/n-gram, used in combination. Shrinks 2-10x more. Less unique-clean beats more duplicated.
+- **Mixing turns sources into a sampling stream.** Sampling weights, not byte fractions; small high-quality slices passed multiple times; large web slices passed once or fewer. Modern recipes increasingly **learn the mix** from small-scale fits (DoReMi-class methods) rather than hand-tuning.
+- **Synthetic data is a fast-growing category.** Teacher-student distillation, textbook-style synthetic (Phi-class), instruction/dialogue pairs for SFT, self-improvement loops for RL. Filtering and dedup apply to synthetic data too; it carries the teacher's blind spots.
+- **Less data, cleaner and well-mixed, often beats more data poorly handled.** The same compute spent on a better corpus produces a noticeably better model.
+- **Technical-not-legal.** Filtering, dedup, mixing, and synthetic data are taught here as data-engineering decisions; legal and policy debates about training data are out of scope.
+
+Pretraining data is not "Common Crawl"; it is what comes out of a deliberate funnel of heuristic filtering, classifier filtering, multi-level deduplication, mixing, and increasingly synthetic generation. The funnel is most of the data work, and increasingly the difference between a strong model and an average one at equal compute.

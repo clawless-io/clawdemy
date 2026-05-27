@@ -1,0 +1,180 @@
+---
+title: "Practice: Wrangling data with the Datasets library"
+description: Self-check on loading, map, filter, batched=True, and splitting, a hands-on clean-and-transform exercise on a real dataset, and flashcards for retrieval.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Seven short questions. Answer each before opening the collapsible.
+
+**1. What does `load_dataset` return for a dataset with train and test splits, and how do you read its shape?**
+
+<details>
+<summary>Show answer</summary>
+
+A `DatasetDict`: a dictionary keyed by split name, where each value is a `Dataset`. Printing it shows each split's `features` (column names) and `num_rows` (row count), which is the fastest way to see the shape of your data.
+
+</details>
+
+**2. How do you load your own local TSV files?**
+
+<details>
+<summary>Show answer</summary>
+
+Use the `"csv"` loader with a `data_files` mapping and a delimiter: `load_dataset("csv", data_files={"train": "...tsv", "test": "...tsv"}, delimiter="\t")`. TSV is just CSV with tabs as the separator. `load_dataset` also has `"json"` and `"text"` loaders.
+
+</details>
+
+**3. What does `Dataset.map()` do, and how do you add a new column versus overwrite an existing one?**
+
+<details>
+<summary>Show answer</summary>
+
+`map` applies a function to every row; the function takes one example (a dict of its fields) and returns a dict of fields to update or add. Returning an existing key overwrites that column; returning a new key adds a column. For example, returning `{"review_length": ...}` when there is no such column yet creates it.
+
+</details>
+
+**4. What does `Dataset.filter()` expect, and what is it for?**
+
+<details>
+<summary>Show answer</summary>
+
+A function (often a lambda) that takes one example and returns `True` to keep the row or `False` to drop it. It is for removing rows: dropping `None` values, filtering out reviews shorter than a threshold, and similar. `map` changes columns; `filter` removes rows.
+
+</details>
+
+**5. What does `batched=True` change about how your `map` function is called, and why use it?**
+
+<details>
+<summary>Show answer</summary>
+
+It passes a batch of examples at once (1,000 by default) instead of one at a time, so your function receives a dict whose values are lists and must return lists. It is dramatically faster, and it is essential for fast tokenizers (which parallelize tokenization across the batch in Rust). Reach for it before `num_proc`.
+
+</details>
+
+**6. Why create a validation set with `train_test_split` when you already have a test set?**
+
+<details>
+<summary>Show answer</summary>
+
+To keep the test set untouched until the very end. You develop and tune against the validation set, then do a single final check on the test set. This protects against overfitting to the test set and deploying a model that fails on real data. It is the same evaluation discipline from lesson 3, applied to your data.
+
+</details>
+
+**7. Why can you work with datasets larger than your RAM?**
+
+<details>
+<summary>Show answer</summary>
+
+A `Dataset` is backed by Apache Arrow on disk, not loaded wholesale into memory. The library reads the parts it needs when it needs them, so dataset size is bounded by disk, not RAM.
+
+</details>
+
+## Try it yourself: load, clean, and split
+
+About 12 minutes in a notebook. You will load a dataset and run the full clean-transform-split flow.
+
+**Part A: load and inspect.** Load any small text dataset from the Hub and look at its shape:
+
+```python
+from datasets import load_dataset
+ds = load_dataset("imdb")
+print(ds)
+print(ds["train"][0])
+```
+
+Note the splits, the `features`, and the `num_rows`.
+
+**Part B: add a column, filter, split.** Add a word-count column, drop the very short reviews, and carve a validation set:
+
+```python
+ds = ds.map(lambda x: {"length": len(x["text"].split())})
+ds = ds.filter(lambda x: x["length"] > 20)
+split = ds["train"].train_test_split(train_size=0.9, seed=42)
+print(split)
+```
+
+<details>
+<summary>What you should see, and why</summary>
+
+After `map`, every row has a new `length` column. After `filter`, the row count drops (the short reviews are gone). After `train_test_split`, you have `train` and `test` keys inside `split` (rename the `test` to `validation` if you like). You have just done the core data-prep loop: load, add a feature, remove bad rows, and protect a held-out slice. The original `ds["test"]` is still untouched, which is the whole point.
+
+</details>
+
+**Part C (reasoning).** You run `ds.map(clean_fn)` on a million-row dataset and it is slow. What one change is the first thing to try, and what must you change about `clean_fn` to use it?
+
+<details>
+<summary>What you should notice</summary>
+
+Add `batched=True`. But then `clean_fn` receives a dict whose values are lists (a whole batch) rather than single values, so it must iterate over each field's list and return lists, typically with a list comprehension. That single change is usually the biggest speedup available, and it is what makes fast tokenizers fast.
+
+</details>
+
+## Flashcards
+
+Nine cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay the set out one card per page for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="What does load_dataset return, and what is a DatasetDict?">
+
+A DatasetDict: a dictionary keyed by split name (train/validation/test), each value a Dataset with features (columns) and num_rows. load_dataset works on Hub datasets and local files (csv/json/text with data_files).
+
+</Flashcard>
+
+<Flashcard question="How do you load local TSV files?">
+
+load_dataset('csv', data_files=`{'train': '...tsv', ...}`, delimiter='\t'). TSV is CSV with tab separators; the csv loader handles it with the delimiter argument.
+
+</Flashcard>
+
+<Flashcard question="What does Dataset.map() do?">
+
+Applies a function to every row. The function takes one example (dict of fields) and returns a dict of fields to update or add. New key = new column; existing key = overwrite.
+
+</Flashcard>
+
+<Flashcard question="What does Dataset.filter() do?">
+
+Takes a function returning True (keep) or False (drop) per example, often a lambda. Used to remove rows: drop None values, short reviews, etc. map changes columns; filter removes rows.
+
+</Flashcard>
+
+<Flashcard question="What does batched=True do in map?">
+
+Passes a batch (default 1,000 examples) at once; the function receives lists and returns lists. Much faster, and essential for fast tokenizers that parallelize in Rust. Try it before num_proc.
+
+</Flashcard>
+
+<Flashcard question="Why create a validation set with train_test_split?">
+
+To keep the test set untouched until the end. Develop and tune on validation, do one final check on test. Protects against overfitting to the test set. Same evaluation discipline as fine-tuning.
+
+</Flashcard>
+
+<Flashcard question="Why can Datasets handle data larger than RAM?">
+
+A Dataset is backed by Apache Arrow on disk, not loaded fully into memory. The library reads what it needs on demand, so size is bounded by disk, not RAM.
+
+</Flashcard>
+
+<Flashcard question="How do you switch to pandas and back?">
+
+Dataset.set_format('pandas') changes only the output format (Arrow stays underneath), so slicing gives a DataFrame. Dataset.from_pandas(df) returns to a Dataset; reset_format() goes back to Arrow.
+
+</Flashcard>
+
+<Flashcard question="How do you save and reload a cleaned dataset?">
+
+save_to_disk('dir') writes Arrow; load_from_disk('dir') reads it back. to_csv / to_json export per split. Datasets also push to the Hub like models do.
+
+</Flashcard>
+
+</FlashcardSet>

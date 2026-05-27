@@ -1,0 +1,92 @@
+---
+title: "Lesson: Debug your training and get unstuck"
+description: The close of Phase 2, and the most universally useful lesson in the track. How to read a Python traceback, debug a pipeline systematically, build a minimal reproducible example, and ask the community for help in a way that actually gets answered.
+sidebar:
+  order: 2
+  label: Lesson
+artifact: lesson
+---
+
+Every lesson so far showed code that worked. Real work does not look like that. You will paste in a snippet, hit run, and get a wall of red text; your training will start and then die three steps in; a model that loaded yesterday will fail to load today. This is not a sign you are doing it wrong. It is the daily texture of the job, and the skill that separates people who ship from people who get stuck is not avoiding errors, it is debugging them calmly and systematically, and knowing how to ask for help when you cannot. That skill is this lesson, and it is the one that will outlast every specific API in this track.
+
+## Read the traceback, bottom to top
+
+When Python errors, it prints a **traceback** (also called a stack trace): the chain of function calls that led to the failure. The single most important habit is to **read it from the bottom up**. The last line names the exception type and gives the message; that is almost always where the useful information is. The lines above it show the path of calls that got there, most recent at the bottom.
+
+Here is a real one. A colleague sends you a model ID and you try to load it:
+
+```python
+from transformers import pipeline
+reader = pipeline("question-answering", model="lewtun/distillbert-base-uncased-finetuned-squad-d5716d28")
+```
+
+```python
+OSError: Can't load config for 'lewtun/distillbert-base-uncased-finetuned-squad-d5716d28'.
+Make sure that:
+- '...' is a correct model identifier listed on 'https://huggingface.co/models'
+- or '...' is the correct path to a directory containing a config.json file
+```
+
+The bottom line tells you the exception (`OSError`) and, helpfully, what to check. Often the message itself is the fix. Here the first suggestion is "is the model ID correct?", and reading closely, `distillbert` has two l's; DistilBERT has one. Fix the typo and try again. If it still fails (it might, for a different reason), you have at least eliminated one cause. The discipline is to read what the error actually says before doing anything else.
+
+## When the message is not enough, work up and inspect
+
+Sometimes the last line is not sufficient, and you climb the traceback to find the line in *your* code (as opposed to deep in a library) that triggered it. Consider this second error, from running a model's forward pass by hand:
+
+```python
+inputs = tokenizer(question, context, add_special_tokens=True)
+outputs = model(**inputs)
+```
+
+```python
+AttributeError: 'list' object has no attribute 'size'
+```
+
+The message says something does not have a `.size()`. Climbing the traceback, the failing library line is `input_shape = input_ids.size()`, and `.size()` is a method on tensors, not on Python lists. So `input_ids` is a list when it should be a tensor. Check the type to confirm (`type(inputs["input_ids"])` returns `list`), and the cause is clear: the tokenizer was called without `return_tensors="pt"`, so it returned plain lists instead of PyTorch tensors. Add it back and the model runs. This is the core debugging move: read the error, form a hypothesis about *what kind of thing* is wrong (here, a type mismatch), and check it directly rather than guessing.
+
+A related tool: when a model will not load, inspect what is actually in the repository. `list_repo_files(repo_id)` from `huggingface_hub` shows the files, and a missing `config.json` explains an `OSError` immediately. Look at the actual state of things; do not assume.
+
+## Search the error, you are rarely the first
+
+When the message and the traceback do not crack it, copy the error text into a search engine or Stack Overflow. This feels like cheating; it is not, it is the job. Most errors you hit have been hit before, and someone has posted the cause and the fix. The `'list' object has no attribute 'size'` error above is a textbook case: searching it surfaces the exact "add `return_tensors='pt'`" answer. Pasting an error message into a search bar is one of the highest-value five-second moves in all of programming.
+
+## Common places a training pipeline breaks
+
+When it is training rather than inference that fails, the failure is almost always in one of a few predictable spots. Check them in order:
+
+- **Data formatting and labels:** the wrong column names, labels as strings when the model wants integers, or a `num_labels` that does not match your data. A surprising share of training errors are really data errors.
+- **Tokenization and tensors:** forgetting `return_tensors`, or inconsistent lengths that should have been handled by a data collator.
+- **The collator:** using `DataCollatorWithPadding` when a task needs `DataCollatorForSeq2Seq` or `...ForTokenClassification`, so labels are not padded correctly.
+- **Shapes and devices:** a mismatch between what the model expects and what the batch provides, or tensors on the CPU when the model is on the GPU.
+
+The systematic version of this is to test the pipeline one stage at a time: confirm one example tokenizes correctly, confirm one batch from the collator has the shapes and types you expect, push that single batch through the model, and only then launch the full run. Catching the error on one batch is far cheaper than catching it after twenty minutes of training.
+
+## Build a minimal reproducible example
+
+When you are still stuck, strip the problem down to the smallest piece of code that still triggers it: one example instead of the whole dataset, the bare model load instead of the full script. This does two things. Very often, the act of minimizing reveals the cause (you remove the irrelevant parts until only the broken part is left). And when it does not, that minimal example is exactly what you need to ask for help, because no one can debug a 300-line script they cannot run.
+
+## Ask the community so you actually get answered
+
+If you have read the traceback, searched, and minimized, and you are still stuck, ask, but ask well. A good question gets a fast answer; a vague one gets silence. Whether you post on the Hugging Face forums (for "how do I" and "why does this happen") or open a GitHub issue (when you believe you have found a real bug), include:
+
+- **A minimal reproducible example:** the shortest code someone can run to see the error themselves.
+- **The full traceback,** as text, not a screenshot of part of it.
+- **Your environment:** library versions and platform (for Transformers, `transformers-cli env` prints exactly this).
+- **What you expected versus what happened,** and what you already tried.
+
+The principle is empathy for the person helping you: give them everything they need to reproduce the problem without a back-and-forth. That is also why these are not Hugging Face-specific skills. Reading tracebacks, minimizing, searching, and writing a clear bug report are how you work with *any* open-source project.
+
+## Why this matters when you use AI
+
+This is the least glamorous lesson in the track and quietly the most important. Models and APIs change; the architecture you fine-tune this year will be replaced. But the moment-to-moment reality of applied AI is hitting errors and getting past them, and the practitioners who move fast are not the ones who never see red text, they are the ones who read it calmly, form a hypothesis, check it, and escalate gracefully when stuck. The opposite, panicking at a traceback and changing random things hoping one works, is how hours disappear. There is also a quiet professional skill here: asking for help well. A clear question with a minimal example respects the time of whoever answers and gets you unstuck faster, and over a career that compounds. Debugging is not the interruption to the work; a lot of the time, it *is* the work.
+
+## What you should remember
+
+- **Read tracebacks bottom to top.** The last line names the exception and the message, usually the most useful information. Work upward to find the line in your own code that triggered it.
+- **Form a hypothesis and check it.** Most errors are a specific kind of wrong (a type mismatch, a missing file, a shape error). Check the type, list the files, print the shape, rather than guessing.
+- **Search the error message.** You are rarely the first to hit it; pasting it into a search engine or Stack Overflow is a five-second, high-value move.
+- **Know where training pipelines break:** data and labels, tokenization and tensors, the collator, and shapes/devices. Test one example and one batch before launching a full run.
+- **Build a minimal reproducible example.** Minimizing often reveals the cause, and it is what others need to help you.
+- **Ask for help well:** a minimal example, the full traceback as text, your environment, and what you expected versus what happened. These skills apply to every open-source project, not just this one.
+
+Errors are not a detour from the work; they are most of it. The skill is not avoiding the red text, it is reading it calmly, checking a hypothesis, and asking a good question when you are stuck. That skill outlasts every API in this track.

@@ -1,0 +1,114 @@
+---
+title: "Lesson: Backpropagation and the chain rule"
+description: Last lesson we kept saying backprop passes "desires" and "wishes" backward, and how much each knob should change. This lesson names the how-much. It is calculus, specifically the chain rule, applied through the layers. We work the smallest chain by hand, watch the chain-rule product turn out to be exactly the backward flow of desires, and see why running it backward is what makes it efficient.
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+Lesson 8 gave us the intuition for backpropagation: each output neuron has a desire, that desire becomes a wish for the previous layer, and the wishes propagate backward through the network. We were deliberately vague about one word, though. We kept saying the network figures out *how much* each weight should change, without ever saying how it computes that number. This lesson names it. The how-much is calculus, and the specific tool is the **chain rule**. By the end you will see that the backward flow of desires from lesson 8 was the chain rule all along, just told as a story.
+
+This is the most math-leaning lesson in the track, so a promise up front: we are going to *use* the chain rule, not teach it from scratch. Track 8 (Visual Math: Calculus) builds the chain rule properly. Here we only need its one-line summary and the willingness to multiply a few small numbers together.
+
+## The chain rule, in one line
+
+Here is the whole tool. If a quantity is built by feeding one function into another, like `f(g(x))`, then the rate at which the outer result changes as you wiggle `x` is the product of the rates at each step:
+
+```
+df/dx = (df/dg) · (dg/dx)
+```
+
+In words: how fast the whole thing changes equals how fast the outer step responds to the inner one, times how fast the inner step responds to `x`. Rates multiply along the chain. The reason they multiply is worth a sentence of intuition: if you nudge `x` by a hair, `g` moves by `dg/dx` times that hair, and then `f` moves by `df/dg` times *that*, so the two responses stack up as a product rather than a sum. That is all we will lean on. (If that one line feels shaky, Track 8's chain-rule lesson is exactly where to firm it up; everything below is just this line, used repeatedly.)
+
+## The cost is a deeply nested function
+
+Why does a chain show up at all? Because the cost is built by nesting. Recall the pieces from earlier lessons. The cost depends on the network's output. The output activation depends on the weighted sum feeding the last layer, which depends on the previous layer's activations. Those depend on *their* weighted sums, which depend on the layer before, and so on, back to the input.
+
+So the cost is a function inside a function inside a function, one nesting per layer. If you want to know how the cost responds to a weight buried near the front of the network, you are asking how a wiggle there ripples forward through every layer until it finally reaches the cost. The chain rule is precisely the tool for that ripple: multiply the rate of change at each layer the wiggle passes through.
+
+## The smallest chain, worked by hand
+
+Let us make it concrete with the simplest network that still has a chain: one neuron per layer, four layers deep. To keep the chain rule visible, we will leave out the squish for now (a network of plain weighted connections) and add it back at the end.
+
+Call the input `a0` and the three weights `w1`, `w2`, `w3`, so:
+
+```
+a1 = w1 · a0          a2 = w2 · a1          a3 = w3 · a2  (the output)
+cost C = (a3 − y)²     where y is the desired output
+```
+
+Pick numbers: `a0 = 1`, `w1 = 2`, `w2 = 3`, `w3 = 0.5`, and a desired answer `y = 2`. Run the forward pass:
+
+```
+a1 = 2 · 1 = 2        a2 = 3 · 2 = 6        a3 = 0.5 · 6 = 3
+C  = (3 − 2)² = 1
+```
+
+The output came out 3 when we wanted 2, so the cost is 1. Now the real question: how does the cost change if we nudge the very first weight, `w1`? That is the chain rule's job. Following the nesting from the cost back to `w1`, we multiply the rate of change at each step:
+
+```
+dC/dw1 = (dC/da3) · (da3/da2) · (da2/da1) · (da1/dw1)
+```
+
+Each factor is tiny and easy:
+
+- `dC/da3 = 2(a3 − y) = 2(3 − 2) = 2`: how much the cost responds to the output.
+- `da3/da2 = w3 = 0.5`: how the output responds to `a2` (just the weight between them).
+- `da2/da1 = w2 = 3`: likewise one layer back.
+- `da1/dw1 = a0 = 1`: how `a1` responds to the weight `w1` (it is whatever value was feeding through).
+
+Multiply them: `2 · 0.5 · 3 · 1 = 3`. So `dC/dw1 = 3`: nudging `w1` up by a tiny amount raises the cost at a rate of 3. (You can check it the long way: since `a3 = w1·w2·w3·a0`, the cost responds to `w1` at exactly that same rate. The chain rule got there by multiplying four simple pieces instead of untangling the whole expression.)
+
+## This is lesson 8's story, in numbers
+
+Look again at that product, because it is lesson 8 wearing a lab coat. The first factor, `dC/da3 = 2`, is the output neuron's *desire*: the output is too high, and 2 measures how much and which way the cost wants it to move. Each following factor, `w3` then `w2`, is how that desire flows back through one more weight, exactly the "wish for the previous layer" we described. The last factor, `a0`, is the activation feeding the weight, which is why lesson 8 said a weight's adjustment matters most when its input is large. The "desires propagating backward" picture and this chain-rule product are the same thing. One is the story; the other is the arithmetic.
+
+And that single number, `dC/dw1 = 3`, is precisely what the rest of the chapter has been waiting for. It is one component of the gradient `∇C` from lessons 6 and 7, the slope of the cost with respect to one knob. Hand it to the gradient descent rule from lesson 7 and the update is immediate: `w1_new = w1 − learning_rate · 3`. Since the slope is positive, the rule lowers `w1` a little, which lowers the cost a little. The whole training loop is now closed end to end: the chain rule (this lesson) produces every knob's slope, gradient descent (lesson 7) steps each knob against its slope, and the cost (lesson 5) inches downward. Backprop is just the part that fills in all those slopes at once.
+
+## Why run it backward
+
+Now the reason for the name. Suppose we also want the cost's sensitivity to the other two weights:
+
+```
+dC/dw3 = (dC/da3) · (da3/dw3) = 2 · a2 = 2 · 6 = 12        (2 factors)
+dC/dw2 = (dC/da3) · (da3/da2) · (da2/dw2) = 2 · 0.5 · 2 = 2  (3 factors)
+dC/dw1 = ... (4 factors, computed above) = 3
+```
+
+Notice the overlap. Every one of these chains begins with `dC/da3 = 2`. The chains for the earlier weights also reuse `da3/da2 = w3`, and so on. The factors near the output show up again and again in the chains for weights further back.
+
+That is the whole efficiency trick. If you compute the chains starting from the output and work backward, you calculate each output-side factor once and reuse it for every weight behind it. Start from the input instead and you would recompute the same output-side pieces over and over. Backpropagation is the chain rule executed in the backward direction precisely so those shared factors are computed once. The name is not poetry; it is describing the direction that saves the work.
+
+## What changes in a real network
+
+Two honest extensions. First, real networks are wider and deeper, so the chains are longer and there is one per weight, but nothing about the rule changes: a four-layer network gives chains of about five factors, a hundred-layer network gives chains of about a hundred factors, all still just rates multiplied along the path. And here is where lesson 8's promise pays off: because the chains for all those weights share their output-side factors, a single backward sweep computes every weight's slope at once. That is the same "one backward pass yields the whole gradient" claim from last lesson, now visible as the arithmetic reason it is true.
+
+Second, we dropped the squish to keep the arithmetic clean. Put it back and each layer simply contributes one extra factor to its chain: the derivative of the activation function (the slope of the sigmoid or ReLU at that point). The chain rule handles it without complaint; you just have one more small number to multiply at each step. The shape of the method is identical.
+
+## Why this matters when you use AI
+
+The chain rule is quietly why deep learning works at all. "Deep" means many layers, which means long chains, and the chain rule is the only thing that makes the gradient through all those layers computable at a sane cost. Every deep model you have used was trained by running exactly this, chains of rates multiplied backward through dozens or hundreds of layers, billions of times.
+
+It also hints at a real difficulty you may have heard named. When a chain has many factors and each is smaller than 1, their product can shrink toward zero, so weights near the front of a very deep network can receive almost no signal about how to change. That is the "vanishing gradient" problem, and a good deal of modern architecture design exists to keep those backward chains healthy. You do not need the details here; the point is that this lesson's simple product-of-rates is the exact place that famous difficulty comes from.
+
+## Common pitfalls
+
+**Thinking you must master calculus to get backprop.** You need one line: rates multiply along a chain. Track 8 has the depth; the intuition from lesson 8 already carried the idea before any symbols appeared.
+
+**Thinking backprop is a different idea from the chain rule.** It is the chain rule, applied to the network's nested structure and executed backward. There is no separate backprop magic on top.
+
+**Forgetting why the direction matters.** Running the chains backward lets the shared output-side factors be computed once and reused. Forward would recompute them for every weight. Same answers, far more work.
+
+**Thinking the squish breaks the method.** It does not. Each activation function just adds one more factor (its slope) to that layer's chain. The rule is unchanged.
+
+## What you should remember
+
+- **Backpropagation is the chain rule** applied through the network's layers. The "how much each knob should change" from lesson 8 is computed by multiplying the rate of change at each layer the wiggle passes through.
+- **The chain rule is one line:** `df/dx = (df/dg)·(dg/dx)`; rates multiply along the chain. Track 8 teaches it in depth; here we only apply it.
+- **Worked small:** for a one-neuron-per-layer chain, `dC/dw1` was the product of four simple factors, `2 · 0.5 · 3 · 1 = 3`, and the first factor was the output's desire from lesson 8.
+- **Run it backward to reuse work.** Output-side factors are shared across every weight's chain; computing backward calculates them once. That is exactly what "backpropagation" names. Adding the squish just adds one factor per layer.
+
+Backpropagation is not a second idea stacked on the chain rule. It is the chain rule, walked backward through the layers so the shared pieces are only computed once. Lesson 8's wishes were derivatives the whole time.
+
+Next: the cheatsheet puts the chain, the worked numbers, and the backward-reuse idea on one page. Then lesson 10 closes the track. We pull the whole picture together, from a messy handwritten 3 to a trained network, and point you toward where to go to build one yourself.

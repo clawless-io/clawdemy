@@ -1,0 +1,94 @@
+---
+title: "Lesson: Fine-tuning LLMs, supervised and instruction tuning"
+description: The first LLM-frontier lesson. How supervised fine-tuning differs from the task fine-tuning of lesson 3, why it turns a base model into an assistant, the chat-formatted data it needs, the SFTTrainer, and how LoRA makes it affordable.
+sidebar:
+  order: 2
+  label: Lesson
+artifact: lesson
+---
+
+In lesson 3 you fine-tuned a model for one narrow task: you bolted a classification head onto BERT and trained it to label sentence pairs. That is one kind of fine-tuning. The assistant-style models you interact with went through a different kind, and this lesson is about that difference. A raw pretrained language model is just a next-token predictor; it will happily continue your prompt but has no notion of "following an instruction" or "answering helpfully." **Supervised fine-tuning (SFT)** is the step that turns that raw predictor into something that behaves like an assistant. Understanding the distinction is the goal here, along with a working picture of how SFT is done.
+
+This is a conceptual-plus-code lesson; a notebook with a GPU helps if you want to run the example, but you can follow the ideas without one.
+
+## Task fine-tuning versus supervised fine-tuning
+
+The two are easy to confuse because both are "fine-tuning," but they differ in what they train and what they produce:
+
+- **Task fine-tuning (lesson 3):** you add a task-specific head (a classifier) and train the model to do one narrow thing (this email is spam or not). The output is a label. You are adapting the model to a single task.
+- **Supervised fine-tuning (SFT):** you keep the language-modeling head and train the generative model on many examples of instructions and good responses, so it learns the general behavior of following instructions and producing assistant-style answers across a wide range of requests. The output is text. You are adapting the model's *behavior*, not narrowing it to one task.
+
+Put differently: task fine-tuning makes a model good at *a task*; SFT makes a base model good at *being an assistant*. The instruction-following models on the Hub are base models that were put through SFT (and often further preference tuning after that, which we touch on at the end).
+
+## When SFT is the right tool, and when it is not
+
+SFT costs real compute and effort, so it is not the first move. The honest order of operations is:
+
+1. **Try prompting an existing instruction-tuned model first.** If a well-crafted prompt to an already-tuned model does the job, you are done; do not fine-tune.
+2. **Reach for SFT when prompting is not enough.** The clear cases are template control (you need a strict output format or chat structure every time), domain adaptation (specialized terminology and conventions a general model fumbles), and cost (a smaller fine-tuned model can be cheaper to run than a large general one for a narrow purpose).
+
+That sequencing matters: SFT is powerful, but a prompt is free. Spend the compute only when the cheaper option falls short.
+
+## The data: instructions, conversations, and chat templates
+
+SFT trains on input-output pairs: an instruction (and any context) plus the response you want. Modern instruction data is usually structured as **conversations**, a list of messages each tagged with a role (`system`, `user`, `assistant`). The model learns to produce the `assistant` messages given the rest.
+
+There is one format detail that matters: every chat model expects its conversation laid out in a specific text layout, with particular markers separating the roles. That layout is the model's **chat template**, and the tokenizer carries it. You apply it with `tokenizer.apply_chat_template(messages)`, which turns a list of role-tagged messages into the exact string the model was trained to read. Getting this right is not optional polish; a model fine-tuned with the wrong template will behave badly, because the markers it relies on to tell "your turn" from "my turn" are wrong.
+
+## The tool: `SFTTrainer` from TRL
+
+You already know the training loop from lesson 3 (data, config, trainer, `train()`). SFT uses the same shape, through the **TRL** library (Transformer Reinforcement Learning), which is built on top of `transformers`. Its `SFTTrainer` is the `Trainer` you know, specialized for supervised fine-tuning of generative models, configured with an `SFTConfig`:
+
+```python
+from datasets import load_dataset
+from transformers import AutoModelForCausalLM, AutoTokenizer
+from trl import SFTConfig, SFTTrainer
+
+dataset = load_dataset("HuggingFaceTB/smoltalk", "all")
+model_name = "HuggingFaceTB/SmolLM2-135M"
+model = AutoModelForCausalLM.from_pretrained(model_name)
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+
+training_args = SFTConfig(
+    output_dir="./sft_output",
+    max_steps=1000,
+    per_device_train_batch_size=4,
+    learning_rate=5e-5,
+    eval_strategy="steps",
+    eval_steps=50,
+)
+
+trainer = SFTTrainer(
+    model=model,
+    args=training_args,
+    train_dataset=dataset["train"],
+    eval_dataset=dataset["test"],
+    processing_class=tokenizer,
+)
+trainer.train()
+```
+
+If the dataset has a `messages` field, the `SFTTrainer` applies the model's chat template automatically, so you do not have to format the conversations yourself. Notice how much carries over: `load_dataset`, an `AutoModelFor...` load, a config object, a trainer, `train()`. The skills from Phases 1 and 2 are exactly the foundation this stands on; SFT is the same loop pointed at a generative model and instruction data.
+
+## Doing it affordably: LoRA and parameter-efficient fine-tuning
+
+There is a practical problem: large language models are huge, and fully fine-tuning every weight needs more memory than most people have. **LoRA (Low-Rank Adaptation)** is the standard answer. Instead of updating all of the model's weights, LoRA freezes the original weights and adds small low-rank matrices to the layers, training only those. The additions are a tiny fraction of the model's size, so the memory needed drops dramatically, and you can fine-tune a large model on a single modest GPU while preserving its pretrained knowledge. LoRA is one of a family of **parameter-efficient fine-tuning (PEFT)** methods, and in practice it is how most people fine-tune large models today. You configure it with a `LoraConfig` and hand it to the trainer; the loop is otherwise the same.
+
+## Where SFT sits in the bigger picture
+
+SFT is one stage of how a usable assistant is built, and it helps to see the sequence at a primer level. A model is first **pretrained** (lesson 1: the expensive next-token-prediction step). Then **SFT** teaches it to follow instructions and produce assistant-style responses. Many models then go through a further **preference-tuning** stage, where methods such as RLHF (reinforcement learning from human feedback) or DPO (direct preference optimization) tune the model on comparisons of better-versus-worse responses. This lesson stops at SFT; the preference-tuning stage is named here only so you know where SFT fits in the pipeline, not as something we evaluate or take a position on. The key takeaway is the shape: pretrain to learn language, SFT to learn to follow instructions, preference tuning to refine which responses are preferred.
+
+## Why this matters when you use AI
+
+Two things change once you understand SFT. First, it demystifies the assistant. The helpful, instruction-following behavior you take for granted is not inherent to the architecture; it was trained in, on top of a base model that on its own would just autocomplete your text. Knowing that, you understand both why these models are good at following instructions and why their behavior is only as good as the data they were tuned on, which connects straight to the next lesson on data quality. Second, it is a real capability you can now reach for, with the right sequencing: try prompting first, and when that genuinely is not enough, SFT with LoRA lets you specialize an open model to your domain or output format on affordable hardware. That combination, a small open model plus targeted SFT, is increasingly how teams get production-quality behavior without the cost of the largest general models.
+
+## What you should remember
+
+- **Task fine-tuning adds a head for one task; SFT trains the generative model to follow instructions** across many tasks. The first makes a model good at a task, the second makes a base model good at being an assistant.
+- **Try prompting an instruction-tuned model first.** Reach for SFT only when you need template control, domain adaptation, or a cheaper specialized model.
+- **SFT data is instructions and conversations** (role-tagged `system`/`user`/`assistant` messages), and the model's **chat template** (via `tokenizer.apply_chat_template`) lays them out the way the model expects. The wrong template breaks behavior.
+- **`SFTTrainer` from TRL is the `Trainer` you know, specialized for SFT.** Same loop (data, `SFTConfig`, trainer, `train()`); it auto-applies the chat template for `messages` datasets.
+- **LoRA / PEFT makes it affordable:** freeze the base weights, train small added low-rank matrices, and fine-tune a large model on modest hardware. The standard way to fine-tune big models today.
+- **SFT is one stage:** pretrain (learn language), SFT (learn to follow instructions), then optional preference tuning (RLHF, DPO) to refine preferred responses.
+
+The chat assistants you use are base models taught to behave, and SFT is the lesson where they learn it. Knowing task fine-tuning from instruction tuning is what lets you choose, correctly, between writing a better prompt and training the model itself.

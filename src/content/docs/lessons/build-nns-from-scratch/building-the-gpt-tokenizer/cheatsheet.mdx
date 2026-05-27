@@ -1,0 +1,76 @@
+---
+title: "Cheatsheet: building the GPT tokenizer"
+description: One-page reference. Why subword tokens, the byte-pair-encoding loop, a worked merge and encode/decode, byte-level tokenization, and the quirks it causes.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## What the tokenizer does
+
+It is the translator between raw text and the integer **token IDs** a GPT consumes (and back). A **separate stage** with its own training, sitting in front of the model.
+
+## Why subword tokens
+
+| Unit | Problem |
+| --- | --- |
+| Characters | sequences far too long, wastes the limited context window |
+| Words | vocabulary explodes; unseen words have no token |
+| Subwords (BPE) | common chunks get one token, rare strings spelled from pieces, anything representable |
+
+## Byte-pair encoding (BPE) loop
+
+1. Start with the basic units (bytes / characters) as the vocabulary.
+2. Find the **most frequent adjacent pair** of tokens in the training text.
+3. **Merge** it into a new token; add to vocabulary; record the merge.
+4. Repeat until the vocabulary hits a target size.
+
+Common patterns become single tokens. The merges are the tokenizer.
+
+## Worked merge (the classic example)
+
+```
+aaabdaaabac        (11 symbols)
+merge aa->Z:  ZabdZabac
+merge ab->Y:  ZYdZYac
+merge ZY->X:  XdXac        (X = ZY = aaab; 11 symbols -> 5)
+```
+
+Merges are layered: `X` is built from `Z` and `Y`, which are built from base symbols.
+
+## Encode / decode
+
+```
+encode "aaab":  aaab -> (aa->Z) Zab -> (ab->Y) ZY -> (ZY->X) X   = one token
+decode X:       X -> ZY -> aa,ab -> "aaab"
+encode "dac":   no learned merges apply -> d, a, c               = three tokens
+```
+
+Common gets short; rare stays spelled out. Trained once on a corpus, separate from the model.
+
+## Byte-level
+
+Real tokenizers run BPE over UTF-8 **bytes**, so any character (any language, emoji) is representable, no "unknown token" gaps. Typical target: tens of thousands of tokens. A page of text (thousands of characters) becomes hundreds of tokens.
+
+## Quirks that come from tokenization (not the model)
+
+- **Spelling / letter-counting** ("how many r's in strawberry"): the model sees tokens, not letters.
+- **Arithmetic:** numbers chunked into tokens inconsistently.
+- **Whitespace sensitivity:** a leading space makes a different token.
+- **Weaker in some languages:** more tokens per word, less effective context.
+
+## The whole pipeline (now complete)
+
+```
+text -> tokenizer -> token IDs -> token + position embeddings
+     -> stack of transformer blocks (attention + feed-forward, residual + norm)
+     -> softmax -> next-token probability -> sample -> tokenizer (decode) -> text
+```
+
+Every piece built from scratch across this track.
+
+## The one-line version
+
+A tokenizer uses byte-pair encoding (repeatedly merge the most frequent adjacent pair) to turn text into subword token IDs and back; it is a separate trained stage, and a surprising share of language-model quirks (spelling, arithmetic, whitespace) trace to it, not to the model.

@@ -1,0 +1,25 @@
+---
+title: "Summary: Inference"
+description: The 5-minute scan version. Prefill vs decode, the KV cache, batching, paged attention, speculative decoding, and quantization.
+sidebar:
+  order: 4
+  label: Summary
+artifact: summary
+---
+
+Inference is a different cost problem than training: **mostly memory bandwidth**, not compute. It runs in two phases, **prefill** (process the whole prompt in parallel, compute-bound, like a training step) and **decode** (generate one token at a time, memory-bound), and most user-visible time is in decode. The central object is the **KV cache**: keys and values for every previous token in every layer, computed once and reused at every later step. It grows with sequence × layers × kv_heads × head_dim and dominates decode's bandwidth. The five techniques that turn this into something efficient: **continuous batching** (amortize weight loads across many concurrent requests), **paged attention** (cache as virtual memory pages, many more concurrent users), **speculative decoding** (small draft model proposes, big model verifies in parallel), **quantization** (int8/int4 shrinks per-step HBM traffic), and **GQA** from lesson 4 (shrinks the KV cache itself). This is the scan version; the lesson closes Phase 2.
+
+## Core ideas
+
+- **Two phases, different costs.** Prefill is compute-bound (parallel over the prompt). Decode is memory-bound (one token at a time, weights and KV cache read every step). Decode dominates user-visible time on long responses.
+- **The KV cache** is the central object: stored keys/values per previous token per layer; grows with sequence × layers × kv_heads × head_dim; can exceed the weights at long context; reads are the bandwidth bottleneck.
+- **Batching is the biggest win.** Loading weights costs the same for 1 or 16 outputs; batching N decodes amortizes the load N times. **Continuous batching** keeps the running batch full by adding/removing requests live.
+- **Paged attention** pages the KV cache like virtual memory: pages allocated only as needed and released on finish. Far higher cache utilization, many more concurrent users.
+- **Speculative decoding** uses a small draft model to propose tokens that the big model verifies in a single parallel pass. Multiple tokens per big-model pass with identical output distribution.
+- **Quantization** (int8, int4) shrinks per-step HBM traffic, the precise cost decode is bottlenecked on. Bigger lever at inference than at training, where compute dominates.
+
+## What changes for you
+
+Inference is the customer-facing half of an LLM system, and its economics are decided here. When a serving stack reports a large speed-up or much higher concurrent-user count, the cause is almost always one or more of the techniques above, all of which target the same enemy: decode's memory-bandwidth cost. Knowing the prefill/decode split and the KV-cache picture lets you read such claims with discrimination, a doubled-throughput number that comes from raising the batch size is doing exactly what the math says, while a "10x faster" claim is almost always a *recipe* (speculative decoding plus quantization plus paged attention against a baseline that did none of them), and you can ask which ingredients and against what baseline. With Phase 2 complete, the rest of the track turns from building and running an LLM to what makes it good: scaling laws, evaluation, data, and post-training.
+
+Inference is a memory-bandwidth problem in decode, with the KV cache at the center. Batch many requests to amortize weight loads, page the cache to fit many users, use speculative decoding to verify several drafted tokens per pass, and quantize to shrink the bytes per token. Those are the techniques behind nearly every fast serving stack.

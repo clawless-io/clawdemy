@@ -1,0 +1,61 @@
+---
+title: "Cheatsheet: self-attention from scratch"
+description: One-page reference. Why tokens must communicate causally, the crude average, query/key/value attention, the causal mask, and a worked step.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## The need
+
+To predict the next token, each token must **gather information from earlier tokens**, weighing relevant ones more. Hard rule (this is what makes it GPT): **causal**, a token attends only to itself and the past, never the future (peeking at later tokens = seeing the answer).
+
+## Crude version: average the past
+
+Each token = the average of itself and all previous tokens. Right shape (a causal weighted sum), wrong weights (uniform, no notion of relevance). Self-attention keeps the shape and learns the weights.
+
+## Self-attention (query, key, value)
+
+Each token produces three learned linear projections of itself:
+
+| Vector | Role |
+| --- | --- |
+| query | "what am I looking for?" |
+| key | "what do I contain?" (used for matching) |
+| value | "what I'll contribute if attended to" |
+
+Steps for each token `i`:
+
+1. **Affinities:** `affinity(i, j) = query_i · key_j` (dot product) for every `j`.
+2. **Causal mask:** set `affinity(i, j) = -inf` for every future `j > i`.
+3. **Softmax** each token's row of affinities into weights (positive, sum to 1).
+4. **Weighted sum of values:** output_i = sum over `j` of weight(i,j) * value_j.
+
+Scale affinities by `1/sqrt(key dimension)` before softmax so it does not saturate (the saturation problem from the BatchNorm lesson).
+
+## Worked step (token 2 of 3)
+
+Query `q = [1,2]`; keys `[1,0]`, `[0.5,0.25]`, `[1,2]`:
+
+```
+affinities = [q·k1, q·k2, q·k3] = [1, 1, 5]
+mask future (token 3): [1, 1, -inf]
+softmax: [e^1, e^1, 0]/5.436 = [0.5, 0.5, 0]
+values v1=2, v2=4:  output = 0.5*2 + 0.5*4 + 0 = 3
+```
+
+Token 3 had the highest raw affinity (5) but is masked to zero: the future is invisible no matter how relevant.
+
+## Causal windows
+
+Each position has a different window: token 1 sees only itself, token 2 sees 1-2, the last token sees all. One matrix of affinities, masked into a lower triangle, handles every position at once and in parallel.
+
+## Why it matters for AI
+
+Self-attention is the mechanism behind every large language model ("attention is all you need"). Its edge over averaging / WaveNet's fixed tree / RNNs: each token **dynamically chooses, from the data, which earlier tokens are relevant** (a pronoun attends to its noun, a closing bracket to its opener). Learned, content-based routing is why transformers won.
+
+## The one-line version
+
+Self-attention is a causal weighted sum where each token's query-key dot products (masked so the future is unreachable, then softmaxed) decide how much it pulls from every earlier token's value, learned routing that replaced fixed combination rules and powers every LLM.

@@ -1,0 +1,73 @@
+---
+title: "Cheatsheet: Building an autograd engine: micrograd"
+description: One-page reference. The Value object, local derivatives per operation, the backpropagation recipe, and a worked backward pass.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## The Value object
+
+Every number is wrapped in a `Value` that carries:
+
+| Field | Holds |
+| --- | --- |
+| data | the actual number (computed forward) |
+| op | the operation that produced it (`+`, `*`, `tanh`, or none for a leaf) |
+| children | the input Values it was produced from |
+| grad | the derivative of the loss with respect to this value (computed backward; starts at 0) |
+
+Running an expression forward builds a **computational graph** of these nodes. That is the forward pass.
+
+## Local derivatives (known per operation)
+
+| Operation | Local derivative | In words |
+| --- | --- | --- |
+| `d = e + c` | 1 for each input | addition passes the gradient through unchanged |
+| `e = a * b` | `b` to `a`, `a` to `b` | each input gets the other input's value |
+| `t = tanh(x)` | `1 - tanh(x)^2` | the squashing nonlinearity that makes a neuron |
+
+## Backpropagation recipe
+
+1. Seed the output: `grad of L = 1` (`dL/dL = 1`).
+2. Walk the graph backward in reverse topological order.
+3. At each node, `grad of child = (grad of node) × (local derivative)`.
+4. A node feeding two places sums the gradients arriving from both.
+
+This is the chain rule (rates multiply through a composition) applied node by node. When done, every node holds `dL/d(itself)`.
+
+## Worked backward pass
+
+Leaves `a=2, b=-3, c=10, f=-2`. Forward:
+
+```
+e = a*b = -6     d = e+c = 4     L = d*f = -8
+```
+
+Backward (seed grad L = 1):
+
+```
+grad d = 1·f = -2      grad f = 1·d = 4
+grad e = grad d · 1 = -2     grad c = grad d · 1 = -2
+grad a = grad e · b = (-2)(-3) = 6
+grad b = grad e · a = (-2)(2) = -4
+```
+
+So `dL/da = 6`, `dL/db = -4`, `dL/dc = -2`: nudge `a` up a hair, the loss rises six times as fast.
+
+## Why it matters for AI
+
+`loss.backward()` in PyTorch (or JAX, TensorFlow) is exactly this procedure: a recorded graph, a local derivative per op, the chain rule walked backward until every parameter holds its gradient. micrograd is ~150 lines on single numbers; real frameworks are millions on tensors. Same idea. Nothing inside is a mystery.
+
+## Pitfalls to dodge
+
+- **Autograd is symbolic calculus.** No, it propagates numbers backward through the graph; no formula is derived.
+- **Multiply derivative uses the same input.** No, `grad of a` for `e=a*b` uses `b`, the other factor.
+- **Skipping reverse topological order.** A node must receive all its incoming gradient before passing any down.
+- **Confusing data with grad.** A node holds both: data (forward) and grad (backward). `a` has data 2, grad 6.
+
+## The one-line version
+
+An autograd engine records the computation as a graph, knows each operation's local derivative, and walks the chain rule backward through the graph so every input ends up holding its gradient.

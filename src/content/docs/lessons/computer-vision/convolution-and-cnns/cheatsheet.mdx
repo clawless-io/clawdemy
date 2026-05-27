@@ -1,0 +1,91 @@
+---
+title: "Cheatsheet: Convolution and CNNs"
+description: One-page reference. Why FC fails, the conv op, output formula, weight sharing, parameter counts.
+sidebar:
+  order: 5
+  label: Cheatsheet
+artifact: cheatsheet
+---
+
+## Why FC fails for images
+
+| Problem | Detail |
+|---|---|
+| Parameter explosion | Single FC neuron on 224x224x3 input = 150,528 weights; 100 hidden units = 15M+ params |
+| No spatial prior | Treats every pixel-pair as unrelated; can't reuse a "cat detector" across positions |
+
+## The convolution operation
+
+| Element | Detail |
+|---|---|
+| Filter / kernel | Small spatially (3, 5, 7), full depth of input (e.g. 3 for RGB) |
+| Operation per position | Dot product of filter with the local input patch |
+| Output per filter | A 2D feature (activation) map showing where the pattern occurred |
+| Many filters (K) | Output is a 3D volume of depth K, one feature map per filter |
+| Non-linearity (next step) | ReLU applied elementwise after conv (typical convention) |
+
+## Three hyperparameters
+
+| Symbol | Meaning | Effect |
+|---|---|---|
+| K (depth) | Number of filters | Sets depth of output volume |
+| S (stride) | Pixels per slide | Larger S shrinks output spatially |
+| P (padding) | Zero rings around border | Tune to control output spatial size |
+
+## Output spatial size formula
+
+`output_size = (W - F + 2P) / S + 1`
+
+| W | F | S | P | Output |
+|---|---|---|---|---|
+| 32 | 5 | 1 | 2 | 32 ("same" padding) |
+| 224 | 3 | 1 | 1 | 224 ("same" padding) |
+| 5 | 3 | 1 | 0 | 3 (body's edge-detector case) |
+| 5 | 3 | 2 | 0 | 2 (stride 2 downsampling) |
+| 7 | 3 | 1 | 0 | 5 (CS231n verbatim) |
+| 7 | 3 | 2 | 0 | 3 (CS231n verbatim) |
+
+Result must be a whole number.
+
+## Parameter count per conv layer
+
+`weights = K * F * F * D_in;  biases = K`
+
+| Setup | Params |
+|---|---|
+| 100 filters of 3x3, RGB input | 100 * (3*3*3) + 100 = 2,800 |
+| 96 filters of 11x11x3 (AlexNet 1st layer) | 96 * (11*11*3) + 96 = 34,944 |
+| FC layer, 100 units, 32x32x3 input (for comparison) | 100 * 3072 + 100 = 307,300 |
+| FC layer, 100 units, 224x224x3 input (for comparison) | 100 * 150,528 + 100 = 15,052,900 |
+
+Conv parameter count does NOT depend on input image size.
+
+## Weight sharing (the vision prior)
+
+| Property | Why |
+|---|---|
+| Same filter weights at every spatial position | Patterns useful at one position are useful at any (translational structure of images) |
+| Fewer parameters | One filter per pattern, not one filter per pattern per position |
+| Translation equivariance | Shift the input, output feature maps shift by the same amount, automatically |
+
+## What does NOT change
+
+| What | Why |
+|---|---|
+| Loss | SVM or softmax / cross-entropy, on the final classifier's scores |
+| Backprop | Chain rule through every layer (including conv layers) |
+| Gradient descent step | `W ← W - α * ∇L` for every filter weight |
+| Four-step training loop | Forward, loss, backward, step (lesson 4) |
+
+## Pitfalls
+
+| Pitfall | Reality |
+|---|---|
+| Convolution = Photoshop filter | Math is similar, but CNN filters are LEARNED by backprop, not hand-designed |
+| Filter sees the whole image | Each filter sees a small local patch; deeper layers grow effective receptive field |
+| Output size is a choice | Determined by `(W - F + 2P) / S + 1`; only certain combinations work |
+| Forgetting input depth | 3x3 filter on RGB = 27 weights (3*3*3), not 9; spatial small but depth full |
+
+## One-line takeaway
+
+A convolution is a small learned filter doing the same dot product everywhere on the image; weight sharing makes it pay for itself in parameters and translation equivariance; the training loop on top is unchanged.

@@ -1,0 +1,62 @@
+---
+title: "Cheatsheet: assembling and training the full GPT"
+description: One-page reference. Multi-head attention, the transformer block, residuals and layer norm, positional embeddings, the full GPT, and training.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## Multi-head attention
+
+Run several attention heads in parallel, each with its own query/key/value, then concatenate and project. Each head tracks a different relationship.
+
+```
+width 64, 8 heads -> each head works in 64/8 = 8 dims
+8 heads concatenated -> 8 x 8 = 64 (same width), then a linear layer mixes them
+```
+
+Heads run in parallel (not deeper); depth comes from stacking blocks.
+
+## The transformer block: communication then computation
+
+1. **Multi-head self-attention** (communication): tokens gather context from each other, causally.
+2. **Feed-forward MLP** (computation): applied to each token independently (often expands to ~4x width and back). Each token processes what it gathered.
+
+"Talk, then think." This block is the unit that gets repeated.
+
+## Two tricks that make deep stacks trainable
+
+- **Residual connections:** `output = x + sublayer(x)`. Addition passes the gradient straight through (autograd lesson), giving a highway back to early blocks, no vanishing gradient. Each block learns a small adjustment, not a rebuild.
+- **Layer normalization:** normalize each token's representation to a healthy mean/variance before each sublayer. The per-token cousin of batch norm; keeps activations trainable through depth.
+
+## Positional embeddings
+
+Attention is order-blind (a weighted sum sees a set, not a sequence). Add a learned **position embedding** to each token embedding (element-wise), so the input means "this token, at this position." Lets the model tell "dog bites man" from "man bites dog."
+
+## The full GPT, end to end
+
+```
+token embedding + position embedding        (what + where)
+   -> stack of N transformer blocks          (attention + feed-forward, each with
+                                              residual + layer norm)
+   -> final layer normalization
+   -> linear layer to vocabulary logits
+   -> softmax -> next-token probabilities
+```
+
+**Shapes:** a window of T tokens at width 64 is `(T, 64)`; every block preserves `(T, 64)` (so blocks stack); the final linear maps to `(T, vocab)` logits.
+
+## Training and generation
+
+- **Train:** cross-entropy (negative log likelihood) loss on the next tokens, backprop (the `p - y` gradient sits at the top), step downhill.
+- **Generate:** sample the next token from the softmax probabilities, append, feed back in, repeat (the autoregressive loop).
+
+## Why it matters for AI
+
+This is the exact architecture of every large language model: token + position embeddings, a deep stack of transformer blocks (multi-head attention + feed-forward, with residuals and layer norm), a softmax head, trained on next-token cross-entropy. Commercial models differ only in scale (more blocks/heads), a larger token vocabulary (not single characters), training data, and a fine-tuning stage, not in kind.
+
+## The one-line version
+
+A GPT is token + position embeddings feeding a deep stack of transformer blocks (multi-head attention then a per-token feed-forward, each wrapped in a residual connection and layer norm), ending in a softmax over the vocabulary, trained on next-token prediction, the full architecture behind every chatbot.

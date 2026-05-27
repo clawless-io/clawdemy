@@ -1,0 +1,85 @@
+---
+title: "Lesson: Why sequences need memory"
+description: The networks so far took a whole input at once and answered in one shot. But a sentence, a melody, or a stock chart arrives in order, one piece at a time, and the order is the meaning. This lesson shows why a plain feedforward network struggles with ordered data, and how giving a network a memory, a running summary it updates step by step, lets it handle sequences. That memory is the idea behind recurrent networks.
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+Read this: "the clouds are in the sky." Now read its shuffle: "sky the in clouds are the." Same words, and the first one means something while the second is noise. Order carries the meaning. The same is true of a melody (the notes in sequence are the tune), a stock chart (yesterday leads to today), and your own sentences (you predict the next word from the ones before it).
+
+The networks we have built so far are bad at this, and the reason is worth understanding before we fix it. So this lesson, the first stop on the tour, is about the problem shape called a **sequence**: data that arrives in order, one piece at a time, where the order is part of the message. We will see exactly why a plain feedforward network struggles with it, and then meet the idea that solves it, giving the network a memory.
+
+## Why a plain network struggles with order
+
+Picture the digit-recognizing network from earlier: 784 input neurons, a fixed slab of pixels in, an answer out. Now try to feed it a sentence. Three problems show up immediately.
+
+**The input is a fixed size; sentences are not.** That network has exactly 784 input slots. A sentence might be three words or thirty. There is no natural way to pour a variable-length sequence into a fixed set of input neurons without either chopping it or padding it awkwardly.
+
+**It has no sense of order, and no memory.** A feedforward network sees its whole input in one shot and answers in one shot. It has no notion of "before" and "after," and nothing carries over from one input to the next. Show it one word, then another, and the second time it has completely forgotten the first. For data where the whole point is what came earlier, that is fatal.
+
+**It cannot share what it learns across positions.** Suppose the network learned to recognize a verb in the second slot of a sentence. With a fixed-input feedforward design, that knowledge sits in the weights for slot two and does nothing for a verb in slot nine. A verb is a verb wherever it appears, but the network would have to relearn it position by position. That is wasteful and does not generalize.
+
+Put together, these say a feedforward network is built for a fixed snapshot, and a sequence is not a snapshot. We need a different arrangement of the same neurons.
+
+## The fix: give the network a memory
+
+Here is the move. Instead of swallowing the whole sequence at once, the network reads it **one piece at a time**, and after each piece it updates a small running summary of everything it has seen so far. That running summary is called the **hidden state**, and it is the network's memory.
+
+Think of how you read a sentence. You do not see all the words simultaneously; your eyes move left to right, and at each word you carry forward a sense of the sentence so far. By the time you reach the last word, that accumulated sense lets you understand it in context. The hidden state is exactly that carried-forward sense, written as a list of numbers.
+
+A network built this way is called a **recurrent neural network**, or RNN, and "recurrent" is the key word: it loops, feeding its own memory back into itself at every step.
+
+## How recurrence works, step by step
+
+At each step in the sequence, a recurrent network does one small thing. It takes two inputs: the current piece of the sequence (say, the next word) and the hidden state left over from the previous step (the memory so far). It combines them, using the familiar weighted-sum-plus-squish machinery, to produce a new hidden state. That new hidden state is the updated memory, and it gets passed forward to the next step. Optionally, at any step, the network can also read out an answer from the current hidden state.
+
+{/* DIAGRAM PLACEHOLDER: an unrolled RNN: a row of identical cells, each taking a word (x1, x2, x3...) from below and the previous hidden state (h) from the left, emitting a new hidden state to the right, with one cell expanded to show "combine current input + previous memory -> new memory" */}
+
+Two things about this are worth pausing on, because they fix exactly the problems we listed.
+
+**The same weights are reused at every step.** There is really just one small network applied over and over, once per element, with the hidden state carrying information between applications. So the network handles a sequence of any length (just keep looping), and whatever it learns about a word applies at every position, because it is literally the same weights each time. Both the variable-length problem and the no-sharing problem fall away.
+
+**The hidden state carries context.** Because each step's memory feeds into the next, information from early in the sequence can travel forward. When the network finally reaches the end, its hidden state is a summary shaped by everything that came before.
+
+Between them, these two facts dissolve all three problems we started with: reusing the weights handles variable length and sharing across positions, and the hidden state supplies the missing memory.
+
+Take a concrete case. Feed the network "the clouds are in the" one word at a time. With each word, the hidden state accumulates a little more context, and by the time it has read "the," the memory strongly suggests what kind of word comes next. Read out a prediction and you get "sky." The network got there not by seeing the whole phrase at once, but by carrying a memory forward word by word.
+
+## Where simple recurrence struggles
+
+Recurrence is a genuinely good idea, but the simplest version of it has a weak spot, and it is the same one we met when networks got deep: a fading signal.
+
+Consider a longer dependency: "I grew up in France, and although I have lived abroad for years, I still speak fluent ____." The right answer, "French," depends on a word near the very start of the sentence. For the network to get it, the memory of "France" has to survive across many steps without being washed out by everything in between. In a simple recurrent network, that early information tends to fade as it is overwritten step after step, so the network effectively forgets the distant past. Short-range context it handles well; long-range context slips away.
+
+This is a real limitation, and it was addressed by smarter recurrent designs (you may hear the names LSTM and GRU) that add a controllable memory: little gates that decide what to keep, what to overwrite, and what to forget at each step, so important early information can be held onto for longer. We will not work their machinery here; the idea to carry forward is just that they are recurrence with a more deliberate memory, built to fight the forgetting.
+
+Even with those improvements, processing a sequence strictly one step at a time, in order, has its own costs, and it set the stage for a different approach entirely, one that looks at all positions at once instead of marching through them. That approach is attention, and it is the next lesson.
+
+## Why this matters when you use AI
+
+Sequence models are behind a huge share of the AI you actually use: predictive text, voice transcription, translation, and the language models that power chat assistants all work on ordered data. The core idea you just met, carry a memory forward and update it as you read, is the foundation those systems were built on, even as the specific designs evolved past simple recurrence.
+
+It also explains a behavior you may have noticed. Early sequence models had short memories and would lose the thread of a long passage, contradicting something said paragraphs earlier. A great deal of progress in AI has been about extending how much context a model can hold and use at once. When you hear about a model's "context window," that is a direct descendant of this lesson's problem: how much of the sequence can the system actually keep in mind. Knowing that memory is the hard part helps you predict where these tools will be strong (short, local context) and where they strain (holding a long, distant thread).
+
+## Common pitfalls
+
+**Thinking a feedforward network just needs more neurons to handle sequences.** It is not a size problem; it is a shape problem. A fixed snapshot has no order and no memory no matter how big it is. Recurrence changes the shape.
+
+**Thinking the hidden state stores the whole sequence.** It does not. It is a fixed-size running summary, a compression of what mattered so far, not a transcript. That is exactly why long-range detail can be lost.
+
+**Thinking each step uses different weights.** The opposite: one small network's weights are reused at every step. That reuse is what lets the model handle any length and share what it learns across positions.
+
+**Thinking LSTMs and GRUs are a different idea.** They are recurrence with gated memory, the same loop with a smarter way to decide what to keep. The core idea, carry a memory forward, is unchanged.
+
+## What you should remember
+
+- **A sequence is ordered data where the order is the meaning** (sentences, audio, time series). A plain feedforward network struggles with it: fixed input size, no memory of what came before, and no sharing of what it learns across positions.
+- **Recurrence adds a memory.** A recurrent network reads one element at a time and keeps a hidden state, a running summary it updates at each step and feeds back into itself.
+- **The same weights are reused at every step,** which lets one small network handle a sequence of any length and apply what it learns at every position.
+- **Simple recurrence forgets the distant past** (the early signal fades over many steps). Gated designs like LSTMs and GRUs hold memory longer, and a different approach, attention, drops the step-by-step march entirely.
+
+A feedforward network sees a snapshot; a recurrent network reads a story, carrying a memory forward word by word. Giving a network memory is what lets it understand things that only make sense in order.
+
+Next: memory carried step by step works, but it is slow and it strains on long-range links. The next lesson meets a different answer to the same problem, attention, which lets a network look at every position in a sequence at once and weigh what matters, the idea at the heart of the transformers that power modern language models (Track 5 goes deep on them).

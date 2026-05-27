@@ -1,0 +1,93 @@
+---
+title: "Lesson: Reasoning and alignment, RL with verifiable rewards"
+description: The track capstone. The current reasoning frontier, training models to think step by step via reinforcement learning with verifiable rewards (RLVR), why this is a systems problem at scale, and a step back over the whole track and what it now gives you.
+sidebar:
+  order: 2
+  label: Lesson
+artifact: lesson
+---
+
+You have built every layer of an LLM. The tokenizer (lesson 1), the cost accounting (2), the architecture (3-4), the systems to run it efficiently (5-8), the scaling laws and evaluation to make it good (9-10), the data pipeline (11-12), and the post-training that turns it into an assistant (13). This final lesson covers the current frontier, **reasoning via reinforcement learning**, and then steps back to look at what the track gave you. Per the Phase 0 mirror, this lesson collapses the two reasoning-and-RL lectures of the source course (the RL-with-verifiable-rewards lecture and the RL-systems lecture).
+
+This lesson is taught at the technical-primer level, same discipline as lesson 13. RL, RLVR, and GRPO are named as mechanical methods, with what they do and how they fit together explained directly. Contested questions about whether these methods solve deeper alignment problems are out of scope here.
+
+## The reasoning gap, in one paragraph
+
+Ordinary LLMs trained with pretraining and standard post-training are good pattern matchers. They struggle on problems that require **several explicit steps**: multi-step math, multi-step code with constraints, logic puzzles, anything where the answer depends on a chain of intermediate results that all have to be right. Asked directly, they tend to one-shot a plausible-looking answer, and a plausible-looking answer to a multi-step problem is often wrong. Reasoning models address this by training the model to produce an explicit chain of **thinking** before its answer, and to make that thinking actually improve the answer.
+
+## RLVR: reward is verifiable correctness
+
+The post-training lesson used human preferences as the reward signal (RLHF) or skipped the explicit reward entirely (DPO). Reasoning training does something different: the reward is **verifiable correctness**. For math, the final numeric answer is right or wrong. For code, the test suite passes or fails. For logic puzzles, a programmatic checker confirms or rejects. **RLVR (RL with Verifiable Rewards)** trains the model on problems whose answers can be checked mechanically.
+
+Two consequences are immediate:
+
+- **No reward model is needed.** The check itself is the reward. This removes the entire "train a separate reward model, then optimize against it" branch of RLHF, including the reward-model-hacking failure mode (the policy can no longer game a learned reward; the checker is fixed).
+- **Reasoning emerges as the model learns** to produce intermediate steps that actually lead to correct answers, because traces that reach the correct answer are rewarded and traces that do not are not, regardless of how plausible the intermediate text sounds.
+
+The result is a model that, on problems it can be verified on, explicitly thinks before answering, with the thinking improving the answer rather than decorating it.
+
+## The training loop, mechanically
+
+The RLVR loop, in its simplest form:
+
+1. **Sample many traces per problem.** Give the policy (an instruction-tuned model from lesson 13) a prompt; have it generate `k` candidate reasoning traces, each ending with an answer.
+2. **Score each trace with the verifier.** Run the answer through the checker (run the code, evaluate the equation, run the puzzle validator). Each trace gets a binary or graded reward.
+3. **Update the policy** to favor high-reward traces and discourage low-reward ones, with a KL penalty back to the policy at the start of the step (preventing the policy from drifting too far in a single update).
+
+The RL algorithm of the moment is **GRPO (Group Relative Policy Optimization)**, which normalizes rewards within each group of `k` samples for the same prompt and avoids needing a separate value network the way PPO does. It is simpler and lives in the same **TRL** library that hosted SFTTrainer and DPOTrainer in lesson 13, so the same pipeline you already know extends one stage further.
+
+## Landscape anchors
+
+Two reference points worth holding:
+
+- **DeepSeek R1** is the model that demonstrated reasoning-via-RL working at scale and made the technique widely known. Its release made the case that an SFT-then-RL recipe on verifiable problems can produce reasoning that competes with much larger proprietary models.
+- **Open R1** is a Hugging Face community project reproducing the approach in the open: public code, public reasoning datasets, public training recipes. It is the open answer to "can the reasoning frontier be rebuilt without a frontier lab's budget?" and the answer is increasingly yes.
+
+GRPO + TRL + open reasoning datasets are why reasoning-via-RL went from a frontier-lab method to something a from-scratch builder can attempt.
+
+## RL as a systems problem
+
+Per the Phase 0 mirror, this lesson collapses Lec 17, the "RL as systems" lecture, with the RLVR lecture above. The reason both belong together: at LLM scale, the **RL algorithm is the easy part**; the systems infrastructure is most of the work. Three things compound:
+
+- **Sample cost.** You generate many traces per prompt (often 8-64), each of which is a full decode pass. Throughput at this stage is the same inference economics from lesson 8 (batching, KV cache, GQA, quantization, speculative decoding), so all of those techniques are directly relevant.
+- **Verifier cost.** The reward step is itself often a model call (a code executor, a math grader, sometimes another LLM judging intermediate steps). Verifier throughput becomes a serious bottleneck and is often offloaded to its own cluster of workers.
+- **Sample-train split.** Modern RL infrastructure separates **sample workers** (running inference to generate traces) from **train workers** (updating the policy on rewarded data). Coordinating the two at scale, with stale-policy correction, queue management, and on-policy vs off-policy trade-offs, is a substantial engineering problem.
+
+The takeaway is that **most of the cost of reasoning training is in the sampling and scoring loop**, not the gradient update; the systems work from Phase 2 returns in a different shape, and the same parallelism and inference tools apply.
+
+## Self-improvement loops: how good gets better
+
+A pattern that has emerged with reasoning training: **use the model to improve itself**. The recipe:
+
+1. Have the current best model attempt a large set of verifiable problems.
+2. **Filter** to the traces that reach correct answers.
+3. Use those traces as new SFT data (or as preference data alongside lower-scoring traces).
+4. Re-train and iterate.
+
+This loop is a form of the **synthetic data** category from lesson 12, with the verifier providing the quality filter. It is also a natural reason reasoning models have improved rapidly: each generation can produce filtered correct-trace data for the next, with the verifier preventing the worst form of synthetic-data drift (no teacher-blind-spot amplification on verifiable problems, because the verifier is the ground truth).
+
+## Stepping back over the track
+
+You started this track unable to run a model; you can now build the whole pipeline. Specifically:
+
+- **The model itself** (Phase 1): a tokenizer, a Transformer with converged design choices, the efficiency variations (GQA, MoE), and the cost-accounting picture that prices them.
+- **The systems to run it** (Phase 2): hardware-aware code (kernels with Triton/XLA), parallelism for training (data, tensor, pipeline; FSDP), and inference (the KV cache, batching, paged attention, speculative decoding, quantization).
+- **What makes it good** (Phase 3): scaling laws to allocate compute, evaluation to measure capability honestly, the data pipeline (sources, funnel, mixing, synthetic), and the post-training that turns a base model into an assistant and now a reasoner.
+
+That is the full applied loop, and it is the same loop whether the model is a 2018 BERT or a 2025 reasoning model. **The specific frontier will keep moving**: reasoning is the headline now, something else will be next, particular model names will go stale within months. But the method, account for compute, exploit the hardware, scale honestly, evaluate the portfolio, curate data, post-train deliberately, does not. That method is what this track was really teaching, with the build-from-scratch project as the worked example.
+
+## Why this matters when you build AI
+
+Reasoning is where capability is being pushed right now, and RLVR is the mechanism most of that push uses. Knowing the loop, sample, verify, update, with the algorithmic and systems pieces separately, is what lets you read a reasoning-model release critically: where the gain is from (better data? better verifier? more samples? a real algorithmic step?). The capstone framing is the larger point. AI is not a fixed body you either know or do not; it is a fast-moving ecosystem, and staying useful in it means holding a stable method while the specifics churn. You now have that method, and you have the open tools (TRL, datasets, kernels, Triton, Open R1) to apply it, which means the next capability, whatever it is, is something you can pick up and use rather than watch from outside. That is the real graduation from this track.
+
+## What you should remember
+
+- **Reasoning models think before answering.** They generate an explicit chain of thinking, then the answer, with the thinking trained to actually improve correctness on multi-step problems.
+- **RLVR uses verifiable correctness as the reward.** No reward model; the checker (math grader, code test suite, puzzle validator) is the reward. Removes reward-model hacking and the train-a-reward-model branch of RLHF.
+- **The training loop:** sample many traces per prompt, score each with the verifier, update the policy to favor high-reward traces, with a KL penalty to the start-of-step policy. The algorithm of the moment is **GRPO**, in the same TRL library as SFTTrainer and DPOTrainer.
+- **DeepSeek R1** demonstrated reasoning-via-RL at scale; **Open R1** is the Hugging Face community open reproduction. Together they made the recipe accessible.
+- **RL at LLM scale is mostly systems.** Sample workers generate traces (inference economics from lesson 8 apply directly); verifier workers score them; train workers update the policy; coordinating the three at scale is the bulk of the engineering.
+- **Self-improvement loops** are a key pattern: filter correct traces, use them as new training data, iterate. A verifier-grounded form of the synthetic-data category from lesson 12.
+- **The method outlasts the frontier.** Reasoning is today; something else will be next. Account for compute, exploit the hardware, scale honestly, evaluate the portfolio, curate data, post-train deliberately, that method is what this track was teaching.
+
+You built it from scratch. Reasoning via RL with verifiable rewards is the current frontier; the loop is sample, verify, update, and the systems work of Phase 2 returns to run it at scale. The track gave you the whole pipeline and, more durably, the method that survives the next frontier and the one after that.

@@ -1,0 +1,125 @@
+---
+title: "Cheatsheet: Agents"
+description: One-page reference. The loop, the patterns, the three tests, the failure modes, the build practices, the boundary disclaimers.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## The agent loop
+
+The lesson-4 tool-use loop with the model deciding when to stop.
+
+```python
+def run_agent(task):
+    history = [task]
+    while True:
+        step = model.predict(history)        # what should we do next?
+        if step.is_final_answer():
+            return step.answer
+        result = execute_tool(step.tool_call) # do it
+        history.append(step)
+        history.append(result)
+```
+
+Model called once per step. Model decides "are we done yet." That's the whole topic.
+
+## Three foundational patterns
+
+| Pattern | When to reach for it |
+| --- | --- |
+| **Function-calling agent** | Default in 2026. Structured tool call or final answer; hosted API enforces JSON schema. Reach for first. |
+| **ReAct** | Free-text Thought/Action/Observation. Predecessor; messier parser; still in literature. |
+| **Plan-and-execute** | Plan up front; execute step-by-step. For actions with real-world cost where you want to verify intent first. |
+
+Variants (not foundational): memory-augmented (persist facts across runs), multi-agent (specialized sub-agents pass control). Add only when forced.
+
+## Three tests for "should this be an agent?"
+
+All three must be yes:
+
+```
+1. Variable shape       : steps depend on earlier results; cannot
+                          be written in advance.
+2. Real bounded tools   : 3 to 10 with clear contracts; not vague
+                          unbounded ("browse the web freely").
+3. Acceptable cost/lat. : agents multiply L2 productive limits;
+                          user willing to wait OR work hidden.
+```
+
+If any test fails: a single call / RAG (L4) / hand-coded pipeline is almost always better.
+
+**Most common production mistake:** using an agent where a single call would do.
+
+## Five engineering failure modes
+
+| Failure | Mitigation |
+| --- | --- |
+| **Loops** (same tool, same args, repeated) | Hard iteration cap + no-identical-call guard; surface to model |
+| **Wrong paths** (early bad decision; doubles down) | Re-planning checkpoints; trajectory-level eval set |
+| **Compound cost** (history grows; ~steps² not steps) | Summarize older history; cap context; smaller models for inner steps |
+| **Harder evaluation** (behavior is a tree) | Trajectory-level eval (success rate, avg steps, cost over time) |
+| **Brittle tool boundaries** (sensitive to name/schema) | Version tool defs like prompts (L3); A/B test tool descriptions |
+
+## Cost shape
+
+```
+Naive estimate:  steps × single_call_cost
+Actual cost:     closer to (steps)² because context grows each step
+```
+
+A 6-step agent processing 1K → 8K tokens of context is closer to 4-5x the naive "6 × single-call" number. Lesson 2's three productive limits (context, cost, latency) all multiply.
+
+## Build practices (lesson 7 LLMOps scaled)
+
+1. **Function-calling + 3-5 well-defined tools.** No multi-agent, no memory, no plan-and-execute until forced.
+2. **Cap iterations and identical calls.** `max_steps` 6-12; no same-tool-same-args twice in a row. Error visibly.
+3. **Log every step.** Lesson 7 schema + `tool_called, tool_arguments, tool_result_summary, step_number, total_steps`.
+4. **Evaluate at trajectory level.** Held-out set with expected final answer AND expected tool-call patterns.
+5. **Observability before scale.** Dashboard of live trajectories (which tools fire, where loops happen, where dead ends accumulate).
+
+## Tooling
+
+| Tool | What it is |
+| --- | --- |
+| **Anthropic / OpenAI / Google APIs** | Hosted function-calling endpoints; structured tool contracts enforced server-side |
+| **Agent frameworks** | LangChain, LangGraph, LlamaIndex, others; the agent loop + retries + observability glue |
+| **Trajectory observability** | Vendor tools (LangSmith, Arize, Helicone) or homegrown structured logging |
+
+Frameworks evolve fast; the patterns in this lesson age slower than any specific library.
+
+## When to consider what
+
+| Symptom / task | Reach for |
+| --- | --- |
+| Single text in, single response out | Single LLM call |
+| Needs current data / domain knowledge | RAG (L4) |
+| Multi-step but steps are fixed and known | Hand-coded pipeline (with LLM calls inside) |
+| Multi-step with variable shape, bounded tools, acceptable latency | **Agent** (this lesson) |
+| "Open-ended, unbounded tools, browse anything" | **Tighten scope first**, vague tools produce vague failures |
+
+## What this lesson does NOT cover
+
+- Agent autonomy
+- Agent safety
+- Agent alignment debates / contested safety claims
+- What agents should be allowed to do (policy)
+- Sector-specific compliance for agent deployment
+
+Real and important; require their own framing in their own forum with the right stakeholders. This lesson is the **engineering** (when / how / cost / what goes wrong) discipline.
+
+## Words to use precisely
+
+- **Agent**: the tool-use loop with the model deciding when to stop.
+- **Step**: one (model decision + tool execution + observation) iteration of the loop.
+- **Trajectory**: the full sequence of steps a single agent run produces; the unit of evaluation.
+- **Function calling**: the structured-tool API contract (JSON schema enforced) that the model produces.
+- **ReAct**: the free-text "Thought / Action / Observation" pattern; predecessor to structured function calling.
+- **Plan-and-execute**: two-phase pattern where the model produces a plan before executing.
+- **max_steps**: hard cap on loop iterations; essential safety control.
+
+## Source
+
+- Full Stack Deep Learning, LLM Bootcamp (Spring 2023), Session 10: Agents (guest: Harrison Chase, LangChain). `fullstackdeeplearning.com/llm-bootcamp`. Independent structural mirror in original prose; see references.

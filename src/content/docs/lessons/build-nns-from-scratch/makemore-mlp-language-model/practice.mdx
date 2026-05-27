@@ -1,0 +1,141 @@
+---
+title: "Practice: the MLP language model"
+description: Check your understanding of learned embeddings and the MLP language model, then size a model by hand and compare it to the count table it replaces.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+import Flashcard from '../../../../../components/Flashcard.astro';
+
+## Self-check
+
+Five short questions. Try to answer each in your head (or on paper) before opening the collapsible. Active retrieval is where the learning sticks; rereading is comfortable but does much less.
+
+**1. Why can't you just extend the counting approach to three characters of context?**
+
+<details>
+<summary>Show answer</summary>
+
+Because the table explodes and empties out. With 27 characters, three characters of context plus the next character means `27^4 = 531,441` table entries, and most of those contexts never appear in the training data, so their rows are blank and the model has no prediction. Every extra character of context multiplies the table by 27 and makes it sparser. Counting cannot scale with context.
+
+</details>
+
+**2. What is an embedding, and what makes it powerful?**
+
+<details>
+<summary>Show answer</summary>
+
+A short vector of numbers assigned to each character (or token), stored in a lookup table with one row per character. Its power is that the vectors are **learned by gradient descent**, so similar characters can end up with similar vectors. The model then generalizes: what it learns about one context transfers to nearby contexts it may never have seen exactly. That smooth, shared representation is what the brittle count table lacked.
+
+</details>
+
+**3. Walk the architecture: how does the MLP get from context characters to next-character probabilities?**
+
+<details>
+<summary>Show answer</summary>
+
+Look up each context character's embedding, concatenate them into one input vector, pass it through a hidden layer (linear + `tanh`), pass that through an output layer to get 27 logits, and softmax the logits into probabilities. Train on negative log likelihood. Only the lookup-and-concatenate front end is new; the hidden-layer-to-softmax part is the Phase 1 network.
+
+</details>
+
+**4. How do the embeddings actually get their values?**
+
+<details>
+<summary>Show answer</summary>
+
+They start as random numbers and are learned just like any other parameter. The embedding table consists of leaf `Value`s in the computational graph, so `backward()` computes a gradient for each embedding number, and gradient descent nudges them downhill alongside the hidden and output weights. No meaning is assigned by hand; any structure (vowels clustering, say) emerges from training to predict well.
+
+</details>
+
+**5. What is the train/dev/test split for, and what does it catch?**
+
+<details>
+<summary>Show answer</summary>
+
+You train on one pile of names, tune choices like the learning rate and hidden size on a second (dev) pile, and measure final quality on a third (test) pile the model never trained on. It catches **overfitting**: a model that memorizes the training names will score well on them but generate garbage, and you only see that gap by measuring on held-out data.
+
+</details>
+
+## Try it yourself
+
+Size an MLP language model by hand and compare it to the count table it replaces.
+
+**Setup.** A model with a context of **2** characters, an embedding of **3** numbers per character, a hidden layer of **50** neurons, and 27 possible characters.
+
+**Steps.**
+
+1. How many numbers are in the concatenated input vector? (context size times embedding size)
+2. Size the embedding table: `27 x (embedding size)`.
+3. Size the hidden layer: `(input size) x 50 + 50` (weights plus biases).
+4. Size the output layer: `50 x 27 + 27`.
+5. Add them for the total parameter count.
+6. Compare: how many entries would a 2-character count table need? (`27 x 27 x 27`, that is `27^3`.)
+
+**Expected outcome.**
+
+```
+concatenated input:  2 x 3              =      6 numbers
+embedding table:     27 x 3             =     81
+hidden layer:        6 x 50 + 50        =    350
+output layer:        50 x 27 + 27       =  1,377
+total parameters:                       ~  1,808
+
+count table (2-char context): 27 x 27 x 27 = 19,683 entries (mostly empty)
+```
+
+About 1,808 learnable, generalizing parameters versus 19,683 mostly-empty count entries, and the gap only widens as you add context. That is the whole argument for embeddings in one comparison: smaller and smarter.
+
+**Confirm it against the real thing (optional).** Andrej Karpathy's [makemore repo](https://github.com/karpathy/makemore) builds this MLP on the real names dataset. Run the MLP section, count the parameters it reports, generate a few names (they should be clearly better than the bigram model's), and, if you use a 2-dimensional embedding, plot the embedding table and look for the vowels clustering together. Seeing the parameter count, the improved names, and the structured embeddings makes the lesson concrete.
+
+## Flashcards
+
+Seven cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay out the full set as one card per page, ready to print or save as a PDF for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="Why does counting fail when you add context?">
+
+Each extra character multiplies the count table by 27 and makes it emptier. Three characters of context need `27^4 = 531,441` entries, most never seen in training (blank rows, no prediction). Counting cannot scale with context.
+
+</Flashcard>
+
+<Flashcard question="What is a (learned) embedding?">
+
+A short vector of numbers assigned to each character/token, stored in a lookup table (one row each). The vectors are parameters learned by gradient descent, so similar items can land near each other and the model generalizes across contexts.
+
+</Flashcard>
+
+<Flashcard question="What are the steps of the MLP language model, front to back?">
+
+Look up each context character's embedding, concatenate them, pass through a hidden layer (linear + `tanh`), pass through an output layer to 27 logits, softmax into probabilities, train on negative log likelihood.
+
+</Flashcard>
+
+<Flashcard question="What is the difference between context size and embedding size?">
+
+Independent knobs. Context size = how many previous characters the model sees. Embedding size = how many numbers represent each character. E.g. 3 characters of context with 2-number embeddings gives a 6-number input vector.
+
+</Flashcard>
+
+<Flashcard question="What is a minibatch and why use it?">
+
+A small random subset of the data used for one training step instead of all of it. The gradient is noisier but you get far more steps per second, and the noise mostly washes out. Nearly all real training uses minibatches.
+
+</Flashcard>
+
+<Flashcard question="What is overfitting, and how do you detect it?">
+
+The model memorizing the training data instead of learning to generalize. Detect it with a train/dev/test split: train on one pile, tune on a second, measure on a held-out third. A big gap between training and held-out quality means overfitting.
+
+</Flashcard>
+
+<Flashcard question="How do embeddings connect this toy to real large language models?">
+
+They are the front end of every LLM: each token is looked up in a giant learned embedding table and turned into a vector the network processes. Swap the single `tanh` hidden layer for a transformer and a few characters for thousands of tokens, and the makemore MLP becomes, in outline, a frontier model.
+
+</Flashcard>
+
+</FlashcardSet>

@@ -1,0 +1,82 @@
+---
+title: 'Cheatsheet: How tool use turns a model into an agent'
+description: One-page reference. The propose-vs-dispose split, the four-step tool-call exchange, a full traced example, choosing between tools, what a tool call really is, and pitfalls.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## The one idea
+
+The model does not run tools. It emits a structured request; the loop runs it and feeds the result back. The model proposes, the surrounding code disposes.
+
+## The four-step tool-call exchange
+
+| Step | Who | What happens |
+| --- | --- | --- |
+| 1. Describe | Loop | Send the model a schema of available tools: name, what it does, expected inputs. |
+| 2. Request | Model | Emit a tool call (tool name + arguments) instead of a final answer. |
+| 3. Execute | Loop | Run the real function, capture the output, feed it back as new model input. |
+| 4. Decide | Model | Read the result; either answer the user or emit another tool call. |
+
+Steps 2 to 4 trace Lesson 1's perceive-decide-act loop entered at the decide point.
+
+## A tool call, traced
+
+```
+TOOLS: get_weather(city, day) "forecast for a city on a day"
+
+USER:  What is the weather in Seattle tomorrow?
+
+MODEL -> call: get_weather { city: "Seattle", day: "tomorrow" }   (step 2)
+LOOP  -> runs it -> { high: 58°F, low: 47°F, condition: "rain" }    (step 3)
+MODEL -> "Tomorrow in Seattle: rain, high 58°F, low 47°F."          (step 4)
+```
+
+One round trip: the model decided what to fetch and how to phrase it; the loop did the fetching.
+
+## Choosing between tools
+
+Given several tools, the model picks based on the descriptions and the request. No hand-written routing rule.
+
+```
+TOOLS: get_weather(city, day) ; get_calendar(person, range)
+USER:  Am I free tomorrow afternoon, and will I need an umbrella?
+
+ROUND 1  MODEL -> get_calendar -> free 2-5pm
+ROUND 2  MODEL -> get_weather  -> rain
+ROUND 3  MODEL -> "Free 2 to 5pm, and bring an umbrella."
+```
+
+## When a tool fails
+
+A failure is just another result. The loop feeds the error back as the step-3 input, and the model reacts: retry with a fix, try a different tool, or tell the user.
+
+```
+MODEL -> get_weather { city: "Seattle", day: "tomorrow" } -> ERROR "request timed out"
+MODEL -> get_weather { city: "Seattle", day: "tomorrow" } (retried) -> { rain, 58°F }
+```
+
+An agent that never sees its failures cannot react to them.
+
+## What a tool call really is
+
+Just text in a shape the loop agreed to recognize. The model is always only predicting tokens. The loop scans the output, spots the tool-call shape, and acts on it instead of showing it to the user. Same model, different scaffolding, is the only difference between a chatbot and an agent.
+
+Many model APIs expose this as built-in "function calling" / "tool use." Agent frameworks automate the menu-building and the watch-and-execute loop (compared in the next lesson).
+
+## Pitfalls to dodge
+
+- Thinking the model runs the tool. It writes a request; code runs it.
+- Expecting a tool call and a final answer in the same step. It does one or the other per step.
+- Assuming the model always picks the right tool. It picks from the descriptions; vague descriptions cause wrong or skipped calls.
+- Forgetting to feed the result back. A tool whose output never returns leaves the model blind.
+
+## Words to use precisely
+
+- **Tool call**: a structured request (tool name + arguments) the model emits instead of a final answer.
+- **Tool schema**: the description of a tool (name, purpose, inputs) the loop gives the model so it knows what it can request.
+- **Function calling / tool use**: the model-provider feature that formalizes emitting and parsing tool calls.
+- **Propose vs dispose**: the model proposes the action (the request); the loop disposes (runs it).

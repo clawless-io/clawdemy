@@ -1,0 +1,99 @@
+---
+title: "Building GPT: self-attention from scratch"
+description: "The final phase builds the architecture behind today's language models, the transformer, starting with its heart: self-attention. This lesson builds it from nothing in the GPT setting, where tokens must gather information from earlier tokens but never peek at later ones. You will see how each token emits a query and a key whose match decides who it listens to, how a causal mask enforces \"past only,\" and why this learned, data-dependent communication is what made transformers win."
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+You have built a language model three ways and learned to train it well. The final phase builds the architecture that beat them all and powers every modern large language model: the **transformer**. We build a GPT (the decoder-only kind that generates text) from scratch, on characters, and this lesson constructs its single most important piece, **self-attention**. If you have met attention from the user's side in the AI Foundations track, this is where you build it yourself.
+
+The contract holds to the end: nothing inside is a mystery, including the mechanism people call the breakthrough behind the whole field.
+
+## The problem: tokens need to talk to each other
+
+So far each position in the sequence has been fairly isolated. To predict the next character well, a token needs to **gather information from the earlier tokens**, the context, and weigh the relevant ones more than the rest. A token in the middle of a name should be able to look back and notice "the last three characters were a common prefix" and adjust accordingly.
+
+There is one hard rule, and it defines GPT. The gathering must be **causal**: a token may look only at itself and the tokens *before* it, never the ones after. The reason is simple, the model is being trained to predict the next token, so letting it peek at future tokens would be letting it see the answer. Every position predicts its successor using only the past. This "past-only" constraint is what makes the model **autoregressive**, able to generate text one token at a time.
+
+## A crude first version: just average the past
+
+Start with the simplest possible communication: each token becomes the **average** of itself and all the tokens before it. Position 5's new representation is the mean of positions 1 through 5; position 2's is the mean of positions 1 and 2. It is a weak form of "talking", every past token contributes equally, with no notion of relevance, but it has the right shape: each token's output is a **weighted sum of the previous tokens**, and the weights respect the causal "past only" rule (future tokens get weight zero).
+
+That shape, a causal weighted sum, is exactly self-attention. All that is missing is making the weights *smart* instead of uniform.
+
+## Self-attention: let each token choose who to listen to
+
+Here is the idea that makes the weights data-dependent. Every token produces two small vectors by passing its representation through learned linear layers:
+
+- a **query**: "what am I looking for?"
+- a **key**: "what do I contain?"
+
+To decide how much token `i` should attend to token `j`, take the **dot product of `i`'s query with `j`'s key**. A large dot product means `j`'s key matches what `i`'s query is asking for, so `i` should listen to `j` a lot. These dot products are the raw **affinities**, one for every pair of positions.
+
+Then three steps turn affinities into an output:
+
+1. **Mask the future.** Set every affinity from `i` to a later position `j > i` to negative infinity, so the next step gives it zero weight. This enforces the causal rule.
+2. **Softmax.** Turn each token's row of affinities into weights that are positive and sum to 1, emphasizing the highest affinities (softmax, from the bigram lesson).
+3. **Weighted sum of values.** Each token also produces a **value** (a third learned projection: "what I will tell you if you attend to me"). Token `i`'s output is the softmax-weighted sum of the values of the tokens it attended to.
+
+So each token looks at the past, decides through query-key matches who is worth listening to, and pulls in a blend of their values. The averaging version was the special case where every weight was equal; attention learns the weights instead.
+
+## A causal attention step, by hand
+
+Make the masking concrete. Consider the **second** token in a sequence of three. First, see where its affinities come from: they are dot products of its query with each token's key. Say token 2's query is `q = [1, 2]`, and tokens 1, 2, 3 have keys `[1, 0]`, `[0.5, 0.25]`, and `[1, 2]`:
+
+```
+affinity(2 -> 1) = [1,2]·[1,0]    = 1*1 + 2*0    = 1
+affinity(2 -> 2) = [1,2]·[0.5,.25]= 1*0.5 + 2*.25 = 1
+affinity(2 -> 3) = [1,2]·[1,2]    = 1*1 + 2*2    = 5
+```
+
+So its raw affinities to tokens 1, 2, and 3 are `[1, 1, 5]`, and on raw score it "wants" to attend most to token 3. But token 3 is in the **future** (position 3 > position 2), so it is masked:
+
+```
+raw affinities (token 2 -> tokens 1,2,3):   [1, 1, 5]
+after causal mask (future set to -inf):      [1, 1, -inf]
+softmax -> attention weights:                [0.5, 0.5, 0]
+```
+
+The softmax step is the one from the bigram lesson: exponentiate the masked affinities to get `[e^1, e^1, 0] = [2.718, 2.718, 0]`, then normalize by their sum `5.436` to get `[0.5, 0.5, 0]`. The masked `-inf` exponentiates to `0`, which is exactly how masking removes the future. Even though token 3 had by far the highest raw affinity, the causal mask makes it invisible: token 2 splits its attention evenly between tokens 1 and 2 and gives token 3 exactly zero. Now blend the values. If tokens 1 and 2 carry values `v1 = 2` and `v2 = 4`:
+
+```
+output = 0.5 * v1 + 0.5 * v2 + 0 * v3 = 0.5*2 + 0.5*4 = 3
+```
+
+The output `3` is not token 2's original value; it is a new representation built from the past it chose to listen to. Had the query-key affinities come out differently, the weights would shift and token 2 would pull in a different blend, which is the whole point of letting the data set the weights.
+
+That is one token's self-attention output: a causal, weighted blend of the past, with the weights decided by query-key affinities and the future cut off. Every token computes its own such blend, all in parallel, and each has a different causal window: token 1 can attend only to itself, token 2 to tokens 1 and 2, and the last token to the whole sequence. The mask widens by one position as you move along, which is why a single matrix of affinities, masked into a triangle, handles every position at once.
+
+## Two details that make it work
+
+**The value is separate from the key.** A token's key is how it advertises itself for matching; its value is what it actually contributes once attended to. Splitting "how I'm found" from "what I deliver" is what lets attention be expressive.
+
+**Scale the affinities.** Before the softmax, the affinities are divided by the square root of the key dimension. Without this, large dot products push the softmax into the saturated, near-one-hot regime (the same saturation problem from the initialization lesson), which starves the gradient. The `1/sqrt(dimension)` scaling keeps the softmax soft enough to train. Query, key, and value are all learned linear projections, so attention's behavior is entirely shaped by training.
+
+## Why this matters when you use AI
+
+Self-attention is the mechanism behind every large language model, the "attention" in "attention is all you need." Its power over the earlier approaches is exactly the move from the crude average to learned weights: instead of a fixed rule for combining context (a uniform average, or WaveNet's fixed tree), **each token dynamically decides, from the data, which earlier tokens are relevant to it**. A pronoun can learn to attend to the noun it refers to; a closing bracket can learn to attend to its opening one. That flexible, learned, content-based routing is what let transformers leap past the recurrent and convolutional models before them.
+
+When you watch a chatbot handle a long prompt and correctly connect a detail at the end to something said near the start, this is the machinery doing it: every token, at every layer, reaching back over the whole context and pulling in what its query finds relevant. The AI Foundations track describes this from the outside; you have now built the inside.
+
+## Common pitfalls
+
+**Forgetting the causal mask is what makes it GPT.** Without the future-masking, a token could attend to later tokens and the model would be cheating during training. The lower-triangular mask is not an optimization detail; it is what makes the model a next-token predictor.
+
+**Conflating keys and values.** The key is for matching (it sets the attention weight); the value is what gets summed. They are different learned projections of the same token, answering "why listen to me?" versus "what do I say?"
+
+**Thinking attention weights are an explanation.** They show where a token drew information from, which is part of the computation, not a guaranteed account of *why* the model produced its output (the same caution the AI Foundations attention lesson raises).
+
+**Skipping the scaling.** Unscaled affinities make softmax saturate and the gradients vanish. Dividing by `sqrt(dimension)` is small but load-bearing, the same lesson about keeping activations in a trainable range from the BatchNorm lesson.
+
+## What you should remember
+
+- **Self-attention lets each token gather information from the earlier tokens, with learned, data-dependent weights.** Each token emits a query and a key; the dot product of one token's query with another's key is their affinity, and softmax turns a token's affinities into weights for a weighted sum of the others' values.
+- **The causal mask is what makes it a GPT.** Affinities to future positions are set to negative infinity before softmax, so every token attends only to itself and the past. Worked once: token 2 with raw affinities `[1, 1, 5]` masks the future to get weights `[0.5, 0.5, 0]`, then blends the past values, ignoring the high-affinity future token entirely.
+- **This is the core of every large language model.** Learned, content-based routing (each token choosing who to listen to) is what made transformers beat the averaging, recurrent, and convolutional models before them. The query/key/value projections are trained, and scaling the affinities by `1/sqrt(dimension)` keeps the softmax trainable.
+
+You have built the heart of the transformer: a single self-attention computation. The next lesson assembles it into the full GPT, many attention heads in parallel, stacked into blocks with the feed-forward layers and normalization from earlier phases, and trains the whole thing to generate text, the last build of the track.

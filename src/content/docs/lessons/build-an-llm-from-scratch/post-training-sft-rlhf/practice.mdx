@@ -1,0 +1,183 @@
+---
+title: "Practice: Post-training, SFT and RLHF"
+description: Self-check on the post-training pipeline, SFT mechanics, RLHF's three steps, DPO's simplification, and what each step does to the model, a method-choice exercise, and flashcards for retrieval.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Seven short questions. Answer each before opening the collapsible.
+
+**1. State the post-training pipeline in one line and what each step does.**
+
+<details>
+<summary>Show answer</summary>
+
+`pretrain -> SFT -> preference tuning (RLHF or DPO)`. Pretraining gives language; SFT teaches instruction-following and format on instruction-response data; preference tuning shapes the model to prefer better responses over worse ones on `(prompt, response_A, response_B, preferred)` data. Each step is necessary; none replaces the others.
+
+</details>
+
+**2. What is the data shape for SFT, and why does data quality matter more than quantity?**
+
+<details>
+<summary>Show answer</summary>
+
+Chat-formatted instruction-response pairs (lists of `system`, `user`, `assistant` messages laid out by the model's chat template). SFT data is much smaller than pretraining (tens or hundreds of thousands of pairs, not trillions of tokens), and the model directly imitates what it sees: bad examples teach bad behavior, inconsistent examples teach inconsistency. A small set of well-written pairs typically beats a large noisy one.
+
+</details>
+
+**3. Why is SFT alone not enough?**
+
+<details>
+<summary>Show answer</summary>
+
+SFT teaches the model to imitate the responses it is shown, so it learns format and basic behavior. What it cannot easily express is **ranking** between plausible outputs: two SFT-trained responses may both look reasonable, and SFT has no way to encode "this one is better than that one." Preference tuning fills that gap.
+
+</details>
+
+**4. Describe RLHF's three steps.**
+
+<details>
+<summary>Show answer</summary>
+
+(1) **Collect preference data:** humans label which of two model outputs is better for a prompt, producing `(prompt, A, B, preferred)` triples. (2) **Train a reward model:** a separate transformer takes `(prompt, response)` and outputs a scalar reward, fit so higher reward correlates with the preferred responses. (3) **Optimize the policy with RL:** treat the SFT model as a policy; sample responses, score with the reward model, and update with RL (classically PPO) to increase the probability of high-reward responses, with a KL penalty keeping the policy near the SFT init.
+
+</details>
+
+**5. How does DPO simplify the pipeline?**
+
+<details>
+<summary>Show answer</summary>
+
+It skips the explicit reward model and the RL step. Under the standard preference-model assumption behind RLHF, the optimal policy has a closed-form relationship to the preference data, and DPO trains the model directly on the preference pairs with a loss derived from that relationship. One supervised-learning-shaped pipeline, one model, one loss. More stable, simpler hyperparameters, comparable or better quality on most preference benchmarks; the modern default.
+
+</details>
+
+**6. What two things change in the model after preference tuning?**
+
+<details>
+<summary>Show answer</summary>
+
+(1) **The output distribution shifts** toward what the preference data labels as better: same prompt, same architecture, but probabilities concentrate on different responses. (2) **The model becomes opinionated in a specific direction**, the direction of whatever preference data it saw; different preference data produces differently-opinionated models from the same SFT initialization. The mechanical effect is exactly the same kind of "fine-tune on different data, get a different distribution" you have seen since lesson 3.
+
+</details>
+
+**7. What is in scope for this lesson, and what is out of scope?**
+
+<details>
+<summary>Show answer</summary>
+
+**In scope:** what the methods do mechanically (data formats, training loops, what changes in the model's distribution). **Out of scope:** whether the resulting opinion is "aligned with human values" or "safe in deployment." Those are contested questions with active debate; this lesson takes no position on them. Technical-primer discipline, same as the post-training and reasoning lessons elsewhere in the fleet.
+
+</details>
+
+## Try it yourself: choose the method
+
+About 10 minutes, no code. Apply the mechanics.
+
+**Part A: which method first?** For each, name whether you would reach for SFT, RLHF, or DPO first (or combinations) and why. Stay strictly on the mechanics; do not propose alignment or safety claims.
+
+```
+a. A base model that ignores instructions and just continues prompts.
+b. A model that already follows instructions but produces verbose, rambling answers when shorter ones are clearly preferred by users.
+c. A team has preference data and limited engineering bandwidth, no in-house RL expertise.
+d. A team has preference data, full RL expertise, and wants the most flexibility for custom reward shaping.
+```
+
+<details>
+<summary>What you'll get</summary>
+
+- **a. SFT first.** The model lacks instruction-following format and behavior; that is exactly what SFT teaches. Preference tuning later can refine.
+- **b. Preference tuning (DPO or RLHF).** SFT taught the model to respond; preference tuning teaches it to prefer the kinds of responses users like (e.g. concise > rambling).
+- **c. DPO.** Same target, simpler pipeline, no RL step, no separate reward model; fewer moving parts to maintain.
+- **d. RLHF (PPO-class).** Explicit reward model gives the most flexibility to shape rewards programmatically, and the team has the expertise to manage RL stability. DPO would still likely be the cheaper baseline; RLHF earns its complexity only when the extra flexibility is actually used.
+
+The pattern: SFT teaches format and behavior; preference tuning ranks plausible outputs; DPO is the simpler default and RLHF is for when explicit reward-shaping is worth the engineering cost.
+
+</details>
+
+**Part B (reasoning).** Why does the same SFT-then-preference-tune pipeline produce very different models from different preference datasets, even with identical architecture?
+
+<details>
+<summary>What you should notice</summary>
+
+Because the model directly imitates the SFT data and shifts its output distribution toward the preference data's "preferred" direction. Two different preference datasets encode different rankings of plausible outputs, so the resulting distributions differ: one model might consistently prefer concise factual responses, another might prefer fluent expansive ones. Mechanically this is the same "data is the lever" lesson from the data chapter; the architecture is the platform, the data is the differentiator.
+
+</details>
+
+**Part C (reasoning).** A teammate asks "isn't DPO just SFT?" What is the technical distinction?
+
+<details>
+<summary>What you should notice</summary>
+
+SFT trains on `(prompt, single response)` with the response-token cross-entropy loss; the model learns to imitate that one response. DPO trains on `(prompt, preferred response, dispreferred response)` with a loss that increases the probability of the preferred response *relative to* the dispreferred one (and uses the SFT model as a reference for the KL term). Same shape of computation, different loss and different data. SFT teaches "produce X"; DPO teaches "prefer X over Y." They compose: SFT first to install the format/behavior, then DPO to rank among the plausible responses SFT already produces.
+
+</details>
+
+## Flashcards
+
+Nine cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay the set out one card per page for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="Post-training pipeline in one line?">
+
+pretrain -> SFT -> preference tuning (RLHF or DPO). Each step is necessary; none replaces the others. SFT teaches format and behavior; preference tuning ranks plausible outputs.
+
+</Flashcard>
+
+<Flashcard question="SFT data and why quality matters?">
+
+Chat-formatted instruction-response pairs (system/user/assistant role markers via the chat template). Much smaller than pretraining; the model imitates what it sees, so quality > quantity.
+
+</Flashcard>
+
+<Flashcard question="Why is SFT alone insufficient?">
+
+It teaches imitation (format and behavior) but cannot rank two plausible responses. Preference tuning fills that gap with (prompt, A, B, preferred) triples.
+
+</Flashcard>
+
+<Flashcard question="RLHF's three steps?">
+
+(1) Collect preference data (humans pick A vs B). (2) Train a reward model: (prompt, response) -> scalar. (3) Optimize the SFT policy with RL (PPO) on reward-model scores, with a KL penalty to the SFT init.
+
+</Flashcard>
+
+<Flashcard question="What does DPO change vs RLHF?">
+
+Skips the explicit reward model and RL step. Under the RLHF preference-model assumption, the optimal policy has a closed-form relationship to preference data; DPO trains directly on the pairs with a loss implementing that relationship. Simpler, more stable, modern default.
+
+</Flashcard>
+
+<Flashcard question="What two things change after preference tuning?">
+
+(1) Output distribution shifts toward preferred responses. (2) Model becomes opinionated in the preference data's specific direction. Different preference data -> differently-opinionated models from the same SFT init.
+
+</Flashcard>
+
+<Flashcard question="What is in scope for this lesson, what is out of scope?">
+
+In scope: data formats, training loops, what changes in the model's distribution (mechanics). Out of scope: whether the resulting opinion is "aligned with human values" or "safe" (contested debates).
+
+</Flashcard>
+
+<Flashcard question="When to pick DPO vs RLHF?">
+
+DPO: limited bandwidth, no in-house RL expertise, want a simpler pipeline. RLHF (PPO): need explicit reward-shaping flexibility, have RL expertise to manage stability. DPO is the modern default; RLHF earns its complexity when the flexibility is actually used.
+
+</Flashcard>
+
+<Flashcard question="Is DPO 'just SFT'?">
+
+No. SFT: (prompt, single response), cross-entropy on that response. DPO: (prompt, preferred, dispreferred), loss that raises the preferred relative to the dispreferred (with SFT model as KL reference). Same compute shape, different loss + different data. They compose.
+
+</Flashcard>
+
+</FlashcardSet>

@@ -1,0 +1,91 @@
+---
+title: 'Lesson: Building trustworthy agents'
+description: "An agent that works in a demo is not the same as one you can put in front of real users. Even with no attacker in sight, agents fail in characteristic ways: they call tools that do not exist, loop without making progress, answer wrongly with full confidence, and quietly act on missing information. This lesson names those failure modes and the guardrails that contain each one, and draws a clean line between trustworthiness (the agent failing on its own) and security (the agent under attack), which the next lesson covers."
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+
+import ReadAlongDim from '../../../../../components/ReadAlongDim.astro';
+import LessonStar from '../../../../../components/LessonStar.astro';
+
+<LessonStar slug="building-trustworthy-agents" />
+
+<ReadAlongDim
+  src="https://audio.clawdemy.org/lessons/building-trustworthy-agents-lesson.mp3"
+  slug="building-trustworthy-agents"
+  cacheVersion="20260526b"
+  approxMinutes={11}
+/>
+
+This lesson opens a new phase. The first nine lessons were about making an agent capable: the loop, tools, frameworks, memory, retrieval, planning, multiple agents, self-checking. Capable is necessary, but it is not the same as ready. An agent that works in a demo, on the happy path, with a forgiving user, is not yet an agent you would let act on a real customer's account. The gap between those two is failure modes: the specific ways agents go wrong.
+
+Before we list them, one distinction has to be clear, because mixing it up is the most common confusion in this area. There are two very different reasons an agent does something harmful. One is that the agent fails on its own: it makes a mistake, no adversary involved. The other is that someone attacks it: a malicious input bends the agent to a purpose it was not meant to serve. This lesson is about the first kind, the agent's own failures and how to contain them. The next lesson is about the second kind, adversarial attacks. Both are real, both matter, and they need different defenses, which is why they get separate lessons. Keep the line in mind: this lesson assumes no attacker.
+
+By the end you will be able to name the characteristic ways an agent fails on its own, and the guardrail that contains each one.
+
+## Failure mode 1: hallucinated tool calls
+
+A plain language model can hallucinate, stating a fabricated fact with full confidence. An agent inherits that and adds a new place for it to happen: the tool call itself. The agent can call a tool that does not exist, or call a real tool with arguments it invented out of nothing. It can decide to call a cancel-order tool when there is no such tool, or call get-weather with a city the user never mentioned.
+
+**Guardrail.** Validate every tool call before running it: check that the named tool actually exists, and that the arguments match the tool's expected shape, and reject the call if not. And reach back to Lesson 4: vague tool descriptions are a leading cause of misdirected calls, so good tool definitions are themselves a guardrail. The clearer the menu, the less the model improvises off it.
+
+## Failure mode 2: runaway loops
+
+The loop that makes an agent powerful can also trap it. An agent can get stuck retrying a tool that keeps failing, replanning the same plan, or bouncing between two steps without ever making progress. Left alone, it burns time and money and never finishes. This is the dark side of the self-correction you saw earlier: an agent that keeps trying is good, until it keeps trying forever.
+
+**Guardrail.** Put a budget on the loop. Cap the number of steps, the number of retries per tool, or the total time or cost a run may consume, and stop with a clear failure when the cap is hit. A run that gives up cleanly and says so is far more trustworthy than one that spins until someone notices the bill.
+
+## Failure mode 3: confidently wrong answers
+
+An agent can produce a wrong result and present it with no hint that anything is off. This is the most dangerous failure mode precisely because it is silent: a runaway loop announces itself, but a confidently wrong answer looks exactly like a correct one. The agent booked the wrong date, summarized a document it misread, or did the arithmetic wrong, and reported success.
+
+**Guardrail.** Two from earlier lessons combine here. A reflection step (Lesson 9) has the agent check its own work before committing, which catches the wrongness a critical re-read would catch. And output validation, checking the result against what a correct result must satisfy, catches the rest where the answer is checkable. For high-stakes results, neither is enough on its own, which points at the strongest guardrail of all, covered below.
+
+## Failure mode 4: mishandled tool failures
+
+Tools fail, as Lesson 2 showed, and an untrustworthy agent handles that failure badly in one of two directions. It ignores the error and proceeds as if the tool succeeded, building the rest of its work on a result it never got. Or it panics, treating a routine, recoverable error as a dead end. Either way the agent is reacting to the error wrong.
+
+**Guardrail.** Make the agent read and act on tool results, not assume them. The error has to flow back into the loop (Lesson 2) so the agent can respond: retry a transient failure, try an alternative for a permanent one, and surface to the user the failures it genuinely cannot resolve. Silently proceeding on a failed tool is the specific behavior to design out.
+
+## Failure mode 5: missing context, silently incomplete work
+
+An agent can act on incomplete information and never mention the gap. Asked to "email the team about the outage," it emails three of the five people because its contact lookup only returned three, and reports the job done. The work was not wrong, exactly; it was partial, and the silence about the partiality is what makes it untrustworthy.
+
+**Guardrail.** Require and validate the inputs a task needs before acting, and when the agent is uncertain or working from partial information, design it to say so rather than paper over the gap. An agent that asks a clarifying question, or flags "I could only reach three of five," is more trustworthy than one that quietly does part of the job.
+
+## Failure mode 6: data over-exposure
+
+An agent can disclose the wrong thing without ever being wrong about the task. It sends an accurate answer to the wrong recipient, includes sensitive fields the task never needed, or echoes one user's data to another because a retrieval step over-fetched. The work is correct and complete; the problem is that it revealed too much, or revealed it to the wrong party. This is distinct from a wrong answer (failure mode 3) and from incomplete work (failure mode 5): here the agent had the right idea and disclosed it badly. It is also distinct from the data exfiltration in the next lesson, which is an attacker pulling data out on purpose. This is the agent over-sharing on its own, with no adversary involved.
+
+**Guardrail.** Scope every output to the requester, and give the agent least-privilege access to data: it should be able to read and return only what the task needs, not everything it could reach. Redact fields a task does not require before they reach the output. And the blast-radius principle applies to disclosure too: when output is bound for a high-stakes recipient (another customer, or sensitive data leaving its lane), gate it behind the same human-in-the-loop confirmation as any other hard-to-reverse action. A leaked record cannot be unleaked.
+
+## The guardrail toolkit, and matching it to the stakes
+
+Pulling the guardrails together, the practitioner's kit is short: validate tool calls against real tools and shapes; cap loops, retries, time, and cost; validate outputs and add a reflection step; read and handle tool errors instead of assuming success; require complete inputs and flag gaps; scope outputs to the requester with least-privilege data access; and, the strongest of all, put a human in the loop for high-stakes actions.
+
+That last one is the organizing principle. Match the guardrail to the blast radius of the action. A read-only lookup that is wrong costs a re-query. An action that is hard to reverse, sending money, deleting data, emailing a customer, placing an order, deserves a checkpoint where a person approves before the agent acts. The more irreversible the action, the more a human-in-the-loop confirmation earns its friction. You do not gate everything; you gate the actions whose mistakes you cannot take back.
+
+## Guardrails reduce risk, they do not erase it
+
+The honest caveat, consistent with the limits named for reflection: guardrails lower the rate and the cost of failures; they do not guarantee an agent never fails. A loop budget stops infinite loops but not a wrong answer produced in three steps. Output validation catches checkable errors but not judgment calls. A human-in-the-loop checkpoint is only as good as the human's attention. Trustworthy is not a switch you flip; it is a set of failure modes you have each deliberately contained, knowing some risk remains. The goal is an agent whose failures are rare, bounded, and visible, not one that cannot fail.
+
+## Common pitfalls
+
+- **Assuming a capable agent is a trustworthy one.** Working on the happy path says nothing about how the agent fails off it. Capability and trustworthiness are different properties.
+- **Confusing trustworthiness with security.** This lesson is about the agent failing on its own. Defenses against an attacker are a different problem, covered next. A reflection step does not stop a malicious input.
+- **Trusting a confident answer because it is confident.** The silent, confidently-wrong failure is the dangerous one precisely because confidence is not evidence of correctness.
+- **Gating everything or gating nothing with human review.** Human-in-the-loop on every trivial action is friction nobody will tolerate; on no action is negligence. Gate by blast radius.
+- **Treating guardrails as guarantees.** They reduce risk; they do not remove it. An agent is trustworthy when its failures are bounded and visible, not when it is claimed to be incapable of failing.
+
+## What you should remember
+
+- **Capable is not the same as trustworthy.** Trustworthiness is about how an agent behaves when things go wrong, which a demo never shows.
+- **Six characteristic own-failures:** hallucinated tool calls, runaway loops, confidently wrong answers, mishandled tool failures, silently incomplete work, and data over-exposure. Each has a guardrail.
+- **The guardrails are mostly things you have seen:** tool-call validation and good tool descriptions (Lesson 4), loop and retry budgets, output validation and a reflection step (Lesson 9), proper tool-error handling (Lesson 2), and input completeness checks.
+- **Match the guardrail to the blast radius.** Human-in-the-loop confirmation belongs on hard-to-reverse actions (money, deletion, outbound messages), not on every read-only lookup.
+- **Guardrails reduce risk; they do not erase it.** A trustworthy agent is one whose failures are rare, bounded, and visible, not one that cannot fail.
+
+Everything here assumed no adversary: the agent failing on its own. But agents that act in the world through tools are also a target. A malicious input can try to hijack the agent, abuse its tools, or extract data it should not reveal. That is a different threat with different defenses, and it is where the next lesson goes: securing agents against attack.

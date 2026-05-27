@@ -1,0 +1,91 @@
+---
+title: "Cheatsheet: Video understanding"
+description: One-page reference. Video tensor, sampling, the architecture ladder (single-frame to video transformers), param-cost comparison.
+sidebar:
+  order: 5
+  label: Cheatsheet
+artifact: cheatsheet
+---
+
+## Video tensor
+
+| Property | Detail |
+|---|---|
+| Shape | `T × H × W × C` (time × height × width × channels) |
+| Example: 64-frame 224x224 RGB clip | 64 · 224 · 224 · 3 ≈ 9.6 million numbers |
+| Real-world: 1-minute 30fps clip | ~270 million numbers |
+| Why temporal sampling exists | Raw frame counts are too large; default 32-64 frames per training example |
+
+## Temporal sampling strategies
+
+| Strategy | Detail |
+|---|---|
+| Uniform stride | Take every k-th frame |
+| Random temporal crops | At training, sample a contiguous chunk (e.g. 64 frames) from a random position |
+| Multi-chunk averaging | At evaluation, average predictions over multiple chunks |
+| Variable rates per stream | SlowFast: one pathway slow (high spatial detail), one fast (high temporal detail) |
+
+## Architecture ladder (in increasing temporal-modelling power)
+
+| Approach | What it does | When to use |
+|---|---|---|
+| Single-frame baseline | 2D classifier on one frame; ignore rest | Always: the floor any video model must beat |
+| Late fusion | Per-frame 2D CNN features averaged; classify | Content matters, ORDER doesn't |
+| Early fusion | Stack T frames as input channels before first conv | First layer sees temporal info; deeper layers do not |
+| 3D conv | Filter slides spatially AND temporally; ~3x param cost per filter | When motion at multiple scales matters; C3D, I3D |
+| Two-stream | RGB appearance stream + optical-flow motion stream; fuse late | When motion is the discriminative signal; SlowFast for modern descendant |
+| CNN + RNN | Per-frame 2D CNN features into a sequence model | When output is itself a sequence (video captioning); see lesson 7 |
+| Video transformer | Spatio-temporal patches into a transformer encoder; factorized attention | Most-scalable; TimeSformer, ViViT |
+
+## 3D vs 2D conv parameter cost
+
+| Layer | Per-filter weights | Per-layer params at K=64 (RGB input) |
+|---|---|---|
+| 2D conv, 3x3 spatial | 3·3·3 = 27 | 64·27 + 64 = 1,792 |
+| 3D conv, 3 temporal × 3·3 spatial | 3·3·3·3 = 81 | 64·81 + 64 = 5,248 |
+| Ratio | 3x more weights per filter | ~2.93x more layer params |
+
+Compute per output position scales similarly.
+
+## Landmark architectures
+
+| Architecture | Year | Headline idea |
+|---|---|---|
+| C3D | 2015 | Early influential 3D-conv architecture for video |
+| I3D | 2017 | "Inflate" pretrained 2D ImageNet weights into 3D filters; bootstrap a 3D model from a strong 2D one |
+| Two-stream (Simonyan & Zisserman) | 2014 | Separate RGB-appearance stream and optical-flow-motion stream, fuse late |
+| SlowFast | 2019 | Modern two-stream descendant; two pathways at different temporal rates, fused throughout |
+| TimeSformer | 2021 | Video transformer with divided space-time attention |
+| ViViT | 2021 | Video transformer with factorized encoder / attention / dot-product variants |
+
+## Datasets to recognize
+
+| Dataset | Coverage |
+|---|---|
+| Kinetics-400/600/700 | Modern action-recognition standard (hundreds of thousands of YouTube clips, hundreds of action classes) |
+| Charades | Longer multi-action everyday videos |
+| AVA | Temporal action localization |
+| Something-Something | Fine-grained physical interactions |
+| HowTo100M | Instructional videos at scale |
+
+## What does NOT change
+
+| What | Why |
+|---|---|
+| Loss | Per-clip classification (cross-entropy) or per-step output; same machinery as L3 |
+| Gradient descent step | Unchanged |
+| Backprop | Carries gradients through 3D convs, RNNs, and transformer blocks identically |
+
+## Pitfalls
+
+| Pitfall | Reality |
+|---|---|
+| Skip the single-frame baseline | Always run it; many benchmarks are largely solvable from one frame; failing to beat it means your video model is not temporal |
+| Late fusion = temporal modelling | No; it captures content, not order. Cannot distinguish "reach then grasp" from the reverse |
+| Optical flow is free | It must be computed beforehand; modern systems often skip it (learn motion directly from raw frames) |
+| Transformer always beats 3D-conv on video | Same trade-off as on images: more data + compute to outperform; 3D-conv stays competitive at moderate scale |
+| Forgetting input scale | 4.8M-9.6M numbers per training example; memory and compute bills scale accordingly |
+
+## One-line takeaway
+
+Video adds the time dimension to a 2D vision pipeline; the standard answers (single-frame baseline → late/early fusion → 3D conv → two-stream → CNN+RNN → video transformer) all run the same Phase 1 training loop on top, and temporal sampling is the essential practical step you cannot skip.

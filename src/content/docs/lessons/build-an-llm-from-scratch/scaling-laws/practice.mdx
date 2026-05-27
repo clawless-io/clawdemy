@@ -1,0 +1,171 @@
+---
+title: "Practice: Scaling laws"
+description: Self-check on the power-law form, the Kaplan-to-Chinchilla shift, Chinchilla-optimal D/N, and inference-cost overtraining, a budget-allocation exercise, and flashcards for retrieval.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Seven short questions. Answer each before opening the collapsible.
+
+**1. What is the empirical form of a scaling law for language model loss?**
+
+<details>
+<summary>Show answer</summary>
+
+Loss follows a **power law** in compute, parameters, and data: `loss(X) ~ X^(-alpha)` for X in `{C, N, D}`. On a log-log plot, loss-vs-each is remarkably straight across many orders of magnitude. Not a theorem, an empirical regularity that holds across hundreds of runs.
+
+</details>
+
+**2. What did Kaplan recommend, and how did Chinchilla correct it?**
+
+<details>
+<summary>Show answer</summary>
+
+Kaplan (2020) recommended spending compute disproportionately on **parameters** rather than tokens (train a big model on moderate data; the GPT-3 era). Chinchilla (Hoffmann et al., 2022) redid the analysis and found model size and data should scale **roughly equally** with compute: `N*` and `D*` both scale as `compute^0.5`, with a rule of thumb of `D* ~= 20 * N*` tokens per parameter. Chinchilla (70B on 1.4T tokens) outperformed GPT-3 at the same compute, confirming that the prior generation was over-parameterized and under-trained.
+
+</details>
+
+**3. State the Chinchilla rule for choosing `(N, D)` from a fixed compute budget `C`.**
+
+<details>
+<summary>Show answer</summary>
+
+Use lesson 2's `6ND ~ C` and pick `(N, D)` so that `D / N ~= 20`. Solving: roughly `N ~= sqrt(C / 120)` and `D ~= 20 * N`. That is the compute-optimal starting point for a training run from the Chinchilla analysis.
+
+</details>
+
+**4. Why do many modern open models train past Chinchilla-optimal on data?**
+
+<details>
+<summary>Show answer</summary>
+
+Because Chinchilla minimizes **training loss for a training budget**, but reality minimizes **total cost including inference**. Inference cost scales with parameters (per-token compute, KV-cache memory), so for a model that will run a lot of inference tokens it is economically better to train a smaller model on more data, paying upfront training cost to save on every serving step. The result is "over-trained" models that are not Chinchilla-optimal for the training budget but better for total cost.
+
+</details>
+
+**5. Beyond picking `(N, D)`, what does fitting a scaling law let you do?**
+
+<details>
+<summary>Show answer</summary>
+
+Predict performance before spending. Fit the curve on small and medium runs, extrapolate to the target scale, and decide whether the predicted loss justifies the cost. Also useful for sanity-checking a run in flight (if the loss diverges from the law, look at data, optimizer, code) and for evaluating architectural changes (a real win improves the **exponent**, not just the prefactor at one size).
+
+</details>
+
+**6. Why is "we beat baseline at our scale" a weaker claim than "we improved the exponent"?**
+
+<details>
+<summary>Show answer</summary>
+
+Because beating a baseline at one size could be a constant-factor improvement that does not survive scaling: at larger scale the gap may close. Improving the scaling exponent means the gap *widens* with scale, so the change is genuinely useful as you grow. Scaling-law-improving claims are stronger evidence than single-point comparisons.
+
+</details>
+
+**7. Name two important limits on applying scaling laws.**
+
+<details>
+<summary>Show answer</summary>
+
+Any two of: (a) they predict cross-entropy loss, not downstream benchmark performance (the relationship is noisy; some capabilities appear in jumps); (b) they assume clean, representative data, and worse data distributions shift the curve and can break the regularity; (c) published exponents are approximate and have been re-fit (Kaplan to Chinchilla and after); (d) extrapolation far from where the law was fit is itself a strong claim and should be reviewed.
+
+</details>
+
+## Try it yourself: split the budget
+
+About 10 minutes, calculator. You will turn a compute budget into a training plan.
+
+**Part A: pick `(N, D)`.** You have a compute budget of `6e22` FLOPs. Using `6ND ~ C` and the Chinchilla rule `D / N ~= 20`, find rough optimal `(N, D)`.
+
+<details>
+<summary>What you'll get</summary>
+
+Set `D = 20N` and plug in: `6 * N * (20N) = 6e22`, so `120 * N^2 = 6e22`, giving `N^2 = 5e20`, `N ~= 2.2e10 = 22 billion parameters`. Then `D = 20 * 22e9 ~= 4.4e11 = 440 billion tokens`. That is the Chinchilla-optimal split for the budget: a ~22B model on ~440B tokens.
+
+</details>
+
+**Part B (reasoning).** Your serving plan expects the model will produce on the order of a trillion tokens of output during its production lifetime. How might you adjust the Chinchilla split, and what is the trade-off?
+
+<details>
+<summary>What you should notice</summary>
+
+You would push toward a **smaller model trained on more data than Chinchilla-optimal** (over-training), because every saved inference token is worth real money, and inference cost scales with parameters. The trade-off: training takes more compute to reach the same final loss with the smaller model, but each of the trillion inference tokens is cheaper. The economic optimum balances upfront training compute against per-token inference savings over the model's lifetime. Many open models in the 7-to-14-billion-parameter range are explicitly over-trained for exactly this reason.
+
+</details>
+
+**Part C (reasoning).** A research team reports their new optimizer beats AdamW at 1-billion-parameter scale. Why might you ask for evidence at multiple scales before believing the result will hold at 70 billion?
+
+<details>
+<summary>What you should notice</summary>
+
+A single-point comparison at 1B parameters could be a constant-factor win that scales away. The right evidence is a fit of the scaling law for both optimizers across multiple sizes; if the new optimizer's **exponent** is better (curves diverge with scale), the gain is real and grows. If only the prefactor is better at 1B (curves converge), the improvement may shrink or vanish at 70B and the result has not earned the "at scale" claim.
+
+</details>
+
+## Flashcards
+
+Nine cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay the set out one card per page for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="Empirical form of a scaling law?">
+
+Loss is a power law in compute, parameters, and data: loss(X) ~ X^(-alpha), straight on log-log plots. Doubling X reduces loss by a predictable modest factor.
+
+</Flashcard>
+
+<Flashcard question="Kaplan (2020) vs Chinchilla (2022)?">
+
+Kaplan: spend compute disproportionately on parameters (GPT-3 era). Chinchilla: N and D should scale roughly equally with compute; rule of thumb D ~ 20*N tokens per parameter. Chinchilla 70B/1.4T beat GPT-3 at the same compute.
+
+</Flashcard>
+
+<Flashcard question="Chinchilla rule for picking (N, D) from compute C?">
+
+Use 6ND ~ C and D/N ~= 20. Roughly N ~= sqrt(C/120), D ~= 20*N. Compute-optimal starting point for a training run.
+
+</Flashcard>
+
+<Flashcard question="Why do modern open models train past Chinchilla-optimal?">
+
+Chinchilla minimizes training loss for a training budget; reality minimizes total cost including inference. Inference scales with parameters, so a smaller model on more data is cheaper to serve, often worth the extra training compute.
+
+</Flashcard>
+
+<Flashcard question="What does fitting a scaling law let you do beyond (N, D)?">
+
+Predict loss at target scale before spending; sanity-check a run in flight; evaluate architectural changes by whether they improve the exponent (not just the prefactor at one size).
+
+</Flashcard>
+
+<Flashcard question="Why is 'we beat baseline at one size' weaker than 'we improved the exponent'?">
+
+Constant-factor wins at one size can scale away (curves converge). An improved exponent means the gap widens with scale, so the change is genuinely useful as you grow.
+
+</Flashcard>
+
+<Flashcard question="Two important limits of scaling laws?">
+
+(1) Predict cross-entropy loss, not benchmarks (some downstream gains are non-smooth). (2) Assume clean, representative data; poor data shifts curves. Also: exponents have been re-fit (Kaplan to Chinchilla); extrapolation far from fits is risky.
+
+</Flashcard>
+
+<Flashcard question="GPT-3 vs Chinchilla in scaling terms?">
+
+GPT-3 (175B / 300B tokens) was Kaplan-era: big model, moderate data. Chinchilla (70B / 1.4T tokens) was compute-optimal under the corrected analysis: smaller model, much more data. Chinchilla won at the same compute.
+
+</Flashcard>
+
+<Flashcard question="What is the production-cost adjustment to Chinchilla?">
+
+For a model that will produce many inference tokens, over-train past Chinchilla-optimal on data to get a smaller model at the same final loss; trade upfront training compute for cheaper per-token serving over the lifetime.
+
+</Flashcard>
+
+</FlashcardSet>

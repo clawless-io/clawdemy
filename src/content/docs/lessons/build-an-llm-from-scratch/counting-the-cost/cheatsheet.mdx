@@ -1,0 +1,79 @@
+---
+title: "Cheatsheet: Counting the cost"
+description: One-page reference. Matmul FLOPs, the 6ND rule, the 16N memory estimate, arithmetic intensity, and einops.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## FLOPs (compute)
+
+```
+matmul (m x k) @ (k x n)  ~=  2 * m * n * k FLOPs
+```
+
+The 2 is multiply-and-add. A Transformer is mostly matmuls, so this is most of the counting.
+
+## The 6ND rule (training compute)
+
+```
+training FLOPs  ~=  6 * N * D
+   N = parameters,  D = training tokens
+   forward ~2N/token,  backward ~4N/token,  total 6
+```
+
+**Example:** 7B params, 2T tokens -> `6 * 7e9 * 2e12 = 8.4e22` FLOPs.
+Divide by useful FLOP/s of your hardware to estimate wall-clock time and device count.
+
+## Memory (training, fp32)
+
+| Component | Bytes |
+| --- | --- |
+| Parameters | 4N |
+| Gradients | 4N |
+| Adam optimizer states (momentum + variance) | 8N |
+| **Subtotal (before activations)** | **~16N** |
+| Activations | scale with batch x sequence length |
+
+**Example:** 7B params -> `16 * 7e9 ~= 112 GB` before activations (exceeds one GPU).
+Optimizer state often dwarfs the model. Memory frequently binds before compute.
+
+## Arithmetic intensity
+
+```
+arithmetic intensity = FLOPs performed / bytes moved from memory
+```
+
+| | Intensity | Bottleneck | Examples |
+| --- | --- | --- | --- |
+| Compute-bound | High | Arithmetic units (good, busy) | Large matmuls |
+| Memory-bound | Low | Memory bandwidth (GPU stalls) | Elementwise adds, activations, norms |
+
+- A GPU runs below peak FLOPs when ops are memory-bound.
+- **Raise intensity** by fusing small ops (read data once) and using bigger batches/matmuls. Motivates kernels (lesson 6) and parallelism (lesson 7).
+
+## einops (readable tensor ops)
+
+```python
+from einops import rearrange
+# opaque:
+x = x.view(b, s, n_heads, head_dim).permute(0, 2, 1, 3)
+# named (reads as a sentence):
+x = rearrange(x, "b s (h d) -> b h s d", h=n_heads)
+```
+
+Named dimensions make shape transformations legible and catch shape bugs at write time. `(h d)` means "this axis is heads times dim."
+
+## Words to use precisely
+
+- **FLOP**: one floating-point operation; the unit of compute.
+- **6ND**: training-compute estimate (6 x params x tokens).
+- **Optimizer state**: per-parameter statistics Adam keeps (momentum + variance), 8N bytes in fp32.
+- **Arithmetic intensity**: FLOPs per byte moved; compute- vs memory-bound.
+- **Activations**: forward-pass intermediates saved for the backward pass; scale with batch x sequence.
+
+## Source
+
+- Stanford CS336, Lecture 2 (PyTorch/einops, resource accounting: FLOPs, memory, arithmetic intensity), by Hashimoto and Liang. `cs336.stanford.edu`. Independent structural mirror in original prose; see references.

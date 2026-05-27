@@ -1,0 +1,144 @@
+---
+title: "Practice: Building and training a net: micrograd"
+description: Check your understanding of how a network is built and trained, then run a full gradient-descent step by hand and watch the loss drop.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+import Flashcard from '../../../../../components/Flashcard.astro';
+
+## Self-check
+
+Five short questions. Try to answer each in your head (or on paper) before opening the collapsible. Active retrieval is where the learning sticks; rereading is comfortable but does much less.
+
+**1. What are a neuron's trainable parameters, and what is fixed by the data?**
+
+<details>
+<summary>Show answer</summary>
+
+The **weights** (one per input) and the **bias** are the trainable parameters: leaf `Value` objects, the dials gradient descent turns. The **inputs** are fixed by the data; they are not adjusted. A neuron computes `tanh(w1*x1 + ... + wn*xn + b)`, and training changes only the `w`s and `b`.
+
+</details>
+
+**2. Why does the loss have to be a single number, and why is it computed as a `Value`?**
+
+<details>
+<summary>Show answer</summary>
+
+A single number gives "less wrong" a direction to move in; you cannot descend on many separate error figures at once. It is computed as a `Value` (from the predictions, which came from the weights) so that it sits at the top of the computational graph. That is what lets `loss.backward()` flood gradients back to every parameter.
+
+</details>
+
+**3. The update is `parameter = parameter - learning_rate * gradient`. Why minus, not plus?**
+
+<details>
+<summary>Show answer</summary>
+
+The gradient points in the direction that *increases* the loss. To make the loss smaller you move the opposite way, so you subtract. Adding the gradient would climb the loss and make the network worse every iteration. The minus sign is the difference between learning and un-learning.
+
+</details>
+
+**4. What are the four steps of the training loop, in order?**
+
+<details>
+<summary>Show answer</summary>
+
+1. Forward pass (predictions + loss, which builds the graph). 2. Zero the gradients. 3. Backward pass (`loss.backward()`). 4. Update every parameter (`p.data -= learning_rate * p.grad`). Then repeat. The order matters: you must zero before you backpropagate, and backpropagate before you step.
+
+</details>
+
+**5. What goes wrong if you forget to zero the gradients?**
+
+<details>
+<summary>Show answer</summary>
+
+Backprop accumulates into `grad` with `+=`, so each new backward pass adds its gradients on top of the previous pass's leftovers. The parameters then step on stale, inflated gradients and training destabilizes. It is the most common bug in the exercise, and a silent one: nothing errors, the network just trains badly.
+
+</details>
+
+## Try it yourself
+
+Run one full gradient-descent step by hand on the smallest possible network and confirm the loss drops.
+
+**Setup.** A single weight `w = 2`, one input `x = 3`, prediction `pred = w * x`, target `y = 3`, and `learning_rate = 0.05`. You will compute the loss, backpropagate to get the gradient of `w`, take one step, and check the new loss.
+
+**Steps.**
+
+1. Forward: compute `pred = w * x`, then `loss = (pred - y)^2`.
+2. Backprop the square: its local derivative is `2 * (pred - y)`.
+3. Chain to `w`: the local derivative of `pred = w * x` with respect to `w` is `x`, so `gradient of w = 2*(pred - y) * x`.
+4. Step downhill: `w = w - learning_rate * gradient`.
+5. Recompute `pred` and `loss` with the new `w`. Did the loss fall?
+
+**Expected outcome.**
+
+```
+pred = 2 * 3 = 6
+loss = (6 - 3)^2 = 9
+gradient of w = 2*(6 - 3) * 3 = 6 * 3 = 18
+w = 2 - 0.05 * 18 = 2 - 0.9 = 1.1
+new pred = 1.1 * 3 = 3.3        new loss = (3.3 - 3)^2 = 0.09
+```
+
+The loss dropped from `9` to `0.09` in one step, and `w` moved from `2` toward `1` (the value where `pred = w*3` exactly hits the target `3`). Repeat the step a few more times and the loss approaches zero. You just ran the same procedure that trains a billion-parameter model, on one weight.
+
+**Confirm it against the real thing (optional).** Andrej Karpathy's [micrograd repo](https://github.com/karpathy/micrograd) includes a `demo.ipynb` that builds a small MLP and trains it with exactly this loop. Run it, watch the printed loss shrink each iteration, then try commenting out the line that zeroes the gradients and watch training fall apart. Seeing the loss number drop pass after pass, and break when you skip the zeroing, makes the loop concrete.
+
+## Flashcards
+
+Eight cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay out the full set as one card per page, ready to print or save as a PDF for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="What is a neuron, in the engine's terms?">
+
+A small expression: `tanh(w1*x1 + ... + wn*xn + b)`. The weights (one per input) and the bias are its trainable parameters; the inputs come from the data.
+
+</Flashcard>
+
+<Flashcard question="What is an MLP (multilayer perceptron)?">
+
+Layers of neurons stacked so each layer's outputs feed the next, e.g. `[3,4,4,1]`. Running an input through records the whole network as one computational graph whose leaves are the parameters.
+
+</Flashcard>
+
+<Flashcard question="What is the loss, and why mean squared error to start?">
+
+A single number measuring how wrong the network is, so "less wrong" has a direction. Mean squared error sums `(pred - target)^2` over examples: squaring makes every miss positive and punishes big misses more.
+
+</Flashcard>
+
+<Flashcard question="State the gradient-descent update rule.">
+
+`parameter = parameter - learning_rate * gradient`. Step each parameter opposite its gradient (downhill on the loss) by a small `learning_rate`. The minus sign is essential.
+
+</Flashcard>
+
+<Flashcard question="What does the learning rate control, and what happens if it is wrong?">
+
+Step size. Too large: steps overshoot and the loss bounces or explodes. Too small: training crawls. It is the knob most often tuned by watching the loss.
+
+</Flashcard>
+
+<Flashcard question="List the four steps of the training loop.">
+
+1. Forward pass (predictions + loss). 2. Zero the gradients. 3. Backward pass (`loss.backward()`). 4. Update every parameter. Repeat. Zeroing the gradients before each backward pass is the step beginners forget.
+
+</Flashcard>
+
+<Flashcard question="Why must gradients be zeroed each iteration?">
+
+Backprop accumulates into `grad` with `+=` (so a parameter feeding two places sums correctly within one pass). Across iterations, old gradients pile onto new ones unless reset to `0`, so you step on stale, inflated gradients.
+
+</Flashcard>
+
+<Flashcard question="How does this loop relate to training GPT?">
+
+Identical heartbeat: forward, loss, backward, update, repeated. At scale the loss is cross-entropy, the optimizer is Adam, the forward pass is a transformer on tensors across many GPUs, but the four steps are the same. A trained model is just its parameters.
+
+</Flashcard>
+
+</FlashcardSet>

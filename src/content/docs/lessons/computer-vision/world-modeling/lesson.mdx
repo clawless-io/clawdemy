@@ -1,0 +1,116 @@
+---
+title: "Lesson: Models that imagine the world, world modeling"
+description: "Every vision system so far has been reactive (process the current input, output an answer). World modeling is predictive: given the past, predict the future. A self-driving car needs to predict where a pedestrian will be in two seconds; a robot needs to plan, which needs to forward-simulate possible futures; video-generation systems are world models in disguise. This lesson covers learned world models at vision-context level. We see the pixel-space vs latent-space prediction trade-off (with a parameter-cost calculation), walk the landmark architectures (World Models, Dreamer, MuZero, JEPA, video world models), and tie back to the cross-track work that deepens each thread."
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+Step back and notice something about every vision system in this track so far. They have all been **reactive**: an image comes in, an answer comes out. Classify the image; box the objects; segment the pixels; recover the depth; embed alongside text. The system reads what is in front of it and reports.
+
+A different kind of vision task asks the system to **predict**. A self-driving car is not just answering "where is the pedestrian"; it is answering "where will the pedestrian be in two seconds, given how they have been moving." A robot planning to pick up an object needs to forward-simulate what its hand will look like in the moments to come, comparing candidate plans against each other before committing. A modern video-generation system, given a few frames or a text prompt, produces the next minute of video. These are all variants of the same task: **given the past, predict the future**.
+
+**World modeling** is the name for the family of techniques that gives a vision system a learned predictive model of how the visible world evolves. This lesson covers world modeling at vision-context level: the central trade-off (pixel-space vs latent-space prediction), the landmark architectures from World Models (2018) through Dreamer, MuZero, JEPA, and recent video world models, and the cross-track connections (T18 for model-based reinforcement learning depth; T24 for video-generation depth).
+
+## The setup
+
+A world model is, in the simplest framing, a function. Given a sequence of past observations `o_1, o_2, ..., o_t` (and possibly actions `a_1, ..., a_t`), predict the next observation `o_{t+1}` (and possibly further into the future). Train it on long sequences of real observations; at inference, **roll it forward** by feeding its own predictions back as input to predict more steps ahead.
+
+Three architectural pieces almost always appear, in some combination:
+
+- An **observation encoder** that maps each raw observation (typically an image) to a compact representation. Often a CNN or ViT, sometimes self-supervised (lesson 10).
+- A **dynamics model** that predicts how the representation evolves over time. Typically a recurrent network (RNN, LSTM, transformer) running over the encoded sequence.
+- A **decoder** (sometimes) that maps predicted representations back to pixels, if the application needs to *see* the predicted future rather than just plan with it.
+
+What distinguishes one world-modeling architecture from another is mostly: what space the prediction happens in (pixels vs latent), how the dynamics model is structured, and what the model is trained to optimize.
+
+## The big trade-off: pixel space vs latent space
+
+The central decision in world modeling is whether to predict the future in **pixel space** (every pixel of every future frame) or in a **learned latent space** (a compact representation produced by the encoder).
+
+Pixel-space prediction is conceptually simple and directly useful for tasks like video generation (where you need to *show* the future). It is expensive. Predicting every pixel of every future frame at high resolution is enormous: a 224 × 224 × 3 RGB frame is 150,528 numbers; thirty future frames is 4,515,840 numbers per prediction. Computing such large outputs and training a model that produces them are both heavy.
+
+Latent-space prediction sidesteps most of the cost. Encode the observation into a compact latent (say 512 numbers); predict the latent at the next time step; if you ever need to see the predicted frame, decode it. Thirty future latent vectors at 512 numbers each is 15,360 numbers, **about 290 times less than pixel-space** for the same prediction horizon. For most downstream uses (planning, decision-making, scoring future trajectories), you do not actually need to render the predicted frames; the latent is sufficient.
+
+This is the Yann LeCun-style argument made structural in the **Joint-Embedding Predictive Architecture (JEPA)** line of work: predict in a learned latent space, not in pixels. The compute saving is real; the harder question is what the right latent space is for the prediction to be meaningful. That is what the architectures below explore.
+
+## A short architecture tour
+
+**World Models (Ha and Schmidhuber 2018).** The early influential work. A VAE encodes each frame into a latent; an RNN predicts how the latent evolves over time; a small controller learns to act in the latent space. Tested on reinforcement-learning environments where the agent can "dream" possible future trajectories in its learned model and select actions based on imagined rollouts. Established the encoder + dynamics + controller pattern that subsequent work built on.
+
+**Dreamer family (Hafner et al. 2019, 2020, 2023).** Dreamer, DreamerV2, and DreamerV3 are increasingly capable model-based reinforcement learning systems. The world model has the same shape (encoder + recurrent dynamics + decoder), and the agent is trained by **imagining many possible futures** in the learned model and updating its policy from those imagined experiences, rather than only from real environment interactions. DreamerV3 in particular generalized to many distinct domains (Atari, robotics tasks, Minecraft-style environments) with essentially the same hyperparameters, which was a notable robustness milestone. Deep coverage of model-based RL lives in T18; this lesson covers the world-model component of it from the CV side.
+
+**MuZero (Schrittwieser et al. 2019).** A planning system that combines deep learning with tree search (in the Monte Carlo Tree Search lineage of AlphaGo / AlphaZero) but uses a **learned dynamics model** instead of an environment simulator. The dynamics model is trained to predict, jointly: the next latent state, the reward, and the policy. MuZero learned to play Go, chess, shogi, and Atari games at superhuman level from raw inputs without ever being given the rules of those games (the dynamics model learned the rules implicitly from observation).
+
+**JEPA family (Joint-Embedding Predictive Architecture).** A research direction championed by Yann LeCun, with image and video variants (I-JEPA, V-JEPA). Central claim: predict in a learned latent space rather than in pixels. **V-JEPA** (Bardes et al. 2024) takes a video as input, masks out portions, and trains a network to predict the latent representations of the masked portions from the visible ones, using a self-supervised setup similar to the masked-image-modeling lesson 10 covered, now extended across space and time. The argument: learning to predict latent representations is enough to learn world structure, without paying the "predict every pixel" tax.
+
+**Video world models (recent).** Several recent systems explicitly position video generation as world modeling, including the Sora (OpenAI 2024) and Genie (Bruce et al. 2024) technical reports. These models, given short conditioning clips or text prompts, generate long video sequences and exhibit some world-physics consistency (objects persist, gravity broadly works, occlusion is handled). They are essentially large-scale video-generation systems trained on web video; the "world model" framing is the claim that they have learned something like a predictive model of how visible scenes evolve. Deep coverage of large video-generation systems lives in T24.
+
+## What world models actually predict
+
+Different world models predict different things, even when the architectural shape is the same:
+
+- **Next observation directly**: produce the next frame's pixels (or latent) from the past sequence.
+- **Next observation given an action**: predict how the world changes in response to a chosen action. Required for any planning or model-based RL use.
+- **Reward (in addition to state)**: predict the reward you would receive, useful for action selection in RL. MuZero is a clean example.
+- **Long horizons**: train and evaluate on prediction quality 10, 30, 60 steps ahead, not just one step. Long-horizon coherence is one of the hardest properties to achieve.
+- **Multiple plausible futures**: in stochastic environments, no single future is correct; the model should ideally represent a distribution over possible futures. Many video-generation models implicitly do this by being trained with stochastic-loss objectives.
+
+Different applications need different combinations. A driving prediction model needs accurate next-few-seconds future given the observed scene (no action input); a robotics planning model needs accurate action-conditioned next-state; a video-generation model needs long-horizon plausibility with realistic stochasticity.
+
+## A small efficiency calculation
+
+The pixel-vs-latent comparison is worth working concretely.
+
+Suppose a vision system needs to predict 30 frames forward at 224 × 224 RGB resolution. Per-frame pixel count is `224 · 224 · 3 = 150,528`. Predicting 30 future frames in pixel space requires producing `30 · 150,528 = 4,515,840` numbers per rollout.
+
+Now suppose the same system uses a learned latent space of dimension 512. Predicting 30 future *latent* vectors requires producing `30 · 512 = 15,360` numbers per rollout. The ratio:
+
+```
+pixel / latent  =  4,515,840 / 15,360  =  294
+```
+
+So latent-space prediction is **about 294 times cheaper** in output size for the same horizon and resolution. The dynamics model that predicts these is also smaller (its output dim is 512 vs 150,528). Decoding back to pixels (when needed) is a single forward pass through the decoder, not 30 separate ones, because most planning uses do not need to see the future, only score it.
+
+This is the structural reason latent-space world models scale where pixel-space ones strain.
+
+## Use cases
+
+World models show up in several application areas, often without being explicitly named that way.
+
+- **Self-driving and autonomous-vehicle perception.** Future-trajectory prediction for other agents (pedestrians, cyclists, vehicles) is a world-modeling task. Modern motion-prediction models in driving stacks are essentially specialized world models.
+- **Robotics planning.** Model-based reinforcement learning, manipulation planning, navigation planning. Forward-simulate candidate actions in a learned model and pick the best.
+- **Video generation.** As noted above, large video-generation systems can be read as world models that have learned how visible scenes evolve.
+- **Physics simulation from observations.** Learn a predictive model of physical systems from video, useful for science applications and for richer game / simulation environments.
+- **Climate, weather, and environmental modeling.** Increasingly, learned forward models supplement or partly replace physics-based simulators in domains where simulators are slow or incomplete.
+- **Game AI and procedural-content systems.** Systems that "imagine" how a game world evolves under different inputs.
+
+The unifying point: anywhere a system needs to plan or anticipate, a learned model of how the world changes is the underlying tool.
+
+## Why this matters when you use AI
+
+When you read about a self-driving system "predicting trajectories" of other agents two to five seconds out, that is a world model. When a robot demonstration shows the robot "imagining" several candidate manipulations before picking one, the imagining is a world-model rollout. When a video-generation system produces minutes of coherent video from a short prompt, the coherence is a (large, expensive) world model fitting how visible scenes tend to evolve. The same architecture family, at different scales and trained on different data, underlies all three.
+
+The cross-track ties are useful to hold. **Reinforcement learning** uses world models to make planning tractable (model-based RL) and to make agents that can imagine their next several steps; T18 covers this in depth. **Video generation** is world modeling pushed to high quality and long horizons; T24 covers the production scale-up. **3D vision** (last lesson) and world modeling share the framing that a vision system needs more than the current pixel grid: 3D vision adds spatial structure; world modeling adds temporal structure. Both lift vision from "what is in this image" to "what is the world this image is a snapshot of."
+
+## Common pitfalls
+
+**Confusing world modeling with video generation specifically.** Video generation is one application; world modeling is the broader concept. Many world-model systems (Dreamer, MuZero) never produce a pixel of imagined video; they predict in latent space and act on those predictions. Pixel-perfect video is one form, not the form.
+
+**Believing latent-space prediction is "lossy" in a damaging way.** It is lossy in the trivial sense that the latent is smaller than the pixels, but that compression is *exactly the point*: the latent should keep what matters for prediction and decision-making and discard what does not. A latent that ignores pixel-level texture but tracks object identity and motion is more useful for planning than a pixel-perfect future-frame prediction.
+
+**Treating world-model accuracy purely on prediction error.** Prediction error is a proxy; what matters downstream is whether the model's predictions support good decisions (in planning) or good rollouts (in video generation) or accurate forecasts (in self-driving prediction). A model that predicts slightly worse on raw error but compounds better over long horizons is often better.
+
+**Reading "world model" too literally.** A learned world model has learned the statistical structure of how its training data evolves. It is not a physics simulator with explicit conservation laws; it is a network that has fit a pattern. In familiar domains it generalizes impressively; in novel ones it fails predictably.
+
+## What you should remember
+
+- **World modeling = learned prediction of how the visible world evolves.** Reactive vision (every lesson so far) processes the current input; predictive vision (this lesson) extends it to "given the past, predict the future."
+- **The central trade-off is pixel space vs latent space.** Pixel space is directly useful for video generation but expensive (a 224x224 RGB frame is ~150K numbers; 30 frames is ~4.5M). Latent space (e.g., 512-dim) is far cheaper (~290x for the same horizon and resolution) and sufficient for most planning and decision-making uses, even if you have to decode at the end.
+- **Landmark architectures.** World Models (Ha & Schmidhuber 2018; established the encoder + dynamics + controller pattern). Dreamer family (Hafner 2019-2023; model-based RL by imagining rollouts in learned latent space). MuZero (Schrittwieser 2019; planning via tree search in a learned dynamics model; mastered Go, chess, shogi, Atari without rule access). JEPA (LeCun's research direction; predict in latent space, not pixels). Recent video world models including Sora (OpenAI 2024) and Genie (Bruce et al. 2024) at production scale.
+- **Cross-track ties.** T18 (planned, reinforcement learning) covers model-based RL in depth. T24 (planned, image generation and multimodal) covers production-scale video-generation systems. T16's L15 covers world modeling from the CV side as the predictive complement to L13's spatial 3D vision.
+
+A reactive vision system answers "what is in this image"; a predictive vision system (a world model) answers "what is the world this image is a snapshot of, and what will happen next." Phase 3 has been the story of moving from the first to the second; this lesson is the most direct expression of that move.
+
+Next: with the technical layers of T16 covered (Phase 1 foundations, Phase 2 spatial vision, Phase 3 generative and predictive vision), the final lesson takes the human-centered view. What do these systems get right, where do they fail, and how should we reason about their biases and limitations as engineering concerns? L16 closes the track.

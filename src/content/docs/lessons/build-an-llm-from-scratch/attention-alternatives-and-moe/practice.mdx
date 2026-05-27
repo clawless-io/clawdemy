@@ -1,0 +1,171 @@
+---
+title: "Practice: Attention alternatives and mixture of experts"
+description: Self-check on attention's cost problems, MQA/GQA, windowing, and MoE, a reasoning exercise on total-vs-active parameters, and flashcards for retrieval.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Seven short questions. Answer each before opening the collapsible.
+
+**1. What are the two scaling problems with standard multi-head attention?**
+
+<details>
+<summary>Show answer</summary>
+
+It is quadratic in sequence length (every token attends to every other, so attention compute and memory grow with the square of the length), and its KV cache dominates inference memory: the cached keys and values of all previous tokens grow with sequence length times head count, can exceed the model's weights at long contexts, and are memory-bandwidth-bound to read back.
+
+</details>
+
+**2. How do MQA and GQA reduce cost, and how do they differ?**
+
+<details>
+<summary>Show answer</summary>
+
+Both share keys and values across attention heads to shrink the KV cache. Multi-Query Attention (MQA) shares a single set of keys/values across all heads. Grouped-Query Attention (GQA) divides heads into a few groups, each sharing one set, a middle ground that cuts the cache severalfold with almost no quality loss. GQA is the modern default.
+
+</details>
+
+**3. What does sliding-window attention change, and what does it cost?**
+
+<details>
+<summary>Show answer</summary>
+
+Each token attends only to a fixed window of recent tokens instead of the whole sequence, so cost grows linearly with length rather than quadratically. The cost is reduced global reach, which models often recover by interleaving some full-attention layers with the windowed ones.
+
+</details>
+
+**4. What does a mixture-of-experts (MoE) layer do?**
+
+<details>
+<summary>Show answer</summary>
+
+It replaces the single FFN with many expert FFNs plus a small router that, for each token, selects just a few experts (top-k, often 2) to run; the rest sit idle for that token. This lets total capacity be large while only a few experts compute per token.
+
+</details>
+
+**5. What is the difference between total and active parameters in an MoE model?**
+
+<details>
+<summary>Show answer</summary>
+
+Total parameters count all the experts (the model's capacity, and what must be stored in memory). Active parameters count only the few experts actually run per token, which is what drives the per-token compute (the `6ND`-style FLOPs). MoE deliberately decouples the two, so a model can be huge in total but cheap per token.
+
+</details>
+
+**6. What are the costs of MoE?**
+
+<details>
+<summary>Show answer</summary>
+
+Memory: every expert must be stored whether or not it runs, so MoE trades compute for memory. And routing complexity: the router must spread tokens across experts evenly (load balancing), or some experts starve while others bottleneck. A dense model is simpler; MoE is for capacity without per-token cost.
+
+</details>
+
+**7. In lesson 2's terms, which resource does each variation target?**
+
+<details>
+<summary>Show answer</summary>
+
+GQA/MQA target memory and memory bandwidth (shrinking the KV cache, a memory-bound inference cost). MoE separates total parameters (which set memory) from active parameters (which set compute via `6ND`). Neither changes the skeleton; each changes which resource you spend.
+
+</details>
+
+## Try it yourself: read the efficiency off the spec
+
+About 10 minutes, no code. These variations show up directly in model specs; practice interpreting them.
+
+**Part A: total vs active.** A model advertises "47B total parameters, 13B active." What architecture does this imply, roughly what does it cost per token to run versus a dense 47B model, and what does it cost in memory?
+
+<details>
+<summary>What you'll get</summary>
+
+The total-vs-active gap signals a mixture-of-experts model: it has 47B parameters of capacity but routes each token through only ~13B of them. Per-token compute (via `6ND`) tracks the **active** 13B, so it runs roughly as cheaply as a dense 13B model, far cheaper than a dense 47B. But memory must hold all 47B (every expert is stored), so its memory footprint is that of a 47B model. That is the MoE bargain: dense-13B compute, dense-47B memory and capacity.
+
+</details>
+
+**Part B (reasoning).** A model with 32 attention heads switches from standard attention to GQA with 8 key/value groups. By roughly how much does the KV cache shrink, and why does this matter most at long context and at inference?
+
+<details>
+<summary>What you should notice</summary>
+
+The KV cache shrinks about fourfold (8 groups instead of 32 independent head key/value sets). It matters most at long context because the cache grows with sequence length, so at long sequences it can dominate memory; and most at inference because that is when the cache is built up and repeatedly read back, a memory-bandwidth-bound operation. Shrinking it fourfold directly lowers the memory and bandwidth cost of serving long contexts, with little quality loss.
+
+</details>
+
+**Part C (reasoning).** Why is it accurate to say GQA and MoE both "spend resources deliberately" rather than just "make the model smaller or bigger"?
+
+<details>
+<summary>What you should notice</summary>
+
+Because each moves cost from one resource to another rather than uniformly scaling. GQA trades a little model quality for much less KV-cache memory and bandwidth. MoE trades more memory (storing all experts) for more capacity at the same per-token compute. Neither simply shrinks or grows the model; each reallocates among compute, memory, and bandwidth, which is the budget-allocation view of architecture from lesson 3.
+
+</details>
+
+## Flashcards
+
+Nine cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay the set out one card per page for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="What are standard attention's two scaling problems?">
+
+Quadratic in sequence length (every token attends to every other), and the KV cache dominates inference memory/bandwidth (cached keys/values of all prior tokens grow with length x heads, can exceed the weights at long context).
+
+</Flashcard>
+
+<Flashcard question="What is Multi-Query Attention (MQA)?">
+
+All attention heads share a single set of keys and values (each keeps its own queries), shrinking the KV cache by the head-count factor, at some quality cost.
+
+</Flashcard>
+
+<Flashcard question="What is Grouped-Query Attention (GQA)?">
+
+Heads are divided into a few groups, each sharing one key/value set, a middle ground between MQA and full attention. Cuts the KV cache severalfold with almost no quality loss. The modern default.
+
+</Flashcard>
+
+<Flashcard question="What does sliding-window attention do?">
+
+Each token attends only to a fixed window of recent tokens, making cost linear (not quadratic) in sequence length. Models often interleave windowed and full-attention layers to keep some global reach.
+
+</Flashcard>
+
+<Flashcard question="What is a mixture-of-experts (MoE) layer?">
+
+It replaces the single FFN with many expert FFNs plus a router that runs only a few experts (top-k, often 2) per token. Large total capacity, small compute per token.
+
+</Flashcard>
+
+<Flashcard question="Total vs active parameters in MoE?">
+
+Total = all experts (capacity, and memory to store). Active = the few experts run per token (drives per-token compute via 6ND). MoE decouples them: huge total, small active.
+
+</Flashcard>
+
+<Flashcard question="What does MoE cost?">
+
+Memory (all experts must be stored even if few run, so it trades compute for memory) and routing complexity (the router needs load balancing so experts are used evenly).
+
+</Flashcard>
+
+<Flashcard question="What resource does each variation target (lesson 2 terms)?">
+
+GQA/MQA: memory and memory bandwidth (the KV cache, a memory-bound inference cost). MoE: separates total parameters (memory) from active parameters (compute). Skeleton unchanged.
+
+</Flashcard>
+
+<Flashcard question="What does '47B total, 13B active' tell you?">
+
+A mixture-of-experts model: ~13B compute cost per token (like a dense 13B) but 47B memory and capacity (all experts stored). Dense-13B compute, dense-47B memory.
+
+</Flashcard>
+
+</FlashcardSet>

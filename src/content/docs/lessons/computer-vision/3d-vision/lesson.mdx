@@ -1,0 +1,117 @@
+---
+title: "Lesson: Recovering the third dimension, 3D vision"
+description: The world is three-dimensional; photographs are two-dimensional. Every time a camera captures a scene, one dimension (depth) is collapsed and has to be recovered if a vision system wants to interact with the world physically. This lesson covers how vision systems reconstruct 3D structure from 2D images. We meet the depth cues a model can use (stereo disparity, monocular priors, motion), the family of 3D representations (depth maps, voxels, point clouds, meshes, implicit functions, NeRFs), the standard methods (monocular depth networks, multi-view stereo, structure from motion, neural radiance fields, 3D Gaussian splatting), and work one stereo-disparity-to-depth calculation by hand.
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+A camera projects a three-dimensional scene onto a two-dimensional image. One dimension, depth, is lost in that projection. The world's geometry is gone the moment the shutter fires; what comes out is a flat grid of pixels.
+
+Most useful interaction with the world needs that geometry back. A self-driving car needs to know how far away the cyclist is, not just that there is a cyclist somewhere in the frame. A robot arm needs to know the 3D shape of an object before it can pick it up. An AR app needs to know where the floor is and how the room is structured to place a virtual object convincingly. The medical-imaging system in lesson 8 needs to measure a 3D tumor, not just outline its pixel projection.
+
+This lesson covers how vision systems **recover 3D structure from 2D images**. It is a different shape of problem from everything in Phase 2 (which treated the image as the answer) and from generative work in Phase 3 lessons 10-12 (which generated images, not geometry). 3D vision asks a question images do not directly answer, and the techniques are correspondingly varied.
+
+## What "depth" means here
+
+We will use "depth" to mean **the distance from the camera to the surface visible at each pixel**. For a typical scene, depth is a number per pixel, and a **depth map** is an image where each pixel's value encodes that distance (often in meters). Closer surfaces have smaller depth values; farther ones have larger. A depth map is the simplest dense 3D representation: same shape as the original image, but with depth instead of color at each pixel.
+
+Other 3D representations exist (we will cover them), but depth-per-pixel is the gateway concept; many vision systems produce or consume depth maps at some stage.
+
+## Cues a model can use
+
+Humans (and machines) recover depth from a combination of cues. Naming them is useful because different vision methods exploit different ones.
+
+- **Stereo disparity.** When the same scene is viewed from two cameras (or two eyes) separated by a known **baseline** distance, the same 3D point projects to slightly different positions in the two images. The difference is called **disparity**, and it is larger for closer objects (your fingertip held close to your face shifts a lot between left and right eye; a distant mountain barely shifts). Stereo geometry converts disparity directly into depth.
+- **Monocular cues.** A single image still carries depth cues: **perspective** (parallel lines converge with distance; objects shrink), **occlusion** (closer objects block farther ones), **shading and shadows** (surface orientation produces predictable lighting), **texture gradient** (textures appear finer with distance), **familiar size** (you know roughly how big a person is, so their image size tells you how far). A monocular depth model is a network trained to read these cues, mostly implicitly.
+- **Motion / temporal cues.** A moving camera generates a sequence of images of the same scene from slightly different positions. Recovering 3D from this is called **structure from motion**; closer objects move faster in the image when the camera moves laterally.
+- **Active sensing (out of scope here).** LIDAR, structured light, and time-of-flight sensors measure depth physically (not from images), and many production 3D-vision systems use them. This lesson focuses on the image-based methods; sensor fusion is its own large topic.
+
+## A worked stereo calculation
+
+The most direct image-based depth recovery is **binocular stereo**. Set up: two cameras side by side, separated by a known baseline `b`, with the same focal length `f` (in pixel units). A 3D point projects to image coordinates `x_L` in the left image and `x_R` in the right image. The **disparity** at that point is `d = x_L - x_R` (in pixels).
+
+The depth `Z` (distance from the camera plane to the 3D point) is recovered by the stereo formula:
+
+```
+Z = (f · b) / d
+```
+
+A small numerical example. Suppose the cameras have focal length `f = 500 pixels`, baseline `b = 10 cm`, and a particular 3D point shows a disparity of `d = 50 pixels` between the two images:
+
+```
+Z = (f · b) / d
+  = (500 · 10) / 50
+  = 5000 / 50
+  = 100 cm  (1 meter)
+```
+
+So that point is 1 meter from the cameras. Notice how disparity behaves: a closer point (smaller `Z`) gives a larger `d`; a distant point gives a tiny `d`; a point infinitely far away has disparity 0 (it projects to the same pixel column in both cameras). This is the same intuition you get holding your finger near and far in front of your face and alternating which eye is open.
+
+Stereo-disparity-based depth requires solving the **correspondence problem**: for each pixel in the left image, find the matching pixel in the right image. Modern deep stereo methods (PSMNet, RAFT-Stereo, and many others) train a network to do this matching, then plug the disparity through the formula above.
+
+## 3D representations: how to store the geometry
+
+Once you have depth (or richer 3D), it has to be stored in some representation. The standard ones each have characteristic strengths.
+
+- **Depth maps.** A per-pixel depth value, same shape as the original image. Easy to produce and consume; cannot represent geometry not visible from the camera.
+- **Point clouds.** A set of 3D points in space, often with associated color or other attributes. Output of LIDAR, RGB-D cameras, and many SfM pipelines. Compact; flexible; no explicit surface or connectivity.
+- **Voxels.** A 3D grid (the natural extension of a 2D pixel grid); each cell is occupied or empty (or carries a value). Easy to apply 3D convolutions to (lesson 9's 3D-conv generalization); cubic memory cost limits resolution.
+- **Meshes.** Vertices (3D points) connected by edges into triangular (or polygonal) faces, producing an explicit surface. The standard representation for graphics and games; precise but harder to learn end-to-end.
+- **Implicit functions / Signed Distance Fields (SDFs).** A function from 3D point to a value (occupancy probability, or signed distance to the surface). Surface is the level set where the function equals zero. Flexible; modern.
+- **Neural Radiance Fields (NeRF) and 3D Gaussian Splatting.** Two recent paradigms covered below.
+
+Different applications favor different representations: graphics pipelines mostly use meshes; LIDAR-based perception uses point clouds; NeRF-style novel view synthesis uses implicit or splat representations. Vision systems often translate between representations multiple times in a pipeline.
+
+## The standard methods
+
+A short tour of the main image-based 3D-vision methods.
+
+**Monocular depth estimation.** A single image in, a depth map out. The model (CNN, ViT, or combination) is trained to read the monocular cues implicitly. Two flavors: **supervised** (training pairs of image + ground-truth depth, often from RGB-D cameras or LIDAR-equipped vehicles) and **self-supervised** (train on stereo pairs or video by enforcing geometric consistency, with no per-pixel depth labels). **MiDaS** (Ranftl et al. 2020) is a popular general-purpose monocular depth model; **Depth Anything** (Yang et al. 2024) is a recent foundation-scale variant.
+
+**Multi-view stereo (MVS).** Multiple images of the same scene from known camera positions, dense 3D reconstruction as output. Modern deep MVS uses CNN features matched across views and aggregated into a depth or 3D-volume output.
+
+**Structure from Motion (SfM).** Many photos of a scene with *unknown* camera positions; jointly recover the camera positions AND the 3D structure. **COLMAP** is the open-source workhorse; it works from a folder of photos and produces a sparse 3D point cloud plus camera poses. Photogrammetry consumer apps run a variant of SfM under the hood.
+
+**Neural Radiance Fields (NeRF).** Mildenhall et al. 2020. A small neural network (typically an MLP) maps `(x, y, z, viewing_direction)` to `(color, density)`. To render a pixel, integrate color and density along the camera ray through that pixel. Train on many photos of a scene by minimizing the reconstruction loss on those photos. After training, the network has implicitly learned the scene's geometry and appearance, and can render the scene from any novel viewpoint at high quality. NeRF was a step-change in **novel view synthesis** and triggered a large research wave.
+
+**3D Gaussian Splatting (3DGS).** Kerbl et al. 2023. Represent a scene as a collection of small 3D Gaussians (each with position, covariance, color, opacity). Render by efficient rasterization rather than volumetric ray-integration. Much faster than NeRF at both training and inference, often with comparable quality. The current state of the art in real-time novel view synthesis at the time of writing.
+
+## Applications
+
+3D vision is the perception layer behind many systems you have seen.
+
+- **Self-driving.** Camera-based 3D perception (monocular and multi-camera depth, 3D object detection, BEV "bird's-eye-view" representations) feeds the planning stack. Modern systems often fuse camera with LIDAR.
+- **AR and VR.** AR features (placing virtual objects on a real surface, occluding them behind real objects, hand tracking) need real-time 3D scene understanding; AR headsets do this constantly.
+- **Robotics.** Robotic arms picking objects, mobile robots navigating, drones avoiding obstacles. 3D vision is the geometry layer below the manipulation or motion-planning stack.
+- **Photogrammetry and 3D capture.** Mobile apps that scan an object or room into a 3D model, archaeological documentation, real-estate listings, e-commerce 3D product views.
+- **Movie and game production.** Photogrammetry for digital doubles and environment capture; NeRF-style novel view synthesis is emerging in film pre-visualization.
+- **Medical imaging.** 3D reconstruction from CT and MRI is its own large field, traditionally not "computer vision" in the sense of this track, but the deep-learning methods overlap substantially.
+
+## Why this matters when you use AI
+
+When you point a phone's AR app at a room and it convincingly places a virtual lamp on the floor, that is real-time monocular depth + plane detection running on-device. When a photo-scanning app turns a stack of photos of a statue into a 3D model, that is structure from motion. When a self-driving car's display shows a 3D bounding box around a pedestrian, that is monocular or multi-view 3D detection. When a new "render this scene from a different angle" demo appears, it is almost certainly NeRF or 3D Gaussian Splatting.
+
+The economic point: dense 3D capture used to require specialized hardware (LIDAR, structured-light scanners). The recent decade of work has progressively made it doable from ordinary cameras, sometimes from a single photo, sometimes from a phone-shot video, sometimes from a curated capture session. That hardware-to-software shift is what made 3D vision applications proliferate beyond the labs that owned LIDAR.
+
+## Common pitfalls
+
+**Treating 3D vision as a single problem.** It is a family of problems (depth estimation, multi-view reconstruction, novel view synthesis, 3D detection, geometry refinement) with very different evaluation, architectures, and trade-offs. The first design decision is which one you actually have.
+
+**Picking the wrong 3D representation.** Depth maps are easy but cannot represent backsides. Meshes are precise but hard to learn end-to-end. Point clouds are flexible but lack structure. NeRFs are great for novel view synthesis but slow to query for explicit geometry. Match representation to task.
+
+**Confusing stereo disparity with depth directly.** Disparity is *inversely* related to depth (`Z = f·b/d`); a larger disparity means a closer object, not a farther one. Mixing this up is a common first-week mistake.
+
+**Thinking NeRF replaces all 3D representations.** NeRFs excel at novel view synthesis (rendering a scene from new viewpoints) but are not always the right tool for explicit geometry (you need to extract a surface from the implicit field, which is its own step). 3D Gaussian Splatting and traditional methods often remain better choices for tasks that need fast queries, editable geometry, or game-engine integration.
+
+## What you should remember
+
+- **Depth is the dimension lost in projection,** and recovering it is the core 3D-vision problem. A **depth map** (depth per pixel) is the simplest dense 3D representation; richer representations include point clouds, voxels, meshes, implicit / SDFs, and NeRF / Gaussian-splat scene models.
+- **Stereo depth recovery:** `Z = (f · b) / d`, with `f` focal length, `b` baseline, `d` disparity. Worked: `f = 500, b = 10cm, d = 50` → `Z = 100cm`. Closer objects give larger disparity; infinite objects give zero.
+- **Standard methods.** Monocular depth (single image to depth map, MiDaS and successors); multi-view stereo (multiple known-pose images to dense 3D); structure from motion (many unknown-pose images to camera poses + 3D structure, COLMAP); NeRF (MLP maps 3D point + view direction to color + density, train on many photos, render any novel view); 3D Gaussian Splatting (faster scene representation via 3D Gaussians rasterized efficiently).
+- **Applications.** Self-driving perception, AR / VR, robotics, photogrammetry and 3D capture, novel view synthesis. The hardware-to-software shift (LIDAR-equipped → image-based) is what made these proliferate from labs to phones in the last decade.
+
+Vision lost the third dimension when the camera projected; the algorithms in this lesson are the field's standard ways of recovering it. The right tool depends on what you have (one image, two images, many images, video) and what you need (dense per-pixel depth, a 3D model, the ability to render new views).
+
+Next: 3D vision recovered geometry from images. The next lesson connects images with **language**. The vision-and-language systems behind text-to-image generation, image captioning, and visual question answering all sit on bridges between two pretrained encoders, one for images, one for text. We have already met one of them inside diffusion's text conditioning; the next lesson covers the family directly.

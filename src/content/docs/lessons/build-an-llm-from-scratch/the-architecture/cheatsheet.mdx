@@ -1,0 +1,77 @@
+---
+title: "Cheatsheet: The Transformer architecture"
+description: One-page reference. The decoder-only skeleton, the converged choices, the sizing hyperparameters, and the parameter-count formula.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## The skeleton (decoder-only)
+
+```
+token IDs
+  -> token embedding (-> vectors of width d_model)
+  -> N x block:
+       residual + attention(norm(x))      # moves info across positions
+       residual + FFN(norm(x))             # processes each position
+  -> final norm
+  -> output projection -> vocab logits     # often weight-tied to embedding
+```
+
+The **residual stream** (width `d_model`) flows end to end; each sublayer reads from it and adds back.
+
+## Converged design choices (modern vs original 2017)
+
+| Choice | Modern default | Why |
+| --- | --- | --- |
+| Norm placement | **Pre-norm** | Stable training at depth |
+| Norm type | **RMSNorm** | Cheaper; no mean-subtraction/bias |
+| FFN activation | **Gated (SwiGLU)** | Better; hidden ratio ~8/3*d_model |
+| Position | **RoPE** (rotary) | Relative position, length generalization |
+| Biases | **Dropped** | Fewer params, more stable |
+| Embedding/output | **Weight-tied** | Share one matrix |
+
+## Sizing hyperparameters
+
+| Name | Meaning |
+| --- | --- |
+| `d_model` | Residual-stream width (the dominant dial) |
+| `n_layers` | Depth (number of blocks) |
+| `n_heads` | Attention heads; `head_dim = d_model / n_heads` |
+| `d_ff` | FFN hidden width (~4*d_model, or ~8/3*d_model gated) |
+| vocab size | Tokenizer vocabulary |
+| context length | Max sequence handled |
+
+## Parameter count
+
+```
+N (non-embedding) ~= 12 * n_layers * d_model^2
+   per block: ~4*d_model^2 (attention Q,K,V,O) + ~8*d_model^2 (FFN)
+embedding ~= vocab_size * d_model
+```
+
+`d_model` enters **squared**, so widening grows parameters faster than deepening. Feeds straight into lesson 2's `6ND` (compute) and `16N` (memory).
+
+## Reading a real config (example field names)
+
+| Config field | This lesson |
+| --- | --- |
+| `hidden_size` | `d_model` |
+| `num_hidden_layers` | `n_layers` |
+| `num_attention_heads` | `n_heads` |
+| `intermediate_size` | `d_ff` |
+| `rms_norm_eps` | uses RMSNorm |
+| `rope_theta` | uses RoPE |
+
+## Words to use precisely
+
+- **Decoder-only**: generates left-to-right; the modern LLM shape.
+- **Residual stream**: the width-`d_model` vector each sublayer reads and writes.
+- **Pre-norm / RMSNorm / SwiGLU / RoPE**: the converged norm-placement / norm-type / FFN-activation / positional choices.
+- **Aspect ratio**: the balance of width (`d_model`) to depth (`n_layers`).
+
+## Source
+
+- Stanford CS336, Lecture 3 (Architectures, hyperparameters), by Hashimoto and Liang. `cs336.stanford.edu`. Independent structural mirror in original prose; see references.

@@ -1,0 +1,71 @@
+---
+title: "Cheatsheet: Parallelism"
+description: One-page reference. The three schemes + FSDP/ZeRO + the placement rules and a decision tree.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## The three classic schemes
+
+| Scheme | What it splits | Communication | Fits where |
+| --- | --- | --- | --- |
+| **Data (DP)** | The batch (full model on each device) | All-reduce gradients once per step | Anywhere; needs model to fit one device |
+| **Tensor (TP)** | Each layer's tensors (FFN width, heads) | All-reduce/all-gather **inside every layer** | Within a node (fast interconnect) |
+| **Pipeline (PP)** | The layers (stages on different devices) | Activations at **stage boundaries** only | Across nodes (tolerates slower fabric) |
+
+## FSDP / ZeRO (the modern default)
+
+- **Shards** parameters, gradients, and optimizer states across the DP ranks.
+- For each layer's forward/backward, the ranks **gather** its parameters, compute, and **discard** the gathered weights.
+- Memory savings of model-splitting **without** per-layer tensor surgery (TP) or pipeline scheduling (PP).
+- **Cost:** extra communication (param gather + release), largely overlapped with compute.
+
+## Decision tree
+
+```
+Does the model fit on ONE GPU (per lesson 2's 16N)?
+  Yes -> DP alone. Done.
+  No  -> Add FSDP/ZeRO (or TP within node).
+        Does it fit across ONE node?
+          Yes -> TP within node + DP across nodes (or FSDP).
+          No  -> 3D: TP within nodes + PP across nodes + DP on top.
+```
+
+## 3D parallelism (largest scale)
+
+```
+TP_size x PP_size x DP_size  =  total devices
+        |             |
+        |             +-- batch scale
+        +-- one node's GPUs (where the fast interconnect is)
+PP_size = number of pipeline stages (across nodes)
+```
+
+Each axis attacks a different bottleneck (per-layer memory / cross-node memory / batch scale).
+
+## Pipeline bubbles -> microbatching
+
+A pipeline stalls at the start/end of a batch as it fills and drains.
+**Fix:** split each batch into many **microbatches** that overlap in the pipeline (assembly-line style). Smaller microbatches -> smaller bubbles + more communication overhead; tune to balance.
+
+## Mapping to lesson 2's accounting
+
+| If lesson-2 says... | Add |
+| --- | --- |
+| Doesn't fit on one GPU | FSDP/ZeRO or TP |
+| Doesn't fit on one node | TP within + PP across |
+| Want more batch scale | DP on top |
+
+## Words to use precisely
+
+- **All-reduce / all-gather**: collective communication ops; their frequency and size are the costs of TP and gradient sync in DP.
+- **Stage / microbatch**: a contiguous group of layers on one device / a small piece of the batch flowing through the pipeline.
+- **FSDP / ZeRO**: sharded data parallel; sharded params/grads/optimizer states.
+- **3D parallelism**: DP × TP × PP combination for frontier-scale training.
+
+## Source
+
+- Stanford CS336, Lectures 7+8 (Parallelism), by Hashimoto and Liang. `cs336.stanford.edu`. Independent structural mirror in original prose; see references.

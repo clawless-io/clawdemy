@@ -1,0 +1,188 @@
+---
+title: "Practice: Run a model in a few lines"
+description: Self-check on pipeline(), the three steps, and the Auto classes, a hands-on exercise that runs a pipeline and then reconstructs it by hand, and flashcards for retrieval.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Seven short questions. Answer each before opening the collapsible. Retrieval is where it sticks.
+
+**1. What three steps does `pipeline()` group together?**
+
+<details>
+<summary>Show answer</summary>
+
+Preprocessing (a tokenizer turns text into numbers the model can read), the model forward pass (those numbers run through the network), and postprocessing (the model's raw output is turned back into something meaningful, like labels and scores). The one-line `pipeline()` call does all three for you.
+
+</details>
+
+**2. What two things does a tokenizer return, and what is each for?**
+
+<details>
+<summary>Show answer</summary>
+
+`input_ids`: the text as integers, one row per input sentence, where each integer is the ID of a token. `attention_mask`: a row of 1s and 0s marking which positions are real tokens and which are padding, so the model knows what to ignore.
+
+</details>
+
+**3. What do `padding=True`, `truncation=True`, and `return_tensors="pt"` each do?**
+
+<details>
+<summary>Show answer</summary>
+
+`padding=True` makes a batch of different-length sentences uniform by filling the short ones with a padding token. `truncation=True` cuts inputs longer than the model can handle. `return_tensors="pt"` returns PyTorch tensors (the format the model expects) instead of plain lists.
+
+</details>
+
+**4. What is the difference between `AutoModel` and `AutoModelForSequenceClassification`?**
+
+<details>
+<summary>Show answer</summary>
+
+`AutoModel` loads just the base transformer, which outputs hidden states (a high-dimensional vector per token, the model's contextual understanding). `AutoModelForSequenceClassification` adds a classification head on top that projects those hidden states down to one score per label. The base model understands; the head answers. The `...For<Task>` part of the class name tells you which head.
+
+</details>
+
+**5. The model's output is `tensor([[-1.5607, 1.6123], ...])`. Are those probabilities? How do you get probabilities and labels?**
+
+<details>
+<summary>Show answer</summary>
+
+No, those are logits, the raw unnormalized scores from the last layer (models output logits because training fuses the softmax into the loss). Apply a softmax (`torch.nn.functional.softmax(logits, dim=-1)`) to turn each row into probabilities that sum to 1, then read `model.config.id2label` to find which column is which label.
+
+</details>
+
+**6. What is the single idiom that loads tokenizers, models, and heads across the whole library?**
+
+<details>
+<summary>Show answer</summary>
+
+`SomeAutoClass.from_pretrained(checkpoint)`, where `checkpoint` is a model name from the Hub. The "Auto" classes inspect the checkpoint and instantiate the right architecture, so you switch models by changing one string and switch tasks by changing the head class.
+
+</details>
+
+**7. When should you drop from `pipeline()` down to the Auto classes?**
+
+<details>
+<summary>Show answer</summary>
+
+When you need something the one-liner does not expose: a specific model the pipeline does not default to, raw logits for a custom threshold, control over batching or padding, or a head the pipeline does not offer. For exploring and a lot of production work, `pipeline()` is correct; the Auto classes are for when you need to customize one of the three steps.
+
+</details>
+
+## Try it yourself: run it, then rebuild it
+
+About 12 minutes, in a notebook (Colab works with no setup). The point is to feel the pipeline and its three steps as the same computation at two levels.
+
+**Part A: run the one-liner.** Install the library if needed (`pip install transformers`), then run:
+
+```python
+from transformers import pipeline
+classifier = pipeline("sentiment-analysis")
+classifier(["This is the best thing I've read all year.", "What a waste of time."])
+```
+
+Note the labels and scores you get back.
+
+**Part B: rebuild it by hand.** Reproduce the same result with the Auto classes. Fill in the four missing pieces:
+
+```python
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
+import torch
+
+checkpoint = "distilbert-base-uncased-finetuned-sst-2-english"
+tokenizer = AutoTokenizer.from_pretrained(checkpoint)
+model = AutoModelForSequenceClassification.from_pretrained(checkpoint)
+
+texts = ["This is the best thing I've read all year.", "What a waste of time."]
+inputs = tokenizer(texts, padding=True, truncation=True, return_tensors="pt")
+outputs = model(**inputs)
+predictions = torch.nn.functional.softmax(outputs.logits, dim=-1)
+print(predictions)
+print(model.config.id2label)
+```
+
+<details>
+<summary>What you should see, and why</summary>
+
+The `predictions` tensor holds the same probabilities the pipeline reported, and `id2label` tells you that column 0 is NEGATIVE and column 1 is POSITIVE. If your by-hand probabilities match the pipeline's scores, you have proven to yourself that `pipeline()` is exactly these three steps with the boilerplate hidden. That is the whole mental model for the rest of the track.
+
+</details>
+
+**Part C (reasoning).** You want to flag only reviews the model is *very* confident are negative (probability above 0.99). Which version do you reach for, the pipeline or the Auto classes, and why?
+
+<details>
+<summary>What you should notice</summary>
+
+The Auto classes. You need the raw probabilities to apply your own 0.99 threshold, and the postprocessing step (softmax plus reading the probability column) is exactly where that lives. The pipeline hands you a label and a score but does not let you insert a custom decision rule between the logits and the answer. This is the canonical "drop down to customize" case.
+
+</details>
+
+## Flashcards
+
+Nine cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay the set out one card per page for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="What does pipeline(task) do?">
+
+Runs a whole task in one call: picks a default model, downloads and caches it, and handles preprocessing and postprocessing. Reach for it first for exploring and a lot of production work.
+
+</Flashcard>
+
+<Flashcard question="What three steps does a pipeline hide?">
+
+Preprocessing with a tokenizer (text to numbers), the model forward pass, and postprocessing (raw output to labels and scores).
+
+</Flashcard>
+
+<Flashcard question="What does a tokenizer return?">
+
+A dictionary with input_ids (text as integer token IDs, one row per sentence) and attention_mask (1s and 0s marking real tokens versus padding).
+
+</Flashcard>
+
+<Flashcard question="What do padding, truncation, and return_tensors do?">
+
+padding=True makes a batch uniform length with a padding token; truncation=True cuts over-long inputs; return_tensors='pt' returns PyTorch tensors, the format the model expects.
+
+</Flashcard>
+
+<Flashcard question="AutoModel versus AutoModelForSequenceClassification?">
+
+AutoModel gives the base transformer's hidden states (a vector per token). AutoModelForSequenceClassification adds a head that projects those down to one score per label. The base understands; the head answers.
+
+</Flashcard>
+
+<Flashcard question="What are logits, and how do you get probabilities?">
+
+Logits are the raw unnormalized scores from the model's last layer (models stop here because training fuses softmax into the loss). Apply softmax over the last dimension to get probabilities that sum to 1.
+
+</Flashcard>
+
+<Flashcard question="How do you find which output column is which label?">
+
+Read model.config.id2label, a mapping like `{0: 'NEGATIVE', 1: 'POSITIVE'}` stored in the model's config.
+
+</Flashcard>
+
+<Flashcard question="What is the one idiom that loads everything in the library?">
+
+SomeAutoClass.from_pretrained(checkpoint). Change the checkpoint string to change the model; change the head class (AutoModelFor...) to change the task.
+
+</Flashcard>
+
+<Flashcard question="When do you drop from pipeline() to the Auto classes?">
+
+When you need raw logits, a custom threshold, a non-default model, control over batching or padding, or a head the pipeline does not expose. The Auto classes are the three steps done by hand.
+
+</Flashcard>
+
+</FlashcardSet>

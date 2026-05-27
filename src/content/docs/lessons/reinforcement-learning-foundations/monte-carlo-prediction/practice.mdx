@@ -1,0 +1,213 @@
+---
+title: "Practice: Monte Carlo prediction"
+description: "A self-check on model-free prediction and the MC algorithm, a five-episode Monte Carlo simulation on a fresh 3-state MDP that shows both the law-of-large-numbers convergence and the high-variance failure mode, a which-method-fits-this-setting drill, and flashcards built for retrieval."
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+The skill is computing MC averages by hand: walking each episode, computing the return from each state, then averaging across episodes. The variance exercise is the most important one, because seeing the estimate go visibly off when episodes happen to skew is what makes "unbiased but high-variance" stop being a slogan. Keep a scratchpad.
+
+## Self-check
+
+Six short questions. Answer each in your head before opening the collapsible.
+
+**1. What is the difference between prediction and control in RL?**
+
+<details>
+<summary>Show answer</summary>
+
+**Prediction:** given a fixed policy pi, estimate V^pi (or Q^pi). You evaluate the policy you have. **Control:** find a better policy, ideally the optimal pi^*. Most RL algorithms use a prediction method inside a control loop; this lesson is just the prediction step in the model-free setting.
+
+</details>
+
+**2. Describe Monte Carlo prediction in four steps.**
+
+<details>
+<summary>Show answer</summary>
+
+(1) Run an episode under pi to termination. (2) For each state s visited at time t, compute the return G_t = sum from t onward of gamma^k * r_(t+k+1). (3) Add G_t to a running average of returns observed from s. (4) Repeat over many episodes; V(s) is the average.
+
+</details>
+
+**3. What is the difference between first-visit and every-visit Monte Carlo?**
+
+<details>
+<summary>Show answer</summary>
+
+**First-visit MC** counts only the **first** time a state appears in each episode. **Every-visit MC** counts **every** appearance of a state within an episode. Both converge to V^pi under standard conditions. The choice is mostly cosmetic; first-visit is slightly cleaner theoretically.
+
+</details>
+
+**4. Why is Monte Carlo prediction described as "unbiased but high-variance"?**
+
+<details>
+<summary>Show answer</summary>
+
+**Unbiased:** the expectation (over all possible episode randomness) of the sample-average return equals V^pi exactly; there is no systematic error. **High-variance:** the return G_t is a sum of many random rewards, so a single episode is a noisy sample. The running average converges but slowly; with few episodes the estimate can be far off, even though its expectation is correct.
+
+</details>
+
+**5. Why does plain Monte Carlo prediction require terminating episodes?**
+
+<details>
+<summary>Show answer</summary>
+
+Because the return G_t is the sum of rewards from time t to termination; on a non-terminating task you would never finish computing G_t. MC works only for episodic tasks (or with truncation tricks). The next lesson's TD learning fixes this by bootstrapping from an estimated next-state value, which only needs a single step.
+
+</details>
+
+**6. Write the incremental Monte Carlo update.**
+
+<details>
+<summary>Show answer</summary>
+
+After observing a return G from state s: **count(s) `<-` count(s) + 1; V(s) `<-` V(s) + (G - V(s)) / count(s)**. This maintains the running average without storing all the past returns. Replacing 1/count with a fixed step size alpha gives an exponentially-weighted moving average (useful for non-stationary environments and the form TD learning uses).
+
+</details>
+
+## Try it yourself: a 5-episode Monte Carlo run
+
+A 3-state episodic MDP with one action everywhere ("go"); gamma = 1 (episodic, no discount needed):
+
+```
+States: {Begin, Mid, End-terminal}.
+
+From Begin, "go": -> Mid,  R(Begin -> Mid) = 2
+From Mid,   "go": -> End,  R(Mid -> End) is stochastic:
+                            +6 with probability 0.4
+                             0 with probability 0.6
+```
+
+**Part A.** Compute the true V^pi(Begin) and V^pi(Mid) by definition (expected return). You can do this without any episodes.
+
+**Part B.** You then run 5 episodes. By luck the high-reward outcome (+6) happens in **episodes 1 and 3**; the low-reward outcome (0) happens in **episodes 2, 4, and 5**. Compute first-visit MC estimates of V(Begin) and V(Mid) from these 5 episodes.
+
+**Part C.** Suppose instead, in a different run, the +6 outcome had happened in **episodes 1, 2, and 3** (three high, two low). Recompute the 5-episode estimates and compare with the true values.
+
+<details>
+<summary>Show answer</summary>
+
+**Part A: true values.**
+
+```
+V^pi(Mid)   = E[reward from Mid -> End]  =  0.4 * 6 + 0.6 * 0  = 2.4
+V^pi(Begin) = R(Begin -> Mid) + V^pi(Mid) = 2 + 2.4           = 4.4
+```
+
+**Part B: episodes 1 and 3 high, episodes 2, 4, 5 low (2 of 5 high, matches the true 0.4 fraction).**
+
+```
+Episode 1: Begin -> Mid (R=2), Mid -> End (R=6).  G(Begin) = 2+6 = 8;  G(Mid) = 6
+Episode 2: Begin -> Mid (R=2), Mid -> End (R=0).  G(Begin) = 2;        G(Mid) = 0
+Episode 3: same as 1.                              G(Begin) = 8;        G(Mid) = 6
+Episode 4: same as 2.                              G(Begin) = 2;        G(Mid) = 0
+Episode 5: same as 2.                              G(Begin) = 2;        G(Mid) = 0
+
+First-visit MC averages:
+V(Begin) = (8 + 2 + 8 + 2 + 2) / 5 = 22 / 5 = 4.4    (matches V^pi exactly)
+V(Mid)   = (6 + 0 + 6 + 0 + 0) / 5 = 12 / 5 = 2.4    (matches V^pi exactly)
+```
+
+When the realized fraction of high outcomes (2/5 = 0.4) matches the true probability, the MC average happens to land exactly on the truth.
+
+**Part C: episodes 1, 2, 3 high (3 of 5 high; realized fraction = 0.6, NOT 0.4).**
+
+```
+G(Begin) values: 8, 8, 8, 2, 2
+G(Mid)   values: 6, 6, 6, 0, 0
+
+V(Begin) = (8 + 8 + 8 + 2 + 2) / 5 = 28 / 5 = 5.6     (vs true 4.4 -- off by 1.2)
+V(Mid)   = (6 + 6 + 6 + 0 + 0) / 5 = 18 / 5 = 3.6     (vs true 2.4 -- off by 1.2)
+```
+
+Both estimates are **1.2 too high**, because the realized sequence happened to be biased toward the rare high outcome. The estimator is still unbiased in expectation, you would average to the truth across infinite runs of "5 episodes each", but **any single run can be off**. Add more episodes and the average shrinks back toward 4.4 and 2.4 by the law of large numbers. That gap is MC's variance, made tangible.
+
+</details>
+
+## Try it yourself: which method fits this setting?
+
+For each scenario, name the right method: **planning** (Phase 2 PI/VI), **Monte Carlo prediction**, **TD learning** (preview, next lesson), or **off-policy evaluation**.
+
+```
+A. A small gridworld where you know transition probabilities and rewards
+   exactly, and want the optimal policy.
+B. A board game with terminal states, no model, but you can play many
+   complete games under a fixed policy and want to know how good it is.
+C. A long-running recommendation system that never terminates; you want
+   to evaluate the policy from a stream of (state, action, reward) tuples.
+D. Estimating how good policy pi_B would have been, using a dataset
+   collected under a DIFFERENT policy pi_A.
+```
+
+<details>
+<summary>Show answer</summary>
+
+- **A: planning** (policy or value iteration). Model is known; no learning needed.
+- **B: Monte Carlo prediction.** Episodic, model unknown, fixed policy. Exactly MC's setting.
+- **C: TD learning** (the next lesson). Continuing task, so MC's full-episode return is unusable; TD bootstraps from one-step rewards plus an estimated next-state value, which works for both episodic and continuing tasks.
+- **D: off-policy evaluation** (an MC variant with importance weights), which corrects the mismatch between the policy that generated the data and the policy you want to evaluate. Built on the same MC machinery as this lesson, with reweighting on top.
+
+The takeaway: **model known -> planning; model unknown -> sample-based methods**; **episodic + on-policy -> MC fits cleanly**; **continuing -> need TD**; **off-policy from logs -> MC + importance weights**.
+
+</details>
+
+## Flashcards
+
+Eight cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay out the full set as one card per page for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="Describe Monte Carlo prediction in one sentence.">
+
+Run episodes under pi, compute the return from each visited state, average the returns across episodes -- V(s) converges to V^pi(s) by the law of large numbers.
+
+</Flashcard>
+
+<Flashcard question="First-visit MC vs every-visit MC: what is the difference?">
+
+First-visit counts only the first time s appears in each episode; every-visit counts every appearance within an episode. Both converge to V^pi.
+
+</Flashcard>
+
+<Flashcard question="Write the incremental MC update.">
+
+count(s) `<-` count(s) + 1; V(s) `<-` V(s) + (G - V(s)) / count(s). Maintains the running average without storing all past returns. Replacing 1/count with a step size alpha gives an EMA.
+
+</Flashcard>
+
+<Flashcard question="Why is Monte Carlo unbiased?">
+
+The estimator is the sample average of returns; E[average of returns from s] = V^pi(s) by definition. Over infinite samples, the average exactly equals the truth -- no systematic error.
+
+</Flashcard>
+
+<Flashcard question="Why is Monte Carlo high-variance?">
+
+The return G_t is a sum of many random rewards along an episode; that random sum can vary widely sample to sample. A single episode is noisy, and the running average can be far from V^pi with few episodes even though it converges eventually.
+
+</Flashcard>
+
+<Flashcard question="Why does plain Monte Carlo need episodes that terminate?">
+
+Because the return G_t is the sum of rewards from t to termination. On a non-terminating task you would never finish computing G_t. Episodic tasks only (or apply TD, next lesson).
+
+</Flashcard>
+
+<Flashcard question="Where does Monte Carlo show up in modern RL?">
+
+Off-policy evaluation from logs (MC with importance weights); MCTS rollouts in self-play (AlphaGo); the unbiased end of the MC-to-TD bias-variance spectrum that n-step returns and TD(lambda) interpolate.
+
+</Flashcard>
+
+<Flashcard question="In the lesson's 5-episode example, why did one realized sequence give V exactly and another give V off by 1.2?">
+
+Because MC's estimate depends on which outcomes the episodes happened to draw. With 2/5 high (matching the true 0.4 probability) the average lands exactly; with 3/5 high it overshoots by 1.2. Unbiased in expectation, high-variance in any single run.
+
+</Flashcard>
+
+</FlashcardSet>

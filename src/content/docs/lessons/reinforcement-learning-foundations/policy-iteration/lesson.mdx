@@ -1,0 +1,162 @@
+---
+title: "Policy iteration"
+description: "The Bellman equation says value is recursive; policy iteration is the first algorithm that actually computes the optimal policy from it. The algorithm alternates two simple steps: evaluate the current policy by solving its Bellman expectation equation, then improve the policy by acting greedily with respect to the evaluation. This lesson lays out both steps, runs the algorithm end-to-end on a two-state MDP through two iterations (changing one action and then stabilizing), and explains why the alternation must terminate at the optimal policy in any finite MDP."
+track: reinforcement-learning-foundations
+order: 4
+phase: planning-with-a-known-model
+phase_order: 1
+difficulty: standard
+estimated_read_minutes: 13
+estimated_practice_minutes: 16
+prerequisites:
+  - lessons/reinforcement-learning-foundations/value-functions-and-the-bellman-equations
+learning_outcomes:
+  - Explain the two phases of policy iteration (policy evaluation and policy improvement)
+  - Compute V^pi for a small MDP by solving the Bellman expectation equation
+  - Apply greedy policy improvement using the action-value Q^pi
+  - Run policy iteration through several iterations on a small MDP and recognize the termination condition
+  - State the policy-improvement theorem and why policy iteration converges in a finite MDP
+authors:
+  - clawdemy
+published_at: 2026-05-25
+last_reviewed: 2026-05-25
+status: draft
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+{/* COMPONENT PLACEHOLDER (Lead wires at promotion): <LessonFreshness lastReviewed={frontmatter.last_reviewed} /> */}
+{/* COMPONENT PLACEHOLDER (Lead wires at promotion): <SourceLecture url="https://davidstarsilver.wordpress.com/teaching/" title="David Silver, UCL Reinforcement Learning Course, Lecture 3: Planning by Dynamic Programming (policy iteration)" instructor="David Silver" /> */}
+
+The Bellman equation in the previous lesson wrote V as a recursion, but for a cyclic MDP it left you with a fixed-point equation, not a number. **Policy iteration** is the first algorithm that actually computes the optimal policy. It works by alternating two steps, each one a direct use of what you already know: **evaluate** the current policy (solve its Bellman expectation equation), then **improve** the policy (act greedily with respect to the evaluation). Keep alternating and the algorithm provably converges to the optimal policy in finite MDPs. It is the cleanest mental model for what "improving a policy" means, and the evaluate-then-improve pattern is the template that almost every later RL method imitates.
+
+This lesson assumes you know the MDP fully (you can read P and R off the table). That is the **planning** setting, the topic of all of Phase 2. Phase 3 will rebuild these ideas from samples when P and R are unknown.
+
+## The two phases
+
+**1. Policy evaluation.** Given a fixed policy pi, compute V^pi(s) for every state. This is exactly the Bellman expectation equation from the previous lesson, solved. For small MDPs you can solve it as a linear system; for larger ones you iterate the update
+
+```
+V_(k+1)(s) = sum_a pi(a | s) * [ R(s, a) + gamma * sum_(s') P(s' | s, a) * V_k(s') ]
+```
+
+starting from V_0 = 0 (or anything) and stopping when V stops moving. The update is the right-hand side of the Bellman expectation equation, and the limit is V^pi. The math guarantees this: the Bellman operator under a fixed policy is a contraction with constant gamma, so V_k converges to V^pi at rate gamma^k.
+
+**2. Policy improvement.** Given V^pi, produce a new policy pi' that is greedy with respect to it. Concretely, at each state pick the action with the largest action-value:
+
+```
+pi'(s) = argmax over a of  Q^pi(s, a)
+       = argmax over a of  [ R(s, a) + gamma * sum_(s') P(s' | s, a) * V^pi(s') ]
+```
+
+The right side is the Bellman optimality-style step computed using the **current** V^pi: for each candidate action a, you compute the immediate reward plus the discounted expected V^pi at the next state, then take the action whose value is largest. The result is a new, often improved, deterministic policy.
+
+## The algorithm and why it converges
+
+Policy iteration just alternates the two steps until the policy stops changing.
+
+```
+1. Start with any policy pi_0  (e.g. uniform random or "always action 1").
+2. EVALUATE: compute V^(pi_k) by solving the Bellman expectation equation.
+3. IMPROVE: pi_(k+1)(s) = argmax_a [ R(s, a) + gamma * sum_(s') P(s' | s, a) V^(pi_k)(s') ].
+4. If pi_(k+1) == pi_k, stop -- pi_k is the optimal policy pi^*.
+   Otherwise, k <- k+1 and go to step 2.
+```
+
+Two facts make the algorithm correct.
+
+- **The policy-improvement theorem.** If pi' is greedy with respect to V^pi, then **V^(pi')(s) >= V^pi(s) for every state s**. The new policy is no worse than the old one anywhere, and strictly better in at least one state unless pi was already optimal. Each iteration of the loop monotonically improves (or preserves) the value at every state.
+- **Finitely many deterministic policies.** A finite MDP with |S| states and |A| actions has exactly |A|^|S| deterministic policies (often a huge number, but finite). Monotone improvement on a finite set must terminate.
+
+When the loop terminates, pi_(k+1) = pi_k means greedy improvement does not change anything: the policy is already greedy with respect to its own value. That is exactly the condition for the Bellman optimality equation to hold, so the final policy is **optimal**.
+
+## Worked example: a two-state, two-action MDP
+
+Here is the smallest interesting case where policy iteration changes a policy. Two states A and B; two actions, "stay" and "switch", from each state; deterministic transitions; gamma = 0.9.
+
+```
+From A:
+  stay   -> A,  reward R(A, stay)   = +1
+  switch -> B,  reward R(A, switch) = 0
+From B:
+  stay   -> B,  reward R(B, stay)   = -1
+  switch -> A,  reward R(B, switch) = +2
+```
+
+**Initialization.** Start with the silly policy pi_0 = "always stay in both states." Each state then loops to itself, so the value computation is trivial:
+
+```
+V^(pi_0)(A) = 1  + 0.9 * V^(pi_0)(A)   ->   0.1 V^(pi_0)(A) = 1   ->   V^(pi_0)(A) = 10
+V^(pi_0)(B) = -1 + 0.9 * V^(pi_0)(B)   ->   0.1 V^(pi_0)(B) = -1  ->   V^(pi_0)(B) = -10
+```
+
+**Improvement (iteration 1).** Compute Q^(pi_0)(s, a) for each action at each state and pick the argmax.
+
+```
+At A:
+  Q(A, stay)   = 1 + 0.9 * V(A) = 1 + 0.9 * 10  = 10
+  Q(A, switch) = 0 + 0.9 * V(B) = 0 + 0.9 * -10 = -9
+  argmax: stay (Q = 10).      ->  pi_1(A) = stay  (unchanged)
+
+At B:
+  Q(B, stay)   = -1 + 0.9 * V(B) = -1 + 0.9 * -10 = -10
+  Q(B, switch) =  2 + 0.9 * V(A) =  2 + 0.9 *  10 = 11
+  argmax: switch (Q = 11).    ->  pi_1(B) = switch  (CHANGED from stay)
+```
+
+So pi_1 = (A: stay, B: switch). Already smarter: from B, jumping to A pays 2 immediately and lands in a state worth a lot.
+
+**Evaluation (round 2).** Solve the Bellman expectation equation under pi_1.
+
+```
+Under pi_1, transitions are: A -> A always (still stay), and B -> A always (switch).
+  V(A) = 1 + 0.9 * V(A)        ->   V(A) = 10        (unchanged from before)
+  V(B) = 2 + 0.9 * V(A)        ->   V(B) = 2 + 0.9 * 10 = 11
+```
+
+**Improvement (round 2).** Recompute the argmax with the new V.
+
+```
+At A:  Q(A, stay)   = 1 + 0.9 * 10 = 10     argmax: stay
+       Q(A, switch) = 0 + 0.9 * 11 = 9.9
+
+At B:  Q(B, stay)   = -1 + 0.9 * 11 = 8.9    argmax: switch
+       Q(B, switch) =  2 + 0.9 * 10 = 11
+```
+
+pi_2 = (A: stay, B: switch) = pi_1. The policy is **stable**, so by the termination rule pi_1 is optimal.
+
+```
+pi^*  =  ( A: stay,  B: switch )
+V^*(A) = 10,   V^*(B) = 11
+```
+
+Two iterations: one to flip a single action, one to confirm. That is the algorithm. On a larger MDP the same loop runs longer; the steps are identical.
+
+## Why this matters when you use AI
+
+Policy iteration is the template, not just an algorithm. The pattern shows up everywhere.
+
+- **Generalized policy iteration (GPI).** Almost every RL method can be described as some flavor of "estimate value, then improve policy greedily, then repeat". Value iteration (next lesson) is policy iteration with only **one** sweep of evaluation per improvement. SARSA and Q-learning (Phase 3) interleave the two steps sample by sample. Actor-critic methods learn an explicit policy ("actor") while a critic estimates value to guide it. The GPI lens makes the family resemblance visible.
+- **The planning vs learning split.** Policy iteration as presented here assumes you know P and R; it is **planning**. The same evaluate-then-improve idea works without a model if you can estimate values from samples instead, which is exactly what Phase 3's TD methods do. The architecture is the same; only the value-estimation step changes.
+- **Approximate policy iteration for big problems.** Real state spaces are too large to enumerate, so V cannot be a table. Replacing the table with a function approximator (a neural network) and the exact evaluation step with a regression to a Bellman target gives **approximate policy iteration**, which underlies a large fraction of practical deep RL. Lesson 9 will sketch the function-approximation move; this lesson is the exact template it scales up.
+
+The biggest single mental model from this lesson is **evaluate, then improve, repeat**. Internalize that and most of the algorithms in the rest of the track read as variations on a theme.
+
+## Common pitfalls
+
+- **Forgetting that policy evaluation is itself iterative (in general).** For small MDPs you can solve V^pi as a linear system in one shot, but in the typical case you iterate the Bellman expectation update to convergence. The outer loop (improve, evaluate, ...) has an inner loop (Bellman sweeps until V settles).
+- **Assuming you need full evaluation before improving.** A practical variant called **modified (or truncated) policy iteration** does only a few Bellman sweeps per improvement step and still converges. The next lesson's value iteration is the extreme case: exactly one Bellman sweep per "improvement." All three are GPI in disguise.
+- **Picking ties in the argmax inconsistently.** When two actions tie in Q, any tie-breaking is fine for the math, but be deterministic across iterations or you can chatter forever in practice. A common rule is "stay with the previous action on ties."
+- **Mixing up the Bellman expectation and optimality equations.** Evaluation uses the **expectation** equation (sum over actions weighted by pi). Improvement is a **max** over actions, with V^pi from the evaluation step plugged in. The two equations from the previous lesson play distinct roles inside one algorithm.
+- **Treating policy iteration as practical at scale.** With millions of states the evaluation step is intractable in its tabular form. The planning setting in this phase is exact and small; the function-approximation move in lesson 9 is what makes the idea scale.
+
+## What you should remember
+
+- **Policy iteration** alternates two steps: **evaluate** the current policy (solve its Bellman expectation equation for V^pi), then **improve** the policy by setting pi'(s) = argmax_a [R(s, a) + gamma * sum_(s') P(s'|s, a) V^pi(s')]. Repeat until the policy is stable.
+- The **policy-improvement theorem** says greedy improvement gives a policy no worse than the previous one (better in at least one state unless already optimal). With finitely many deterministic policies, the loop must terminate at pi^*.
+- On the two-state, two-action MDP, policy iteration runs two rounds: round one flips B's action from "stay" to "switch" (Q jumps from -10 to +11); round two confirms the new policy is stable, giving V^*(A) = 10, V^*(B) = 11.
+- **Generalized policy iteration (GPI)** is the lens that ties almost every RL method together: estimate value, improve policy greedily, repeat. Value iteration (next), TD methods (Phase 3), and actor-critic methods are all variations.
+- This lesson lives in the **planning** setting (P and R known). Phase 3 will re-do the same evaluate-then-improve loop from **samples**, which is what makes RL work in the real world where you do not know the MDP.

@@ -1,0 +1,87 @@
+---
+title: "Giving the model memory: the MLP language model"
+description: The bigram model saw only one character of context. This lesson extends makemore to a multilayer perceptron that reads several previous characters, using learned character embeddings, the idea from Bengio's 2003 neural language model. Embeddings dissolve the explosion that kills the counting approach and let the model generalize across similar characters, and they are the same mechanism every large language model uses to turn tokens into vectors.
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+The bigram model worked, but it had one crippling limit: it predicted the next character from only the single character before it. A model with one character of memory cannot tell that a name beginning `emm` is likely to continue differently than one beginning `xqz`. The obvious fix is to give it more context, several previous characters instead of one. This lesson does that, and the way it does it, **learned embeddings**, is one of the most important ideas in all of modern AI.
+
+The contract holds: nothing inside is a mystery. By the end, the word "embedding," which you will hear constantly around large language models, will be a lookup table of vectors that the network learned, nothing more.
+
+## Why you cannot just count more context
+
+The natural first thought is to keep the counting approach but use more context: instead of counting pairs, count which character follows each *triple* of characters. It does not work, and the reason is arithmetic.
+
+With 27 possible characters, there are 27 single characters, but `27 x 27 x 27 = 19,683` possible three-character contexts, and the full table of "next character given the previous three" has `27 x 27 x 27 x 27 = 531,441` entries. Most of those contexts never appear in the training names even once, so their rows are empty and the model has no prediction at all. Every character you add to the context multiplies the table size by 27 and makes it emptier. Counting collapses under its own size the moment you ask for real context. We need a representation that grows gently and shares what it learns.
+
+## The key idea: learned embeddings
+
+Here is the move that changes everything. Instead of treating each character as an isolated slot, give each one a short vector of numbers, say two or three to start, and store these in a lookup table (one row per character). This vector is the character's **embedding**. Crucially, the embeddings are not fixed; they are parameters, just like weights, and they are **learned by gradient descent** along with everything else.
+
+Why does this help? Because similar characters can end up with similar vectors. If the vowels `a`, `e`, `i`, `o`, `u` tend to behave alike, training can place their embeddings near each other, and then anything the model learns about contexts containing one vowel transfers automatically to the others. The model no longer needs to see every exact context; it can generalize from the ones it has seen to nearby ones it has not. That shared, smooth representation is exactly what the brittle count table lacked.
+
+## The architecture, end to end
+
+The model is a multilayer perceptron, the kind you built in Phase 1, with an embedding lookup bolted on the front. It follows the design from Bengio's 2003 neural language model. Fix a context size (say the previous three characters), then for each prediction:
+
+1. **Look up** the embedding vector for each of the three context characters.
+2. **Concatenate** those vectors into one longer input vector.
+3. Pass it through a **hidden layer**: a linear layer followed by `tanh`, exactly as before.
+4. Pass that through an **output layer** to get 27 numbers (logits), one per possible next character.
+5. **Softmax** the logits into probabilities, and train on negative log likelihood.
+
+Steps 3 through 5 are the network you already know; steps 1 and 2 are the only new structure, and the embedding table is just more parameters to learn.
+
+Walk the new part once with numbers. Suppose the context is the three characters `e`, `m`, `m`, and training has so far learned the embeddings `e -> [0.2, -0.5]` and `m -> [0.9, 0.1]`. Looking each one up and concatenating in order gives a single six-number input vector:
+
+```
+e -> [0.2, -0.5]
+m -> [0.9,  0.1]
+m -> [0.9,  0.1]
+concatenated input: [0.2, -0.5, 0.9, 0.1, 0.9, 0.1]
+```
+
+That six-number vector is what flows into the hidden layer. Notice that the repeated `m` contributes the same embedding both times: the table is a lookup by identity, so a character always maps to its one current vector, wherever it appears. Those vectors are not hand-set; they started as random numbers and are being nudged by gradient descent like every other parameter.
+
+Count the parameters to see how gentle this is. With three characters of context, a 2-number embedding, and a hidden layer of 100 neurons: the embedding table is `27 x 2 = 54` numbers; the concatenated input is `3 x 2 = 6` numbers, so the hidden layer has `6 x 100 + 100 = 700`; the output layer has `100 x 27 + 27 = 2,727`. That totals about `3,481` parameters. Compare that to the `531,441` entries the three-character count table needed, and remember that those 3,481 parameters *generalize* while the count table's half-million mostly sat empty. The embedding approach is both smaller and smarter.
+
+{/* DIAGRAM PLACEHOLDER: the MLP language model, three context characters at the bottom each indexing into an embedding lookup table, their vectors concatenated into one input, flowing up through a tanh hidden layer to 27 output logits, then softmax to probabilities */}
+
+## Training it, with a few practical wrinkles
+
+Training is the same loop as ever: forward pass to get predictions and the negative-log-likelihood loss, zero the gradients, `backward()`, then nudge every parameter downhill. What is new is only that the embeddings learn alongside the weights, because they too are leaf parameters in the graph, so backprop reaches them just like any weight.
+
+Three practical details show up once the dataset and model are real:
+
+- **Minibatches.** Computing the loss on all the data every single step is slow. Instead, each step uses a small random batch of examples. The gradient from a batch is a noisier estimate of the true gradient, but you get many more steps per second, and the noise mostly washes out. Nearly all real training uses minibatches.
+- **Learning rate.** The step size matters a lot, and there is no single right value. You find a good one by trying a range and watching which makes the loss fall fastest without blowing up. Too high and the loss bounces; too low and training crawls.
+- **Train, dev, and test splits.** Split the names into three piles: one to train on, one to tune choices like the learning rate and hidden size, and one held back to measure final quality honestly. This is how you catch **overfitting**, the model memorizing the training names instead of learning to generate new ones.
+
+Run the loop and the payoff is audible: the generated names are noticeably more name-like than the bigram model's, because the model finally has real context and a representation that generalizes.
+
+## Why this matters when you use AI
+
+Embeddings are not a makemore curiosity; they are the on-ramp to every modern language model. A large language model begins exactly here: each token (its unit of text) is looked up in a giant learned embedding table and turned into a vector, and those vectors are what the rest of the network processes. The embeddings you just met, a learned vector per symbol, where similar symbols land near each other, are the same mechanism behind the word and token embeddings the AI Foundations track described, and behind the famous result that arithmetic on word vectors can capture analogies.
+
+The shape of the whole system is now visible. A language model looks up a learned embedding for each token of context, runs the result through a neural network, and produces a probability over the next token, trained on negative log likelihood. Swap this lesson's single `tanh` hidden layer for a deep transformer and its three characters of context for thousands of tokens, and you have, in outline, a frontier model. The embedding table is where text first becomes numbers the network can reason with, which is why "embeddings" comes up in almost every conversation about how these systems work.
+
+## Common pitfalls
+
+**Thinking embeddings are looked up by meaning.** They are looked up by identity (which character or token this is), and the *values* in the vector are learned. Any meaning they capture is a side effect of training to predict well, not something hand-assigned.
+
+**Confusing the embedding size with the context size.** They are independent knobs. Context size is how many previous characters the model sees; embedding size is how many numbers represent each one. You can have three characters of context with two-number embeddings, or the reverse.
+
+**Believing more context is free.** More context means a larger concatenated input and more parameters, and eventually diminishing returns. The art is using a representation (embeddings) that makes context affordable, not just bolting on more of it.
+
+**Skipping the dev/test split.** Without held-out data you cannot tell learning from memorizing. A model that nails the training names but generates garbage has overfit, and you will only notice if you measured on names it never trained on.
+
+## What you should remember
+
+- **Counting cannot scale with context.** Each extra character of context multiplies the count table by 27 and makes it emptier; three characters already need over half a million mostly-empty entries. A representation that generalizes is required.
+- **Embeddings are the fix: a learned vector per character, stored in a lookup table and trained by gradient descent.** Similar characters can land near each other, so the model generalizes across contexts instead of needing to have seen each one. The MLP looks up and concatenates the context characters' embeddings, runs them through a `tanh` hidden layer, and produces next-character probabilities via softmax, trained on negative log likelihood, the same loop as before.
+- **This is the front end of every large language model.** Each token becomes a learned embedding vector, and the network processes those. Swap the single hidden layer for a transformer and a few characters of context for thousands of tokens, and the makemore MLP becomes, in outline, a modern language model.
+
+You now have a model with real memory and a representation that generalizes, and it generates much better names. But making this deeper network train *well*, rather than stalling or saturating, turns out to be surprisingly finicky. The next lesson opens up the network during training to see what can go wrong, dead neurons, exploding or vanishing gradients, and fixes it with careful initialization and a technique called batch normalization.

@@ -1,0 +1,78 @@
+---
+title: "Cheatsheet: The main NLP tasks"
+description: One-page reference. The shared loop, the task-to-head-to-metric map, the token-alignment and sequence-to-sequence wrinkles, and the data collators.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## The shared loop (every task)
+
+1. Load + clean data (`datasets`, `map`, `filter`)
+2. Tokenize (with task-specific alignment)
+3. Load `AutoModelFor<Task>`
+4. Pick a data collator + a metric
+5. Train with `Trainer` (or `Seq2SeqTrainer`)
+6. Evaluate + push to Hub
+
+Only the **head**, the **label shape**, and the **metric** change between tasks.
+
+## Task -> head -> metric -> shape
+
+| Task | Head | Metric | Shape |
+| --- | --- | --- | --- |
+| Sequence classification | `AutoModelForSequenceClassification` | accuracy, F1 | encoder |
+| Token classification (NER) | `AutoModelForTokenClassification` | seqeval (entity F1) | encoder |
+| Extractive QA | `AutoModelForQuestionAnswering` | SQuAD EM, F1 | encoder |
+| Masked LM | `AutoModelForMaskedLM` | perplexity | encoder |
+| Causal LM | `AutoModelForCausalLM` | perplexity | decoder |
+| Summarization | `AutoModelForSeq2SeqLM` | ROUGE | encoder-decoder |
+| Translation | `AutoModelForSeq2SeqLM` | BLEU / SacreBLEU | encoder-decoder |
+
+## Data collators by task
+
+| Collator | Used for |
+| --- | --- |
+| `DataCollatorWithPadding` | Sequence classification (dynamic padding) |
+| `DataCollatorForTokenClassification` | Token classification (pads labels too) |
+| `DataCollatorForLanguageModeling` | Masked LM (and causal LM with `mlm=False`) |
+| `DataCollatorForSeq2Seq` | Summarization, translation |
+
+## Wrinkle 1: token-level alignment
+
+Token classification and QA work in **token positions**, but labels/answers live at word/character level. Use the fast tokenizer:
+
+- **word IDs**: spread a word's label across its tokens (NER)
+- **offsets**: map predicted start/end token positions back to characters (QA)
+
+This is why fast tokenizers matter (lesson 6).
+
+## Wrinkle 2: sequence-to-sequence
+
+Summarization and translation need:
+
+- `AutoModelForSeq2SeqLM`
+- `Seq2SeqTrainingArguments` + `Seq2SeqTrainer`
+- `DataCollatorForSeq2Seq` (targets are sequences, padded + shifted)
+- generation-based metrics: **ROUGE** (summarize), **BLEU** (translate)
+
+## Language modeling: no labels needed
+
+The text is its own supervision; `DataCollatorForLanguageModeling` builds the targets:
+
+- Masked LM (BERT): random masking, `mlm=True` (default)
+- Causal LM (GPT): next-token, `mlm=False`
+- Metric: perplexity (lower is better)
+
+## Words to use precisely
+
+- **Token classification**: one label per token (NER, POS tagging).
+- **Extractive QA**: return a span of the source; vs **generative QA**, which writes a new answer (and can hallucinate).
+- **Perplexity**: a language-model quality metric; lower is better.
+- **seqeval / ROUGE / BLEU / SQuAD**: standard metrics for NER / summarization / translation / QA.
+
+## Recommended further study
+
+- Hugging Face LLM Course, Chapter 7: "Main NLP tasks." `huggingface.co/learn/llm-course/chapter7`. Released under Apache 2.0; this lesson mirrors its structure with original prose.

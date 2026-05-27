@@ -1,0 +1,226 @@
+---
+title: "Practice: Policy iteration"
+description: "A self-check on the two-phase structure and convergence guarantee, a run-policy-iteration exercise on a new 2-state-2-action MDP through to a stable policy, a what-the-improvement-theorem-promises drill, and flashcards built for retrieval."
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+The skill is running the loop yourself: evaluate the current policy (solve the Bellman expectation equation for V^pi), then improve by argmax over Q. The big idea is the alternation; the practice makes it tangible. Keep a scratchpad.
+
+## Self-check
+
+Six short questions. Answer each in your head before opening the collapsible.
+
+**1. State the two phases of policy iteration in one sentence each.**
+
+<details>
+<summary>Show answer</summary>
+
+**Policy evaluation:** given a fixed policy pi, compute V^pi(s) for every state by solving (or iterating) the Bellman expectation equation. **Policy improvement:** given V^pi, produce a new policy pi' that is greedy with respect to V^pi: pi'(s) = argmax_a [R(s, a) + gamma * sum_(s') P(s'|s, a) V^pi(s')].
+
+</details>
+
+**2. State the policy-improvement theorem.**
+
+<details>
+<summary>Show answer</summary>
+
+If pi' is greedy with respect to V^pi, then **V^(pi')(s) >= V^pi(s) for every state s**, strictly greater in at least one state unless pi was already optimal. Greedy improvement monotonically improves (or preserves) value everywhere.
+
+</details>
+
+**3. Why must policy iteration terminate in any finite MDP?**
+
+<details>
+<summary>Show answer</summary>
+
+Because there are only finitely many deterministic policies (exactly |A|^|S|), and policy iteration produces a strictly better one at each step until it stops. A monotone improvement on a finite set must terminate; the termination condition is that the improvement step does not change the policy, which means the policy is already greedy with respect to its own value, which is exactly the Bellman optimality condition.
+
+</details>
+
+**4. What is the termination condition, and why does it imply optimality?**
+
+<details>
+<summary>Show answer</summary>
+
+The condition is **pi_(k+1) = pi_k**: the improvement step produces the same policy as the input. That means the policy is greedy with respect to its own value, which exactly satisfies the Bellman optimality equation, so the policy is optimal (pi^*).
+
+</details>
+
+**5. Why is policy iteration in this form a planning method, not a learning method?**
+
+<details>
+<summary>Show answer</summary>
+
+Because the algorithm uses **P and R directly** (in both the evaluation update and the improvement step's expectation). It assumes you know the MDP fully and can read off transitions and rewards. Phase 3 will redo the evaluate-then-improve idea **from samples**, without ever writing P down.
+
+</details>
+
+**6. What is "generalized policy iteration" (GPI)?**
+
+<details>
+<summary>Show answer</summary>
+
+The lens that almost every RL method is some flavor of "estimate value, improve policy greedily, repeat." Value iteration (next lesson) is GPI with just one Bellman sweep per improvement; TD methods (Phase 3) interleave the two steps sample-by-sample; actor-critic learns an explicit policy guided by a critic's value estimate. All are GPI.
+
+</details>
+
+## Try it yourself: run policy iteration end-to-end
+
+Here is a new 2-state, 2-action MDP. Deterministic transitions; gamma = 0.5.
+
+```
+States: {L, R}.  Actions: {hold, push}.
+
+From L:
+  hold  -> L,  R(L, hold)  = 0
+  push  -> R,  R(L, push)  = 3
+From R:
+  hold  -> R,  R(R, hold)  = 5
+  push  -> L,  R(R, push)  = -2
+```
+
+Starting from pi_0 = "always hold in both states", run policy iteration until the policy stabilizes. At each round: evaluate V under the current policy, then improve by argmax over Q.
+
+<details>
+<summary>Show answer</summary>
+
+**Evaluation under pi_0 (hold everywhere).** Each state loops to itself.
+
+```
+V(L) = 0 + 0.5 * V(L)   ->   0.5 V(L) = 0   ->   V(L) = 0
+V(R) = 5 + 0.5 * V(R)   ->   0.5 V(R) = 5   ->   V(R) = 10
+```
+
+**Improvement (round 1).**
+
+```
+At L:
+  Q(L, hold) = 0 + 0.5 * V(L) = 0 + 0     = 0
+  Q(L, push) = 3 + 0.5 * V(R) = 3 + 5     = 8
+  argmax: push.    ->  pi_1(L) = push  (CHANGED from hold)
+
+At R:
+  Q(R, hold) = 5 + 0.5 * V(R) = 5 + 5     = 10
+  Q(R, push) = -2 + 0.5 * V(L) = -2 + 0   = -2
+  argmax: hold.    ->  pi_1(R) = hold  (unchanged)
+```
+
+pi_1 = (L: push, R: hold).
+
+**Evaluation under pi_1.** From L: push -> R; from R: hold -> R.
+
+```
+V(R) = 5 + 0.5 * V(R)   ->   V(R) = 10   (unchanged)
+V(L) = 3 + 0.5 * V(R)   ->   V(L) = 3 + 5 = 8
+```
+
+**Improvement (round 2).**
+
+```
+At L:  Q(L, hold) = 0 + 0.5 * V(L) = 0 + 4 = 4
+       Q(L, push) = 3 + 0.5 * V(R) = 3 + 5 = 8
+       argmax: push.    ->  pi_2(L) = push  (unchanged)
+
+At R:  Q(R, hold) = 5 + 0.5 * V(R) = 5 + 5 = 10
+       Q(R, push) = -2 + 0.5 * V(L) = -2 + 4 = 2
+       argmax: hold.    ->  pi_2(R) = hold  (unchanged)
+```
+
+pi_2 = pi_1, so the policy is stable.
+
+```
+Optimal policy:  pi^* = ( L: push,  R: hold )
+Optimal values:  V^*(L) = 8,  V^*(R) = 10
+```
+
+Two iterations: one flipped a single action; one confirmed. Same shape as the lesson's H/S example, fresh numbers.
+
+</details>
+
+## Try it yourself: what does the improvement theorem promise, and what does it not?
+
+```
+Mark each statement TRUE or FALSE.
+
+A. After one round of greedy improvement, the new policy's value is at
+   least as large as the old policy's value in EVERY state.
+B. After one round, the new policy's value is STRICTLY larger in every
+   state (unless the old policy was already optimal).
+C. The new policy is necessarily optimal after one improvement step.
+D. Policy iteration could take many rounds to converge on a large MDP,
+   but on a FINITE MDP it must terminate at the optimum eventually.
+```
+
+<details>
+<summary>Show answer</summary>
+
+- **A: TRUE.** The improvement theorem guarantees the new policy is no worse in any state.
+- **B: FALSE.** It is strictly better in **at least one** state (unless already optimal); other states may tie.
+- **C: FALSE.** Improvement gives a policy no worse than before, but it may take multiple rounds to reach pi^*. The lesson's H/S MDP took two rounds; bigger MDPs can take more.
+- **D: TRUE.** Finitely many deterministic policies + monotone improvement = guaranteed termination at the optimum.
+
+The mental model: improvement is **monotone**, not necessarily one-shot. Each round closes some of the gap; the algorithm stops when no action change improves Q anywhere.
+
+</details>
+
+## Flashcards
+
+Eight cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay out the full set as one card per page for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="State the two phases of policy iteration.">
+
+(1) Policy EVALUATION: compute V^pi(s) for the current pi by solving the Bellman expectation equation. (2) Policy IMPROVEMENT: set pi'(s) = argmax_a [R(s, a) + gamma * sum_(s') P(s'|s, a) V^pi(s')]. Repeat until pi stops changing.
+
+</Flashcard>
+
+<Flashcard question="State the policy-improvement theorem.">
+
+If pi' is greedy w.r.t. V^pi, then V^(pi')(s) >= V^pi(s) for every state s, strictly greater in at least one state unless pi was already optimal. Greedy improvement monotonically improves value.
+
+</Flashcard>
+
+<Flashcard question="Why does policy iteration terminate in any finite MDP?">
+
+Finitely many deterministic policies (|A|^|S|) + strict monotone improvement until stable = guaranteed termination. The stable point is greedy w.r.t. its own value -- exactly the Bellman optimality condition.
+
+</Flashcard>
+
+<Flashcard question="What is the termination condition, and why does it imply optimality?">
+
+pi_(k+1) = pi_k: the improvement step does not change the policy. That means the policy is greedy w.r.t. its own value, which satisfies the Bellman optimality equation, so the policy is optimal.
+
+</Flashcard>
+
+<Flashcard question="Why is policy iteration a planning method, not a learning method?">
+
+Because it uses P and R directly (in evaluation and improvement). It assumes the MDP is fully known. Phase 3 re-does the evaluate-then-improve idea from samples without writing P down.
+
+</Flashcard>
+
+<Flashcard question="What does generalized policy iteration (GPI) mean?">
+
+The lens that almost every RL method is 'estimate value, improve policy greedily, repeat.' Value iteration, TD methods, actor-critic are all GPI. It is the family resemblance under the algorithms.
+
+</Flashcard>
+
+<Flashcard question="Why does Q-style improvement (argmax over actions) use the CURRENT V^pi, not the optimal V^*?">
+
+Because at improvement time you only have V^pi, computed in the evaluation step for the current policy. The argmax still produces a policy no worse than pi (by the improvement theorem); repeating drives the value toward V^* over iterations.
+
+</Flashcard>
+
+<Flashcard question="What is the difference between truncated/modified policy iteration and full policy iteration?">
+
+Full PI iterates the evaluation step to full convergence between improvements. Truncated PI does only a few Bellman sweeps before improving. Both converge; value iteration is the extreme case (one sweep per improvement).
+
+</Flashcard>
+
+</FlashcardSet>

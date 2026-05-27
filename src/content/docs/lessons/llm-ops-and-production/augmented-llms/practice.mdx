@@ -1,0 +1,185 @@
+---
+title: "Practice: Augmented language models"
+description: Self-check on RAG's moving parts, the trade-offs, tool use, and how they connect to the three productive limits, a design-the-pipeline exercise, and flashcards for retrieval.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Seven short questions. Answer each before opening the collapsible.
+
+**1. Why does an LLM application need augmentation in the first place?**
+
+<details>
+<summary>Show answer</summary>
+
+The model only knows what was in its pretraining data plus what is in the prompt for this call. Anything current, internal, or user-specific must be fetched and placed in the prompt (RAG), or made available via callable external systems (tool use). This is the place lesson 3 named where prompts run out.
+
+</details>
+
+**2. Name the seven moving parts of a RAG pipeline.**
+
+<details>
+<summary>Show answer</summary>
+
+(1) Knowledge source (your docs / KB / data). (2) Chunking (split into retrieval-sized pieces). (3) Embedding model (encode chunks as vectors). (4) Vector store (Pinecone / Weaviate / Chroma / pgvector etc., for nearest-neighbor search). (5) Retriever (embed the query, fetch top-k). (6) Prompt composition (system prompt + retrieved chunks with sources + user question). (7) Generation, with citations.
+
+</details>
+
+**3. What is the recurring RAG failure mode, and the cheapest defense?**
+
+<details>
+<summary>Show answer</summary>
+
+Bad retrieval the model cannot detect: the model dutifully answers from whatever chunks it was handed, and if those were wrong or unrelated, the answer is wrong with full confidence. The cheapest defense is a **held-out retrieval-evaluation set** ("for this query, the relevant chunks are X and Y"); measure retrieval quality separately from end-to-end answer quality.
+
+</details>
+
+**4. What does re-ranking add to a RAG pipeline, and at what cost?**
+
+<details>
+<summary>Show answer</summary>
+
+Retrieve a larger initial set (say 50) with cheap embedding similarity, then re-rank with a more expensive model (cross-encoder or LLM-as-judge) to pick the best 5-10. **Adds latency**; usually **adds quality on hard queries**. Worth it when bare embedding similarity returns near-misses on harder queries.
+
+</details>
+
+**5. What is hybrid search, and why is it usually better than dense or sparse alone?**
+
+<details>
+<summary>Show answer</summary>
+
+Combine dense (embedding-based) retrieval with sparse (BM25 / keyword) retrieval. Dense catches semantic matches (synonyms, paraphrases); sparse catches exact-term matches (product codes, IDs, rare words). Real queries mix both kinds; hybrid usually beats either alone.
+
+</details>
+
+**6. Walk the four steps of tool use.**
+
+<details>
+<summary>Show answer</summary>
+
+(1) **Declare** the tools in the API call (schema: name, description, parameter types). (2) **The model decides**: replies directly, or emits a structured tool-call request ("call `search_docs` with `query='refund policy'`"). (3) **Your code executes** the requested tool and returns the result. (4) **The model continues**: appends the result to the conversation, then either calls another tool, refines, or produces the final answer.
+
+</details>
+
+**7. Why is "RAG-as-a-tool" cleaner than the older "always run RAG, then prompt the model" pattern?**
+
+<details>
+<summary>Show answer</summary>
+
+Because the model decides when retrieval is needed (some questions do not need it; some need several searches with refined queries), rather than every turn paying the retrieval cost in tokens, time, and money. It also matches the broader agent shape (lesson 10): a model-driven loop of "think, call a tool, continue" instead of a fixed pipeline.
+
+</details>
+
+## Try it yourself: design the pipeline
+
+About 12 minutes, no code required. Apply the moving parts and trade-offs to a real scenario.
+
+**Part A: a RAG pipeline for internal help.** You are building an internal help assistant over a company knowledge base of ~5,000 markdown docs (averaging ~3K tokens each). Sketch the seven moving parts and at least three trade-off decisions you would make and why.
+
+<details>
+<summary>What a reasonable answer looks like</summary>
+
+Moving parts:
+1. **Source:** the markdown KB.
+2. **Chunking:** ~500-token chunks with 50-token overlap. Reason: docs are mostly procedural; 500 tokens fits a coherent section but stays small enough for precise retrieval. Tag each chunk with its source doc path + section heading.
+3. **Embedding model:** a recent general-purpose embedder (text-embedding-3 or similar); revisit if domain-specific quality is poor.
+4. **Vector store:** Chroma or pgvector for self-hosted; Pinecone or Weaviate if managed is preferred. ~25K-50K chunks fits comfortably in any of them.
+5. **Retriever:** top-k = 6, dense similarity as the default.
+6. **Prompt composition:** system prompt + retrieved chunks (with `[source: doc.md#section]` labels) + user question, with the user question repeated at the end.
+7. **Generation:** ask the model to cite the `[source: ...]` labels it used.
+
+Three trade-off decisions:
+- **Hybrid search** added (dense + BM25), because help-docs queries often include exact product names / error codes that sparse retrieval handles better.
+- **Metadata filtering** by `doc_type` (procedure vs reference vs FAQ) when the query category is identifiable, so retrieval narrows.
+- **Re-ranking with an LLM-as-judge cross-encoder** above top-6 cheap retrieval -> top-3 final; adds ~200ms latency but lifts retrieval precision on the long-tail queries that matter.
+
+The point is not to memorize this answer; it is the shape of the design decision, name the parts, defend each trade-off.
+
+</details>
+
+**Part B (reasoning).** Walk through how RAG-as-a-tool changes the lesson-2 cost equation versus always-retrieve.
+
+<details>
+<summary>What you should notice</summary>
+
+Always-retrieve pays for the retrieval (embedding, vector search) and for the retrieved chunks in the prompt **on every request**, even on requests that did not need retrieval (greetings, follow-up clarifications, simple confirmations). RAG-as-a-tool pays only when the model chooses to call it, so simple requests avoid both the latency and the token cost of retrieval. At the cost of one round-trip when the model does decide to retrieve, you eliminate the retrieval bill on the (often large) share of requests that did not need it. At 50K requests/day with even half not needing retrieval, this is real money and real latency.
+
+</details>
+
+**Part C (reasoning).** Why does "just retrieve everything and let the model figure it out" fail on all three of lesson 2's productive limits?
+
+<details>
+<summary>What you should notice</summary>
+
+**Context length:** retrieving more than necessary fills the budget, leaving no room for system prompt, history, few-shot, or `max_tokens` output; even at frontier-model context sizes the marginal value of irrelevant chunks is negative. **Cost per token:** every retrieved chunk in every request is paid for every time; bulky retrieval compounds dramatically at scale. **Latency:** more retrieval = bigger embedding search + longer prompt = higher TTFT; users wait longer. Targeted retrieval is cost, latency, and quality engineering at once; "more is more" is wrong on all three axes.
+
+</details>
+
+## Flashcards
+
+Nine cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay the set out one card per page for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="Why do LLM apps need augmentation?">
+
+The model knows only its pretraining + the current prompt. Anything current, internal, or user-specific must be fetched (RAG) or made callable (tool use). The place lesson 3 named where prompts run out.
+
+</Flashcard>
+
+<Flashcard question="Seven moving parts of a RAG pipeline?">
+
+Knowledge source -> chunking (size + overlap) -> embedding model -> vector store -> retriever (top-k) -> prompt composition (with sources) -> generation (with citations).
+
+</Flashcard>
+
+<Flashcard question="Recurring RAG failure mode and the cheapest defense?">
+
+Bad retrieval the model cannot detect: it answers from whatever chunks it gets, confidently wrong. Defense: a held-out retrieval-evaluation set ("for this query, X and Y are the relevant chunks") measured separately from end-to-end quality.
+
+</Flashcard>
+
+<Flashcard question="What does re-ranking add to RAG?">
+
+Retrieve a larger initial set with cheap embedding similarity, then re-rank with a more expensive model (cross-encoder, LLM-as-judge) to pick the best few. Adds latency; usually adds quality on hard queries.
+
+</Flashcard>
+
+<Flashcard question="What is hybrid search?">
+
+Dense (embedding) retrieval + sparse (BM25 / keyword) retrieval. Dense catches semantic matches; sparse catches exact-term matches (codes, IDs, rare words). Usually beats either alone on real workloads.
+
+</Flashcard>
+
+<Flashcard question="Four steps of tool use?">
+
+(1) Declare tool schemas. (2) Model decides: reply directly OR emit a structured tool-call request. (3) Your code executes the tool and returns the result. (4) Model continues: more tools, refinement, or final answer.
+
+</Flashcard>
+
+<Flashcard question="Why is 'RAG-as-a-tool' cleaner than always-retrieve?">
+
+The model decides when retrieval is needed (some questions don't need it; some need several refined searches). Always-retrieve pays cost/latency on every request, including those that needed nothing.
+
+</Flashcard>
+
+<Flashcard question="Key RAG trade-offs to tune?">
+
+Chunk size + overlap; top-k; embedding-model choice; re-ranking (cost vs quality); hybrid search (dense + BM25); metadata filtering. Each has measurable empirical effect.
+
+</Flashcard>
+
+<Flashcard question="Why does 'retrieve everything' fail all three productive limits?">
+
+Context: fills the budget, no room for system / history / output. Cost: every chunk per request paid every time; compounds at scale. Latency: bigger search + longer prompt = higher TTFT. Targeted retrieval is engineering across all three.
+
+</Flashcard>
+
+</FlashcardSet>

@@ -31,6 +31,16 @@ export const collections = {
 						'ai-foundations',
 						'privacy-local-first',
 						'pain-point-library',
+						// Mirror tracks (structural mirrors of external open courses)
+						'intro-to-deep-learning', // Track 12: MIT 6.S191 (Amini and Amini)
+						'build-nns-from-scratch', // Track 13: Karpathy Neural Networks Zero to Hero
+						'ai-agents-and-tool-use', // Track 20: Microsoft AI Agents for Beginners + Berkeley CS294
+						'neural-network-intuition', // Track 11: 3Blue1Brown Neural Networks series
+						'practical-transformers', // Track 14: Hugging Face LLM Course
+						'reinforcement-learning-foundations', // Track 17: David Silver UCL RL Course
+						'llm-ops-and-production', // Track 21: Full Stack Deep Learning LLM Bootcamp
+						'build-an-llm-from-scratch', // Track 15: Sebastian Raschka book
+						'computer-vision', // Track 16: Stanford CS231n
 					])
 					.optional(),
 				course: z.string().optional(),
@@ -63,6 +73,43 @@ export const collections = {
 						'vendor-policies',
 						'local-first',
 						'rights-hygiene',
+						// Track 12 (Intro to Deep Learning)
+						'foundations-and-sequences',
+						'vision-and-generation',
+						'decisions-and-limits',
+						// Track 13 (Build Neural Networks from Scratch)
+						'the-autograd-engine',
+						'building-a-language-model',
+						'building-a-transformer',
+						// Track 20 (AI Agents and Tool Use)
+						'what-agents-are',
+						'agent-design-patterns',
+						'production-agents',
+						// Track 11 (Neural Network Intuition)
+						'network-structure',
+						'how-networks-learn',
+						'backpropagation',
+						// Track 14 (Practical Transformers — Hugging Face LLM Course)
+						'transformers-library',
+						'data-tokenizers-tasks',
+						'demos-and-frontier',
+						// Track 17 (Reinforcement Learning Foundations — David Silver UCL)
+						'the-rl-setup',
+						'planning-with-a-known-model',
+						'model-free-learning',
+						'scaling-up',
+						// Track 21 (LLM Ops and Production — Full Stack Deep Learning)
+						'foundations-and-first-app',
+						'building-production-apps',
+						'advanced-and-the-field',
+						// Track 15 (Build an LLM from Scratch — Sebastian Raschka)
+						'the-model',
+						'systems-and-efficiency',
+						'scale-data-and-alignment',
+						// Track 16 (Computer Vision — Stanford CS231n)
+						'foundations-for-vision',
+						'how-machines-see',
+						'generating-and-grounding-vision',
 					])
 					.optional(),
 				phase_order: z.number().int().positive().optional(),
@@ -107,6 +154,7 @@ export const collections = {
 							'clawless-kb',
 							'reddit-thread',
 							'original',
+							'web-course',
 						]),
 						primary_url: z.string().url().optional(),
 						attribution_block: z

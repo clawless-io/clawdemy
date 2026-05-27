@@ -1,0 +1,117 @@
+---
+title: "Lesson: Beyond what is it, detection, segmentation, and seeing inside the net"
+description: Classification answers "what is in this image?" Real-world vision often needs more. Detection asks "what AND where?" Segmentation asks "which pixels belong to which object?" Visualization asks "what is the network actually looking at?" This lesson covers all three. We walk the R-CNN-to-YOLO progression for detection, compute one Intersection-over-Union (IoU) by hand, distinguish semantic from instance segmentation and meet the architectures that do each, and then survey the techniques (saliency, occlusion, Grad-CAM, t-SNE, DeepDream) for peeking inside what a trained network has learned.
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+So far this track has trained classifiers: images in, single class label out. That answers one question. Real-world computer vision usually needs more. A self-driving car needs to know not just "there is a pedestrian" but "there is a pedestrian, in this particular box, twenty meters ahead." A medical imaging system needs not just "this scan contains a tumor" but "these exact pixels are the tumor." An analyst trying to trust or debug a vision model needs to know "what about the input made the network say `cat`?"
+
+This lesson covers the three families of tasks that go beyond classification: **object detection** (what AND where), **segmentation** (which pixels belong to which object), and **visualization** (what is the network looking at, internally). Each gets a section.
+
+## Object detection: what AND where
+
+Object detection takes an image and produces a list of `(class label, bounding box)` pairs, one per detected object. The output is not a single answer; it is a variable-length list, which means the architecture has to do something more than classification.
+
+There are two dominant architectural families.
+
+**Two-stage detectors (the R-CNN family).** The original R-CNN (Girshick et al. 2014) used an external algorithm to propose around 2000 candidate regions in the image, ran a CNN classifier on each region, and refined the box coordinates. It worked but was slow (a separate CNN forward pass per region). **Fast R-CNN** (2015) ran the CNN on the whole image *once* and used a Region-of-Interest pooling layer to extract per-region features from the shared feature map, getting an order-of-magnitude speedup. **Faster R-CNN** (Ren et al. 2015) replaced the external region-proposal algorithm with a learned **Region Proposal Network (RPN)**, making the whole system end-to-end trainable and faster again. Faster R-CNN is still a strong baseline in many production systems.
+
+**One-stage detectors (YOLO, SSD, RetinaNet).** These do detection in a single forward pass over the image, with no separate proposal step. **YOLO** (You Only Look Once, Redmon et al. 2015) divides the image into a grid and predicts class scores + bounding boxes at every grid cell simultaneously. **SSD** and **RetinaNet** follow similar one-stage patterns with various refinements. The trade-off is roughly: one-stage detectors are faster (often real-time), two-stage detectors historically had slightly better accuracy. Modern variants of both have narrowed that gap.
+
+A few shared concepts both families use.
+
+**Anchor boxes.** Instead of regressing arbitrary box coordinates from scratch, the network predicts *offsets* from a set of pre-defined boxes of different shapes and sizes (**anchors**) placed densely across the image. Anchors give the network a sensible starting point and help it handle the wide range of object scales and aspect ratios in natural images.
+
+**Loss = classification + box regression.** A detection model is trained with two losses combined: a classification loss (cross-entropy, lesson 3) for the class label, and a regression loss (smooth-L1 or similar) for the box coordinates. The total loss is a weighted sum, and the network learns both jobs jointly.
+
+**Intersection over Union (IoU) for evaluation.** To check whether a predicted box matches a ground-truth box, the standard metric is **IoU**:
+
+```
+IoU = (area of intersection) / (area of union)
+```
+
+A predicted box is counted as a "true positive" for a given object if its IoU with the ground-truth box is above some threshold (commonly 0.5; stricter benchmarks use 0.75 or sweep across thresholds and average). Detection-quality is usually summarized by **mean Average Precision (mAP)**, which aggregates precision-recall behaviour across all classes and IoU thresholds.
+
+**A worked IoU.** Take two boxes in standard `(x1, y1, x2, y2)` format. Predicted box `A = (0, 0, 10, 10)`, ground-truth box `B = (1, 1, 11, 11)`. Compute the intersection rectangle:
+
+```
+intersection_x1 = max(A.x1, B.x1) = max(0, 1) = 1
+intersection_y1 = max(A.y1, B.y1) = max(0, 1) = 1
+intersection_x2 = min(A.x2, B.x2) = min(10, 11) = 10
+intersection_y2 = min(A.y2, B.y2) = min(10, 11) = 10
+
+intersection area = (10 - 1) * (10 - 1) = 81
+A area = 10 * 10 = 100
+B area = 10 * 10 = 100
+union area = 100 + 100 - 81 = 119
+
+IoU = 81 / 119 ≈ 0.681
+```
+
+That is above the 0.5 threshold, so the prediction would count as a match. The IoU formula is the single most-used evaluation primitive across detection, segmentation, and tracking.
+
+## Image segmentation: which pixels
+
+Segmentation goes one level finer than detection: instead of a box around each object, it labels **every pixel** in the image. There are two flavours.
+
+**Semantic segmentation** labels each pixel with a class but does not distinguish between instances of that class. A photo of three cats would have every cat pixel labelled "cat," with no information about which pixel belongs to which cat. Use cases: autonomous driving (every pixel as road / car / pedestrian / sky / building) where the categories matter more than the per-object identity for navigation.
+
+**Instance segmentation** labels each pixel with both a class *and* an instance identifier. The same photo of three cats produces three separate masks: "cat #1's pixels," "cat #2's pixels," "cat #3's pixels." Instance segmentation effectively combines detection (which objects are present and where) with semantic segmentation (which exact pixels belong to each).
+
+The dominant architectures for each:
+
+**Fully Convolutional Networks (FCN, Long et al. 2015)** for semantic segmentation. The first deep architecture to do per-pixel labelling. The insight: replace the fully-connected layers at the top of a classification CNN with conv layers, so the network's output is itself a spatial map (per-pixel class scores) rather than a single class vector. Upsampling layers then bring the output back to the input's spatial resolution.
+
+**U-Net (Ronneberger et al. 2015)** for semantic segmentation, especially in medical imaging. An encoder-decoder shape: the encoder progressively downsamples (extracting features at decreasing spatial resolution), then a decoder progressively upsamples back to input resolution. The key piece is **skip connections** (you have already met this idea in ResNet) from each encoder layer to the corresponding decoder layer, which pass spatial detail across the U-shape so the output can be both semantically informed (from deep features) and spatially precise (from early features).
+
+**Mask R-CNN (He et al. 2017)** for instance segmentation. Built on top of Faster R-CNN: in addition to predicting `(class, box)` per proposed region, it predicts a per-region binary mask saying which pixels inside the box belong to the object. Conceptually clean: detection plus a per-instance segmentation head.
+
+Use cases for segmentation in the wild: medical imaging (tumor or organ segmentation, where you need pixel-precise boundaries for treatment planning), autonomous driving (per-pixel scene parsing for navigation), photo editing tools (subject extraction, background removal), and augmented reality (knowing which pixels are "ground" so virtual objects can sit on it).
+
+## Visualizing what CNNs learned: seeing inside the net
+
+The other extension that takes vision beyond classification is **interpretability**: techniques for peeking inside what a trained network has actually learned to see. These do not change what the network is; they change what *we* can see about it.
+
+A useful taxonomy by what the technique looks at.
+
+**Saliency maps.** Compute the gradient of the predicted class's score with respect to the *input pixels*. Pixels where a small change would most affect the class score are the ones the network is paying attention to. Visualized as a heatmap over the image, saliency maps highlight which regions drove the prediction. Cheap to compute (one backward pass; the same backprop machinery from lesson 4) and the canonical first-look at "what mattered."
+
+**Occlusion sensitivity.** Slide a small grey square over different positions of the image. At each position, record how much the predicted class score drops. Build a heatmap of "predictions drop when this region is hidden." Slower than saliency (many forward passes), but more directly faithful to "what is the network actually using" because it actually deletes regions rather than computing a derivative.
+
+**Class Activation Mapping (CAM) and Grad-CAM (Selvaraju et al. 2017).** Use the network's *own* feature maps near the top, weighted by the predicted class, to produce a coarse heatmap of "where in the image is the evidence for this class." Grad-CAM works on essentially any CNN architecture (the original CAM required a specific final-layer structure) and is the most commonly used in practice for "show me what the model is looking at when it predicts X."
+
+**Activation maximization and DeepDream.** Find (by gradient ascent) the input image that maximally activates a specific neuron. Useful for inspecting what individual neurons or filters have learned to detect; **DeepDream** (Mordvintsev et al. 2015) is the popular and visually striking version that maximizes the activation of a whole layer at once, producing the famous psychedelic dog-faces-and-eyes images.
+
+**Feature space embedding (t-SNE).** Run the network on many images, take the deep feature vectors (from a late layer), and project them to 2D with **t-SNE** (van der Maaten and Hinton 2008) or **UMAP** (McInnes et al. 2018). Images of the same class should cluster together; clean clustering is evidence the network has learned useful features. Often used as a sanity check after training.
+
+An honest caveat. These techniques are useful for intuition and debugging, and they often flag obvious failures (a "wolf vs husky" classifier turning out to rely on snow in the background, a famous example). They are **not** a complete explanation of why a deep network makes a particular decision. Modern interpretability and "mechanistic" understanding of neural networks is an active and unsettled research area; treat visualizations as a useful first-look, not as a guarantee. The field that studies this is sometimes called **XAI** (explainable AI) and has its own ongoing literature.
+
+## Why this matters when you use AI
+
+You see all three extensions in production. **Detection** is the engine behind autonomous-vehicle perception (boxes around pedestrians, cars, traffic signs), security camera analytics, retail shopper tracking, document OCR pre-processing, and the face-detection box your phone draws when it focuses. **Segmentation** powers medical imaging tools (tumor boundary measurement for radiology), photo background-removal in consumer apps, AR features like virtual try-on, and per-pixel scene parsing in autonomous-driving stacks. **Visualization** powers debugging when a model behaves strangely, fairness analysis (does the model attend to spurious features that correlate with protected attributes?), and AI-safety research in general.
+
+If you ever build or deploy a vision system, the IoU formula is the metric you will end up computing. The saliency or Grad-CAM map is the first thing you will produce to investigate a failed prediction. And the choice between Faster R-CNN, YOLO, or Mask R-CNN is the kind of pragmatic decision you make based on latency budget, accuracy floor, and whether you need instance-level masks.
+
+## Common pitfalls
+
+**Treating detection IoU as a 0/1 quality measure.** IoU is continuous; a prediction can be "almost right" at IoU 0.45 (below threshold but visually fine) and "wrong" at IoU 0.51. The 0.5 threshold is convention, not truth. Stricter benchmarks (0.75, or averaging across thresholds for mAP) exist precisely because 0.5 is loose.
+
+**Confusing semantic and instance segmentation.** Semantic: every cat pixel says "cat," no per-cat identity. Instance: each cat's pixels are tagged with that cat's instance ID. Different output formats, different evaluation, different architectures (FCN/U-Net vs Mask R-CNN).
+
+**Reading saliency or Grad-CAM as ground truth about why the model decided.** These are local approximations. They are useful, often correct, occasionally misleading. A saliency map highlighting a region does not prove that region is the unique reason for the prediction; it shows that region is *one* thing the network used.
+
+**Thinking one-stage detectors are always faster.** They are usually faster, but the gap depends heavily on the backbone CNN, the image size, the inference framework, and the hardware. "Real-time" is not a property of the algorithm alone.
+
+## What you should remember
+
+- **Object detection produces `(class, box)` lists per image.** Two families: two-stage (R-CNN, Fast R-CNN, Faster R-CNN; proposal then classify, slower but accurate) and one-stage (YOLO, SSD, RetinaNet; single forward pass, faster). Both use anchor boxes, train with classification + box-regression loss, and evaluate with IoU (with mAP as the standard summary metric). IoU = intersection area / union area.
+- **Segmentation labels every pixel.** Semantic segmentation: per-pixel class only (FCN, U-Net). Instance segmentation: per-pixel class AND per-instance ID (Mask R-CNN). U-Net's encoder-decoder with skip connections is the standard shape for medical imaging.
+- **Visualization techniques peek inside trained CNNs.** Saliency (gradient of class score wrt input), occlusion sensitivity (slide a mask and watch the score drop), Grad-CAM (class-weighted feature maps), DeepDream / activation maximization (gradient-ascend an input), t-SNE (project deep features to 2D). Useful for intuition and debugging; not a complete explanation of network behaviour. XAI is an active research area.
+- **The training loop is unchanged.** Each of these tasks defines its own loss (often a combination of classification + box regression, or per-pixel cross-entropy for segmentation), and lesson 3's gradient descent + lesson 4's backprop run on top. The architecture and loss change; the engine does not.
+
+Three sentences capture the lesson. Detection adds "where" to "what." Segmentation refines "where" all the way to per-pixel. Visualization adds "why" (partially, honestly) to "what." All three sit on top of the convolutional architectures of lessons 5 and 6.
+
+Next: with detection, segmentation, and visualization covered for single images, the natural next question is how vision handles *motion*. The next lesson covers video understanding, the time dimension that one image does not have.

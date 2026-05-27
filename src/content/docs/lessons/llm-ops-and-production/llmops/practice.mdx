@@ -1,0 +1,181 @@
+---
+title: "Practice: LLMOps"
+description: Self-check on the five engineering pillars, a design-an-LLMOps-stack exercise, and flashcards for retrieval.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Seven short questions. Answer each before opening the collapsible.
+
+**1. State the five pillars of LLMOps in one line each.**
+
+<details>
+<summary>Show answer</summary>
+
+(1) **Observability**: log every request with enough fields to debug. (2) **Evaluation in production**: sample and score live responses; A/B test changes; surface poor responses for labeling. (3) **Prompt versioning**: treat prompts as code, source control + version + registry. (4) **Cost and latency monitoring**: per-request and aggregate dashboards with budget and regression alerts. (5) **Regression testing**: rerun a 100s-1000s example suite before every change; refuse regressions without override.
+
+</details>
+
+**2. Name at least seven fields you should log per request.**
+
+<details>
+<summary>Show answer</summary>
+
+Prompt (or prompt id), model + parameters (temperature, max_tokens), prompt version, retrieved context ids + tool calls + their results, response, token counts (input + output), latency (TTFT + total), cost, user feedback signal, anonymized trace id. Ten is the upper end; seven is a reasonable working minimum. Without these, debugging and evaluation are guessing.
+
+</details>
+
+**3. Why is offline evaluation alone not enough?**
+
+<details>
+<summary>Show answer</summary>
+
+Offline test sets catch only the failures they were designed for. Real users ask things the offline set never had, and those are exactly the cases that matter for production quality. **Evaluation in production** (sample live responses, score with rubric, surface poor ones for human review, feed labels back into the offline set) catches what offline tests do not predict and grows the suite over time.
+
+</details>
+
+**4. What does A/B testing buy you over "ship the new prompt and watch"?**
+
+<details>
+<summary>Show answer</summary>
+
+Causal evidence rather than vibes. Running two prompt versions in parallel on real traffic with the same scoring rubric tells you whether the new version actually helped, on the same population, in the same conditions. "Ship and watch" confounds the change with everything else moving in production (different user mix, different time of day, different model conditions). The platform tools (LangSmith, Langfuse, Helicone) support this directly; a feature flag and the logging fields work too.
+
+</details>
+
+**5. How does prompt versioning interact with the logging discipline?**
+
+<details>
+<summary>Show answer</summary>
+
+The deployed prompt's version is one of the per-request log fields. That correlation lets you tie a change date to quality changes ("our LLM-judge accuracy dropped on 2026-05-25, the same day we shipped prompt v23"). Without versioning, a change is anonymous; without the version in the logs, you cannot connect the version to its production behavior. The two practices together are how you investigate regressions deliberately.
+
+</details>
+
+**6. What does regression testing make safe that would otherwise be silently dangerous?**
+
+<details>
+<summary>Show answer</summary>
+
+**Model upgrades.** When a provider releases a new model, switching to it can silently break the output format, change the response style, or regress on edge cases that did not appear in casual testing. Running the regression suite against the new model first, before switching, catches these silently-dangerous changes. Same logic applies to prompt changes, retrieval-config changes, and pipeline component swaps.
+
+</details>
+
+**7. What does this lesson deliberately exclude, and why?**
+
+<details>
+<summary>Show answer</summary>
+
+Incident-disclosure policy (when and how to tell users something went wrong), vendor-failure / SLA / liability questions, compliance frameworks (SOC 2, ISO, sector-specific regimes), and similar policy topics. They are real and important, but they belong with the right people in their own forum (legal, security, compliance, product). This lesson is the **engineering** discipline that keeps an LLM application running well; the policy layer above it requires its own framing.
+
+</details>
+
+## Try it yourself: design the LLMOps stack
+
+About 12 minutes, no code required. Apply the five pillars to a real-feeling project.
+
+**Part A: a starting stack.** You are joining a team that has shipped an internal LLM-powered Q&A assistant (RAG over their docs) and want to bring real LLMOps practice. They currently log only the user's question and the model's response, have no versioned prompts (the system prompt is a string in `app.py`), no eval, no dashboards. Sketch the **smallest practical first stack** to introduce, in priority order, with one sentence per move.
+
+<details>
+<summary>What a reasonable answer looks like</summary>
+
+In priority order:
+
+1. **Expand logging** to the 7-10 fields (model + params + prompt version + retrieved chunk ids + response + token counts + latency + cost + user feedback + trace id). Done in a day; unlocks everything else.
+2. **Add prompt versioning**: move the system prompt out of `app.py` into a versioned constant (or a registry); the version field goes into the new logs.
+3. **Build a 50-example regression suite** from the early production traffic; rerun on every prompt or model change. Refuse regressions without an explicit "we know" override.
+4. **Hook up an LLM-observability platform** (LangSmith / Langfuse / Helicone / Arize Phoenix) so the logs are searchable, prompt versions are tracked, and basic dashboards (cost, latency, p95) come for free.
+5. **Add sampling for evaluation in production**: 2-5% of responses scored with an LLM-as-judge rubric; route low-scoring ones for human review; labels feed back into the regression suite.
+6. **Add budget alerts** on monthly cost and on p95 latency regressions; integrate with whatever the team's platform observability already is.
+7. **Run a first A/B test** when the next prompt change comes up, to prove the discipline works.
+
+Days, not months. The discipline beats fancy tooling.
+
+</details>
+
+**Part B (reasoning).** A team's "feels worse" report appears a week after a model upgrade. Walk through how the LLMOps pillars let you investigate the regression rather than guess.
+
+<details>
+<summary>What you should notice</summary>
+
+(1) **Logs** with model + prompt version + per-request quality signal let you split the traffic by model version and compare. (2) **Evaluation in production** (the LLM-judge or human-reviewed sample) gives you a quantitative quality number per cohort, not a vibe. (3) **Regression-test suite** can be re-run on both the old and new model to confirm where the change diverges. (4) **Cost/latency dashboards** rule out (or confirm) latency-as-perceived-quality. The investigation is hours of data, not weeks of speculation. Without the pillars, "feels worse" is unfalsifiable; with them, it becomes a number you can chase down to a specific cause (a model behavior change on a class of inputs you already test against).
+
+</details>
+
+**Part C (reasoning).** Why does this lesson insist that "the tools matter less than the discipline"?
+
+<details>
+<summary>What you should notice</summary>
+
+Because the LLMOps platforms (LangSmith, Langfuse, Helicone, Arize, etc.) all implement the same five pillars from different angles. Picking one is a budget and stack-fit decision, not a quality decision; teams that buy a platform and never build the discipline (always log enough; always version prompts; always run the suite before changes; always sample for production eval) get less out of an expensive tool than a team with a spreadsheet and a Python script and good habits. The platforms accelerate teams that already have the practice; they do not replace the practice.
+
+</details>
+
+## Flashcards
+
+Nine cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay the set out one card per page for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="The five LLMOps pillars?">
+
+(1) Observability (log enough to debug). (2) Evaluation in production (sample + score live; A/B test). (3) Prompt versioning (code-like + registry). (4) Cost + latency monitoring (dashboards + alerts). (5) Regression testing (run suite before every change).
+
+</Flashcard>
+
+<Flashcard question="Seven-to-ten fields to log per request?">
+
+Prompt (or id), model + params, prompt version, retrieved context ids + tool calls + results, response, token counts, latency (TTFT + total), cost, user feedback signal, anonymized trace id. Without these, debugging is guessing.
+
+</Flashcard>
+
+<Flashcard question="Why is offline evaluation alone insufficient?">
+
+Offline test sets catch only failures they were designed for; real users ask things the suite never had. Eval in production (sample, score with rubric, surface poor responses for human review, feed back into offline set) catches what offline misses and grows the suite.
+
+</Flashcard>
+
+<Flashcard question="What does A/B testing give you over 'ship and watch'?">
+
+Causal evidence on the same population, same conditions. 'Ship and watch' confounds the change with everything else moving in production. Platforms (LangSmith, Langfuse, Helicone) support this directly; feature flags work too.
+
+</Flashcard>
+
+<Flashcard question="How does prompt versioning interact with logging?">
+
+The deployed prompt version is one of the per-request log fields. That correlation lets you tie change dates to quality changes; without it, regressions are anonymous and uninvestigatable.
+
+</Flashcard>
+
+<Flashcard question="What does regression testing make safe?">
+
+Model upgrades (silent format/style/edge-case changes), prompt changes, retrieval-config changes, pipeline component swaps. Run the suite on the new before switching; catch silent breakage that 'feels worse' reports surface a week later.
+
+</Flashcard>
+
+<Flashcard question="Smallest practical first LLMOps stack?">
+
+(1) Expand logging to 7-10 fields. (2) Version the prompt. (3) Build a 50-example regression suite. (4) Adopt an LLM-observability platform. (5) Sample for in-production eval. (6) Budget + p95 alerts. (7) First A/B test on next change. Days, not months.
+
+</Flashcard>
+
+<Flashcard question="'Tools matter less than discipline': why?">
+
+LLMOps platforms (LangSmith, Langfuse, Helicone, Arize) all implement the same five pillars; the pick is budget/stack-fit, not quality. Teams with the discipline (always log, always version, always run the suite, always sample for eval) outperform teams with the fanciest platform and no consistent habits.
+
+</Flashcard>
+
+<Flashcard question="What does the LLMOps lesson NOT cover?">
+
+Incident-disclosure policy, vendor-failure / SLA / liability questions, compliance frameworks (SOC 2, ISO, sector-specific), similar policy topics. Real and important, but require their own framing in their own forum. This lesson is the engineering discipline.
+
+</Flashcard>
+
+</FlashcardSet>

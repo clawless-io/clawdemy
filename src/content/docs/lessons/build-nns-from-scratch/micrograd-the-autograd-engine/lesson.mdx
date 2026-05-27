@@ -1,0 +1,111 @@
+---
+title: "Lesson: Building an autograd engine: micrograd"
+description: "A neural network learns by nudging its parameters to lower a loss, and to do that it needs the gradient of the loss with respect to every parameter. This lesson builds the engine that computes those gradients automatically, micrograd, in your head: a computational graph, a local derivative per operation, and backpropagation walking the chain rule backward through it."
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+You have seen what a neural network is, and you have the calculus that trains it: the derivative as a rate of change, and the chain rule for sending a rate backward through a composition. What you have not seen is the thing that makes a network actually learn, built from nothing. That thing is an **autograd engine**, and the smallest honest version of it, Andrej Karpathy's `micrograd`, is about 150 lines of code. This lesson builds it in your head.
+
+The contract for this whole track is simple: nothing inside is a mystery. By the end of this lesson, the phrase "the framework computes the gradients for you" will stop being magic and become a procedure you could write yourself.
+
+## Why a network needs gradients
+
+A network learns by adjusting its parameters to make a single number, the **loss** (how wrong it currently is), smaller. To know which way to nudge each parameter, it needs the derivative of the loss with respect to that parameter: if I increase this weight a hair, does the loss go up or down, and how fast? That derivative is the parameter's **gradient**.
+
+A real network has millions or billions of parameters, all tangled together through layers of operations. Computing each gradient by hand is hopeless. So we need a machine that, given any expression built out of `+`, `*`, and a few other operations, computes the derivative of the final output with respect to every input automatically. That machine is autograd, and the trick behind it is to record the computation as a graph.
+
+## Every number remembers where it came from
+
+In micrograd, you do not work with bare numbers. You wrap each one in a small object, call it a `Value`, that carries:
+
+- its **data** (the actual number),
+- the **operation** that produced it (`+`, `*`, `tanh`, or nothing if it is a leaf input),
+- the **inputs** it was produced from (its "children" in the graph),
+- and a **gradient**, `grad`, which will hold the derivative of the final loss with respect to this value (initially 0).
+
+When you write an expression like `e = a * b`, the multiply does not just return `-6`; it returns a new `Value(-6)` that remembers it came from multiplying `a` and `b`. Build up a whole expression this way and you have silently recorded a **computational graph**: a network of `Value` nodes, each pointing back to the inputs that made it, from the leaf inputs at the bottom up to the final output at the top. Running the expression forward to get the output is the **forward pass**. The graph is the record of how it was computed.
+
+{/* DIAGRAM PLACEHOLDER: a computational graph for L = (a*b + c) * f, showing leaf Values a,b,c,f at the bottom, intermediate nodes e=a*b and d=e+c, and the output L=d*f at top, with arrows pointing from children to the node they produced */}
+
+## Each operation knows its own local derivative
+
+Here is the key idea that makes automatic differentiation possible: each operation is simple enough that we know its derivative by heart, regardless of what the rest of the graph looks like.
+
+- **Addition.** If `d = e + c`, then nudging `e` by a little changes `d` by the same little (and likewise for `c`). So addition has a local derivative of `1` for each input: it passes a gradient straight through, unchanged, to both children.
+- **Multiplication.** If `e = a * b`, then nudging `a` changes `e` at the rate `b` (the other factor), and nudging `b` changes `e` at the rate `a`. So multiplication's local derivative with respect to one input is the value of the other input. This is the product rule on a single product.
+
+These are *local* derivatives: how much this one operation's output changes when one of its immediate inputs moves. They do not yet know anything about the loss far up the graph. Connecting the local derivatives into a global gradient is the job of backpropagation.
+
+## Backpropagation is the chain rule, walked backward
+
+To get the gradient of the loss `L` with respect to every node, start at the top and walk down, applying the chain rule at each step.
+
+The chain rule, from the calculus track, says rates multiply through a composition: if the loss depends on `d`, and `d` depends on `e`, then the loss's sensitivity to `e` is its sensitivity to `d` times `d`'s local sensitivity to `e`. In gradient terms:
+
+```
+grad of e  =  (grad of d)  ×  (local derivative of d with respect to e)
+```
+
+So **backpropagation** is: seed the output's gradient as `dL/dL = 1` (the loss's rate of change with respect to itself is 1), then move backward through the graph, and at each node multiply the gradient that arrived from above by the local derivative of the operation, handing the result down to its children. Each `+` passes its gradient down unchanged; each `*` hands each child the other child's value times the incoming gradient. Walk the whole graph in reverse and every node, including every leaf parameter, ends up holding `dL/d(itself)`. That is the gradient the network uses to learn.
+
+(One bookkeeping detail: you process nodes in reverse **topological order**, so that by the time you compute a node's contribution to its children, that node has already received all the gradient flowing into it from above. A node that feeds two places upstream sums the gradients from both, which is just the calculus fact that contributions to a rate add.)
+
+## A full backward pass, by hand
+
+Walk Karpathy's worked expression all the way through. Take leaf values `a = 2`, `b = -3`, `c = 10`, `f = -2`, and build:
+
+```
+e = a * b = (2)(-3) = -6
+d = e + c = -6 + 10 = 4
+L = d * f = (4)(-2) = -8
+```
+
+That is the forward pass: `L = -8`. Now backpropagate to find how `L` responds to each value. Seed `grad of L = 1`, then walk backward:
+
+```
+L = d * f   ->   grad of d = grad of L · f = 1 · (-2) = -2
+                 grad of f = grad of L · d = 1 · 4    =  4
+
+d = e + c   ->   grad of e = grad of d · 1  = -2     (add passes it through)
+                 grad of c = grad of d · 1  = -2
+
+e = a * b   ->   grad of a = grad of e · b = (-2)(-3) =  6
+                 grad of b = grad of e · a = (-2)(2)  = -4
+```
+
+So `dL/da = 6`, `dL/db = -4`, `dL/dc = -2`. Read one of them aloud to feel it: `dL/da = 6` means that if you nudge `a` upward by a tiny amount, the loss `L` rises at six times that rate. Every gradient came from one rule applied repeatedly, multiply the incoming gradient by the local derivative, with nothing fancier than the chain rule doing the work.
+
+{/* DIAGRAM PLACEHOLDER: the same graph annotated with both the forward values and the backward gradients on each node (L:grad 1, d:-2, f:4, e:-2, c:-2, a:6, b:-4), arrows showing gradient flowing down from L to the leaves */}
+
+## Adding a nonlinearity makes it a neuron
+
+`+` and `*` get you weighted sums, but a neuron also needs a nonlinear squashing function, the kind the network-intuition track introduced. micrograd adds one, `tanh`, as just another operation with a known local derivative: the derivative of `tanh(x)` is `1 - tanh(x)^2`. So a `Value` can apply `tanh` to itself, record it in the graph like any other op, and backprop flows through it using that local derivative.
+
+With `+`, `*`, and `tanh`, the engine can express a full neuron, a weighted sum of inputs passed through `tanh`, and then backpropagate the loss's gradient to every weight. Stack neurons and the same graph, the same backward pass, handles the whole network. The engine does not know or care whether the graph is two operations or two million; it walks whatever graph the forward pass recorded.
+
+## Why this matters when you use AI
+
+This is not a toy analogy for what real frameworks do. It is what they do. When you call `loss.backward()` in PyTorch, or let JAX or TensorFlow differentiate a model, the framework is running exactly this procedure: it recorded a computational graph during the forward pass, and now it walks that graph backward, multiplying local derivatives by incoming gradients via the chain rule, until every parameter holds its gradient. `micrograd` is around 150 lines and operates on single numbers; PyTorch is millions of lines and operates on whole tensors at once for speed. But the idea is identical, and the 150-line version is complete enough to train a real (small) neural network.
+
+That is the payoff of building it from scratch. The next time a framework "magically" computes your gradients, you will know there is no magic: there is a graph, a local derivative per operation, and the chain rule walked backward. Nothing inside is a mystery.
+
+## Common pitfalls
+
+**Thinking autograd is symbolic calculus.** It does not derive a formula for the gradient. It computes a *number* for each node by propagating numbers backward through the recorded graph. There is no algebra being simplified; there is arithmetic being chained.
+
+**Forgetting which value the multiply derivative uses.** For `e = a * b`, the gradient to `a` uses `b` (the other factor), not `a`. Swapping them is the most common slip; anchor on "the local derivative of a product with respect to one input is the other input."
+
+**Skipping the reverse topological order.** A node must collect all the gradient flowing into it from above before it passes anything to its children, so the backward walk goes top-down through the graph in reverse of how it was built. Process a node too early and it hands down an incomplete gradient.
+
+**Confusing the forward value with the gradient.** Each `Value` holds two separate numbers: its data (computed going forward) and its grad (computed going backward). `a` has data `2` and grad `6`; those are different things answering different questions.
+
+## What you should remember
+
+- **An autograd engine records the computation as a graph and differentiates it automatically.** Every number is a `Value` that remembers its data, the operation that produced it, and its input values; running the expression forward builds the graph.
+- **Each operation has a local derivative known in advance:** addition passes a gradient through unchanged (local derivative 1), multiplication hands each input the other input's value, and `tanh` uses `1 - tanh^2`. Backpropagation seeds `dL/dL = 1` at the output and walks the graph backward, multiplying each incoming gradient by the local derivative, until every node holds its gradient. That backward walk is the chain rule, applied node by node.
+- **This is exactly what real frameworks do.** `micrograd` is ~150 lines on single numbers; PyTorch is millions on tensors, but the procedure, graph plus local derivatives plus chain-rule backward pass, is the same. When a framework computes your gradients, nothing inside is a mystery.
+
+You now have the engine: something that, given any expression, hands back the gradient of the output with respect to every input. That is the whole basis of learning. The next lesson uses this engine to do the thing it was built for, assembling neurons into a network and training it by repeatedly computing gradients and nudging the parameters downhill.

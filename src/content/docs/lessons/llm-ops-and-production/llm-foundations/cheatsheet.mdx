@@ -1,0 +1,88 @@
+---
+title: "Cheatsheet: LLM foundations for production"
+description: One-page reference. The three properties, generation loop, sampling controls, and the three productive limits.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## The three properties (at the API level)
+
+| Property | Implication |
+| --- | --- |
+| Works in **tokens** | Cost, context, latency are denominated in tokens (not characters/words) |
+| **Stateless** between calls | Your app keeps conversation state; replay relevant pieces into the prompt |
+| Trained on a **fixed corpus** to some date | Newer or domain knowledge must come through prompt or retrieval |
+
+## Autoregressive generation
+
+```
+1. Tokenize the prompt
+2. Network -> distribution over next tokens
+3. Sample one (per your sampling settings)
+4. Append; repeat step 2
+5. Stop on EOS token, max_tokens, or stop sequence
+```
+
+Output streams one token at a time -> streaming is possible.
+
+## Sampling controls
+
+| Knob | What it does | Typical |
+| --- | --- | --- |
+| `temperature` | Peakiness of distribution (low = deterministic, high = varied) | Answer apps 0-0.4; creative higher; 0 = closest to deterministic |
+| `top_p` (nucleus) | Smallest set whose probs sum to `p` | ~0.9-1.0 common |
+| `max_tokens` | Cap on output length | Cap deliberately; controls cost + latency |
+| stop sequences | Strings that halt generation | Set when format requires it |
+
+Defaults usually suffice; tune for consistency, variance, or format needs.
+
+## The three productive limits
+
+### Context length
+
+- Hard input cap per model (tens of K to hundreds of K tokens).
+- **Shared budget:** system + user + retrieved context + few-shot + history + `max_tokens` output.
+- Hitting it -> tighter prompts (lesson 3), better retrieval (lesson 4), summarized history, or a longer-context model.
+
+### Cost per token
+
+- Input and output **priced separately**; output usually **several times more** per token.
+- **Long system prompts compound at scale.** A 4K-token system prompt is paid for every request.
+- **Biggest levers:** cap `max_tokens`, prompt for conciseness, pick a cheaper model for sub-tasks.
+
+### Latency
+
+```
+total time ≈ TTFT + (output_tokens / tokens_per_second)
+```
+
+- TTFT rises with input length.
+- Total time rises linearly with output length.
+- **Streaming masks it** at the UX layer (lesson 6): user sees tokens within ~1s, not after 5s.
+
+## Back-of-envelope template
+
+```
+inputs/req     = sys + retrieved + user (+ history)
+input_cost/day = requests/day x inputs/req x $/M_input
+output_cost/day= requests/day x avg_output x $/M_output
+total_time     = TTFT + (output_tokens / tps)
+```
+
+## The reframing for the rest of the track
+
+> Prompt design, retrieval, UX, and ops decisions are largely **deliberate moves against context, cost, or latency**. Name the limits; the techniques look like targeted moves rather than recipes.
+
+## Words to use precisely
+
+- **Token**: the integer unit the model processes; the unit of cost, context, and latency.
+- **Stateless**: each API call stands alone; state lives in your application.
+- **TTFT**: time-to-first-token; user-perceived "the model is responding."
+- **Context window**: the maximum input tokens the model can take in one call.
+
+## Source
+
+- Full Stack Deep Learning, LLM Bootcamp (Spring 2023), Session 2: LLM Foundations. `fullstackdeeplearning.com/llm-bootcamp`. Independent structural mirror in original prose; see references.

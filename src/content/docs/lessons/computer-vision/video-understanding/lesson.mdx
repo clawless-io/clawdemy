@@ -1,0 +1,120 @@
+---
+title: "Lesson: Teaching machines to understand video"
+description: "A photo is a single moment; a video is a sequence of moments stretched across time. Adding the time dimension changes computer vision in three ways: the input is much larger (thousands of frames per clip), the right answer often depends on what changed across frames (a hand reaching is different from a hand grasping), and many useful tasks are defined over time spans (action recognition, video captioning). This lesson covers the standard ways to add time to a vision system, from a one-frame baseline through 3D convolutions and two-stream networks to modern video transformers, with the parameter-count cost of doing it."
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+A photo is a single moment. A video is a sequence of moments stretched across time, and that one structural change makes most of computer vision more interesting and more expensive. The same object can move; the same scene can change; the same hand can be reaching for something, grasping it, or letting it go, and a still frame at any point in that sequence could look identical. A vision model that wants to answer questions like "what is happening in this clip" needs to relate frames to each other, not just classify each one in isolation.
+
+This lesson walks the standard ways of adding the time dimension to a vision system, from the surprisingly competitive one-frame baseline through 3D convolutions, two-stream networks, and the modern video-transformer architectures. The training loop you have built across Phase 1 still runs on top; what changes is how the input is shaped and what one part of the network looks at.
+
+## What a video actually is
+
+Numerically, a video is a 4D tensor with shape `T × H × W × C`, where `T` is the number of frames, `H × W` is the spatial size of each frame, and `C` is the channels per pixel (typically 3 for RGB). A short clip at modest resolution can be enormous: 64 frames of 224 by 224 RGB is 64 × 224 × 224 × 3 ≈ 9.6 million numbers, against a single image's 150 thousand. Real videos are larger still: a one-minute clip at 30 frames per second is 1,800 frames, which at the same resolution is around 270 million numbers per clip. You almost never process all of them; sampling and chunking, named below, are essential.
+
+The tasks built on top of this 4D tensor are a few standard ones:
+
+- **Action recognition.** Classify what activity is happening in the clip (running, swimming, opening a door).
+- **Video classification.** A more general per-clip label; could be the genre of a film or the topic of a YouTube video.
+- **Temporal action localization.** Not just *what* happens but *when* it happens within a longer video (e.g., a goal in a 90-minute football match).
+- **Video captioning.** Generate a natural-language description of the clip.
+
+All of these need some way to relate frames. The history of how the field has handled that is the rest of the lesson.
+
+## The one-frame baseline (a strong one, surprisingly)
+
+The simplest possible approach: take one frame from the clip, run it through an image classifier you already know how to build (Phase 1 onward), and read off the label. Discard the rest of the video.
+
+This is the **single-frame baseline**, and you should always run it. It is fast, it uses zero new architecture, and on many video benchmarks it is **embarrassingly competitive**. A surprising fraction of action-recognition benchmarks turn out to be substantially solvable from a single well-chosen frame, because the visual context (a swimming pool, a kitchen, a soccer field) already says a lot about what is going on. If you cannot beat the single-frame baseline by a comfortable margin, your fancier video model probably is not learning anything genuinely temporal.
+
+The next improvements layer temporal information on top.
+
+## Early fusion vs late fusion
+
+The next-easiest approaches treat each frame with a 2D CNN and combine the results.
+
+**Late fusion.** Run each frame through a 2D CNN independently to get a per-frame feature vector. Average the features across frames (or concatenate them) and pass the result to a classifier. Cheap; gets a temporally aggregated representation without learning any temporal dynamics. Beats single-frame on most benchmarks because it sees more of the clip, but it cannot distinguish ordered events (a hand reaching followed by grasping looks the same to "averaged features" as grasping followed by reaching).
+
+**Early fusion.** Stack `T` frames along the channel dimension before the first conv layer (so the input becomes `H × W × (T × C)` instead of `H × W × C`). The first conv now sees raw temporal information directly. Limited because the temporal range is fixed by the first layer's filter; deeper layers no longer have access to per-frame structure.
+
+Both are easy to implement and easy to beat once the network can learn temporal patterns at every layer.
+
+## 3D convolutions
+
+The cleanest way to put time into a CNN is to make the convolution itself 3D. Where a 2D conv filter is `F × F × D_in` (spatial × spatial × input depth, lesson 5), a **3D conv filter** is `T_f × F × F × D_in` (temporal × spatial × spatial × input depth). It slides spatially *and* temporally, computing a dot product at each `(t, x, y)` position and producing a 4D output volume of shape `T' × H' × W' × K`.
+
+Concretely, a 3D conv with filter shape `3 × 3 × 3` on an RGB input (depth 3) has **3 × 3 × 3 × 3 = 81 weights per filter** (plus 1 bias). Compare to a 2D conv with the same spatial filter size: `3 × 3 × 3 = 27 weights per filter`. The 3D version has roughly 3 times the parameters per filter and roughly 3 times the compute per output position. Modest at the layer level; substantial when stacked many layers deep.
+
+**C3D** (Tran et al. 2015) was an early influential 3D-conv architecture for video. **I3D** (Carreira and Zisserman 2017) introduced "inflating" pretrained 2D ImageNet weights into 3D filters (by replicating across the time dimension) as a way to bootstrap a 3D model from a good 2D one, which was a meaningful practical unlock. 3D-conv networks remain a strong family for video, especially when paired with the modern training tricks from lesson 6's training-at-scale subsection.
+
+## Two-stream networks
+
+A different angle is to separate the "what is in the frame" job from the "what is moving" job. **Two-stream networks** (Simonyan and Zisserman 2014) run two parallel CNNs:
+
+- A **spatial stream** that takes individual RGB frames and learns appearance.
+- A **temporal stream** that takes **optical flow** (a precomputed per-pixel motion vector field between consecutive frames) and learns motion.
+
+The two streams' outputs are fused late (averaged or concatenated) for the final prediction. Two-stream networks were the state of the art on action recognition for several years and remain a strong reference point. **SlowFast** (Feichtenhofer et al. 2019) is a modern descendant that runs two pathways at different temporal sampling rates (a slow pathway with high spatial detail, a fast pathway with high temporal detail), fused throughout the network rather than only at the end.
+
+## CNN + RNN (covered in L7)
+
+A natural shape: process each frame with a 2D CNN to get a per-frame feature vector, then run an RNN (or LSTM, or GRU) over those features as a sequence to capture temporal patterns. Output the classification (or caption) from the RNN's final state, or from each step for per-frame outputs.
+
+This is exactly the video-with-RNN architecture you met in lesson 7. The choice between this and 3D convolutions or two-stream is mostly empirical: each has its sweet spot on different benchmarks. The CNN-plus-RNN shape has historically been strong for video captioning (where the output is itself a sequence).
+
+## Video transformers
+
+The most recent shift, and the one most likely to keep evolving, is video-on-transformers. The natural extension is to do for video what Vision Transformer did for images: cut the input into **spatio-temporal tokens** (small 3D patches of `T_p × P × P`), embed each as a vector, and run a transformer encoder over the resulting token sequence.
+
+The straightforward implementation runs **full self-attention** across all spatial and temporal positions, which is expensive (quadratic in the number of tokens). Most production video transformers use clever attention factorizations to avoid the full quadratic cost:
+
+- **TimeSformer** (Bertasius et al. 2021) uses **divided space-time attention**: at each transformer block, attend across space within one frame, then across time at the same spatial position. Two cheaper attentions instead of one expensive one.
+- **ViViT** (Arnab et al. 2021) explores several factorizations along similar lines (factorized encoder, factorized self-attention, factorized dot-product).
+
+Video transformers benefit from the same advantages ViT brought to images (parallelism, long-range attention) and the same trade-offs (need more data and compute to outperform CNNs; scale further when both are available). Modern foundation-scale video models (multimodal video understanding, video question answering, large vision-language models that ingest clips) increasingly use transformer-based backbones.
+
+## A practical reality: temporal sampling
+
+You cannot feed thousands of frames into any of these architectures directly. **Temporal sampling** is the practical step everyone takes.
+
+- **Uniform sampling.** Pick every `k`-th frame across the clip (e.g., 1 in 8) to bring the input down to a manageable size (often 32 or 64 frames per training example).
+- **Random temporal crops.** At training time, randomly sample a contiguous chunk (e.g., 64 frames starting at a random position) from a longer clip; at evaluation, average predictions over multiple chunks.
+- **Variable frame rates by stream.** SlowFast's design embraces this: one pathway sees few frames (slow, more spatial detail per frame); another sees many frames (fast, more temporal detail).
+
+The trade-off is direct: more frames per training example means more compute and memory; fewer frames means risk of missing the temporal signal you needed. The default in most modern systems is 32 to 64 frames per training example, sampled uniformly or in random chunks, with multi-chunk averaging at evaluation.
+
+## Datasets the field actually trains on
+
+For context, the **Kinetics** dataset family (Kay et al. 2017 for Kinetics-400, with later Kinetics-600 and Kinetics-700 extensions) is the modern action-recognition benchmark, with hundreds of thousands of labelled YouTube clips spanning hundreds of human action classes. **Charades**, **AVA**, **Something-Something**, and **HowTo100M** cover other shapes of video data (longer multi-action videos, action localization, fine-grained interactions, instructional videos respectively). When you read about a video model's accuracy in a paper, the dataset name is doing real work in interpreting that number.
+
+## Why this matters when you use AI
+
+Video models are everywhere quietly. Phone photo galleries automatically generate clips from your day. Security cameras detect activities (a person fell, a package was left). Sports broadcasts auto-tag highlights. YouTube and TikTok categorize uploaded videos for search and recommendation. Self-driving cars run video models over their camera streams to track moving objects (motion is exactly the information a single frame cannot provide). All of these run something in the same family as the architectures above.
+
+The choice between 3D convolutions, two-stream, CNN-plus-RNN, and video transformers is a practical engineering one. Latency-sensitive systems (security cameras processing many streams) often use lightweight 3D convs or CNN-plus-RNN. Accuracy-sensitive systems with budget (large-scale video search, content moderation) increasingly use video transformers at scale. The training loop is the same loss + gradient descent + backprop machinery; the engineering chooses the architecture and the temporal sampling.
+
+## Common pitfalls
+
+**Skipping the single-frame baseline.** Always run it. If your fancy video model is not beating it by a comfortable margin, the model is not learning anything genuinely temporal and you should diagnose before building further.
+
+**Confusing late fusion with temporal modelling.** Averaging per-frame features captures *what is in the clip* but not *what happens when*. Late fusion cannot distinguish ordered events from their reverses; that is what 3D convs, RNNs, or attention buy you.
+
+**Treating optical flow as free.** The temporal stream in a two-stream network needs optical flow computed beforehand, which has its own per-frame cost. Modern systems sometimes skip optical flow entirely (3D convs or video transformers learn motion directly from raw frames).
+
+**Reading "transformer beats CNN" on video benchmarks as settled.** Same trade-off as on images: video transformers scale further with data and compute but need more of both; 3D-conv variants remain competitive at moderate scale, especially in latency-bound deployment.
+
+**Forgetting the input scale.** A 32-frame clip at 224 by 224 RGB is 32 × 224 × 224 × 3 ≈ 4.8 million numbers per training example. Memory and compute bills scale with this; budget accordingly.
+
+## What you should remember
+
+- **A video is a 4D tensor `T × H × W × C`** (time × height × width × channels), and the input scale is the first thing to plan around. Temporal sampling (uniform stride, random temporal crops, multi-rate streams) is essential because raw frame counts are enormous.
+- **Single-frame baseline first.** Always run it; many video benchmarks turn out to be largely solvable from one well-chosen frame, and beating that baseline is what proves a video-specific model is learning something temporal.
+- **The standard ways to add time, in increasing order:** late fusion (per-frame features averaged), early fusion (stack frames as channels), 3D convolutions (filter slides spatially AND temporally; ~3x parameter cost per filter; C3D, I3D), two-stream networks (spatial RGB stream + temporal optical-flow stream; SlowFast for the modern descendant), CNN + RNN (per-frame features into an RNN, lesson 7), and video transformers (spatio-temporal tokens; TimeSformer, ViViT, with divided attention for cost).
+- **Same training loop, scaled engineering.** The loss + gradient descent + backprop machinery is unchanged. What changes per architecture is the forward and backward pass at the temporal-handling layers (and the parameter count / compute cost that result).
+
+A photo gave us pixels; a video gives us a sequence of pixel grids over time. The strategies above are the field's standard answers for how to make that sequence into a single prediction (action, caption, label) or a per-time-step output (when did this event happen). Most modern production video systems are some recognizable variant.
+
+Next: we leave recognition behind and turn to generation. So far, every architecture in this track took an image (or video) in and produced a label, a box, a mask, or a heatmap. The next phase asks whether vision models can run the other way and produce images, frames, and even short videos themselves. Phase 3 opens with self-supervised learning, the technique that lets a model learn useful visual features from images without labels at all.

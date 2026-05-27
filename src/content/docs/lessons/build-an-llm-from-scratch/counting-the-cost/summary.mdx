@@ -1,0 +1,25 @@
+---
+title: "Summary: Counting the cost"
+description: The 5-minute scan version. Matmul FLOPs, the 6ND rule, training memory (16N), arithmetic intensity, and einops.
+sidebar:
+  order: 4
+  label: Summary
+artifact: summary
+---
+
+Efficiency is the track's through-line, and this lesson is the accounting that makes it concrete: before training, you can compute the cost on paper. **Compute is FLOPs**, and since a model is mostly matrix multiplies (an m-by-k times k-by-n matmul costs about `2mnk`), the whole training run reduces to the **6ND rule**: about `6 * N * D` FLOPs for N parameters and D tokens. **Memory** is roughly `16N` bytes in fp32 (parameters 4N + gradients 4N + Adam optimizer states 8N), before activations, and is often the binding constraint. **Arithmetic intensity** (FLOPs per byte moved) decides whether an op is compute-bound (GPU busy, good) or memory-bound (GPU stalled), which motivates most later systems work. And **einops** names tensor dimensions so the reshaping that dominates model code stays readable. This is the scan version; the lesson works real estimates.
+
+## Core ideas
+
+- **FLOPs and matmuls.** Compute is measured in FLOPs; a model is mostly matrix multiplies, and an m-by-k times k-by-n matmul costs about `2 * m * n * k` (the 2 is multiply-and-add).
+- **The 6ND rule.** Training costs about `6 * N * D` FLOPs (N parameters, D tokens): ~2N forward per token, ~4N backward. It scopes a training run from two numbers.
+- **Memory is ~16N bytes (fp32).** Parameters (4N) + gradients (4N) + Adam states (8N), before activations (which scale with batch and sequence length). Optimizer state often dwarfs the model; memory frequently binds before compute.
+- **Arithmetic intensity = FLOPs / bytes moved.** High = compute-bound (hardware busy); low = memory-bound (hardware idle on memory). Large matmuls are compute-bound; elementwise ops are memory-bound.
+- **It explains the peak-FLOPs gap.** A GPU runs below peak when ops are memory-bound; fusing small ops and using bigger batches/matmuls raises intensity. This motivates the kernels and parallelism lessons.
+- **einops for legibility.** `rearrange(x, "b s (h d) -> b h s d", h=n_heads)` names dimensions, making shape transformations readable and bug-resistant versus raw `.view`/`.permute`.
+
+## What changes for you
+
+This lesson is the literacy that turns model-building from hope into engineering. With the `6ND` rule and the `16N` estimate you can answer, before spending compute, the questions that actually decide a project: how long will it train, how many devices will it need, will it fit in memory at all? In the practice you saw a 7B model on 2T tokens come out to ~8.4e22 FLOPs and ~112 GB of optimizer-plus-model memory, enough to know immediately it will not fit on one GPU. The arithmetic-intensity lens then explains why real throughput falls short of a GPU's spec sheet and motivates nearly every optimization to come. This accounting is the common currency the rest of the track trades in, which is exactly why it precedes the architecture: you choose the design knowing what each choice costs. Next, the architecture itself.
+
+Before you train anything, you can count what it will cost: `6ND` for compute, `16N` for memory, and arithmetic intensity for whether the hardware will be busy. That accounting underlies every decision in the rest of the track.

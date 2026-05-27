@@ -1,0 +1,104 @@
+---
+title: "Cheatsheet: Fine-tune a pretrained model"
+description: One-page reference. The full Trainer fine-tuning flow, the data collator, TrainingArguments, evaluation with compute_metrics, and the efficiency switches.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## The fine-tuning loop at a glance
+
+| Step | What you do | Key object |
+| --- | --- | --- |
+| 1. Data | Load + tokenize a labeled dataset | `load_dataset`, `tokenizer` |
+| 2. Collate | Dynamic padding per batch | `DataCollatorWithPadding` |
+| 3. Model | Load base model with a task head | `AutoModelFor<Task>(..., num_labels=N)` |
+| 4. Configure | Set all hyperparameters | `TrainingArguments` |
+| 5. Train | Assemble and run | `Trainer`, `trainer.train()` |
+| 6. Evaluate | Score on held-out data | `compute_metrics`, `evaluate` |
+
+## Prepare data + collator
+
+```python
+from datasets import load_dataset
+from transformers import AutoTokenizer, DataCollatorWithPadding
+
+raw = load_dataset("glue", "mrpc")
+tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+
+def tok(ex):
+    return tokenizer(ex["sentence1"], ex["sentence2"], truncation=True)
+
+tokenized = raw.map(tok, batched=True)
+data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
+```
+
+`DataCollatorWithPadding` pads each batch to its own longest example (dynamic padding), not the whole dataset to one length.
+
+## Load the model (expect a warning)
+
+```python
+from transformers import AutoModelForSequenceClassification
+model = AutoModelForSequenceClassification.from_pretrained("bert-base-uncased", num_labels=2)
+```
+
+The warning about discarded/random weights is **expected**: the pretraining head is dropped, a fresh task head is added. Training makes it useful.
+
+## Configure + train
+
+```python
+from transformers import TrainingArguments, Trainer
+
+args = TrainingArguments("test-trainer", eval_strategy="epoch")
+
+trainer = Trainer(
+    model, args,
+    train_dataset=tokenized["train"],
+    eval_dataset=tokenized["validation"],
+    data_collator=data_collator,
+    processing_class=tokenizer,
+    compute_metrics=compute_metrics,   # see below
+)
+trainer.train()
+```
+
+`TrainingArguments` only requires an output directory. `processing_class=tokenizer` tells the Trainer how to process data (and defaults the collator to `DataCollatorWithPadding`).
+
+## Evaluation
+
+```python
+import numpy as np, evaluate
+
+def compute_metrics(eval_preds):
+    metric = evaluate.load("glue", "mrpc")
+    logits, labels = eval_preds
+    preds = np.argmax(logits, axis=-1)
+    return metric.compute(predictions=preds, references=labels)
+```
+
+- Models output **logits**; `np.argmax(logits, axis=-1)` turns them into predicted classes.
+- A falling training loss is **not** proof of quality. Measure on held-out data.
+- `trainer.predict(dataset)` returns `predictions` (logits), `label_ids`, and `metrics`.
+
+## Efficiency switches (in TrainingArguments)
+
+| Argument | Effect |
+| --- | --- |
+| `fp16=True` | Mixed precision: faster, less GPU memory |
+| `gradient_accumulation_steps=N` | Simulate a larger batch when memory is tight |
+| `learning_rate=2e-5` | The most important hyperparameter |
+| `lr_scheduler_type="cosine"` | How the learning rate decays |
+| `eval_strategy="epoch"` | Evaluate at the end of each epoch |
+
+## Words to use precisely
+
+- **Data collator**: assembles examples into a batch; `DataCollatorWithPadding` adds dynamic padding.
+- **Head swap**: replacing a model's pretraining head with a fresh task head (random weights) at load time.
+- **Epoch**: one full pass over the training data.
+- **`compute_metrics`**: a function (predictions, labels) -> dict of metric names to values.
+
+## Recommended further study
+
+- Hugging Face LLM Course, Chapter 3: "Fine-tuning a pretrained model." `huggingface.co/learn/llm-course/chapter3`. Released under Apache 2.0; this lesson mirrors its structure with original prose.

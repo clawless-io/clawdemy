@@ -1,0 +1,84 @@
+---
+title: "Lesson: Augmented language models, retrieval and tools"
+description: Phase 2 opens here. The two patterns that take an LLM beyond what it was trained on, retrieval-augmented generation (RAG) and tool use, the moving parts of each, and the trade-offs that decide whether they actually work in production.
+sidebar:
+  order: 2
+  label: Lesson
+artifact: lesson
+---
+
+Lesson 3 named the place prompts run out: when the model lacks the **knowledge** required, or when the task needs an **external system** the model cannot call. This lesson is what you reach for in both cases. **Retrieval-Augmented Generation (RAG)** and **tool use** are the two patterns that take an LLM beyond what it was trained on, and they make up the bulk of what a production LLM application actually does. Get them right and the rest of the application is straightforward; get them wrong and no amount of prompt tuning rescues the product.
+
+## RAG: feed the model what it needs to know
+
+The model only knows what was in its pretraining data plus what is in your prompt. If your application needs current information, internal company knowledge, or anything specific to a user, that information has to be fetched and placed in the prompt for that call. RAG is the pattern for doing this in a principled way.
+
+The pipeline has seven moving parts. The first time you build one is also the first time most of these decisions feel real:
+
+1. **A knowledge source.** Your documents, knowledge base, support tickets, internal wiki, public webpages, whatever holds the information.
+2. **Chunking.** Documents get split into smaller pieces (chunks) that the retrieval step can find. Chunk size is a real decision: too small and a chunk lacks the context needed to answer; too large and similarity matching becomes imprecise. Typical chunks are a few hundred tokens, often with overlap so a sentence is not split across chunks.
+3. **An embedding model.** Each chunk is encoded as a dense vector (a fixed-length list of numbers) that represents its meaning. Sentences with similar meanings end up nearby in this vector space.
+4. **A vector store.** A database designed to hold these vectors and find nearest neighbors quickly. Common choices include managed services (Pinecone, Weaviate) and self-hosted options (Chroma, pgvector); they all do the same job at different scale-vs-operations trade-offs.
+5. **A retriever.** Given the user's query, embed the query into the same vector space, find the top-k most similar chunks. This is the heart of RAG.
+6. **Prompt composition.** Stitch the retrieved chunks into the prompt: system prompt + retrieved chunks (with their sources) + user question. Lesson 3's discipline applies here, especially placing critical instructions at the end of the long prompt.
+7. **Generation, with citations.** The model produces an answer using the retrieved context. A well-designed RAG application asks the model to cite which chunks it used; lesson 6's UX work uses those citations.
+
+That pipeline is the textbook version. The deep work is in the trade-offs.
+
+## RAG trade-offs: where the real work is
+
+Once you have the seven pieces, the production quality of the whole thing turns on a handful of choices:
+
+- **Chunk size and overlap.** Standard starting point: a few hundred tokens with a small overlap (50-100 tokens). Tune empirically against your data; the wrong chunk size silently destroys retrieval quality.
+- **Top-k.** How many chunks to retrieve per query. More chunks = better recall but longer prompt = more cost and risk of distracting context. Typical k starts around 5-10; rarely above 20.
+- **Embedding model choice.** Different models (text-embedding-3, e5-large, BGE, others) have different quality and dimensions; quality varies by domain. Try a couple on a held-out evaluation set.
+- **Re-ranking.** Retrieve a larger initial set (say 50) with cheap embedding similarity, then **re-rank** with a more expensive model (a cross-encoder, or another LLM-as-judge) to pick the best 5-10. Adds latency; usually adds quality on hard queries.
+- **Hybrid search.** Combine dense (embedding-based) retrieval with sparse (BM25 keyword) retrieval. Dense catches semantic matches; sparse catches exact-term matches; hybrid usually beats either alone on real workloads.
+- **Metadata filtering.** Tag chunks with structured metadata (date, document type, customer ID) and filter at retrieval time. Often the single biggest quality win when your data has any structure to it.
+
+The recurring failure mode is **bad retrieval that the model cannot detect**. The model dutifully answers from whatever chunks it was handed, and if those chunks were wrong or unrelated, the answer is wrong with full confidence. RAG without **retrieval evaluation** is a debugging nightmare; even a simple held-out set of "this query should return chunks X and Y" goes a long way.
+
+## Tool use: let the model call external systems
+
+The other augmentation pattern is **tool use** (sometimes called **function calling**). Instead of the model only consuming context, you give it the ability to **call functions you define**, like a search API, a calculator, a database query, an internal action. The model decides when to call a tool, with what arguments; your code runs it; the result feeds back into the conversation.
+
+The shape is consistent across providers (Anthropic's `tools` parameter, OpenAI's function calling, and equivalents):
+
+1. **Declare the tools** in the API call: schema for each tool with a name, description, and parameter types.
+2. **The model decides.** Given a user request, the model either replies directly or emits a structured **tool-call request** ("call `search_docs` with `query='refund policy'`").
+3. **Your code executes** the requested tool and returns the result.
+4. **The model continues.** The result is appended to the conversation; the model either calls another tool, refines, or produces the final user-facing answer.
+
+What makes tool use powerful: it lets the model **take actions** (look something up, write to a system, transform data) rather than just produce text. What makes it harder than RAG: the model has to choose **which** tool, **whether** to use one at all, and **with what arguments**. That choice is itself a model decision, with all the prompt-engineering levers from lesson 3 (clear tool descriptions are the equivalent of clear instructions).
+
+## RAG and tools, together
+
+In practice RAG is often **implemented as a tool**: define a `search_knowledge_base` tool whose execution is the RAG retrieval pipeline. The model decides when retrieval is needed (some questions do not need it; some need several searches), calls the tool with refined queries, and uses the results. The unified "tool-using" frame is cleaner than the older "always run RAG, then prompt the model" pattern because it lets the model choose its own context rather than forcing a fixed retrieval on every turn.
+
+This is the basic shape of an **agent** (the topic of lesson 10): a loop of "model thinks, model calls a tool, tool returns, model continues" repeated until a final answer. Agents add complexity (planning, memory, error recovery); the underlying mechanism is the tool-use loop introduced here.
+
+## How this connects back to the three productive limits
+
+Every move in this lesson lives against lesson 2's constraints:
+
+- **Context length:** retrieved chunks share the same budget as the system prompt, history, and `max_tokens` output. More-aggressive retrieval (higher k, bigger chunks) eats budget fast. Tighter retrieval and re-ranking are not just quality moves; they are budget moves.
+- **Cost per token:** every retrieved chunk in every request is paid for every time. A 4K-token retrieved context across 50K requests/day is real money; targeted retrieval is cost engineering.
+- **Latency:** retrieval adds wall-clock time (embedding the query, similarity search, optional re-ranking) before the model even starts. Caching common retrievals, async retrieval, and right-sizing top-k all reduce it.
+
+This is why "just retrieve everything and let the model figure it out" fails at scale: it loses on all three constraints at once.
+
+## Why this matters when you build AI
+
+RAG and tool use are where applied LLM work actually lives. The model is the easy part (you call an API); the application's quality is decided by how well you fetch the right context, how cleanly you let the model call your systems, and how well you evaluate both. Teams that ship strong products spend more time on retrieval quality and tool design than on prompts at this stage of maturity, and the prompts they do iterate on (lesson 3) are mostly about how the retrieved context or tool results are presented. The next lesson reads a real application end to end so the parts you just learned have a worked-example shape, and Phase 2 then turns to the UX layer that wraps all of this, and the operational layer that keeps it working.
+
+## What you should remember
+
+- **Two augmentation patterns:** **RAG** feeds the model fetched context; **tool use** lets the model call external systems. Modern applications use both.
+- **RAG has seven moving parts:** knowledge source, chunking, embedding model, vector store, retriever, prompt composition (with sources), and generation with citations.
+- **The real work is in the trade-offs:** chunk size and overlap; top-k; embedding-model choice; re-ranking with a more expensive model; hybrid search (dense + sparse / BM25); metadata filtering.
+- **The recurring failure mode is bad retrieval the model cannot detect.** A held-out retrieval-evaluation set (queries with their expected relevant chunks) is the cheapest defense and goes a long way.
+- **Tool use is four steps:** declare tool schemas, model emits a tool-call request, your code executes and returns, the model continues with the result. Choosing which tool, when, and with what arguments is itself a model decision, with prompt-engineering levers.
+- **RAG is often implemented as a tool** (`search_knowledge_base`), letting the model decide when retrieval is needed and with what query, rather than forcing retrieval on every turn. This is also the seed of agent behavior (lesson 10).
+- **Every move respects the three productive limits:** context (retrieved chunks share the budget), cost (every chunk per request is paid every time), latency (retrieval is wall-clock before generation). Targeted retrieval is not just a quality move; it is cost and latency engineering.
+
+RAG and tools are where applied LLM work actually lives. The model is the easy part; the application's quality is decided by how well you fetch the right context, how cleanly you let the model call your systems, and how well you evaluate both.

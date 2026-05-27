@@ -1,0 +1,183 @@
+---
+title: "Practice: Video understanding"
+description: Self-check on video-specific architectures, a parameter-count comparison of 2D vs 3D conv, an architecture-matching exercise, and flashcards.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Seven short questions. Answer each before opening the collapsible.
+
+**1. What shape does a video tensor have, and roughly how large is a 64-frame 224x224 RGB clip?**
+
+<details>
+<summary>Show answer</summary>
+
+Shape `T × H × W × C` (time × height × width × channels). A 64-frame 224x224 RGB clip is `64 × 224 × 224 × 3 ≈ 9.6 million numbers`, compared to a single image's 150 thousand. Real videos at 30fps for a minute are around 270 million numbers; temporal sampling exists because you cannot process all of them directly.
+
+</details>
+
+**2. Why is the single-frame baseline important, and what does failing to beat it imply?**
+
+<details>
+<summary>Show answer</summary>
+
+Many video benchmarks are largely solvable from one well-chosen frame because visual context (a swimming pool, a kitchen, a soccer field) already says a lot. The single-frame baseline is fast, uses no new architecture, and is the floor any video model needs to comfortably beat. If your fancy video model is not beating it, the model probably is not learning anything genuinely temporal and you should diagnose before building further.
+
+</details>
+
+**3. Distinguish late fusion from early fusion.**
+
+<details>
+<summary>Show answer</summary>
+
+Late fusion: run each frame through a 2D CNN independently, average (or concatenate) the per-frame features, then classify. Cheap; captures *what is in the clip* but not *what happens when* (cannot distinguish ordered events from their reverses). Early fusion: stack T frames along the channel dimension before the first conv layer (input becomes `H × W × (T × C)`). First conv sees temporal info directly, but the temporal range is fixed by the first layer's filter; deeper layers no longer see per-frame structure.
+
+</details>
+
+**4. How does a 3D convolution differ from a 2D convolution, and what is the parameter-cost ratio per filter at 3x3 (or 3x3x3) spatial-temporal size on RGB input?**
+
+<details>
+<summary>Show answer</summary>
+
+A 2D conv filter is `F × F × D_in` (spatial × spatial × input depth); it slides spatially only. A 3D conv filter is `T_f × F × F × D_in`; it slides spatially AND temporally. At 3x3 spatial + 3 temporal on RGB (D_in = 3): 2D has `3·3·3 = 27` weights per filter; 3D has `3·3·3·3 = 81` weights per filter. **About 3x more parameters per filter** (and proportionally more compute per output position).
+
+</details>
+
+**5. What are the two streams in a two-stream network, and what does each learn?**
+
+<details>
+<summary>Show answer</summary>
+
+(1) **Spatial stream**: takes individual RGB frames and learns appearance ("what is in the frame"). (2) **Temporal stream**: takes precomputed optical flow (per-pixel motion vector field between consecutive frames) and learns motion ("what is moving"). The two streams are fused late for the final prediction. SlowFast (Feichtenhofer et al. 2019) is a modern descendant that uses two pathways at different temporal sampling rates instead.
+
+</details>
+
+**6. What is the "divided space-time attention" idea in TimeSformer?**
+
+<details>
+<summary>Show answer</summary>
+
+Full self-attention over all spatial AND temporal positions is quadratic in the total number of tokens, which is expensive for video. TimeSformer's divided attention factorizes it: at each transformer block, first attend across space within one frame, then attend across time at the same spatial position. Two cheaper attentions in sequence instead of one expensive one. ViViT explores similar factorizations.
+
+</details>
+
+**7. What is temporal sampling, and why is it essential?**
+
+<details>
+<summary>Show answer</summary>
+
+The practical step of selecting a subset of frames from a video to actually feed the network (uniform stride, random temporal crops at training, multi-chunk averaging at evaluation). Essential because raw frame counts (1,800 for a 30fps minute) are too large for any architecture to process directly; you almost always sample down to 32-64 frames per training example. Trade-off: more frames = more compute and memory; fewer frames = risk of missing the temporal signal.
+
+</details>
+
+## Try it yourself: count 3D-conv params, match the architecture, defend the baseline
+
+Three exercises, about 15 minutes.
+
+**Part A: parameter counts for a 3D conv layer.** A 3D conv layer has K filters of size 3 × 3 × 3 (temporal × spatial × spatial) on an RGB input volume (input depth 3). (1) How many weights per filter? (2) How many total parameters in the layer if K = 64 (with biases)? (3) Compare to a 2D conv layer with K = 64 filters of size 3 × 3 on RGB (with biases). What is the ratio?
+
+<details>
+<summary>Answers</summary>
+
+**(1)** Weights per filter = T_f · F · F · D_in = 3 · 3 · 3 · 3 = **81 weights**. (Plus 1 bias per filter.)
+
+**(2)** 3D layer total: K · (T_f · F · F · D_in) + K = 64 · 81 + 64 = 5,184 + 64 = **5,248 parameters**.
+
+**(3)** 2D layer total at same K: K · (F · F · D_in) + K = 64 · (3·3·3) + 64 = 64 · 27 + 64 = 1,728 + 64 = **1,792 parameters**. Ratio: 5,248 / 1,792 ≈ **2.93x more parameters** for the 3D version (essentially 3x, the temporal-filter dimension). Compute per output position also scales similarly. Modest at the layer level; substantial when stacked across many layers in a deep 3D-conv network.
+
+</details>
+
+**Part B: match the architecture.** For each description, name the video architecture or technique.
+
+1. Run every frame through a 2D CNN independently, average the per-frame features, classify. Cannot distinguish "reach then grasp" from "grasp then reach."
+2. Two parallel CNNs: one on RGB frames (appearance), one on optical flow (motion); fuse late.
+3. Filter slides spatially AND temporally; one filter shape is `3 × 3 × 3` (temporal × spatial × spatial) on RGB input.
+4. Split video into spatio-temporal patches; embed each; run a transformer encoder; factorize attention into space-then-time to keep compute manageable.
+
+<details>
+<summary>Answers</summary>
+
+1. **Late fusion.** Per-frame features averaged; appearance only, no temporal modelling.
+2. **Two-stream network** (Simonyan and Zisserman 2014). Spatial RGB stream + temporal optical-flow stream, fused late. SlowFast is the modern descendant.
+3. **3D convolution** (C3D, I3D family). Filter slides in time as well as space.
+4. **Video transformer with divided attention** (TimeSformer or ViViT). Factorized space-then-time attention to avoid quadratic-in-total-tokens cost.
+
+</details>
+
+**Part C: defend the baseline.** You are reviewing a paper that proposes a complex new video architecture, reports a 2-percent improvement over prior work on Kinetics, and does not include a single-frame baseline. In 2-3 sentences, explain why the missing baseline is a concrete problem (not just a pedantic complaint).
+
+<details>
+<summary>What a good answer looks like</summary>
+
+Without a single-frame baseline, you cannot tell whether the new architecture's reported gain is genuinely temporal (the model is learning something about motion or sequence) or whether it just uses the per-frame visual context better and would be matched by a careful image classifier given the same input. Many Kinetics actions correlate strongly with scene (a "swimming" clip almost always shows a pool); a single frame can already get a substantial fraction of the accuracy. A 2-percent improvement over prior video work is interesting; a 2-percent improvement over a strong single-frame baseline is the actual evidence of temporal modelling. Without the baseline, you cannot make that distinction, which makes the result effectively un-interpretable.
+
+</details>
+
+## Flashcards
+
+Nine cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay out the full set as one card per page, ready to print or save as a PDF for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="Video tensor shape and scale?">
+
+`T × H × W × C`. A 64-frame 224x224 RGB clip is ~9.6 million numbers; a 1-minute 30fps clip is ~270 million. Temporal sampling exists because you cannot process all frames directly.
+
+</Flashcard>
+
+<Flashcard question="Single-frame baseline: why and what to read from it?">
+
+Run a 2D image classifier on one frame, discard the rest; cheap and surprisingly strong. Many benchmarks are largely solvable from one frame (scene context says a lot). If a video model does not comfortably beat this baseline, it is not learning temporal structure.
+
+</Flashcard>
+
+<Flashcard question="Late fusion vs early fusion?">
+
+Late: per-frame 2D CNN features averaged then classified. Captures content, not order. Early: stack frames as input channels before the first conv. First layer sees temporal info; deeper layers do not.
+
+</Flashcard>
+
+<Flashcard question="3D conv vs 2D conv: parameter cost per filter (3x3, RGB)?">
+
+2D: 3·3·3 = 27 weights per filter. 3D (3 temporal × 3·3 spatial): 3·3·3·3 = 81 weights per filter. ~3x cost per filter, with proportionally more compute per output position.
+
+</Flashcard>
+
+<Flashcard question="C3D and I3D in one line each?">
+
+C3D (Tran 2015): early influential 3D-conv architecture for video. I3D (Carreira & Zisserman 2017): "inflate" pretrained 2D ImageNet weights into 3D filters to bootstrap a 3D model from a strong 2D one.
+
+</Flashcard>
+
+<Flashcard question="Two-stream network architecture and modern descendant?">
+
+Spatial stream (RGB frames, appearance) + temporal stream (optical flow, motion), fused late. SlowFast (Feichtenhofer 2019) is the modern descendant: two pathways at different temporal sampling rates (slow with high spatial detail; fast with high temporal detail).
+
+</Flashcard>
+
+<Flashcard question="Video transformer factorized attention?">
+
+Full self-attention over all spatial + temporal positions is quadratic in total tokens, expensive. TimeSformer (Bertasius 2021) divides it: attend across space within a frame, then across time at the same spatial position. ViViT explores similar factorizations.
+
+</Flashcard>
+
+<Flashcard question="Temporal sampling and the trade-off?">
+
+Select a subset of frames (uniform stride, random temporal crops at training, multi-chunk averaging at evaluation) because raw frame counts are too large. More frames = more compute + memory; fewer frames = risk of missing temporal signal. Default 32-64 frames per training example.
+
+</Flashcard>
+
+<Flashcard question="Kinetics dataset family?">
+
+Kinetics-400/600/700 (Kay et al. 2017+): the modern action-recognition benchmark. Hundreds of thousands of labeled YouTube clips, hundreds of action classes. Reporting a video result without naming the dataset is doing the dataset's interpretive work invisibly.
+
+</Flashcard>
+
+</FlashcardSet>

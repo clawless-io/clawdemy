@@ -1,0 +1,100 @@
+---
+title: "Cheatsheet: Training your own LLM"
+description: One-page reference. Decision criteria, pipeline, tools, economics, mix-architecture fit, boundary disclaimers.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## Decision: should you fine-tune?
+
+Fine-tune ONLY when ALL THREE are true:
+
+```
+1. Prompting consistently fails on a specific recurring task at scale
+   (the "where prompts run out" line from L3)
+2. Retrieval / tools (L4) do not fix it
+   (failure is "wrong behavior," not "missing knowledge")
+3. Volume is high enough that inference savings justify upfront cost
+   (L8 economics, L2 productive limits applied at lifetime scale)
+```
+
+Most production apps never need to fine-tune. **Train-from-scratch is almost never right** for an app team (Track 15 territory).
+
+## The staged pipeline
+
+| Stage | What you do |
+| --- | --- |
+| **1. Pick an open checkpoint** | Llama / Mistral / Phi family; size class fits the task |
+| **2. Curate SFT data** | Small + high-quality; format-matched (chat template); synthetic-then-filtered with held-out eval |
+| **3. LoRA training** | TRL or Axolotl; single capable GPU; hours to a day; managed provider (Together/Modal/Lambda/Anyscale) |
+| **4. Optional: DPO** | Preference tuning when you need ranked-output quality |
+| **5. Evaluate + A/B test** | Pass the held-out set; A/B test on real traffic; verify cost/latency moved (lessons 2 + 7) |
+
+## Tooling
+
+| Tool | What it is |
+| --- | --- |
+| **TRL** | Hugging Face; `SFTTrainer`, `DPOTrainer` |
+| **Axolotl** | Config-driven wrapper over TRL |
+| **PEFT / LoRA** | Parameter-efficient fine-tuning; standard choice |
+| Managed compute | Together, Modal, Lambda Labs, Anyscale |
+
+## Economics rule
+
+```
+hosted_lifetime  = hosted_cost_per_call × calls_per_period × periods
+fine-tune_lifetime = train_cost + (serving_cost_per_call × calls × periods)
+
+Fine-tune if:  fine-tune_lifetime << hosted_lifetime  AND  quality ≥ hosted
+                                                          (on held-out eval)
+```
+
+**Worked example.** 200K calls/month, 24 months, hosted $0.005/call, fine-tune $2,500, serving $0.0005/call:
+- Hosted: 200K × 24 × 0.005 = **$24,000**
+- Fine-tuned: $2,500 + (200K × 24 × 0.0005) = **$4,900**
+- Saving: ~$19,000 (~80% reduction); crossover at ~3 months.
+
+## The mix architecture fit
+
+```
+Inner sub-tasks (high-volume, narrow):
+  router, classifier, extractor, retriever-rewriter, eval-as-judge
+  -> FINE-TUNED specialized models (smaller, cheaper to serve)
+
+Outer user-facing synthesis (the main response):
+  -> FRONTIER HOSTED model
+```
+
+Most production fine-tunes = one or two specific inner sub-tasks; the rest stays hosted.
+
+## When to consider what
+
+| Symptom | Reach for |
+| --- | --- |
+| Vague answers, format misses | Prompt engineering (L3) |
+| Missing knowledge / current data needed | Retrieval / tools (L4) |
+| Wrong behavior on a specific task at scale | **Fine-tune** (this lesson) |
+| Need a foundation model nobody else has | Train from scratch (Track 15; almost never the right answer for app teams) |
+
+## What this lesson does NOT cover
+
+- Training-data policy
+- Alignment debates / contested safety claims
+- Sector-specific compliance for trained models
+
+Real and important; require their own framing in their own forum with the right stakeholders. This lesson is the **engineering** (when / how / what it costs / what you get) discipline.
+
+## Words to use precisely
+
+- **Fine-tuning**: continued training from an existing checkpoint on a small task-specific dataset.
+- **SFT (supervised fine-tuning)**: training on `(instruction, response)` pairs with the model's chat template.
+- **DPO (Direct Preference Optimization)**: simpler successor to RLHF; trains on `(prompt, preferred, dispreferred)` pairs directly.
+- **LoRA**: parameter-efficient fine-tuning by training small added matrices instead of updating all weights.
+- **Crossover**: the volume × lifetime point where fine-tuned-and-served cost equals hosted cost.
+
+## Source
+
+- Full Stack Deep Learning, LLM Bootcamp (Spring 2023), Session 9: How to train your own LLM (guest: Reza Shabani, Replit). `fullstackdeeplearning.com/llm-bootcamp`. Independent structural mirror in original prose; see references.

@@ -1,0 +1,197 @@
+---
+title: "Practice: Project walkthrough"
+description: Self-check on the production decisions inside a real LLM application, a read-this-design exercise, and flashcards for retrieval.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Seven short questions. Answer each before opening the collapsible.
+
+**1. What is askFSDL, in one line, and what does it scope itself to?**
+
+<details>
+<summary>Show answer</summary>
+
+A chat-style Q&A app over the FSDL course materials: user asks a question about the course content; app returns an answer grounded in the materials, with citations to source video/text. It is scoped on purpose to a narrow, well-known corpus, the system prompt can promise that scope and refuse out-of-scope cleanly.
+
+</details>
+
+**2. Why is scoping the knowledge source a quality decision, not a limitation?**
+
+<details>
+<summary>Show answer</summary>
+
+A narrow, well-retrievable corpus produces consistently good answers; a broad corpus produces inconsistent ones. Narrow scope lets the system prompt make an honest promise ("this answers FSDL course questions") and refuse out-of-scope plainly, which beats "be helpful about everything" failing inconsistently. A narrow app that works beats a broad app that does not.
+
+</details>
+
+**3. Why does each chunk carry its source label through the entire pipeline?**
+
+<details>
+<summary>Show answer</summary>
+
+So citations are real and traceable, not bolted on at the end. The retrieval step keeps the source; the prompt presents chunks with their labels; the system prompt asks the model to cite which source each claim came from; the UI renders citations as clickable links back to the source. Citations decide whether users (and the team) trust the answer; carrying the source is the only way to keep them honest.
+
+</details>
+
+**4. What is in the scope-honest system prompt, and why does refusing out-of-scope belong in the spec?**
+
+<details>
+<summary>Show answer</summary>
+
+In spirit: "You answer questions about the FSDL course based on the provided context. Cite sources. If the context does not contain the answer, say so plainly." Refusing out-of-scope is part of the spec because the alternative is hallucinating-plausible-sounding answers when retrieval missed the topic, which destroys trust. The system prompt enforces the boundary the knowledge-source scope already implies.
+
+</details>
+
+**5. What five-to-ten fields per request should you log, and why up front?**
+
+<details>
+<summary>Show answer</summary>
+
+Question, retrieved chunk IDs, prompt version, model identifier, model parameters (temperature, max_tokens), response, and user feedback signal (thumbs/edit). Trivial to add up front; nearly impossible to backfill once you need them for debugging or evaluation. Without these logs, no real evaluation in production is possible; with them, regressions, retrieval failures, and bad prompts become traceable.
+
+</details>
+
+**6. What does the walkthrough deliberately defer to later lessons, and where does each go?**
+
+<details>
+<summary>Show answer</summary>
+
+Sophisticated UX patterns (regeneration, hedging, recoverable failure) -> **lesson 6**. Production observability and evaluation pipelines (dashboards, regression tests, eval harnesses) -> **lesson 7**. Multiple tools or agentic flow (planning, multi-step tool use) -> **lesson 10**. The walkthrough is honest scoping: do the core well, name what is missing, point at where each missing piece gets added.
+
+</details>
+
+**7. State the "five hours, not five weeks" reframing and what it implies.**
+
+<details>
+<summary>Show answer</summary>
+
+A real LLM application of this shape is **small**, a few hundred lines of Python across the pipeline, plus prompts, plus the indexed corpus, plus a hosted model someone else trained. The complexity is in the **decisions**, not the line count. Teams that ship in days have internalized this; teams that take months are usually fighting the wrong battle (custom architecture, training from scratch, never-finished eval system) for an application the L1-L4 components would already solve.
+
+</details>
+
+## Try it yourself: read this design
+
+About 10 minutes, no code. Apply the production-decision eye to a sketch.
+
+**Part A: catalog the decisions.** Below is a one-paragraph sketch of a new LLM application. Identify at least five production decisions (good or questionable) embedded in it.
+
+```
+A team is building a Q&A assistant for their public API documentation.
+They scrape every page of their docs site nightly, split each page into
+1000-token chunks with 200-token overlap, embed with a general-purpose
+embedding model, store in a managed vector DB tagged with the docs section
+and page URL. At query time they retrieve top-10 chunks, prepend a short
+system prompt "You are a helpful technical assistant," append the chunks
+followed by the user's question, call a frontier model with default
+temperature, return the response (no streaming, no citations). They log
+the question and response only.
+```
+
+<details>
+<summary>What you'll get</summary>
+
+Decisions visible:
+
+1. **Scope** = public API docs (narrow, retrievable, good).
+2. **Refresh cadence** = nightly scrape (reasonable; freshness needs).
+3. **Chunking** = 1000 tokens with 200 overlap (slightly large; tutorial-style docs often do better at ~400-600).
+4. **Embedding** = general-purpose (fine first try; revisit on held-out eval).
+5. **Vector store** = managed (good early-stage; revisit at scale-cost).
+6. **Metadata** = section + page URL (good; supports filtering + citations).
+7. **Top-k = 10** (reasonable; tune empirically).
+8. **System prompt** = thin (problematic; missing scope-honest framing, missing citation-asking, missing out-of-scope refusal).
+9. **Default temperature** (probably fine for a Q&A; consider 0-0.3 for consistency).
+10. **No streaming, no citations** (UX regression vs even the askFSDL baseline; missed lesson-6 work + the citation discipline this lesson named).
+11. **Logging = question + response only** (will hobble all evaluation later; missing retrieval IDs, prompt version, model+parameters, user feedback).
+
+Five would be a passing answer; the more you catch, the better the production-decision eye is forming.
+
+</details>
+
+**Part B (reasoning).** Of the questionable decisions in Part A, which two would you fix first and why?
+
+<details>
+<summary>What you should notice</summary>
+
+(1) **Citations + a scope-honest, citation-asking system prompt**. The fix is two prompt changes (state scope; ask for source citations) plus a UI change (render citations). Together they decide whether users trust the answer, which is a foundational quality move. (2) **Logging the missing fields** (retrieval IDs, prompt version, model + parameters, a feedback signal). Trivial to add now; near-impossible to backfill; required for any real evaluation work. Both fixes are small in code, large in impact. Streaming + better chunking come next.
+
+</details>
+
+**Part C (reasoning).** Why does the walkthrough teach more than a generic "build a RAG app" tutorial, even though the components are the same?
+
+<details>
+<summary>What you should notice</summary>
+
+A tutorial teaches the components. The walkthrough teaches the **decisions** about the components: scope, chunking-for-content, source-carrying, scope-honest prompting, citation discipline, logging-for-evaluation. The components are easy to copy; the decisions are what make an application useful, and reading them in a real example is the fastest way to internalize them. Knowing "RAG has chunks and a vector store" is not the same as knowing "this team chunked at 500 tokens with overlap because the docs are tutorial-style, and they tag every chunk with section because that is what citations point to."
+
+</details>
+
+## Flashcards
+
+Nine cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay the set out one card per page for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="What is askFSDL?">
+
+A chat-style Q&A app over the FSDL course materials. Scoped to a narrow, well-known corpus; system prompt promises that scope and refuses out-of-scope cleanly. The bootcamp's worked example for a real production LLM app.
+
+</Flashcard>
+
+<Flashcard question="Why scope the knowledge source narrowly?">
+
+Narrow + well-retrievable corpus produces consistently good answers; broad produces inconsistent ones. Lets the system prompt promise scope and refuse out-of-scope honestly. Narrow that works > broad that doesn't.
+
+</Flashcard>
+
+<Flashcard question="Why carry the source label on every chunk through the pipeline?">
+
+So citations are real and traceable, not bolted on. Retrieval keeps source; prompt presents chunks with labels; model cites; UI renders as links. Citations decide trust; carrying the source is the only honest way.
+
+</Flashcard>
+
+<Flashcard question="What's in a scope-honest system prompt?">
+
+In spirit: "Answer about [scope] from the provided context. Cite sources. If context doesn't contain the answer, say so plainly." Refusing out-of-scope is part of the spec, hallucinating on missed retrieval destroys trust.
+
+</Flashcard>
+
+<Flashcard question="Five-to-ten fields to log per request?">
+
+Question, retrieved chunk IDs, prompt version, model identifier, model parameters (temperature/max_tokens), response, user feedback signal. Trivial to add up front; near-impossible to backfill. Seed of LLMOps (L7).
+
+</Flashcard>
+
+<Flashcard question="What does the walkthrough defer to later lessons?">
+
+Sophisticated UX patterns (regeneration, hedging, recoverable failure) → L6. Production observability/eval pipelines (dashboards, regression tests) → L7. Multiple tools / agentic flow → L10. Honest scoping: core well, missing pieces named.
+
+</Flashcard>
+
+<Flashcard question="'Five hours, not five weeks' reframing?">
+
+A real LLM app of this shape is small: a few hundred lines of Python + prompts + indexed corpus + a hosted model. Complexity is in the DECISIONS, not the line count. Shipping teams have internalized this.
+
+</Flashcard>
+
+<Flashcard question="What's the difference between a 'RAG tutorial' and this walkthrough?">
+
+A tutorial teaches the components. The walkthrough teaches the DECISIONS about them: scope, chunking-for-content, source-carrying, scope-honest prompting, citations, logging-for-eval. Decisions are what make an app useful.
+
+</Flashcard>
+
+<Flashcard question="When reading a real app, what's the 'production-decision eye'?">
+
+The ability to see, at each pipeline stage, the deliberate choice baked in (scope, chunk size, top-k, prompt structure, what's logged) and judge it. The walkthrough's purpose is to develop this eye against a real example.
+
+</Flashcard>
+
+</FlashcardSet>

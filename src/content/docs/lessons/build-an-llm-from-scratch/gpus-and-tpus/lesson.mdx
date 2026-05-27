@@ -1,0 +1,53 @@
+---
+title: "Lesson: How models run on hardware, GPUs and TPUs"
+description: Phase 2 opens on the chip. How a GPU executes math (SIMT, streaming multiprocessors, tensor cores), the memory hierarchy that decides whether the math is fed (HBM, SRAM, registers), how TPUs differ (systolic arrays), and why hardware shapes design choices in lesson 2's terms.
+sidebar:
+  order: 2
+  label: Lesson
+artifact: lesson
+---
+
+Phase 1 built the model: tokenizer, cost accounting, architecture, and the efficiency-minded variations. Phase 2 turns to the machine that runs it. The lessons in this phase are about making your model fast, and "fast" is not a software property in the abstract; it is a relationship between your computation and the hardware it lands on. This lesson opens the box on that hardware, the GPU you actually train on (and the TPU you might), and ties what you see back to the cost vocabulary from lesson 2.
+
+If lesson 2 said "arithmetic intensity decides whether the hardware is busy," this lesson is the physical reason, with the memory hierarchy and execution model that make it true.
+
+## How a GPU executes math
+
+A GPU is, in one sentence, a chip that can perform an enormous number of arithmetic operations per cycle by running many threads at once. Concretely, modern data-center GPUs contain on the order of tens to hundreds of **streaming multiprocessors (SMs)**, each with many small arithmetic units. Threads within an SM execute in lockstep groups (often called **warps**) of 32 threads, all running the same instruction on different data, a model called **SIMT** (single-instruction, multiple-thread). When you write a kernel for the GPU (lesson 6's topic), you are partitioning your computation into thousands of threads grouped into warps and blocks.
+
+For an LLM, almost all of the work is matrix multiplies, and modern GPUs include specialized hardware for them: **tensor cores**, units that perform a small matmul (typically in fp16 or bf16) in a single cycle. The published peak FLOPs of a recent data-center GPU comes largely from its tensor cores, and you only reach that peak by feeding them large enough matmuls in the right precision. Get the shape or the dtype wrong and most of the chip is idle.
+
+## The memory hierarchy decides who is fed
+
+This is the single most important picture in the lesson. A GPU's compute is not the bottleneck; getting data to the compute is. There are three levels of memory you must know:
+
+- **HBM (high-bandwidth memory):** the GPU's main memory, large (tens of gigabytes) and fast by everyday standards (a terabyte per second class), but far slower than the compute units can consume. The model weights, the optimizer states, the activations, all live here.
+- **SRAM (shared memory or L1 cache):** small per-SM (tens or hundreds of kilobytes), an order of magnitude or more faster than HBM. Data must be staged here to be processed efficiently.
+- **Registers:** tiny, per-thread, the fastest of all.
+
+The pyramid is unforgiving: HBM is huge but distant; registers are fast but tiny. A matmul that pulls its inputs from HBM, multiplies once, and writes back has **low arithmetic intensity** (lesson 2's term) and is **memory-bound**: the tensor cores wait on HBM and most of their peak goes unused. A matmul that pulls a tile of its inputs into SRAM and reuses it across many multiplies has **high arithmetic intensity** and is **compute-bound**: the tensor cores stay fed and you actually reach close to peak. Every later optimization in this phase, from kernels to parallelism, is some version of "keep the data near the compute long enough to amortize moving it."
+
+## TPUs: a different bet on the same problem
+
+Google's **TPU** is a different shape of solution to the same problem. Where a GPU is a flexible many-core chip with tensor cores added on, a TPU's heart is a **systolic array**: a 2D grid of multiply-accumulate units (commonly 128 by 128 or 256 by 256) through which data *flows*. Each cycle, partial sums march one step across the grid while inputs march the other way, so each loaded value is reused across many multiplies as it moves. The systolic array is essentially a hardware bet that the dominant operation is matrix multiplication, and it pays off when that bet is right. TPUs are typically used in **pods**, many chips connected by fast interconnect, and they shine on the regular, large matmuls that LLM training is mostly made of.
+
+The TPU's design also reflects the same memory-hierarchy reality: the systolic array reuses data within the chip's fast memory as it computes, rather than constantly returning to a slow main memory. Different chip, same principle.
+
+## Why this shapes the design choices upstream
+
+The accounting in lesson 2 set you up to see why. A GPU's peak FLOPs is reachable only by **large, regular matrix multiplies in tensor-core-friendly precision**. That is precisely what the modern architecture (lesson 3) gives you, big matmuls in the attention and FFN sublayers, and what training practice exploits, mixed-precision (bf16 or fp16) computation, batches large enough to keep tensor cores fed, FFN hidden widths that align nicely with hardware tile sizes. Conversely, operations that the hardware is bad at, lots of small elementwise ops, irregular control flow, dependent serial chains, run far below peak. This is the bridge between the architecture and the systems work: the architecture was designed for matmul-heavy hardware, and the systems work in this phase exists to keep that hardware busy.
+
+## Why this matters when you build AI
+
+Two practical instincts come from this lesson. First, when a training or inference job runs far below the GPU's spec sheet, you know where to look: arithmetic intensity, precision, and matmul shapes. The hardware was not lying; you were not feeding it. Second, the architecture choices from lesson 3 stop looking arbitrary. Pre-norm and the rest are stability decisions; the bias-toward-big-matmuls is a *hardware* decision, made because that is what GPUs and TPUs are actually good at. Modern LLMs are co-designed with their hardware, and once you have seen the chip's structure, you read model designs differently: they are bargains struck against the physical reality of the machine that will run them. The next two lessons turn this principle into code, with kernels (lesson 6) and parallelism (lesson 7).
+
+## What you should remember
+
+- **A GPU runs many threads in lockstep (SIMT)** across **streaming multiprocessors (SMs)**, with thousands of small arithmetic units and specialized **tensor cores** for matrix multiplies. Peak FLOPs comes largely from tensor cores and only on large matmuls in fp16/bf16.
+- **The memory hierarchy decides who is fed.** **HBM** (main memory, large but slow relative to compute), **SRAM/shared memory** (small per-SM, fast), and **registers** (tiny, fastest). Data must be staged into fast memory and reused to keep compute busy.
+- **Arithmetic intensity is physical:** memory-bound ops leave tensor cores idle waiting on HBM; compute-bound ops reuse data in SRAM and approach peak. Every later optimization keeps data near the compute long enough.
+- **TPUs use a systolic array:** a 2D grid of multiply-accumulate units through which data flows, reusing each value across many multiplies. A hardware bet that the dominant op is matmul, paying off when it is. Used in pods with fast interconnect.
+- **Hardware shapes model design.** The bias toward large matmuls, mixed precision, and tile-friendly shapes is a hardware decision; the architecture is co-designed with the chip.
+- **When a job runs below the spec sheet,** the cause is almost always low arithmetic intensity, wrong precision, or matmul shapes that miss tensor-core tiles. Lesson 2's accounting plus this lesson's hardware picture is how you diagnose it.
+
+A GPU is many tensor cores fed (or starved) by a memory hierarchy, and a TPU is a systolic array making the same bet a different way. The lesson is the same: hardware peaks only when the data is near the compute. Everything else in Phase 2 follows from that.

@@ -1,0 +1,116 @@
+---
+title: "Lesson: Tokenizers up close"
+description: Open the component you have been calling since lesson 2. How a fast tokenizer turns text into tokens through a four-stage pipeline, why fast tokenizers are fast, the three subword algorithms, and how to train a brand-new tokenizer on your own corpus.
+sidebar:
+  order: 2
+  label: Lesson
+artifact: lesson
+---
+
+You have called a tokenizer in almost every lesson since lesson 2, always as a black box: text goes in, `input_ids` come out. This lesson opens the box. The tokenizer is the bridge between human text and the numbers a model reads, and it quietly shapes everything downstream: how long your sequences are, how much context you can fit, even how well a model handles your particular kind of text. By the end you will understand how a fast tokenizer turns text into tokens, and you will train a new one of your own.
+
+Keep a notebook open; `pip install transformers datasets` if needed.
+
+## What a fast tokenizer actually does
+
+Turning text into tokens is not one step but a pipeline of four, run in order:
+
+1. **Normalization** cleans the text (lowercasing, stripping accents, Unicode tidy-up).
+2. **Pre-tokenization** splits the cleaned text into words (the boundaries the subword pieces must respect).
+3. **The model** applies the subword algorithm that breaks words into the actual tokens.
+4. **Postprocessing** adds the special tokens (`[CLS]`, `[SEP]`, and friends) the model expects.
+
+You can watch the first two stages directly. Every fast tokenizer exposes its internals through a `backend_tokenizer` attribute. Normalization first:
+
+```python
+from transformers import AutoTokenizer
+tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+tokenizer.backend_tokenizer.normalizer.normalize_str("Héllò hôw are ü?")
+```
+
+```python
+'hello how are u?'
+```
+
+Because this is the *uncased* BERT tokenizer, normalization lowercased everything and stripped the accents. A *cased* tokenizer would leave the capitals alone. Now pre-tokenization:
+
+```python
+tokenizer.backend_tokenizer.pre_tokenizer.pre_tokenize_str("Hello, how are  you?")
+```
+
+```python
+[('Hello', (0, 5)), (',', (5, 6)), ('how', (7, 10)), ('are', (11, 14)), ('you', (16, 19)), ('?', (19, 20))]
+```
+
+Two things to notice. BERT splits on whitespace and punctuation, and it records **offsets**, the character span each piece came from. Different tokenizers pre-tokenize differently: the GPT-2 tokenizer keeps spaces and marks them with a `Ġ` symbol (so the original text can be reconstructed exactly), while the T5 tokenizer, built on SentencePiece, marks spaces with `▁` and only splits on whitespace. These small choices ripple through everything the tokenizer produces.
+
+## Why "fast" tokenizers are fast, and what they give you
+
+The library ships two kinds of tokenizer. Slow ones are pure Python. Fast ones are backed by the `tokenizers` library, written in Rust, which parallelizes the work. `AutoTokenizer` picks the fast version automatically whenever one exists. The speed is real (recall from lesson 5 that a fast tokenizer with `batched=True` can be roughly 30 times quicker), but fast tokenizers also give you something slow ones cannot: those **offsets** and **word IDs**. Because a fast tokenizer tracks which character span and which original word each token came from, you can map a model's token-level output back to the exact place in the original text. That is what makes token-level tasks like named-entity recognition and extractive question answering work cleanly, as you will see in the next lesson.
+
+## The three subword algorithms
+
+Stage three, the model, is where words become subword tokens, and there are three algorithms in wide use. You do not need to implement them, but you should recognize them, because the choice is baked into every model family:
+
+- **BPE (Byte-Pair Encoding)** starts from a tiny vocabulary and repeatedly merges the most frequent adjacent pair into a new token, learning merge rules plus a vocabulary. Used by the GPT family.
+- **WordPiece** also merges upward but scores pairs by frequency in a way that favors pairs whose individual pieces are rarer; it keeps just a vocabulary. Used by BERT.
+- **Unigram** goes the other way: it starts from a large vocabulary and removes the tokens that hurt the corpus likelihood least, ending with a vocabulary plus a score per token. Used by T5 and others, usually via SentencePiece.
+
+The common thread is **subword tokenization**: rather than one token per word (a huge vocabulary, and helpless on unseen words) or one per character (tiny vocabulary, very long sequences), these algorithms learn a middle vocabulary of frequent word-pieces. Common words stay whole; rare words split into familiar parts. That is why a model can handle a word it never saw in training.
+
+## Training a new tokenizer on your own corpus
+
+Here is the capability that makes this lesson hands-on. If your text is very different from what a model's tokenizer was built for (a new language, or a specialized domain like source code), the existing tokenizer will be inefficient, splitting your text into far more tokens than necessary. The fix is to train a new tokenizer on your corpus.
+
+First, an important distinction: **training a tokenizer is not training a model.** Model training uses gradient descent and is randomized (you set seeds to reproduce it). Training a tokenizer is a deterministic statistical process: it scans the corpus and picks the subwords that best represent it according to the algorithm's rules. Same corpus, same algorithm, same result every time. No GPU, no loss curve.
+
+The API is one method, `train_new_from_iterator`, and the smart move is to start from an existing fast tokenizer so you inherit its algorithm, its normalization, and its special tokens, changing only the learned vocabulary. Say you want a tokenizer for Python code. Load GPT-2's tokenizer and a corpus of code:
+
+```python
+from datasets import load_dataset
+from transformers import AutoTokenizer
+
+raw_datasets = load_dataset("code_search_net", "python")
+old_tokenizer = AutoTokenizer.from_pretrained("gpt2")
+```
+
+The corpus must arrive as an *iterator of batches* of text, so the whole thing never sits in memory at once. A generator function does this cleanly, yielding 1,000 examples at a time:
+
+```python
+def get_training_corpus():
+    dataset = raw_datasets["train"]
+    for start in range(0, len(dataset), 1000):
+        yield dataset[start : start + 1000]["whole_func_string"]
+
+training_corpus = get_training_corpus()
+```
+
+Then train, asking for a vocabulary size:
+
+```python
+tokenizer = old_tokenizer.train_new_from_iterator(training_corpus, 52000)
+```
+
+That is the whole thing. (Note `train_new_from_iterator` only works on fast tokenizers, because the Rust core is what makes training a large vocabulary quick rather than excruciating.) The payoff is concrete. GPT-2's stock tokenizer splits four spaces of indentation into four separate tokens and mangles `add_numbers`; the freshly trained one learns a single token for an indentation level, a token for the `"""` that opens a docstring, and splits names sensibly on `_`. On a sample function the new tokenizer produces 27 tokens where the stock one needed 36, a 25% shorter sequence for the same code, which means cheaper, faster, longer-context processing.
+
+Save and share it exactly as you did a model in lesson 4:
+
+```python
+tokenizer.save_pretrained("code-search-net-tokenizer")
+tokenizer.push_to_hub("code-search-net-tokenizer")
+```
+
+## Why this matters when you use AI
+
+The tokenizer is the most overlooked lever in the whole stack. It does not learn anything during model training, it is not glamorous, and yet it sets the units everything else operates on. A tokenizer poorly matched to your text inflates every sequence, and since cost and context limits are measured in tokens, that inflation is a direct tax on every call: more tokens per document means higher bills, slower runs, and less of your content fitting in the context window. The 25% reduction on Python code above is not a curiosity; on a real codebase it is a quarter off your token budget. Most of the time you will use the tokenizer that ships with your model and never think about it, which is correct. But knowing what it does, and that you can retrain it for an unusual domain, is what separates someone who accepts the defaults from someone who can diagnose why their text is unexpectedly expensive.
+
+## What you should remember
+
+- **A fast tokenizer runs a four-stage pipeline:** normalization (clean), pre-tokenization (split into words), the subword model (words to tokens), and postprocessing (add special tokens). Inspect the first two with `backend_tokenizer.normalizer` and `.pre_tokenizer`.
+- **Fast tokenizers are Rust-backed and the default.** Beyond speed, they track offsets and word IDs, mapping each token back to its place in the original text, which token-level tasks rely on.
+- **Three subword algorithms cover the field:** BPE (GPT family), WordPiece (BERT), Unigram (T5 and SentencePiece-based models). All learn a middle vocabulary of word-pieces so rare words split into familiar parts.
+- **Training a tokenizer is not training a model.** It is a deterministic statistical scan of a corpus, no gradient descent, same result every time.
+- **`train_new_from_iterator` retrains the vocabulary** from an existing fast tokenizer, keeping its algorithm and special tokens. Feed it a generator of text batches and a vocab size.
+- **A tokenizer matched to your domain is more efficient:** fewer tokens per document means lower cost, faster runs, and more content per context window.
+
+Every model you use starts by tokenizing, and the tokenizer decides the units the rest of the work is measured in. Knowing how it splits text, and that you can retrain it, turns a silent black box into a lever you can actually pull.

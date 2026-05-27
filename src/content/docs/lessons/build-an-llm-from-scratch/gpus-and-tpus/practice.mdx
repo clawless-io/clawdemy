@@ -1,0 +1,178 @@
+---
+title: "Practice: How models run on hardware"
+description: Self-check on SIMT, tensor cores, the memory hierarchy, TPUs, and why hardware shapes architecture, a diagnose-the-slow-job exercise, and flashcards for retrieval.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Seven short questions. Answer each before opening the collapsible.
+
+**1. What is SIMT, and why does it let a GPU do so much arithmetic per cycle?**
+
+<details>
+<summary>Show answer</summary>
+
+SIMT (single-instruction, multiple-thread) is the GPU's execution model: threads run in lockstep groups (warps, typically 32) executing the same instruction on different data, across many streaming multiprocessors (SMs). So a single instruction issued in an SM drives many arithmetic units at once, which is why the chip can perform an enormous number of operations per cycle.
+
+</details>
+
+**2. What are tensor cores, and what does it take to reach the peak FLOPs they advertise?**
+
+<details>
+<summary>Show answer</summary>
+
+Tensor cores are specialized units that perform a small matrix multiply per cycle (typically in fp16 or bf16). The published peak FLOPs of a modern data-center GPU comes largely from them. To reach that peak you need large matmuls in tensor-core-friendly precision (mixed precision), with shapes that align to the tile sizes. Small matmuls, wrong dtype, or odd shapes leave most of the chip idle.
+
+</details>
+
+**3. Name the three levels of GPU memory hierarchy and what each is for.**
+
+<details>
+<summary>Show answer</summary>
+
+**HBM** (main memory): large (tens of gigabytes) and fast by everyday standards (~TB/s) but far slower than compute; holds weights, optimizer states, activations. **SRAM** (shared memory / L1 cache): small per-SM (tens to hundreds of KB), an order of magnitude or more faster than HBM; data must be staged here to be processed efficiently. **Registers**: tiny, per-thread, fastest of all.
+
+</details>
+
+**4. Why is arithmetic intensity "physical"?**
+
+<details>
+<summary>Show answer</summary>
+
+Because the speed gap between HBM and the compute units is real: a matmul that pulls inputs from HBM, multiplies once, and writes back is memory-bound and the tensor cores wait on memory. A matmul that pulls a tile into SRAM and reuses it across many multiplies is compute-bound and approaches peak. The arithmetic-intensity number from lesson 2 is just describing which side of that gap an operation lands on.
+
+</details>
+
+**5. How is a TPU's systolic array different from a GPU's design?**
+
+<details>
+<summary>Show answer</summary>
+
+A TPU's heart is a 2D grid of multiply-accumulate units through which data flows: each cycle, partial sums and inputs march across the grid, so each loaded value is reused across many multiplies as it moves. The GPU is many flexible cores with tensor cores added on; the TPU is a hardware bet that the dominant operation is matrix multiplication, with reuse built into the geometry of the chip. Same principle (reuse data within fast memory), different shape.
+
+</details>
+
+**6. Why does a typical LLM job often run far below the GPU's published peak FLOPs?**
+
+<details>
+<summary>Show answer</summary>
+
+Because the peak applies only to large, regular matmuls in tensor-core-friendly precision with shapes that fit the tiles. Real workloads include memory-bound elementwise operations (low arithmetic intensity), data movement between layers, attention's KV-cache reads, and matmul shapes that miss tile alignment. The compute is not the bottleneck; feeding it is.
+
+</details>
+
+**7. How does this lesson explain the architecture choices from lesson 3?**
+
+<details>
+<summary>Show answer</summary>
+
+The architecture was co-designed with the hardware. The bias toward big matmul-heavy sublayers (attention's Q/K/V/O projections, the FFN), the use of mixed precision, and the preference for tile-friendly shapes are *hardware* decisions, because that is what GPUs and TPUs are actually good at. Modern LLM designs are bargains struck against the physical reality of the chip that will run them.
+
+</details>
+
+## Try it yourself: diagnose the slow job
+
+About 10 minutes, no setup. Diagnostics is the practical payoff of this lesson.
+
+**Part A: where's the slowdown?** A teammate reports their model is running at about 20% of the GPU's advertised peak FLOPs. List three plausible causes from this lesson and what you would check for each.
+
+<details>
+<summary>What you'll get</summary>
+
+Any three of:
+
+- **Wrong precision.** They might be running in fp32 instead of bf16/fp16, so tensor cores aren't engaged. Check the model's dtype and the autocast/mixed-precision setup.
+- **Small or odd matmul shapes.** Matmuls below the tensor-core tile size, or with dimensions that miss alignment, leave the tensor cores partially used. Check the shapes of the dominant matmuls; aligning hidden sizes to multiples like 128 or 64 often helps.
+- **Memory-bound surroundings.** Many small elementwise ops (norms, activations, biases) between matmuls have low arithmetic intensity and stall on HBM. The fix is fusion (the next lesson), so the data stays in fast memory across them.
+- **Batch too small.** Tensor cores need enough work to amortize the data movement; a tiny batch is a memory-bound shape no matter what you do.
+
+The pattern: the hardware is not lying; you are not feeding it.
+
+</details>
+
+**Part B (reasoning).** Why is it accurate to say a TPU's design is a "bet" on matmul, and what would happen on a workload where that bet was wrong?
+
+<details>
+<summary>What you should notice</summary>
+
+The systolic array's geometry only pays off when data can flow through it for many cycles doing matrix multiplies. A workload that needed mostly irregular elementwise ops or dynamic control flow would not feed the array efficiently and the chip would underperform. The TPU's bet is right for LLMs because the dominant operation is large matmul; on a workload where it is not (say, sparse computations with lots of branching), a more flexible GPU may serve better. Bets pay off when reality matches them.
+
+</details>
+
+**Part C (reasoning).** From this lesson, explain why "use mixed precision" is essentially a free speedup on modern GPUs.
+
+<details>
+<summary>What you should notice</summary>
+
+Tensor cores execute their fastest matmuls in fp16 or bf16, and the published peak FLOPs of modern data-center GPUs is the tensor-core peak. Running in fp32 forgoes most of that peak. Mixed precision (do most of the math in bf16/fp16 while keeping a few sensitive accumulations in fp32) reaches near the tensor-core peak at almost no quality cost on modern training recipes. It is "free" only in the sense that the hardware was already designed to do it; you just have to ask.
+
+</details>
+
+## Flashcards
+
+Nine cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay the set out one card per page for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="What is SIMT, and what are SMs and warps?">
+
+SIMT = single-instruction, multiple-thread: many threads run in lockstep on different data. They live in warps (typically 32 threads) inside streaming multiprocessors (SMs); a GPU has many SMs, each with many arithmetic units.
+
+</Flashcard>
+
+<Flashcard question="What are tensor cores and what reaches peak FLOPs?">
+
+Specialized units that do a small matmul per cycle in fp16/bf16. Peak FLOPs comes largely from them and is reached only with large, tile-aligned matmuls in mixed precision; wrong dtype or shape leaves the chip idle.
+
+</Flashcard>
+
+<Flashcard question="Name the GPU memory hierarchy.">
+
+HBM (main memory, large, ~TB/s, holds weights/grads/activations), SRAM/shared memory (small per-SM, much faster, staging area), registers (tiny, per-thread, fastest). Compute is fed only when data is near it.
+
+</Flashcard>
+
+<Flashcard question="Why is arithmetic intensity 'physical'?">
+
+The HBM-to-compute speed gap is real. Low intensity (one op per byte from HBM) -> memory-bound, tensor cores idle. High intensity (many ops per byte staged in SRAM) -> compute-bound, near peak.
+
+</Flashcard>
+
+<Flashcard question="What is a TPU systolic array?">
+
+A 2D grid of multiply-accumulate units; each cycle, inputs and partial sums march across the grid, so each loaded value is reused across many multiplies. A hardware bet that matmul is the dominant op.
+
+</Flashcard>
+
+<Flashcard question="Why does an LLM job often run below the GPU's peak FLOPs?">
+
+Real workloads include memory-bound elementwise ops, data movement, KV-cache reads, and matmul shapes that miss tile alignment. Compute is not the bottleneck; feeding it is.
+
+</Flashcard>
+
+<Flashcard question="What three causes explain '20% of peak FLOPs'?">
+
+Wrong precision (fp32 instead of bf16/fp16, tensor cores not engaged), small or misaligned matmul shapes (miss tiles), and memory-bound surroundings (small ops between matmuls, batch too small). Hardware isn't lying; not feeding it.
+
+</Flashcard>
+
+<Flashcard question="Why is mixed precision essentially a free speedup?">
+
+Tensor-core peak is in fp16/bf16; fp32 forgoes most of it. Mixed precision (math in bf16/fp16, sensitive accumulations in fp32) reaches near peak at almost no quality cost. Free in the sense that the hardware already does it.
+
+</Flashcard>
+
+<Flashcard question="How does hardware shape architecture choices?">
+
+The architecture was co-designed with the chip: big matmuls in attention/FFN sublayers, mixed precision, tile-friendly shapes. Pre-norm/RMSNorm are stability bets; the matmul bias is a hardware bet.
+
+</Flashcard>
+
+</FlashcardSet>

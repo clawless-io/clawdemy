@@ -1,0 +1,211 @@
+---
+title: "Practice: Self-supervised vision"
+description: Self-check on pretext tasks + contrastive + masked-image modeling, a fresh cosine-similarity computation, a method-matching exercise, and flashcards.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Seven short questions. Answer each before opening the collapsible.
+
+**1. What is the core trick that defines self-supervised learning?**
+
+<details>
+<summary>Show answer</summary>
+
+Construct labels from the data itself (a **pretext task**), then run standard supervised training on the resulting labels. The pretext task does not matter in itself; what matters is that solving it forces the network to learn visual features that transfer well to real downstream tasks. The "supervision" comes from the auto-derived pretext labels, not from human annotation.
+
+</details>
+
+**2. Name three pretext tasks from the 2014-2018 wave and what each requires the network to "understand."**
+
+<details>
+<summary>Show answer</summary>
+
+Any three of: **rotation prediction** (predict 0/90/180/270 degree rotation; requires recognizing canonical object orientation, which requires recognizing the object); **jigsaw puzzle** (predict the original permutation of shuffled patches; requires knowing what fits where); **colorization** (predict color from grayscale; requires understanding what objects are present, since skin is roughly skin-toned, foliage roughly green); **inpainting** (predict missing pixels of a masked region); **relative position prediction** (predict spatial relationship of two patches).
+
+</details>
+
+**3. Describe SimCLR's contrastive setup in one sentence.**
+
+<details>
+<summary>Show answer</summary>
+
+For each image in a mini-batch, generate two random augmentations (positive pair); treat all other augmented images in the batch as negatives; pass through a shared encoder; train so positive pairs have high cosine similarity and negative pairs have low, using a temperature-scaled cross-entropy loss (NT-Xent).
+
+</details>
+
+**4. What does MoCo add over SimCLR, and what does BYOL remove?**
+
+<details>
+<summary>Show answer</summary>
+
+**MoCo** uses a momentum-updated encoder and a queue of negatives, letting you use many more negatives than fit in a single GPU's mini-batch (more memory-efficient at scale). **BYOL** removes the explicit negatives entirely; two networks (online + a momentum-target copy), with the online network learning to predict the target's representation of an augmented view. Surprising that it works without negatives at all.
+
+</details>
+
+**5. What is masked image modeling (MAE), and what fraction of patches typically get masked?**
+
+<details>
+<summary>Show answer</summary>
+
+Split the image into patches; randomly mask a large fraction (typically **75 percent**); train the network to reconstruct the masked patches from the visible ones. MAE pairs a heavy encoder (sees only the visible 25 percent) with a lightweight decoder (reconstructs masked patches). The encoder ends up learning rich features because it has to support the reconstruction; the asymmetric design is also computationally efficient.
+
+</details>
+
+**6. Describe the standard pre-train-then-transfer workflow.**
+
+<details>
+<summary>Show answer</summary>
+
+(1) **Pre-train** an encoder on a huge unlabeled image dataset with a self-supervised method (expensive, happens once). (2) **Transfer** to a downstream task with a small labeled dataset, either by **fine-tuning** the whole network (usually best task accuracy) or **linear probing** (freeze encoder, train only a single linear classifier on top; faster, and the fair comparison for evaluating encoders).
+
+</details>
+
+**7. What is the difference between linear probing and fine-tuning, and when do you use each?**
+
+<details>
+<summary>Show answer</summary>
+
+Linear probing: freeze the pre-trained encoder; train only a single linear classifier on top of its features. Used to measure **feature quality** cleanly (no encoder updates allowed) and to compare encoders fairly. Fine-tuning: train the whole network including the encoder, usually with a small learning rate on the encoder. Used when you want the **best task accuracy** in production; the encoder adapts to the downstream task. Published numbers tend to be linear probing for feature comparison and fine-tuning for headline accuracy.
+
+</details>
+
+## Try it yourself: cosine similarity, match the method, plan the workflow
+
+Three exercises, about 15 minutes.
+
+**Part A: cosine similarity on a positive vs negative pair.** Compute `cos(u, v) = (u · v) / (||u|| * ||v||)` for the following.
+
+Image A's two augmentations produce feature vectors `a = [2, 1]` and `a⁺ = [3, 2]` (positive pair). A different image B produces `b = [-2, 1]` (negative).
+
+Compute `cos(a, a⁺)` and `cos(a, b)`. Which one would a contrastive loss try to make larger, and which smaller?
+
+<details>
+<summary>Worked answer</summary>
+
+Compute the norms first:
+
+```
+||a||  = sqrt(2² + 1²)    = sqrt(5)  ≈ 2.236
+||a⁺|| = sqrt(3² + 2²)    = sqrt(13) ≈ 3.606
+||b||  = sqrt((-2)² + 1²) = sqrt(5)  ≈ 2.236
+```
+
+Cosine of the **positive pair** `(a, a⁺)`:
+
+```
+cos(a, a⁺) = (2·3 + 1·2) / (2.236 · 3.606)
+           = 8 / 8.062
+           ≈ 0.992      (high; positive pair)
+```
+
+Cosine of the **negative pair** `(a, b)`:
+
+```
+cos(a, b)  = (2·(-2) + 1·1) / (2.236 · 2.236)
+           = -3 / 5
+           = -0.600     (low; negative pair)
+```
+
+The positive pair sits at ~0.992 cosine similarity; the negative pair at -0.600. The contrastive loss tries to **make `cos(a, a⁺)` even larger** (closer to 1, the maximum) and **make `cos(a, b)` smaller** (more negative, ideally pushing toward -1). Scaled across thousands of pairs per mini-batch, the network ends up with features where same-image-different-view is consistently close and different-image is consistently far.
+
+</details>
+
+**Part B: match the method.** For each description, name the self-supervised method.
+
+1. Mask 75 percent of an image's patches; train a Vision Transformer encoder + lightweight decoder to reconstruct the masked patches from the visible ones.
+2. Two augmented views of the same image are a positive pair; all other images in the batch are negatives; NT-Xent loss; large batches.
+3. Predict the rotation angle (0, 90, 180, 270 degrees) of an input image.
+4. Two networks: an online network learns to predict the representation of a momentum-target copy of itself; no explicit negatives.
+
+<details>
+<summary>Answers</summary>
+
+1. **MAE (Masked Autoencoder)** (He et al. 2022). The asymmetric heavy-encoder + lightweight-decoder design is its signature.
+2. **SimCLR** (Chen et al. 2020). The canonical contrastive-learning instantiation.
+3. **Rotation prediction** (Gidaris et al. 2018). One of the simplest and most surprising pretext tasks.
+4. **BYOL** (Grill et al. 2020). The surprising "contrastive without negatives" approach.
+
+</details>
+
+**Part C: plan a workflow.** You are starting a medical-imaging project with 5 million unlabeled chest X-rays and 2,000 expert-labeled examples (one of two diagnostic classes per labeled scan). You want to build a classifier. In 3-4 sentences, sketch the self-supervised workflow you would use, and explain why this is better than training a CNN from scratch on the 2,000 labeled examples.
+
+<details>
+<summary>What a good answer looks like</summary>
+
+Pre-train a Vision Transformer (or ResNet-family CNN) on the 5 million unlabeled chest X-rays using a self-supervised method, MAE or DINOv2-style self-distillation would be strong choices for an image-rich domain like this. Then fine-tune the pre-trained encoder on the 2,000 labeled examples for the diagnostic-classification task (small learning rate on the encoder, larger on a fresh classification head). Linear probing first is also worth running as a baseline and a sanity check on feature quality before committing compute to fine-tuning.
+
+Why better than from scratch: 2,000 labeled examples is far too few to learn good visual features for chest X-rays from scratch; a CNN trained directly on those 2,000 cases would overfit badly or fail to learn the relevant patterns at all. The 5 million unlabeled scans contain enormous information about chest-X-ray statistics (anatomy, common variations, scanner artifacts), and self-supervised pre-training extracts that information into the encoder without needing any radiologist time. The labeled 2,000 then teach a fine-tune the small, task-specific layer where their information is most useful, instead of being asked to teach the encoder everything from zero.
+
+This is exactly the pattern that makes vision feasible in label-scarce domains, and why self-supervised learning is the engine behind so much modern medical-imaging work.
+
+</details>
+
+## Flashcards
+
+Nine cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay out the full set as one card per page, ready to print or save as a PDF for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="What does self-supervised learning do?">
+
+Constructs labels from the data itself (a pretext task) and runs standard supervised training on them. The pretext task doesn't matter in itself; what matters is that solving it forces the network to learn features that transfer to real tasks.
+
+</Flashcard>
+
+<Flashcard question="Name three pretext tasks from the 2014-2018 wave?">
+
+Any three of: rotation prediction, jigsaw puzzles, colorization (grayscale → color), inpainting (predict masked region), relative position prediction of two patches.
+
+</Flashcard>
+
+<Flashcard question="SimCLR setup in one sentence?">
+
+Two augmentations of the same image = positive pair; other images in the batch = negatives; pass through a shared encoder; NT-Xent loss makes positives have high cosine similarity and negatives low. Large batches; strong augmentations essential.
+
+</Flashcard>
+
+<Flashcard question="What does MoCo add over SimCLR?">
+
+A momentum-updated encoder + a queue of negatives, letting you use many more negatives than fit in one GPU's mini-batch. More memory-efficient at scale than SimCLR's "all negatives in one big batch" approach.
+
+</Flashcard>
+
+<Flashcard question="What's surprising about BYOL?">
+
+It works without explicit negatives. Two networks (online + momentum-target); online learns to predict the target's representation of an augmented view. The asymmetric setup prevents feature collapse.
+
+</Flashcard>
+
+<Flashcard question="MAE (Masked Autoencoder) recipe?">
+
+Mask 75% of image patches; heavy encoder sees only visible 25%; lightweight decoder reconstructs masked patches. Encoder ends up with rich features; computationally efficient because most patches aren't processed by the encoder. He et al. 2022.
+
+</Flashcard>
+
+<Flashcard question="DINO / DINOv2 in one line?">
+
+Self-distillation with no labels: a student network learns to predict a teacher network's output (teacher = momentum-averaged copy of student). DINOv2 features are a strong general-purpose vision encoder for many downstream tasks, often used frozen.
+
+</Flashcard>
+
+<Flashcard question="Pre-train-then-transfer workflow?">
+
+(1) Pre-train encoder on huge unlabeled data (expensive, once). (2) Transfer to downstream task with small labeled data: linear-probe (freeze encoder, train one linear layer; clean feature comparison) or fine-tune (train whole network with small LR on encoder; best task accuracy).
+
+</Flashcard>
+
+<Flashcard question="Why is self-supervised learning load-bearing for label-scarce domains?">
+
+Many real domains (medical, satellite, scientific) have orders of magnitude more unlabeled than labeled data. Self-supervised pretraining extracts the structural information from unlabeled data into the encoder; the labeled data then fine-tunes the small task-specific head where labels are most useful, instead of being asked to teach the encoder from zero.
+
+</Flashcard>
+
+</FlashcardSet>
