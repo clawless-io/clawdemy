@@ -23,14 +23,14 @@ In one line, the basic RNN update is:
 h_t = f(W · x_t + U · h_{t-1} + b)
 ```
 
-where `x_t` is the input at time t, `h_{t-1}` is the hidden state from the previous step, W and U are learned weight matrices, b is a learned bias, and f is a non-linearity (often `tanh` historically, or related). The output at step t is read off the hidden state, optionally through another linear layer. There are many variants (LSTMs and GRUs add internal gates that control what the hidden state remembers and forgets, addressing the original RNN's tendency to lose information over long sequences), but the spine is always: one element at a time, hidden state forward, output per step.
+where the input at time t and the previous step's hidden state combine, W and U are learned weight matrices, b is a learned bias, and f is a non-linearity (often tanh historically, or related). The output at step t is read off the hidden state, optionally through another linear layer. There are many variants (LSTMs and GRUs add internal gates that control what the hidden state remembers and forgets, addressing the original RNN's tendency to lose information over long sequences), but the spine is always: one element at a time, hidden state forward, output per step.
 
 For vision, the two canonical RNN use cases are:
 
 - **Image captioning.** A CNN encoder processes the image once to produce a feature vector; an RNN decoder then generates a caption one word at a time, with the image features serving as the initial context. So the input is a static image but the *output* is a sequence, and the RNN handles the sequence half.
 - **Video understanding.** Each frame is passed through a CNN to produce a per-frame feature; an RNN then processes those features as a sequence across time, so the model can recognize an action that depends on the temporal pattern (a hand reaching, then grasping, then lifting) rather than any one frame.
 
-The structural limits of the basic RNN are worth naming, because they motivate what came next: it processes the sequence **sequentially** (step t depends on step `t-1`'s hidden state, so the steps cannot be computed in parallel on a GPU), and it has trouble carrying information over **long sequences** (later steps tend to forget earlier ones, even with LSTM-style gating, especially when the relevant signal is far away in the sequence). For a vision system that needs to relate the first frame of a five-minute video to the last, both limits hurt.
+The structural limits of the basic RNN are worth naming, because they motivate what came next: it processes the sequence **sequentially** (step t depends on the previous step's hidden state, so the steps cannot be computed in parallel on a GPU), and it has trouble carrying information over **long sequences** (later steps tend to forget earlier ones, even with LSTM-style gating, especially when the relevant signal is far away in the sequence). For a vision system that needs to relate the first frame of a five-minute video to the last, both limits hurt.
 
 Track 12's lesson 2 (Why sequences need memory) covers the recurrence mechanism in more depth in a generic neural-network setting if you want the deeper walk.
 
@@ -44,11 +44,11 @@ The standard formulation uses three matrices derived from the inputs: **queries*
 Attention(Q, K, V) = softmax( Q · K^T / sqrt(d_k) ) · V
 ```
 
-Unpacked: `Q · K^T` produces a matrix of compatibility scores (how well each query matches each key, by dot product). Dividing by `sqrt(d_k)` (the dimension of the keys) keeps the scores from getting too sharp when `d_k` is large. The softmax turns each row into a probability distribution over input positions. Multiplying by V produces, for each query, a weighted average of the values, with weights given by the attention probabilities.
+Unpacked: the query-key product (Q times K-transpose) produces a matrix of compatibility scores (how well each query matches each key, by dot product). Dividing by the square root of the key dimension keeps the scores from getting too sharp when that dimension is large. The softmax turns each row into a probability distribution over input positions. Multiplying by V produces, for each query, a weighted average of the values, with weights given by the attention probabilities.
 
 The key practical differences from recurrence: **all positions are computed in parallel** (no sequential dependency between steps), and **every output position can directly attend to every input position** (no distance penalty). Both lifts come from the same change.
 
-Worked numerical example. Suppose we have one query `q = [1, 0]` (a 2-dimensional vector) and three keys `K = [[1, 0], [0, 1], [1, 1]]` with three corresponding values `V = [[1, 0], [0, 1], [1, 1]]`. With `d_k = 2`:
+Worked numerical example. Suppose we have one query, the 2-dimensional vector (1, 0), and three keys (1, 0), (0, 1), and (1, 1), with three corresponding values (1, 0), (0, 1), and (1, 1). The key dimension is 2:
 
 ```
 Scores (Q · K^T):      [1·1+0·0,  1·0+0·1,  1·1+0·1] = [1, 0, 1]
@@ -103,8 +103,8 @@ The unification ViT enabled also explains a lot of the recent multimodal model h
 
 ## What you should remember
 
-- **Recurrence (RNN, LSTM, GRU) processes a sequence step by step,** carrying a hidden state forward. `h_t = f(W · x_t + U · h_{t-1} + b)`. Vision uses: image captioning (RNN as decoder) and video understanding (RNN over per-frame features). Limits: sequential (no parallelism) and weak at long-range dependencies.
-- **Attention compares every position to every other in parallel,** outputting a weighted average of values with weights from query-key compatibility. `Attention(Q, K, V) = softmax(Q · K^T / sqrt(d_k)) · V`. Both lifts (parallel + long-range) come from the same change.
+- **Recurrence (RNN, LSTM, GRU) processes a sequence step by step,** carrying a hidden state forward. The hidden state at step t is a non-linearity applied to W times the input, plus U times the previous hidden state, plus a bias. Vision uses: image captioning (RNN as decoder) and video understanding (RNN over per-frame features). Limits: sequential (no parallelism) and weak at long-range dependencies.
+- **Attention compares every position to every other in parallel,** outputting a weighted average of values with weights from query-key compatibility. Attention is the softmax of (Q times K-transpose, divided by the square root of the key dimension), times V. Both lifts (parallel + long-range) come from the same change.
 - **Vision applications:** CNN-plus-RNN/attention image captioning; per-frame-CNN-then-sequence-model video understanding; **Vision Transformer (ViT)** treats an image as a sequence of patches and uses attention end to end, no convolution. ViT matches or beats ResNet at scale and unified vision with language architecturally.
 - **Sister tracks own the deep mechanics.** This lesson is what these tools look like applied to vision; Track 12 L2 covers recurrence, Track 5 (multi-lesson sequence) and T14 cover attention and transformers in depth. The training loop is identical: T16 L3's loss and gradient descent over T16 L4's backprop.
 
