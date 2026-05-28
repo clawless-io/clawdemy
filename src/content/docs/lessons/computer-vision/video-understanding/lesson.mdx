@@ -13,7 +13,7 @@ This lesson walks the standard ways of adding the time dimension to a vision sys
 
 ## What a video actually is
 
-Numerically, a video is a 4D tensor with shape `T × H × W × C`, where T is the number of frames, `H × W` is the spatial size of each frame, and C is the channels per pixel (typically 3 for RGB). A short clip at modest resolution can be enormous: 64 frames of 224 by 224 RGB is 64 × 224 × 224 × 3 ≈ 9.6 million numbers, against a single image's 150 thousand. Real videos are larger still: a one-minute clip at 30 frames per second is 1,800 frames, which at the same resolution is around 270 million numbers per clip. You almost never process all of them; sampling and chunking, named below, are essential.
+Numerically, a video is a 4D tensor with shape time by height by width by channels, where T is the number of frames, height by width is the spatial size of each frame, and C is the channels per pixel (typically 3 for RGB). A short clip at modest resolution can be enormous: 64 frames of 224 by 224 RGB is 64 times 224 times 224 times 3, about 9.6 million numbers, against a single image's 150 thousand. Real videos are larger still: a one-minute clip at 30 frames per second is 1,800 frames, which at the same resolution is around 270 million numbers per clip. You almost never process all of them; sampling and chunking, named below, are essential.
 
 The tasks built on top of this 4D tensor are a few standard ones:
 
@@ -38,15 +38,15 @@ The next-easiest approaches treat each frame with a 2D CNN and combine the resul
 
 **Late fusion.** Run each frame through a 2D CNN independently to get a per-frame feature vector. Average the features across frames (or concatenate them) and pass the result to a classifier. Cheap; gets a temporally aggregated representation without learning any temporal dynamics. Beats single-frame on most benchmarks because it sees more of the clip, but it cannot distinguish ordered events (a hand reaching followed by grasping looks the same to "averaged features" as grasping followed by reaching).
 
-**Early fusion.** Stack T frames along the channel dimension before the first conv layer (so the input becomes `H × W × (T × C)` instead of `H × W × C`). The first conv now sees raw temporal information directly. Limited because the temporal range is fixed by the first layer's filter; deeper layers no longer have access to per-frame structure.
+**Early fusion.** Stack T frames along the channel dimension before the first conv layer (so the input becomes height by width by frames-times-channels, instead of height by width by channels). The first conv now sees raw temporal information directly. Limited because the temporal range is fixed by the first layer's filter; deeper layers no longer have access to per-frame structure.
 
 Both are easy to implement and easy to beat once the network can learn temporal patterns at every layer.
 
 ## 3D convolutions
 
-The cleanest way to put time into a CNN is to make the convolution itself 3D. Where a 2D conv filter is `F × F × D_in` (spatial × spatial × input depth, lesson 5), a **3D conv filter** is `T_f × F × F × D_in` (temporal × spatial × spatial × input depth). It slides spatially *and* temporally, computing a dot product at each `(t, x, y)` position and producing a 4D output volume of shape `T' × H' × W' × K`.
+The cleanest way to put time into a CNN is to make the convolution itself 3D. Where a 2D conv filter is filter-size by filter-size by input-depth (spatial by spatial by input depth, lesson 5), a **3D conv filter** is temporal-size by filter-size by filter-size by input-depth (temporal by spatial by spatial by input depth). It slides spatially *and* temporally, computing a dot product at each time-and-space position and producing a 4D output volume (time by height by width by K).
 
-Concretely, a 3D conv with filter shape `3 × 3 × 3` on an RGB input (depth 3) has **3 × 3 × 3 × 3 = 81 weights per filter** (plus 1 bias). Compare to a 2D conv with the same spatial filter size: `3 × 3 × 3 = 27 weights per filter`. The 3D version has roughly 3 times the parameters per filter and roughly 3 times the compute per output position. Modest at the layer level; substantial when stacked many layers deep.
+Concretely, a 3D conv with a 3 by 3 by 3 filter on an RGB input (depth 3) has **3 times 3 times 3 times 3, which is 81 weights per filter** (plus 1 bias). Compare to a 2D conv with the same spatial filter size: 3 times 3 times 3, which is 27 weights per filter. The 3D version has roughly 3 times the parameters per filter and roughly 3 times the compute per output position. Modest at the layer level; substantial when stacked many layers deep.
 
 **C3D** (Tran et al. 2015) was an early influential 3D-conv architecture for video. **I3D** (Carreira and Zisserman 2017) introduced "inflating" pretrained 2D ImageNet weights into 3D filters (by replicating across the time dimension) as a way to bootstrap a 3D model from a good 2D one, which was a meaningful practical unlock. 3D-conv networks remain a strong family for video, especially when paired with the modern training tricks from lesson 6's training-at-scale subsection.
 
@@ -67,7 +67,7 @@ This is exactly the video-with-RNN architecture you met in lesson 7. The choice 
 
 ## Video transformers
 
-The most recent shift, and the one most likely to keep evolving, is video-on-transformers. The natural extension is to do for video what Vision Transformer did for images: cut the input into **spatio-temporal tokens** (small 3D patches of `T_p × P × P`), embed each as a vector, and run a transformer encoder over the resulting token sequence.
+The most recent shift, and the one most likely to keep evolving, is video-on-transformers. The natural extension is to do for video what Vision Transformer did for images: cut the input into **spatio-temporal tokens** (small 3D patches, a short temporal span by P by P), embed each as a vector, and run a transformer encoder over the resulting token sequence.
 
 The straightforward implementation runs **full self-attention** across all spatial and temporal positions, which is expensive (quadratic in the number of tokens). Most production video transformers use clever attention factorizations to avoid the full quadratic cost:
 
@@ -110,7 +110,7 @@ The choice between 3D convolutions, two-stream, CNN-plus-RNN, and video transfor
 
 ## What you should remember
 
-- **A video is a 4D tensor `T × H × W × C`** (time × height × width × channels), and the input scale is the first thing to plan around. Temporal sampling (uniform stride, random temporal crops, multi-rate streams) is essential because raw frame counts are enormous.
+- **A video is a 4D tensor: time by height by width by channels,** and the input scale is the first thing to plan around. Temporal sampling (uniform stride, random temporal crops, multi-rate streams) is essential because raw frame counts are enormous.
 - **Single-frame baseline first.** Always run it; many video benchmarks turn out to be largely solvable from one well-chosen frame, and beating that baseline is what proves a video-specific model is learning something temporal.
 - **The standard ways to add time, in increasing order:** late fusion (per-frame features averaged), early fusion (stack frames as channels), 3D convolutions (filter slides spatially AND temporally; ~3x parameter cost per filter; C3D, I3D), two-stream networks (spatial RGB stream + temporal optical-flow stream; SlowFast for the modern descendant), CNN + RNN (per-frame features into an RNN, lesson 7), and video transformers (spatio-temporal tokens; TimeSformer, ViViT, with divided attention for cost).
 - **Same training loop, scaled engineering.** The loss + gradient descent + backprop machinery is unchanged. What changes per architecture is the forward and backward pass at the temporal-handling layers (and the parameter count / compute cost that result).

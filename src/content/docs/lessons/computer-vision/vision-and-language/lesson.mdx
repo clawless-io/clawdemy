@@ -24,7 +24,7 @@ Both encoders' outputs are projected to a shared embedding space; both are L2-no
 
 The training objective is **contrastive**, in exactly the sense covered in lesson 10's self-supervised section, but now across modalities rather than within one modality:
 
-- For each `(image, text)` pair in a mini-batch, treat the matching pair as a **positive** (they should have high cosine similarity in the shared embedding space).
+- For each image-text pair in a mini-batch, treat the matching pair as a **positive** (they should have high cosine similarity in the shared embedding space).
 - Treat the same image paired with any other text in the batch as a **negative** (low cosine similarity), and the same text paired with any other image as a negative.
 - Use a symmetric **InfoNCE loss** (essentially the NT-Xent loss from SimCLR, applied across image-text pairs in both directions) to pull positives together and push negatives apart.
 
@@ -32,9 +32,9 @@ After training, the joint embedding space has the property that **an image and a
 
 ## A worked image-text similarity
 
-Cosine similarity between an image embedding and a text embedding looks exactly like the self-supervised case from lesson 10: `cos(u, v) = (u · v) / (||u|| · ||v||)`. The new piece is just that one of the vectors came from an image encoder and the other from a text encoder; both sit in the same vector space because that is what CLIP's training enforced.
+Cosine similarity between an image embedding and a text embedding looks exactly like the self-supervised case from lesson 10: the dot product of the two vectors divided by the product of their lengths. The new piece is just that one of the vectors came from an image encoder and the other from a text encoder; both sit in the same vector space because that is what CLIP's training enforced.
 
-A small numerical example. Suppose, after L2 normalization (so both vectors have length 1), CLIP gives an image of a cat the embedding `img = [0.6, 0.8]`, the caption "a photo of a cat" the embedding `txt_cat = [0.5, 0.866]`, and an unrelated caption "a photo of a car" the embedding `txt_car = [0.8, -0.6]`. Both vectors are unit-length, so the cosine simplifies to the dot product:
+A small numerical example. Suppose, after L2 normalization (so both vectors have length 1), CLIP gives an image of a cat the embedding 0.6, 0.8; the caption "a photo of a cat" the embedding 0.5, 0.866; and an unrelated caption "a photo of a car" the embedding 0.8, -0.6. Both vectors are unit-length, so the cosine simplifies to the dot product:
 
 ```
 cos(img, txt_cat) = (0.6)(0.5) + (0.8)(0.866)
@@ -52,11 +52,11 @@ The cat-photo's embedding is ~0.99 cosine-similar to the cat-caption's embedding
 
 The first and most striking downstream use is **zero-shot classification**. You can build an image classifier for a new set of categories *without training on any of them*.
 
-The recipe is short. Pick the K categories you want to classify into (say "cat", "dog", "car"). Build a text prompt for each (commonly `"a photo of a {class}"`). Encode each prompt with the trained CLIP text encoder, producing K text embeddings. At inference, encode the input image with the trained CLIP image encoder. The predicted class is the one whose text embedding is most cosine-similar to the image embedding.
+The recipe is short. Pick the K categories you want to classify into (say "cat", "dog", "car"). Build a text prompt for each (commonly the template "a photo of a" plus the class name). Encode each prompt with the trained CLIP text encoder, producing K text embeddings. At inference, encode the input image with the trained CLIP image encoder. The predicted class is the one whose text embedding is most cosine-similar to the image embedding.
 
 That is it. You did no training on the K-class task; you just leveraged CLIP's general-purpose embedding space. Zero-shot CLIP was competitive with fully-supervised models on many ImageNet-style benchmarks at the time of publication, and it generalized to many categories far outside ImageNet without further tuning. The same trick works for arbitrary classes the developer thinks of in advance: medical conditions, products on a shelf, or fine-grained categories with no labeled training set, all just by changing what text strings get embedded.
 
-The recipe extends to **prompt engineering**: small changes to the text template ("a photo of a `{class}`" vs "an iPhone photo of a `{class}`" vs "a sketch of a `{class}`") can substantially shift accuracy by anchoring CLIP to a register of imagery; this is one of the very first cases in modern AI where prompt design materially affected downstream metrics.
+The recipe extends to **prompt engineering**: small changes to the text template (a plain "a photo of a ..." versus "an iPhone photo of a ..." versus "a sketch of a ...", each filling in the class name) can substantially shift accuracy by anchoring CLIP to a register of imagery; this is one of the very first cases in modern AI where prompt design materially affected downstream metrics.
 
 ## Image-text retrieval
 
@@ -110,8 +110,8 @@ The economic point that closes Phase 3's framing: image-text pairs are abundant 
 ## What you should remember
 
 - **CLIP's two-tower setup** (Radford et al. 2021): an image encoder + a text encoder trained jointly on ~400M web image-text pairs with a contrastive loss (matching pairs close in a shared embedding space, mismatched pairs far). The trained embedding space is the asset; all downstream uses read value from its geometry.
-- **Cosine similarity** between image and text embeddings encodes semantic match: `cos(img, txt_match) ≈ high`, `cos(img, txt_unrelated) ≈ 0` (or negative). Body: `[0.6, 0.8]` cat-image vs `[0.5, 0.866]` cat-text → cos ≈ 0.993; vs `[0.8, -0.6]` car-text → cos ≈ 0.000.
-- **Zero-shot classification.** Encode candidate class names as text prompts ("a photo of a `{class}`"); at inference, pick the class whose text embedding is closest to the image embedding. No training on the target task. Competitive with fully-supervised on many benchmarks. Prompt design matters.
+- **Cosine similarity** between image and text embeddings encodes semantic match: a matching image-text pair scores high, an unrelated pair near 0 (or negative). Body: the 0.6, 0.8 cat-image versus the 0.5, 0.866 cat-text gives a cosine of about 0.993; versus the 0.8, -0.6 car-text, about 0.000.
+- **Zero-shot classification.** Encode candidate class names as text prompts ("a photo of a" plus the class name); at inference, pick the class whose text embedding is closest to the image embedding. No training on the target task. Competitive with fully-supervised on many benchmarks. Prompt design matters.
 - **Image-text retrieval.** Same embedding space supports text-to-image and image-to-text search via nearest-neighbour lookup. The engine behind modern photo-gallery search.
 - **Captioning and VQA.** Add a text decoder (a language model with cross-attention to image features). Train to generate text conditioned on image + (optional question). Modern systems (BLIP, CoCa, LLaVA, and successors) use this shape; the trend is toward general-purpose VLMs that handle multiple tasks from one trained model.
 - **The economic frame.** Image-text pairs are abundant on the web; CLIP-style pre-training exploits that abundance to learn cross-modal structure at scale. The same shift that self-supervised learning made for within-modality vision (use unlabeled data) extends to cross-modal: use naturally-paired data instead of expensive task-specific annotation.
