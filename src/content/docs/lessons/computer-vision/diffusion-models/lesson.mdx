@@ -17,11 +17,11 @@ As with lesson 11, the deep mechanics live in sister tracks. T19 (the generative
 
 Diffusion takes a strange route to generation. Instead of training a network to produce images directly (the VAE decoder does this; the GAN generator does this), it trains a network to *remove noise* from an image. The whole architecture has two directions, only one of which is learned.
 
-**Forward process (no learning, just defined).** Take a training image `x_0`. Add a small amount of Gaussian noise to produce `x_1`. Add another small amount to produce `x_2`. Repeat, say, `T = 1000` times. By the end, `x_T` is essentially pure noise; nothing of the original image is visible. This process is fully specified in advance (no parameters to learn); the only choice is a **noise schedule** `β_1, β_2, ..., β_T` (small positive numbers, often ~ 10^-4 to 10^-2) controlling how fast noise is added at each step.
+**Forward process (no learning, just defined).** Take a training image. Add a small amount of Gaussian noise to produce a slightly noisier version. Add another small amount. Repeat, say, 1000 times. By the end, the image is essentially pure noise; nothing of the original is visible. This process is fully specified in advance (no parameters to learn); the only choice is a **noise schedule**, a sequence of small positive numbers (often between about 0.0001 and 0.01) controlling how fast noise is added at each step.
 
-**Reverse process (this is what gets trained).** The model learns to reverse the corruption one step at a time. Given a noised image `x_t` at any step `t`, the network learns to predict either the noise that was added, or the slightly-less-noisy `x_{t-1}` directly (mathematically equivalent under the standard formulation). Train on many `(x_t, t)` pairs sampled by running the forward process on training images.
+**Reverse process (this is what gets trained).** The model learns to reverse the corruption one step at a time. Given a noised image at any step t, the network learns to predict either the noise that was added, or the slightly-less-noisy previous-step image directly (mathematically equivalent under the standard formulation). Train on many noised-image-and-step pairs sampled by running the forward process on training images.
 
-**Generation, at inference.** Start from pure noise `x_T ~ N(0, I)`. Apply the trained reverse step T times: `x_T → x_{T-1} → ... → x_1 → x_0`. The end of the chain is a sample from the training distribution: a synthesized image. The network never saw the data distribution directly; it only ever saw "predict the noise at this corruption level," and that turns out to be enough.
+**Generation, at inference.** Start from pure noise (a draw from the standard normal). Apply the trained reverse step T times, walking from the fully-noised image back down to a clean one. The end of the chain is a sample from the training distribution: a synthesized image. The network never saw the data distribution directly; it only ever saw "predict the noise at this corruption level," and that turns out to be enough.
 
 This is the strange-but-elegant move that makes diffusion work. The data is the training images, the task is denoising, and "generation" emerges from running denoising iteratively starting from pure noise.
 
@@ -33,9 +33,9 @@ The forward noising step is one line of math:
 x_t = sqrt(1 - β_t) · x_{t-1}  +  sqrt(β_t) · ε,    where ε ~ N(0, I)
 ```
 
-The first term **shrinks** the previous image slightly; the second adds a calibrated **bump of fresh noise**. Both factors are square roots so the total variance stays normalized as `t` grows.
+The first term **shrinks** the previous image slightly; the second adds a calibrated **bump of fresh noise**. Both factors are square roots so the total variance stays normalized as t grows.
 
-A small numerical example. Suppose a single pixel (or just one component of a vector image) has value `x_{t-1} = 0.8`, the noise schedule at step `t` is `β_t = 0.1`, and we sample `ε = -0.3` from N(0, 1) for this pixel:
+A small numerical example. Suppose a single pixel (or just one component of a vector image) has value 0.8 at the previous step, the noise level at step t is 0.1, and we sample a noise value of -0.3 from the standard normal for this pixel:
 
 ```
 x_t = sqrt(1 - 0.1) · 0.8 + sqrt(0.1) · (-0.3)
@@ -45,27 +45,27 @@ x_t = sqrt(1 - 0.1) · 0.8 + sqrt(0.1) · (-0.3)
     ≈ 0.6641
 ```
 
-The pixel moved from 0.8 to ~0.664, partly shrunk toward zero and partly nudged by random noise. Stack 1000 such steps and the original signal is essentially gone; `x_T` is indistinguishable from a sample of pure noise. The reverse process's job is to learn to *undo* one of these steps reliably, so 1000 reverse steps can take pure noise all the way back to a plausible image.
+The pixel moved from 0.8 to ~0.664, partly shrunk toward zero and partly nudged by random noise. Stack 1000 such steps and the original signal is essentially gone; the final image is indistinguishable from a sample of pure noise. The reverse process's job is to learn to *undo* one of these steps reliably, so 1000 reverse steps can take pure noise all the way back to a plausible image.
 
 ## Training: predict the noise
 
 What does the network actually learn? Concretely:
 
-1. Sample a training image `x_0` from your dataset.
-2. Sample a random timestep `t ~ uniform(1, T)`.
-3. Sample noise `ε ~ N(0, I)` and use a closed-form expression (derivable from the forward process applied `t` times) to produce `x_t` from `x_0` in one shot.
-4. Pass `(x_t, t)` to the network. The network's job is to predict `ε`, the noise that was added.
-5. Loss is mean squared error between the predicted noise `ε_θ(x_t, t)` and the true `ε`: `|| ε - ε_θ(x_t, t) ||²`.
+1. Sample a training image from your dataset.
+2. Sample a random timestep t, uniformly between 1 and T.
+3. Sample noise from the standard normal and use a closed-form expression (derivable from the forward process applied t times) to produce the step-t noised image from the clean image in one shot.
+4. Pass the noised image and the step number to the network. The network's job is to predict the noise that was added.
+5. Loss is the mean squared error between the predicted noise and the true noise.
 
-Repeated across many training examples and many timesteps, the network learns to estimate the noise at any corruption level. The architecture is typically a **U-Net** (which you have already met in lesson 8 for semantic segmentation), modified to be conditioned on `t` (a sinusoidal time embedding gets injected at multiple layers).
+Repeated across many training examples and many timesteps, the network learns to estimate the noise at any corruption level. The architecture is typically a **U-Net** (which you have already met in lesson 8 for semantic segmentation), modified to be conditioned on t (a sinusoidal time embedding gets injected at multiple layers).
 
 The training loss is just MSE. There is no adversarial dynamic (so no mode collapse, no oscillation); there is no encoder-decoder reconstruction term (so no per-pixel-average blurriness); there is one clean regression target per training example. This stability is one of the reasons diffusion training works so reliably compared to GANs.
 
 ## Inference: iterative denoising
 
-To generate an image, the network's prediction at each step is used to step from `x_t` toward `x_{t-1}`. The standard formula combines the network's noise prediction with the noise schedule to estimate the previous-step image; this is iterated from `t = T` down to `t = 1`, ending at `x_0`, the generated image.
+To generate an image, the network's prediction at each step is used to step from the current noised image toward the previous step's image. The standard formula combines the network's noise prediction with the noise schedule to estimate the previous-step image; this is iterated from step T down to step 1, ending at the clean image, the generated image.
 
-The crucial property: **inference is iterative**. With `T = 1000`, generating one image requires 1000 forward passes of the network. This is dramatically slower than a VAE's single decoder pass or a GAN's single generator pass. It is the main trade-off you accept in exchange for diffusion's quality.
+The crucial property: **inference is iterative**. With 1000 steps, generating one image requires 1000 forward passes of the network. This is dramatically slower than a VAE's single decoder pass or a GAN's single generator pass. It is the main trade-off you accept in exchange for diffusion's quality.
 
 Several techniques cut this cost without much quality loss:
 
@@ -122,7 +122,7 @@ As with the L11 framing: the technique is general. Diffusion models have many ne
 
 **Thinking diffusion is just "a fancier VAE."** It is structurally different. There is no compact bottleneck latent (the "latent" in latent-diffusion is a separate VAE that is *fed* by the user, not produced by the diffusion model itself). The mechanism is iterative denoising; the network is trained on noise prediction, not on direct image generation.
 
-**Confusing the noise schedule's `β_t` with the predicted noise.** `β_t` is a fixed hyperparameter (the noise schedule); it controls *how much* noise gets added at step `t`. The network's prediction `ε_θ(x_t, t)` is the model's guess at *what* noise was added; this is what gets learned.
+**Confusing the noise schedule with the predicted noise.** The noise schedule is a fixed hyperparameter; it controls *how much* noise gets added at step t. The network's prediction is the model's guess at *what* noise was added; this is what gets learned.
 
 **Treating diffusion's iterative cost as fixed.** It is the main practical limitation, but it is being attacked from many directions (DDIM, distilled diffusion, consistency models, latent diffusion). Inference cost has dropped substantially since the original DDPM and continues to drop.
 
@@ -132,9 +132,9 @@ As with the L11 framing: the technique is general. Diffusion models have many ne
 
 ## What you should remember
 
-- **Forward process (no learning):** repeatedly add Gaussian noise to training images, by a small schedule β_1, ..., β_T, until `x_T` is essentially pure noise. Per-step formula: `x_t = sqrt(1 - β_t) · x_{t-1} + sqrt(β_t) · ε`.
-- **Reverse process (the learned part):** train a network (typically a U-Net conditioned on the timestep `t`) to predict the noise at each step. Loss is simple MSE between predicted and true noise.
-- **Generation:** start from pure noise `x_T ~ N(0, I)`; iteratively denoise for T steps; end with `x_0`, a synthesized image. Trade-off: high quality + stable training at the cost of iterative (slow) inference.
+- **Forward process (no learning):** repeatedly add Gaussian noise to training images, by a small noise schedule, until the image is essentially pure noise. Per step: the next noised image is the square root of one-minus-the-noise-level times the current image, plus the square root of the noise level times a noise sample.
+- **Reverse process (the learned part):** train a network (typically a U-Net conditioned on the timestep t) to predict the noise at each step. Loss is simple MSE between predicted and true noise.
+- **Generation:** start from pure noise; iteratively denoise for T steps; end with a synthesized image. Trade-off: high quality + stable training at the cost of iterative (slow) inference.
 - **Speed-ups** in production: DDIM (fewer steps with a deterministic sampler), distilled diffusion (1-4 steps), and especially **latent diffusion** (operate in a small VAE-compressed latent space; the architecture behind Stable Diffusion). The VAE from lesson 11 is now load-bearing as latent diffusion's first-stage encoder.
 - **Text-to-image** adds prompt conditioning via cross-attention to a text embedding (typically CLIP's text encoder), with **classifier-free guidance** giving a tunable knob for "stay close to the prompt vs more diverse." Stable Diffusion, Imagen, and DALL-E 2/3 are all diffusion-based.
 - **Mechanism vs application.** Diffusion is a general technique with many neutral or beneficial uses; the well-known ethical questions about text-to-image at scale apply to any high-capability generative method and are outside the scope of this technique-focused lesson.
