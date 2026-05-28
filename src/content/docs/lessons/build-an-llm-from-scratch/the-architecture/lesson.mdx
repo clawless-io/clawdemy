@@ -15,11 +15,11 @@ This is Stage C; the lesson assumes you know what attention and a feed-forward l
 
 Almost every modern LLM is a **decoder-only** Transformer with this structure:
 
-1. A **token embedding** turns each input token ID into a vector of size `d_model` (the model, or residual, dimension).
+1. A **token embedding** turns each input token ID into a vector of size d-model (the model, or residual, dimension).
 2. A stack of **N identical blocks**, each containing two sublayers: a **self-attention** sublayer and a **feed-forward (FFN)** sublayer. Each sublayer is wrapped with a normalization and added back via a **residual connection**.
 3. A **final normalization**, then an **output projection** to vocabulary-sized logits (often weight-tied to the embedding, reusing the same matrix).
 
-The organizing idea is the **residual stream**: a vector of width `d_model` that flows from the embedding to the output, and each sublayer *reads* from it and *adds* its contribution back. Attention moves information between positions; the FFN processes each position independently. Everything else is variations on how those two sublayers are normalized, activated, and told about position.
+The organizing idea is the **residual stream**: a vector of width d-model that flows from the embedding to the output, and each sublayer *reads* from it and *adds* its contribution back. Attention moves information between positions; the FFN processes each position independently. Everything else is variations on how those two sublayers are normalized, activated, and told about position.
 
 ## The choices the field converged on
 
@@ -27,7 +27,7 @@ The 2017 Transformer worked, but training large, deep versions revealed better c
 
 - **Pre-norm, not post-norm.** The original normalized *after* each sublayer; modern models normalize the input *before* each sublayer (pre-norm). Pre-norm keeps the residual stream clean and makes very deep models train stably, which is why it is now standard.
 - **RMSNorm, not LayerNorm.** RMSNorm normalizes by the root-mean-square of the activations only (no mean-subtraction, no bias term). It is cheaper to compute and works as well, so it has largely replaced LayerNorm.
-- **Gated activations in the FFN.** The original FFN used a simple activation (ReLU, later GeLU). Modern models favor **gated** variants (often called SwiGLU), where one linear projection gates another. They perform better; because a gate adds a third matrix, the hidden dimension is shrunk (to about `8/3 * d_model` instead of `4 * d_model`) to keep the parameter count matched.
+- **Gated activations in the FFN.** The original FFN used a simple activation (ReLU, later GeLU). Modern models favor **gated** variants (often called SwiGLU), where one linear projection gates another. They perform better; because a gate adds a third matrix, the hidden dimension is shrunk (to about eight-thirds of d-model instead of four times d-model) to keep the parameter count matched.
 - **Rotary position embeddings (RoPE), not learned absolute positions.** A Transformer is otherwise order-blind, so it needs position information. Modern models inject it inside attention by **rotating** the query and key vectors by an angle that depends on position (RoPE), which encodes *relative* position naturally and generalizes to longer sequences better than the original learned absolute embeddings.
 - **No bias terms, and weight tying.** Modern models typically drop the bias terms in linear layers (they add parameters and instability for little gain) and tie the input embedding and output projection to share one matrix.
 
@@ -37,31 +37,31 @@ None of these change the skeleton; they are refinements to the sublayers, and th
 
 The architecture above is defined by a small set of numbers. These are the hyperparameters you set, and they determine the parameter count (and therefore, via lesson 2, the cost):
 
-- **`d_model`**: the residual-stream width. The single most important size dial.
-- **`n_layers`**: the depth (how many blocks).
-- **`n_heads`** (and **`head_dim = d_model / n_heads`**): attention splits `d_model` into this many heads; more heads means smaller heads.
-- **`d_ff`**: the FFN hidden width, about `4 * d_model` (non-gated) or `8/3 * d_model` (gated).
+- **d-model**: the residual-stream width. The single most important size dial.
+- **n-layers**: the depth (how many blocks).
+- **n-heads** (and **head-dim**, which is d-model divided by n-heads): attention splits d-model into this many heads; more heads means smaller heads.
+- **d-ff**: the FFN hidden width, about four times d-model (non-gated) or eight-thirds of d-model (gated).
 - **vocabulary size** and **context length** (the maximum sequence the model handles).
 
-These connect directly to the counting from lesson 2. Per block, attention's four projections (query, key, value, output) are about `4 * d_model^2` parameters and the FFN is about `8 * d_model^2`, so each block holds roughly `12 * d_model^2` parameters. Across the stack:
+These connect directly to the counting from lesson 2. Per block, attention's four projections (query, key, value, output) are about 4 times d-model squared parameters and the FFN is about 8 times d-model squared, so each block holds roughly 12 times d-model squared parameters. Across the stack:
 
 ```
 N (non-embedding) ~= 12 * n_layers * d_model^2
 ```
 
-plus the embedding (`vocab_size * d_model`). That formula is why `d_model` dominates: it enters squared. The design decisions that follow, depth versus width (more layers or wider layers for the same budget?), how many heads, the aspect ratio of the model, are all trade-offs made against this parameter count and the FLOP and memory costs it implies. There is no single optimum; there are choices, and the scaling-laws lesson is how you make them with evidence rather than folklore.
+plus the embedding (vocabulary size times d-model). That formula is why d-model dominates: it enters squared. The design decisions that follow, depth versus width (more layers or wider layers for the same budget?), how many heads, the aspect ratio of the model, are all trade-offs made against this parameter count and the FLOP and memory costs it implies. There is no single optimum; there are choices, and the scaling-laws lesson is how you make them with evidence rather than folklore.
 
 ## Why this matters when you build AI
 
-Two things change once you hold this skeleton. First, model configs stop being intimidating. Open any modern LLM's config file and you will see exactly these fields, `d_model` (sometimes `hidden_size`), `n_layers`, `n_heads`, `d_ff` (`intermediate_size`), the norm type, the activation, the positional scheme, and you will know what each does and why it was chosen. The apparent variety of "different architectures" collapses into one skeleton with a few switched settings. Second, you understand the design as a budget problem: the parameter count is set by `d_model` and `n_layers`, the cost follows from lesson 2's accounting, and choosing the architecture is choosing how to spend a compute budget across width, depth, and data. That framing, architecture as a constrained allocation rather than a bag of tricks, is exactly what the scaling-laws lesson formalizes, and it is the mature way to read every model that gets released.
+Two things change once you hold this skeleton. First, model configs stop being intimidating. Open any modern LLM's config file and you will see exactly these fields, d-model (sometimes called hidden-size), n-layers, n-heads, d-ff (sometimes intermediate-size), the norm type, the activation, the positional scheme, and you will know what each does and why it was chosen. The apparent variety of "different architectures" collapses into one skeleton with a few switched settings. Second, you understand the design as a budget problem: the parameter count is set by d-model and n-layers, the cost follows from lesson 2's accounting, and choosing the architecture is choosing how to spend a compute budget across width, depth, and data. That framing, architecture as a constrained allocation rather than a bag of tricks, is exactly what the scaling-laws lesson formalizes, and it is the mature way to read every model that gets released.
 
 ## What you should remember
 
 - **Modern LLMs share one skeleton:** a decoder-only Transformer, token embedding then N identical blocks (each an attention sublayer and an FFN sublayer, with normalization and a residual connection) then a final norm and an output projection.
-- **The residual stream** is the width-`d_model` vector flowing end to end; each sublayer reads from it and adds back. Attention moves information across positions; the FFN processes each position.
+- **The residual stream** is the vector of width d-model flowing end to end; each sublayer reads from it and adds back. Attention moves information across positions; the FFN processes each position.
 - **The field converged on a few choices:** pre-norm (not post-norm), RMSNorm (not LayerNorm), gated FFN activations like SwiGLU (with a smaller hidden ratio), RoPE for position (not learned absolute), and typically no bias terms plus weight tying.
-- **A small set of hyperparameters sizes the model:** `d_model`, `n_layers`, `n_heads` (and `head_dim`), `d_ff`, vocabulary size, and context length.
-- **Parameters are about `12 * n_layers * d_model^2`** (non-embedding), so `d_model` dominates because it enters squared. This ties the architecture directly to lesson 2's cost accounting.
+- **A small set of hyperparameters sizes the model:** d-model, n-layers, n-heads (and head-dim), d-ff, vocabulary size, and context length.
+- **Parameters are about 12 times n-layers times d-model squared** (non-embedding), so d-model dominates because it enters squared. This ties the architecture directly to lesson 2's cost accounting.
 - **Choosing the architecture is a budget allocation:** depth versus width versus data for a fixed compute budget, which the scaling-laws lesson decides with evidence.
 
 A modern LLM is one skeleton, a decoder-only Transformer with a residual stream, plus a handful of converged choices and a few sizing hyperparameters. Learn those, and every model config you ever open is suddenly legible.

@@ -15,7 +15,7 @@ This lesson assumes the PyTorch comfort the track expects; the payoff is that "i
 
 Compute is measured in **FLOPs**, floating-point operations. Almost all of a Transformer's compute is **matrix multiplication**, so if you can count the FLOPs in a matmul, you can count the model.
 
-Multiplying `A` (shape m by k) by `B` (shape k by n) to get `C` (shape m by n) computes each of the m times n outputs as a dot product of length k. A dot product of length k is k multiplications and about k additions, so roughly 2k operations. Total:
+Multiplying A (shape m by k) by B (shape k by n) to get C (shape m by n) computes each of the m times n outputs as a dot product of length k. A dot product of length k is k multiplications and about k additions, so roughly 2k operations. Total:
 
 ```
 FLOPs(matmul) ~= 2 * m * n * k
@@ -27,7 +27,7 @@ The factor of 2 is the multiply-and-add. Hold that formula; it is most of what y
 
 You rarely count every matmul. There is a famous approximation that gets you within a small factor, expressed in two numbers: **N**, the number of model parameters, and **D**, the number of tokens you train on.
 
-- A **forward pass** costs about `2 * N` FLOPs per token (each parameter participates in roughly one multiply-add).
+- A **forward pass** costs about 2N FLOPs per token (each parameter participates in roughly one multiply-add).
 - The **backward pass** costs about twice the forward pass.
 - So **training** costs about:
 
@@ -35,7 +35,7 @@ You rarely count every matmul. There is a famous approximation that gets you wit
 FLOPs(training) ~= 6 * N * D
 ```
 
-Two for the forward pass, four for the backward, six total, times parameters times tokens. That single rule lets you size a training run before you start it. Worked example: a 1-billion-parameter model trained on 100 billion tokens needs about `6 * 1e9 * 1e11 = 6e20` FLOPs. If a GPU delivers, say, on the order of `1e15` useful FLOPs per second, that is `6e20 / 1e15 = 6e5` seconds of compute, roughly a week on one device, which immediately tells you that you will want more than one (the subject of the parallelism lesson). You just scoped a training run with arithmetic.
+Two for the forward pass, four for the backward, six total, times parameters times tokens. That single rule lets you size a training run before you start it. Worked example: a 1-billion-parameter model trained on 100 billion tokens needs about 6 times 10 to the 20th FLOPs (six, times a billion parameters, times a hundred billion tokens). If a GPU delivers, say, on the order of 10 to the 15th useful FLOPs per second, that is about 600,000 seconds of compute (the 6 times 10 to the 20th divided by 10 to the 15th), roughly a week on one device, which immediately tells you that you will want more than one (the subject of the parallelism lesson). You just scoped a training run with arithmetic.
 
 ## Memory: what has to fit on the device
 
@@ -45,7 +45,7 @@ Compute tells you how long; memory tells you whether it fits at all, and memory 
 - **Gradients:** one per parameter, another 4N bytes.
 - **Optimizer states:** the Adam optimizer (and its common variant AdamW) keeps two running statistics per parameter, a momentum and a variance, so 2 times N values, 8N bytes.
 
-That is `4N + 4N + 8N = 16N` bytes before you have stored a single activation. A 1-billion-parameter model therefore needs about 16 GB just for parameters, gradients, and optimizer state. On top of that sit the **activations**, the intermediate values saved during the forward pass so the backward pass can use them, and these scale with batch size and sequence length, not with parameter count. The practical consequences are immediate: optimizer state often dwarfs the model itself, and activation memory is why you cannot simply use an enormous batch. Memory accounting, not just FLOP accounting, decides what you can train on the hardware you have.
+That is 4N plus 4N plus 8N, which is 16N bytes before you have stored a single activation. A 1-billion-parameter model therefore needs about 16 GB just for parameters, gradients, and optimizer state. On top of that sit the **activations**, the intermediate values saved during the forward pass so the backward pass can use them, and these scale with batch size and sequence length, not with parameter count. The practical consequences are immediate: optimizer state often dwarfs the model itself, and activation memory is why you cannot simply use an enormous batch. Memory accounting, not just FLOP accounting, decides what you can train on the hardware you have.
 
 ## Arithmetic intensity: is the hardware actually busy?
 
@@ -64,7 +64,7 @@ This is the single idea behind a huge amount of the systems work later in the tr
 
 ## einops: reading the shapes
 
-A surprising amount of model code is not math but **reshaping tensors**, and written with raw `.view`, `.permute`, and `.transpose` it becomes an unreadable, bug-prone puzzle of bare numbers. **einops** fixes this by letting you name the dimensions. Compare splitting a packed attention tensor into heads:
+A surprising amount of model code is not math but **reshaping tensors**, and written with raw view, permute, and transpose calls it becomes an unreadable, bug-prone puzzle of bare numbers. **einops** fixes this by letting you name the dimensions. Compare splitting a packed attention tensor into heads:
 
 ```python
 # Opaque: which axis is which?
@@ -79,15 +79,15 @@ The einops version states exactly what happens: a batch-by-sequence-by-(heads-ti
 
 ## Why this matters when you build AI
 
-Resource accounting is the literacy that turns model-building from hope into engineering. With the `6ND` rule and the `16N` memory estimate you can answer, before spending a dollar of compute, the questions that actually decide a project: how long will this train, how many devices do I need, will it even fit in memory? The arithmetic-intensity lens then explains the gap between a GPU's advertised speed and what you actually get, and it motivates nearly every optimization in the systems half of this track. And einops keeps the implementation you are accounting for legible enough to trust. Together these are the difference between "let us train it and see" and a plan you can defend. Every later lesson, kernels, parallelism, scaling laws, leans on this accounting, which is why it comes second, right after the tokenizer and before the architecture itself.
+Resource accounting is the literacy that turns model-building from hope into engineering. With the 6ND rule and the 16N memory estimate you can answer, before spending a dollar of compute, the questions that actually decide a project: how long will this train, how many devices do I need, will it even fit in memory? The arithmetic-intensity lens then explains the gap between a GPU's advertised speed and what you actually get, and it motivates nearly every optimization in the systems half of this track. And einops keeps the implementation you are accounting for legible enough to trust. Together these are the difference between "let us train it and see" and a plan you can defend. Every later lesson, kernels, parallelism, scaling laws, leans on this accounting, which is why it comes second, right after the tokenizer and before the architecture itself.
 
 ## What you should remember
 
-- **Compute is FLOPs, and a matrix multiply (m by k times k by n) costs about `2 * m * n * k`.** The model is mostly matmuls, so this is most of the counting.
-- **The 6ND rule:** training costs about `6 * N * D` FLOPs (N parameters, D tokens), two for the forward pass and four for the backward. It scopes a training run from two numbers.
-- **Training memory is roughly `16N` bytes in fp32:** parameters (4N) + gradients (4N) + Adam optimizer states (8N), before activations, which scale with batch and sequence length. Memory is often the binding constraint.
+- **Compute is FLOPs, and a matrix multiply (m by k times k by n) costs about 2 times m times n times k.** The model is mostly matmuls, so this is most of the counting.
+- **The 6ND rule:** training costs about 6ND FLOPs (N parameters, D tokens), two for the forward pass and four for the backward. It scopes a training run from two numbers.
+- **Training memory is roughly 16N bytes in fp32:** parameters (4N) plus gradients (4N) plus Adam optimizer states (8N), before activations, which scale with batch and sequence length. Memory is often the binding constraint.
 - **Arithmetic intensity = FLOPs per byte moved.** High intensity is compute-bound (hardware busy, good); low intensity is memory-bound (hardware stalled waiting on memory). Large matmuls are compute-bound; elementwise ops are memory-bound.
 - **Arithmetic intensity is why fusion and big batches help** and why a GPU often runs far below its peak FLOPs. It motivates most of the systems work later in the track.
-- **einops names tensor dimensions** (`rearrange(x, "b s (h d) -> b h s d", h=n_heads)`), making shape transformations readable and far less bug-prone than raw `.view`/`.permute`.
+- **einops names tensor dimensions** (you write the rearrange with named axes instead of bare numbers, as in the example above), making shape transformations readable and far less bug-prone than raw view and permute calls.
 
-Before you train anything, you can count what it will cost: `6ND` for compute, `16N` for memory, and arithmetic intensity for whether the hardware will be busy. That accounting is the common currency of every decision in the rest of this track.
+Before you train anything, you can count what it will cost: 6ND for compute, 16N for memory, and arithmetic intensity for whether the hardware will be busy. That accounting is the common currency of every decision in the rest of this track.

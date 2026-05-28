@@ -23,8 +23,8 @@ After pretraining, you have a model that knows language. SFT teaches it to follo
 
 The mechanical pieces:
 
-- **Chat-formatted data.** Conversations as ordered lists of `system`, `user`, and `assistant` messages, laid out by the model's **chat template** (the same `tokenizer.apply_chat_template` idea from Track 14 lesson 10). Format consistency matters; the wrong template wrecks the result.
-- **The training loop.** Same Trainer-class loop you already know, with `SFTTrainer`-class wrappers (TRL) that handle the templating and the loss-masking (mask the user turn so the model is graded only on its `assistant` responses). Often combined with **LoRA / PEFT** (Track 14 lesson 10) so the run fits on modest hardware.
+- **Chat-formatted data.** Conversations as ordered lists of *system*, *user*, and *assistant* messages, laid out by the model's **chat template** (the same chat-template idea from Track 14 lesson 10). Format consistency matters; the wrong template wrecks the result.
+- **The training loop.** Same Trainer-class loop you already know, with SFTTrainer-class wrappers (TRL) that handle the templating and the loss-masking (mask the user turn so the model is graded only on its *assistant* responses). Often combined with **LoRA / PEFT** (Track 14 lesson 10) so the run fits on modest hardware.
 - **Data leverage.** SFT data quality matters more than quantity. A small set of well-written instruction-response pairs typically beats a large noisy one. This is the synthetic-data lesson from the previous lesson applied at small scale: teacher-generated, classifier-filtered, deduplicated instruction data is the modern norm.
 
 The result is a model that follows instructions, holds dialogue, and produces output in the format you trained. It is usable; it is also opinionated in whatever direction the SFT data led.
@@ -33,14 +33,14 @@ The result is a model that follows instructions, holds dialogue, and produces ou
 
 SFT teaches the model to imitate the responses it sees. It is excellent at teaching format ("respond in this chat style") and basic behavior ("answer the question, don't continue the prompt"). What it does poorly is rank: two SFT outputs may both look reasonable, and SFT has no way to express "this one is better than that one."
 
-Preference tuning fills that gap. It assumes you have **preference pairs**, `(prompt, response_A, response_B, "A is preferred")`, and trains the model to assign higher probability to the preferred response. The result is a model that, given multiple plausible continuations, tends toward the ones a labeler would have picked.
+Preference tuning fills that gap. It assumes you have **preference pairs**: for the same prompt, two candidate responses with a label saying which one is preferred, and trains the model to assign higher probability to the preferred response. The result is a model that, given multiple plausible continuations, tends toward the ones a labeler would have picked.
 
 ## RLHF: three steps, with PPO as the optimizer
 
 **RLHF (Reinforcement Learning from Human Feedback)** is the original recipe. Three stages:
 
-1. **Collect preference data.** Show humans pairs of model outputs for the same prompt; ask which is better. Aggregate into a dataset of `(prompt, response_A, response_B, preferred_label)`.
-2. **Train a reward model.** A separate model takes a `(prompt, response)` and outputs a scalar **reward**, fit so that higher reward correlates with the preferred responses in the data. The reward model is itself a transformer with a small head; training it is supervised learning on the preferences.
+1. **Collect preference data.** Show humans pairs of model outputs for the same prompt; ask which is better. Aggregate into a dataset where each example is a prompt, two responses, and a label for which response was preferred.
+2. **Train a reward model.** A separate model takes a prompt and a response and outputs a scalar **reward**, fit so that higher reward correlates with the preferred responses in the data. The reward model is itself a transformer with a small head; training it is supervised learning on the preferences.
 3. **Optimize the policy with RL.** Treat the SFT model as a **policy**. For each prompt, sample several responses, score each with the reward model, and update the policy with a reinforcement learning algorithm, classically **PPO (Proximal Policy Optimization)**, that increases the probability of high-reward responses and decreases the probability of low-reward ones. A KL penalty keeps the policy from drifting too far from the SFT initialization.
 
 RLHF works, and it produced the early generation of widely-used instruction-tuned assistants. It also has known engineering pains: the RL step is **unstable** (PPO is finicky at LLM scale), the reward model is **hackable** (the policy learns to exploit reward-model quirks), and the whole pipeline has many moving parts.
@@ -49,7 +49,7 @@ RLHF works, and it produced the early generation of widely-used instruction-tune
 
 **Direct Preference Optimization (DPO)** is the recent simplification that has largely replaced PPO-style RLHF in open-model post-training. The key insight: if you assume the standard preference model behind RLHF, you can show that the optimal policy has a closed-form relationship to the preference data. DPO trains the model directly on the preference pairs with a clever loss that implements that relationship, **no explicit reward model, no RL step.** The result is a single supervised-learning-shaped pipeline with one model and one loss.
 
-In practice DPO is more stable, simpler to implement, requires fewer hyperparameters, and reaches comparable or better quality on most preference benchmarks. Modern open post-training stacks default to DPO (or a close relative) for preference tuning, and the TRL library exposes both `DPOTrainer` and `PPOTrainer` for the contrast.
+In practice DPO is more stable, simpler to implement, requires fewer hyperparameters, and reaches comparable or better quality on most preference benchmarks. Modern open post-training stacks default to DPO (or a close relative) for preference tuning, and the TRL library exposes both DPOTrainer and PPOTrainer for the contrast.
 
 ## What this does to the model, in mechanical terms
 
@@ -68,7 +68,7 @@ Post-training is the unglamorous part of "this model talks to people," and it is
 
 - **Pretrain -> SFT -> preference tuning.** Pretraining gives language; SFT teaches instruction-following and format; preference tuning shapes the model to prefer better responses over worse ones. Each step is necessary; none replaces the others.
 - **SFT data is chat-formatted instruction-response pairs.** Same cross-entropy loss as pretraining, much smaller and curated. Quality > quantity. Often combined with LoRA / PEFT for affordable runs.
-- **SFT alone cannot rank** two plausible responses; preference tuning fills that gap with `(prompt, response_A, response_B, preferred)` triples.
+- **SFT alone cannot rank** two plausible responses; preference tuning fills that gap with preference examples: for each prompt, two responses and a label for which is preferred.
 - **RLHF has three steps:** collect preference data, train a reward model on it, then update the SFT policy with RL (classically PPO) to maximize reward while staying near the SFT initialization (KL penalty).
 - **DPO simplifies preference tuning** by training directly on the preference pairs with a closed-form-derived loss, no reward model, no RL step. More stable; the modern open-model default.
 - **Mechanical effect:** the model's output distribution shifts toward the preference data's preferred direction; the model becomes opinionated in that specific direction. This lesson takes no position on whether the resulting opinion solves deeper alignment or safety questions; those debates are out of scope.
