@@ -40,7 +40,7 @@ import SourceLecture from "../../../../../components/SourceLecture.astro";
 
 Policy iteration in the previous lesson did a full evaluation step between every improvement step, an outer loop wrapping an inner loop. **Value iteration** is the simpler sibling: it interleaves the two completely. Each update is one direct sweep of the **Bellman optimality equation** (max over actions, not sum under a policy). Repeat until V stops moving. There is no explicit policy maintained during the loop; the policy falls out at the end (or whenever you ask for it) as the greedy action with respect to the current V.
 
-Two facts make this work beautifully. The Bellman optimality operator is a **contraction**, so V converges to V^* at a known rate. And the **greedy policy stabilizes long before V converges**, often after just a few iterations, which is a stopping trick that makes value iteration efficient in practice. The lesson runs it four steps on the same MDP from policy iteration so the comparison is direct.
+Two facts make this work beautifully. The Bellman optimality operator is a **contraction**, so V converges to the optimal value function at a known rate. And the **greedy policy stabilizes long before V converges**, often after just a few iterations, which is a stopping trick that makes value iteration efficient in practice. The lesson runs it four steps on the same MDP from policy iteration so the comparison is direct.
 
 ## The value-iteration update
 
@@ -50,28 +50,28 @@ The update is the Bellman optimality equation, used directly as an assignment:
 V_(k+1)(s) = max over a of  [ R(s, a) + gamma * sum over s' of  P(s' | s, a) * V_k(s') ]
 ```
 
-Read it slowly. For each state s and each candidate action a, you compute the immediate reward R(s, a) plus the discounted expected value at the next state under the **current** value estimate V_k. Then you take the max over a and that is the new value at s. You do this for every state in one sweep, then repeat.
+Read it slowly. For each state s and each candidate action a, you compute the immediate reward plus the discounted expected value at the next state under the **current** value estimate. Then you take the max over a and that is the new value at s. You do this for every state in one sweep, then repeat.
 
-There is no policy in the loop. The implicit policy at iteration k is "act greedily with respect to V_k", but you do not need to write it down until you want to act. Compare with policy iteration, which maintained an explicit pi_k throughout and changed it on improvement steps. Value iteration just chases V^*; the policy is a byproduct.
+There is no policy in the loop. The implicit policy at iteration k is "act greedily with respect to the current V", but you do not need to write it down until you want to act. Compare with policy iteration, which maintained an explicit policy throughout and changed it on improvement steps. Value iteration just chases the optimal value function; the policy is a byproduct.
 
 When does V stop moving? Two practical answers:
 
-- **Theoretical:** keep going until || V_(k+1) - V_k ||_infinity < some small epsilon (the largest entry-wise change is tiny).
+- **Theoretical:** keep going until the largest entry-wise change between successive iterates falls below some small epsilon.
 - **Practical:** keep going until the greedy policy stops changing, because for the purposes of acting you only need the right policy, not the exact value.
 
 The second one is often much earlier than the first, as the worked example will show.
 
 ## Why it converges: the contraction property
 
-Define the Bellman optimality operator T^* by
+Define the Bellman optimality operator (call it T-star) by
 
 ```
 (T^* V)(s) = max over a of  [ R(s, a) + gamma * sum over s' of  P(s' | s, a) * V(s') ]
 ```
 
-so the value-iteration update is just V_(k+1) = T^* V_k. The fact that makes everything work is:
+so the value-iteration update is just applying T-star to the previous iterate. The fact that makes everything work is:
 
-> **The Bellman optimality operator T^* is a contraction in the sup-norm with constant gamma.**
+> **The Bellman optimality operator is a contraction in the sup-norm with constant gamma.**
 
 In symbols: for any two value functions U and V,
 
@@ -79,7 +79,7 @@ In symbols: for any two value functions U and V,
 || T^* U  -  T^* V ||_infinity  <=  gamma * || U - V ||_infinity
 ```
 
-A single application of T^* shrinks the maximum entry-wise gap by a factor of gamma. Applied k times, it shrinks the gap by gamma^k. Because V^* is the unique fixed point of T^* (by the Bellman optimality equation), iterating from any starting V_0 gives V_k = (T^*)^k V_0, and the distance to V^* shrinks geometrically with rate gamma. Concretely, the error after k iterations is at most a constant times gamma^k.
+A single application of the operator shrinks the maximum entry-wise gap by a factor of gamma. Applied k times, it shrinks the gap by gamma to the k. Because the optimal value function is the unique fixed point of the operator (by the Bellman optimality equation), iterating from any starting point gives V at iteration k as the operator applied k times, and the distance to the optimal value function shrinks geometrically with rate gamma. Concretely, the error after k iterations is at most a constant times gamma to the k.
 
 You do not need the proof for the algorithm to work; you need to know that convergence is geometric and the rate is gamma. A gamma of 0.9 halves the error roughly every seven iterations, which is fast on small MDPs and slow on big ones. The same contraction makes Q-learning converge in Phase 3, so this property pays off twice.
 
@@ -92,39 +92,39 @@ From A:   stay -> A (R = 1),     switch -> B (R = 0)
 From B:   stay -> B (R = -1),    switch -> A (R = 2)
 ```
 
-Initialize V_0(A) = V_0(B) = 0 and apply T^* sweep by sweep.
+Initialize V at A and V at B to 0 and apply the operator sweep by sweep.
 
-**Iteration 1.** Using V_0 = (0, 0):
+**Iteration 1.** Starting from V at iteration 0 equal to (0, 0):
 
 ```
 V_1(A) = max{ 1 + 0.9 * V_0(A), 0 + 0.9 * V_0(B) } = max{ 1, 0 } = 1
 V_1(B) = max{ -1 + 0.9 * V_0(B), 2 + 0.9 * V_0(A) } = max{ -1, 2 } = 2
 ```
 
-Greedy policy implied by V_1: at A pick stay (Q = 1 > 0); at B pick switch (Q = 2 > -1). That is already **pi^***, the same policy policy iteration converged to.
+Greedy policy implied by V at iteration 1: at A pick stay (Q is 1, greater than 0); at B pick switch (Q is 2, greater than -1). That is already **the optimal policy**, the same one policy iteration converged to.
 
-**Iteration 2.** Using V_1 = (1, 2):
+**Iteration 2.** Using V at iteration 1 equal to (1, 2):
 
 ```
 V_2(A) = max{ 1 + 0.9 * 1,  0 + 0.9 * 2 } = max{ 1.9, 1.8 } = 1.9
 V_2(B) = max{ -1 + 0.9 * 2, 2 + 0.9 * 1 } = max{ 0.8, 2.9 } = 2.9
 ```
 
-**Iteration 3.** Using V_2 = (1.9, 2.9):
+**Iteration 3.** Using V at iteration 2 equal to (1.9, 2.9):
 
 ```
 V_3(A) = max{ 1 + 0.9 * 1.9,  0 + 0.9 * 2.9 } = max{ 2.71, 2.61 } = 2.71
 V_3(B) = max{ -1 + 0.9 * 2.9, 2 + 0.9 * 1.9 } = max{ 1.61, 3.71 } = 3.71
 ```
 
-**Iteration 4.** Using V_3 = (2.71, 3.71):
+**Iteration 4.** Using V at iteration 3 equal to (2.71, 3.71):
 
 ```
 V_4(A) = max{ 1 + 0.9 * 2.71,  0 + 0.9 * 3.71 } = max{ 3.439, 3.339 } = 3.439
 V_4(B) = max{ -1 + 0.9 * 3.71, 2 + 0.9 * 2.71 } = max{ 2.339, 4.439 } = 4.439
 ```
 
-You can see the pattern: V is creeping toward the fixed point V^* = (10, 11) that policy iteration found exactly in two rounds. After four sweeps you are at (3.439, 4.439), still well short. The geometric convergence at rate gamma = 0.9 means errors shrink by a factor of about 10 every 22 iterations; full numerical convergence of V is slow.
+You can see the pattern: V is creeping toward the fixed point — the optimal value function (10, 11) — that policy iteration found exactly in two rounds. After four sweeps you are at (3.439, 4.439), still well short. The geometric convergence at rate gamma equal to 0.9 means errors shrink by a factor of about 10 every 22 iterations; full numerical convergence of V is slow.
 
 **But the greedy policy is already optimal from iteration 1.** A quick check across the iterations:
 
@@ -152,8 +152,8 @@ Three points on the same spectrum. They all converge, by closely related argumen
 
 Value iteration is the simplest planning algorithm, but its **shape** is everywhere downstream.
 
-- **Q-learning is value iteration on sampled transitions.** When you do not know P and R, you cannot compute the full expectation under P inside the max. So you replace it with a sample: from an observed (s, a, r, s') you bootstrap a target r + gamma * max_a' Q(s', a') and nudge Q(s, a) toward it. That is exactly value iteration's update with the expectation replaced by a sample (lesson 8 develops it in full).
-- **DQN minimizes the Bellman optimality residual.** A deep Q-network approximates Q with a neural network and uses gradient descent to make Q(s, a) close to the Bellman optimality target r + gamma * max_a' Q(s', a'). The recursion is the same; the table is replaced by a function approximator. Lesson 9.
+- **Q-learning is value iteration on sampled transitions.** When you do not know P and R, you cannot compute the full expectation under P inside the max. So you replace it with a sample: from an observed transition (state, action, reward, next state) you bootstrap a target — immediate reward plus discounted max next-state Q — and nudge Q at that state-action pair toward it. That is exactly value iteration's update with the expectation replaced by a sample (lesson 8 develops it in full).
+- **DQN minimizes the Bellman optimality residual.** A deep Q-network approximates Q with a neural network and uses gradient descent to make Q close to the Bellman optimality target — immediate reward plus discounted max next-state Q. The recursion is the same; the table is replaced by a function approximator. Lesson 9.
 - **Early-stopping the greedy policy is a standard trick.** In planning and in practice, "stop iterating values when the policy stabilizes" can save orders of magnitude of computation, especially when gamma is close to 1 and value convergence is slow.
 
 The biggest single mental model: **iterate the Bellman update; the policy comes for free**. Everything that follows in the track is this idea adapted to the sample-based, function-approximation setting.
@@ -164,12 +164,12 @@ The biggest single mental model: **iterate the Bellman update; the policy comes 
 - **Waiting for V to fully converge.** The greedy policy often stabilizes much earlier; stopping when the policy stops changing is usually enough for control purposes.
 - **Forgetting bounded rewards.** The contraction argument needs bounded rewards (otherwise sup-norm distances blow up). Real problems with very large or unbounded rewards may need a clip or a different analysis.
 - **Treating value iteration as automatically fast.** Convergence is geometric at rate gamma, so a gamma close to 1 means **slow** convergence in iteration count, even though each sweep is cheap. The two trade off.
-- **Maintaining the policy explicitly during VI.** There is no need to; the implicit policy is greedy with respect to V_k, and you can read it off at any time without writing it down.
+- **Maintaining the policy explicitly during VI.** There is no need to; the implicit policy is greedy with respect to the current V, and you can read it off at any time without writing it down.
 
 ## What you should remember
 
-- **Value iteration** applies the Bellman optimality equation as a direct update: **V_(k+1)(s) = max_a [R(s, a) + gamma * sum_(s') P(s'|s, a) V_k(s')]**. Sweep all states, repeat until V (or the greedy policy) stops moving.
-- The Bellman optimality operator T^* is a **contraction in the sup-norm with constant gamma**, so V_k converges to V^* **geometrically at rate gamma** from any starting V_0.
-- The implicit policy at iteration k is **greedy with respect to V_k**, and it typically stabilizes well before V converges; using the policy as the stopping rule is a standard trick.
-- Worked on the A/B MDP at gamma = 0.9 starting from V_0 = (0, 0): V_1 = (1, 2), V_2 = (1.9, 2.9), V_3 = (2.71, 3.71), V_4 = (3.439, 4.439), creeping toward V^* = (10, 11) found exactly by policy iteration. The greedy policy is **pi^* = (stay, switch) from iteration 1 on**.
+- **Value iteration** applies the Bellman optimality equation as a direct update: at each state, take the max over actions of immediate reward plus the discounted expected next-state value (the formula above). Sweep all states, repeat until V (or the greedy policy) stops moving.
+- The Bellman optimality operator is a **contraction in the sup-norm with constant gamma**, so the iterates converge to the optimal value function **geometrically at rate gamma** from any starting point.
+- The implicit policy at iteration k is **greedy with respect to the current V**, and it typically stabilizes well before V converges; using the policy as the stopping rule is a standard trick.
+- Worked on the A/B MDP at gamma equal to 0.9 starting from (0, 0). The first four iterates are (1, 2), (1.9, 2.9), (2.71, 3.71), and (3.439, 4.439), creeping toward the optimal value function (10, 11) found exactly by policy iteration. The greedy policy is **(stay, switch) from iteration 1 on**, which is the optimal policy.
 - Value iteration is the **extreme point of GPI**: one Bellman sweep per "improvement." Policy iteration, truncated policy iteration, and value iteration are three points on the same evaluate-then-improve spectrum. Q-learning and DQN later in the track are this same update adapted to samples and function approximators.
