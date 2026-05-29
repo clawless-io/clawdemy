@@ -7,9 +7,18 @@ sidebar:
 artifact: lesson
 ---
 
-Every lesson so far quietly assumed the data was ready. In lesson 3 you called `load_dataset("glue", "mrpc")` and a clean, labeled, split dataset appeared. Real data is almost never that tidy: it arrives with missing values, inconsistent labels, junk characters, and wildly varying lengths. Phase 2 turns to that reality, and it starts with the `datasets` library, the tool for loading, cleaning, and transforming data at a scale your laptop's memory could not otherwise handle.
+import ReadAlongDim from '../../../../../components/ReadAlongDim.astro';
 
-Keep a notebook open; `pip install datasets` if you have not. The running example is a dataset of patient drug reviews, the kind of messy real-world text you will actually meet.
+<ReadAlongDim
+  src="https://audio.clawdemy.org/lessons/wrangle-data-with-datasets-lesson.mp3"
+  slug="wrangle-data-with-datasets"
+  cacheVersion="20260529-6"
+  approxMinutes={8}
+/>
+
+Every lesson so far quietly assumed the data was ready. In lesson 3 a single load-dataset call produced a clean, labeled, split dataset. Real data is almost never that tidy: it arrives with missing values, inconsistent labels, junk characters, and wildly varying lengths. Phase 2 turns to that reality, and it starts with the *datasets* library, the tool for loading, cleaning, and transforming data at a scale your laptop's memory could not otherwise handle.
+
+Keep a notebook open; install the *datasets* library if you have not. The running example is a dataset of patient drug reviews, the kind of messy real-world text you will actually meet.
 
 ## Loading data, from the Hub or your own files
 
@@ -20,14 +29,14 @@ from datasets import load_dataset
 raw = load_dataset("glue", "mrpc")
 ```
 
-But `load_dataset` also loads your own files. Point it at the right loader (`"csv"`, `"json"`, `"text"`) and pass a `data_files` mapping of split names to paths. A tab-separated file is just CSV with a different delimiter:
+But the same load-dataset call also loads your own files. Point it at the right loader (*csv*, *json*, *text*) and pass a data-files mapping of split names to paths. A tab-separated file is just CSV with a different delimiter:
 
 ```python
 data_files = {"train": "drugsComTrain_raw.tsv", "test": "drugsComTest_raw.tsv"}
 drug_dataset = load_dataset("csv", data_files=data_files, delimiter="\t")
 ```
 
-What comes back is a `DatasetDict`: a dictionary of splits, each one a `Dataset`. Print it and you see the shape of your data at a glance, its column names (the `features`) and row count (`num_rows`):
+What comes back is a dictionary of splits, each one a *Dataset*. Print it and you see the shape of your data at a glance, its column names (the *features*) and row count:
 
 ```python
 DatasetDict({
@@ -39,24 +48,24 @@ DatasetDict({
 })
 ```
 
-One thing worth knowing up front: a `Dataset` is backed by Apache Arrow on disk, not loaded wholesale into RAM. That is what lets you work with datasets far larger than memory; the library reads what it needs when it needs it.
+One thing worth knowing up front: a *Dataset* is backed by Apache Arrow on disk, not loaded wholesale into RAM. That is what lets you work with datasets far larger than memory; the library reads what it needs when it needs it.
 
 ## Peek before you leap
 
-Before transforming anything, look at a sample. Chain `shuffle` (with a fixed `seed` so it is reproducible) and `select` (which takes an iterable of indices):
+Before transforming anything, look at a sample. Chain *shuffle* (with a fixed *seed* so it is reproducible) and *select* (which takes an iterable of indices):
 
 ```python
 drug_sample = drug_dataset["train"].shuffle(seed=42).select(range(1000))
 drug_sample[:3]
 ```
 
-A quick look reveals the usual problems: a mystery `Unnamed: 0` column, `condition` labels in mixed case, and reviews full of HTML codes like `&#039;` and stray line breaks. Now you clean.
+A quick look reveals the usual problems: a mystery unnamed first column, condition labels in mixed case, and reviews full of HTML escape codes and stray line breaks. Now you clean.
 
-## Transform with `map`
+## Transform with *map*
 
-`Dataset.map()` is the workhorse, the same method you used to tokenize in lesson 3. You give it a function that takes one example (a dict of that row's fields) and returns a dict of fields to update or add. Returning an existing key overwrites it; returning a new key adds a column.
+The *map* method is the workhorse, the same method you used to tokenize in lesson 3. You give it a function that takes one example (a dict of that row's fields) and returns a dict of fields to update or add. Returning an existing key overwrites it; returning a new key adds a column.
 
-Normalize the `condition` labels to lowercase:
+Normalize the condition labels to lowercase:
 
 ```python
 def lowercase_condition(example):
@@ -65,7 +74,7 @@ def lowercase_condition(example):
 drug_dataset = drug_dataset.map(lowercase_condition)
 ```
 
-Add a brand-new `review_length` column by returning a key that does not yet exist:
+Add a brand-new review-length column by returning a key that does not yet exist:
 
 ```python
 def compute_review_length(example):
@@ -74,7 +83,7 @@ def compute_review_length(example):
 drug_dataset = drug_dataset.map(compute_review_length)
 ```
 
-After this, every row has a `review_length`. Cleaning text works the same way; here using Python's `html` module to unescape those character codes:
+After this, every row has a review-length column. Cleaning text works the same way; here using Python's html module to unescape those character codes:
 
 ```python
 import html
@@ -83,18 +92,18 @@ drug_dataset = drug_dataset.map(lambda x: {"review": html.unescape(x["review"])}
 
 ## Filter out what you do not want
 
-`Dataset.filter()` is `map`'s sibling: give it a function that returns `True` to keep a row and `False` to drop it. A lambda is the natural fit. Some `condition` values are `None` (and will crash `.lower()`), so drop them; and very short reviews carry little signal, so drop those too:
+The *filter* method is *map*'s sibling: give it a function that returns *True* to keep a row and *False* to drop it. A lambda is the natural fit. Some condition values are *None* (and would crash the lowercase call), so drop them; and very short reviews carry little signal, so drop those too:
 
 ```python
 drug_dataset = drug_dataset.filter(lambda x: x["condition"] is not None)
 drug_dataset = drug_dataset.filter(lambda x: x["review_length"] > 30)
 ```
 
-The second filter removes roughly 15% of the rows. The pattern, `map` to add or change columns and `filter` to remove rows, covers most of the cleaning you will ever do.
+The second filter removes roughly 15% of the rows. The pattern, *map* to add or change columns and *filter* to remove rows, covers most of the cleaning you will ever do.
 
-## The `map` superpower: `batched=True`
+## The *map* superpower: batching
 
-Here is the switch that makes this practical on real data. Pass `batched=True` and `map` hands your function a batch of examples at once (1,000 by default) instead of one at a time. Your function now receives a dict whose values are *lists*, and should return lists:
+Here is the switch that makes this practical on real data. Pass the batched flag and *map* hands your function a batch of examples at once (1,000 by default) instead of one at a time. Your function now receives a dict whose values are *lists*, and should return lists:
 
 ```python
 drug_dataset = drug_dataset.map(
@@ -102,7 +111,7 @@ drug_dataset = drug_dataset.map(
 )
 ```
 
-This runs dramatically faster, and it is essential for the "fast" tokenizers you will meet in the next lesson. Tokenizing a whole dataset with `batched=True` and a fast tokenizer can be roughly 30 times quicker than one-at-a-time with a slow one, because the fast tokenizer's Rust core parallelizes across the batch:
+This runs dramatically faster, and it is essential for the "fast" tokenizers you will meet in the next lesson. Tokenizing a whole dataset with batching and a fast tokenizer can be roughly 30 times quicker than one-at-a-time with a slow one, because the fast tokenizer's Rust core parallelizes across the batch:
 
 ```python
 from transformers import AutoTokenizer
@@ -114,18 +123,18 @@ def tokenize_function(examples):
 tokenized = drug_dataset.map(tokenize_function, batched=True)
 ```
 
-For functions without a fast Rust path, `map` also accepts `num_proc=N` to spread work across processes. As a rule, reach for `batched=True` first; it is the single biggest speedup available.
+For functions without a fast Rust path, *map* also accepts a process-count argument to spread work across processes. As a rule, reach for batching first; it is the single biggest speedup available.
 
 ## A few more tools you will reach for
 
-- `rename_column("Unnamed: 0", "patient_id")` cleans up column names across every split at once.
-- `sort("review_length")` orders rows by a column (useful for finding the extremes).
-- `unique("column")` returns the distinct values (handy for sanity checks, like confirming an ID column really is unique).
-- `train_test_split(train_size=0.8, seed=42)` carves a validation set out of your training data, so you can keep the real test set untouched until the very end.
+- The rename-column method cleans up column names across every split at once.
+- The *sort* method orders rows by a column (useful for finding the extremes).
+- The *unique* method returns the distinct values (handy for sanity checks, like confirming an ID column really is unique).
+- The train-test-split method carves a validation set out of your training data, so you can keep the real test set untouched until the very end.
 
 ## Pandas when you need it, Arrow underneath
 
-Sometimes you want pandas for a quick `value_counts()` or a groupby. `Dataset.set_format("pandas")` changes only the *output* format (the underlying Arrow data is untouched), so slicing the dataset gives you a `DataFrame`. When you are done, `Dataset.from_pandas(df)` turns a frame back into a `Dataset`, and `reset_format()` returns to Arrow. The library is built to interoperate with pandas, NumPy, and the deep-learning frameworks, so you are never trapped in one representation.
+Sometimes you want pandas for a quick value-counts call or a groupby. The set-format call changes only the *output* format (the underlying Arrow data is untouched), so slicing the dataset gives you a *DataFrame*. When you are done, a from-pandas call turns a frame back into a *Dataset*, and a reset-format call returns to Arrow. The library is built to interoperate with pandas, NumPy, and the deep-learning frameworks, so you are never trapped in one representation.
 
 ## Save it, reload it
 
@@ -138,19 +147,19 @@ from datasets import load_from_disk
 reloaded = load_from_disk("drug-reviews")
 ```
 
-There are also `to_csv` and `to_json` for sharing in those formats (one file per split). And, as you saw with models in lesson 4, datasets push to the Hub too, with the same patterns, so a cleaned dataset can be shared as easily as a model.
+There are also methods to write the dataset out as CSV or JSON (one file per split). And, as you saw with models in lesson 4, datasets push to the Hub too, with the same patterns, so a cleaned dataset can be shared as easily as a model.
 
 ## Why this matters when you use AI
 
-Most of applied machine learning is data work, not model work. The model architecture is usually a solved choice; the difference between a project that works and one that does not is almost always the quality and preparation of the data. The `datasets` library is what makes that work tractable: `map` and `filter` let you express cleaning and transformation as small functions applied across millions of rows, `batched=True` makes it fast, and the Arrow backend means dataset size is not bounded by your RAM. And the discipline of carving a validation set with `train_test_split`, keeping the test set untouched until the end, is the same evaluation honesty from lesson 3 applied to your data: you protect a slice the model never sees so your final number means something. Garbage in, garbage out is not a slogan here; it is the thing the whole library exists to help you avoid.
+Most of applied machine learning is data work, not model work. The model architecture is usually a solved choice; the difference between a project that works and one that does not is almost always the quality and preparation of the data. The *datasets* library is what makes that work tractable: *map* and *filter* let you express cleaning and transformation as small functions applied across millions of rows, batching makes it fast, and the Arrow backend means dataset size is not bounded by your RAM. And the discipline of carving a validation set with the train-test-split method, keeping the test set untouched until the end, is the same evaluation honesty from lesson 3 applied to your data: you protect a slice the model never sees so your final number means something. Garbage in, garbage out is not a slogan here; it is the thing the whole library exists to help you avoid.
 
 ## What you should remember
 
-- **`load_dataset` loads from the Hub or your own files.** Pass a loader (`"csv"`, `"json"`) and a `data_files` mapping for local data; you get a `DatasetDict` of splits, each a `Dataset` with `features` and `num_rows`.
-- **A `Dataset` is Arrow-backed on disk, not held in RAM,** which is why it scales past your memory.
-- **`map` transforms, `filter` removes.** `map` takes a function returning a dict (update a column or add a new one); `filter` takes a function returning `True`/`False` to keep or drop rows.
-- **`batched=True` is the key speedup.** It passes 1,000 examples at once (values become lists) and is essential for fast tokenizers; reach for it before `num_proc`.
-- **Handy extras:** `rename_column`, `sort`, `unique`, and `train_test_split` (carve a validation set, leave the test set alone).
-- **You can drop to pandas and back.** `set_format("pandas")` changes only the output format; `from_pandas` returns to a `Dataset`. Save with `save_to_disk` / `load_from_disk`.
+- **The load-dataset call loads from the Hub or your own files.** Pass a loader (*csv*, *json*) and a data-files mapping for local data; you get a dictionary of splits, each a *Dataset* with its *features* and row count.
+- **A Dataset is Arrow-backed on disk, not held in RAM,** which is why it scales past your memory.
+- **map transforms, filter removes.** *map* takes a function returning a dict (update a column or add a new one); *filter* takes a function returning *True*/*False* to keep or drop rows.
+- **The batched flag is the key speedup.** It passes 1,000 examples at once (values become lists) and is essential for fast tokenizers; reach for it before the process-count option.
+- **Handy extras** include renaming columns, sorting, finding unique values, and splitting off a validation set while leaving the test set alone.
+- **You can drop to pandas and back.** A set-format call changes only the output format; a from-pandas call returns to a *Dataset*. Save the cleaned dataset to disk and reload it later, each in one call.
 
-The model is usually the easy part; the data is where the work lives. `map`, `filter`, and `batched=True` are how you do that work at scale without drowning in it.
+The model is usually the easy part; the data is where the work lives. *map*, *filter*, and batching are how you do that work at scale without drowning in it.

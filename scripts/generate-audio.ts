@@ -245,6 +245,18 @@ export function mdxToProse(mdx: string): string {
 	// Code blocks (fenced)
 	text = text.replace(/```[\s\S]*?```/g, '');
 
+	// Markdown tables: remove entire table rows (header, separator, body).
+	// ReadAlongDim's DOM walker only counts highlight words inside BLOCK_TAGS
+	// (P / LI / Hn / BLOCKQUOTE); <td> and <th> are NOT block tags, so table
+	// cells never enter the read-along word sequence. The narration must drop
+	// them too, or every word after a table drifts out of sync with the
+	// highlight. (Bug found 2026-05-29 on the-main-nlp-tasks: the audio read
+	// the task-map table while the highlight skipped it.) Runs after the
+	// fenced-code strip so any pipe characters inside code blocks are already
+	// gone. Clawdemy tables use the bracketed-pipe convention (each row starts
+	// and ends with |).
+	text = text.replace(/^[ \t]*\|.*\|[ \t]*$/gm, '');
+
 	// Self-closing JSX components: <Component ... />
 	text = text.replace(/<[A-Z][a-zA-Z0-9]*[^<>]*\/>/g, '');
 

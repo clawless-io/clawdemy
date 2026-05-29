@@ -7,9 +7,18 @@ sidebar:
 artifact: lesson
 ---
 
-In lesson 1 you met the asymmetry: pre-training is the expensive part, fine-tuning is the cheap part. This is the lesson where you do the cheap part. You take a model someone else paid to pre-train, continue training it for a few minutes on a dataset of your own, and watch it learn a task it could not do before. The `transformers` library gives you a `Trainer` class that handles the hard machinery (the training loop, batching, gradient steps, mixed precision) so the part you write is small.
+import ReadAlongDim from '../../../../../components/ReadAlongDim.astro';
 
-Keep a notebook open, and this time you want a GPU. Training on a CPU works but is painfully slow; Google Colab gives you a free GPU, which is the path of least resistance. If you have not, `pip install transformers datasets evaluate`.
+<ReadAlongDim
+  src="https://audio.clawdemy.org/lessons/fine-tune-on-your-data-lesson.mp3"
+  slug="fine-tune-on-your-data"
+  cacheVersion="20260529-6"
+  approxMinutes={9}
+/>
+
+In lesson 1 you met the asymmetry: pre-training is the expensive part, fine-tuning is the cheap part. This is the lesson where you do the cheap part. You take a model someone else paid to pre-train, continue training it for a few minutes on a dataset of your own, and watch it learn a task it could not do before. The *transformers* library gives you a *Trainer* class that handles the hard machinery (the training loop, batching, gradient steps, mixed precision) so the part you write is small.
+
+Keep a notebook open, and this time you want a GPU. Training on a CPU works but is painfully slow; Google Colab gives you a free GPU, which is the path of least resistance. If you have not, install the *transformers*, *datasets*, and *evaluate* libraries.
 
 ## The setup: data ready to train on
 
@@ -30,11 +39,11 @@ tokenized_datasets = raw_datasets.map(tokenize_function, batched=True)
 data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
 ```
 
-One piece here is new and worth a pause: the **data collator**. In the last lesson we padded every sentence to the same length up front. That wastes compute, because the longest example in the whole dataset forces every batch to be that long. `DataCollatorWithPadding` does **dynamic padding** instead: it pads each batch only to the length of the longest example *in that batch*, right as the batch is assembled. Shorter batches stay short. You hand it to the `Trainer` and forget about it.
+One piece here is new and worth a pause: the **data collator**. In the last lesson we padded every sentence to the same length up front. That wastes compute, because the longest example in the whole dataset forces every batch to be that long. The padding data collator does **dynamic padding** instead: it pads each batch only to the length of the longest example *in that batch*, right as the batch is assembled. Shorter batches stay short. You hand it to the *Trainer* and forget about it.
 
 ## The model: a head swap you should expect
 
-Load the model the way you did in lesson 2, but with one new argument: `num_labels`, because MRPC has two classes (paraphrase or not).
+Load the model the way you did in lesson 2, but with one new argument that sets the number of labels, because MRPC has two classes (paraphrase or not).
 
 ```python
 from transformers import AutoModelForSequenceClassification
@@ -46,7 +55,7 @@ Run this and you will get a warning, and it is not a problem, it is the whole po
 
 ## TrainingArguments: the configuration object
 
-Everything about *how* to train (where to save, learning rate, batch size, how often to evaluate, which speed tricks to use) lives in a single `TrainingArguments` object. The only argument you must supply is an output directory; the defaults handle the rest for a basic run.
+Everything about *how* to train (where to save, learning rate, batch size, how often to evaluate, which speed tricks to use) lives in a single *TrainingArguments* object. The only argument you must supply is an output directory; the defaults handle the rest for a basic run.
 
 ```python
 from transformers import TrainingArguments
@@ -58,7 +67,7 @@ That is enough to train. You will tune this object far more than any other piece
 
 ## Trainer: assemble and go
 
-The `Trainer` takes the model, the arguments, the train and validation splits, the collator, and the tokenizer (passed as `processing_class`, which tells the Trainer how to process data). Then one method call starts training.
+The *Trainer* takes the model, the arguments, the train and validation splits, the collator, and the tokenizer (passed in to tell the Trainer how to process data, via the processing-class argument). Then one method call starts training.
 
 ```python
 from transformers import Trainer
@@ -75,11 +84,11 @@ trainer = Trainer(
 trainer.train()
 ```
 
-`trainer.train()` runs the fine-tuning (a couple of minutes on a GPU) and reports the training loss as it goes. When you pass a tokenizer as `processing_class`, the Trainer defaults its collator to `DataCollatorWithPadding` anyway, so the explicit `data_collator` line is optional; we keep it to make the moving part visible.
+The trainer train call runs the fine-tuning (a couple of minutes on a GPU) and reports the training loss as it goes. When you pass a tokenizer in, the Trainer defaults its collator to the padding data collator anyway, so the explicit collator line is optional; we keep it to make the moving part visible.
 
 ## Evaluation: did it actually get better?
 
-Here is the catch: `trainer.train()` on its own tells you the training loss is going down, but not whether the model is any good on data it has not seen. Loss going down is necessary, not sufficient. To get a real answer you add two things: tell the Trainer to evaluate (an `eval_strategy`), and give it a function that computes a metric you understand.
+Here is the catch: training on its own tells you the training loss is going down, but not whether the model is any good on data it has not seen. Loss going down is necessary, not sufficient. To get a real answer you add two things: tell the Trainer to evaluate, by setting an evaluation strategy, and give it a function that computes a metric you understand.
 
 First, see what the model predicts on the validation set:
 
@@ -92,14 +101,14 @@ print(predictions.predictions.shape, predictions.label_ids.shape)
 (408, 2) (408,)
 ```
 
-Those `predictions.predictions` are logits again (every transformer outputs logits, as you saw in lesson 2): 408 examples, 2 labels each. To turn logits into a concrete prediction, take the index of the larger value in each row with `argmax`:
+Those raw predictions are logits again (every transformer outputs logits, as you saw in lesson 2): 408 examples, 2 labels each. To turn logits into a concrete prediction, take the index of the larger value in each row (the argmax operation):
 
 ```python
 import numpy as np
 preds = np.argmax(predictions.predictions, axis=-1)
 ```
 
-Now compare `preds` to the true labels using the `evaluate` library, which knows the standard metrics for named datasets:
+Now compare those predictions to the true labels using the *evaluate* library, which knows the standard metrics for named datasets:
 
 ```python
 import evaluate
@@ -122,7 +131,7 @@ def compute_metrics(eval_preds):
     return metric.compute(predictions=predictions, references=labels)
 ```
 
-Then rebuild the Trainer with `eval_strategy="epoch"` and the new function, so it reports real metrics at the end of every pass through the data. Use a fresh `TrainingArguments` and a fresh model, otherwise you are just continuing to train the model you already trained:
+Then rebuild the Trainer with the epoch evaluation strategy and the new function, so it reports real metrics at the end of every pass through the data. Use a fresh *TrainingArguments* and a fresh model, otherwise you are just continuing to train the model you already trained:
 
 ```python
 training_args = TrainingArguments("test-trainer", eval_strategy="epoch")
@@ -144,25 +153,25 @@ Now each epoch reports validation loss and your metrics alongside the training l
 
 ## A few switches worth knowing
 
-The `Trainer` packages modern training practices behind single arguments in `TrainingArguments`. Three you will reach for:
+The *Trainer* packages modern training practices behind single arguments in the *TrainingArguments* object. Three you will reach for:
 
-- `fp16=True` turns on mixed-precision training: faster, and uses less GPU memory, usually for free.
-- `gradient_accumulation_steps=4` simulates a larger batch size when your GPU cannot fit one, by accumulating gradients across several small batches before stepping.
-- `learning_rate=2e-5` and `lr_scheduler_type="cosine"` adjust the most important hyperparameter and how it decays over the run.
+- The fp16 flag turns on mixed-precision training: faster, and uses less GPU memory, usually for free.
+- The gradient-accumulation argument simulates a larger batch size when your GPU cannot fit one, by accumulating gradients across several small batches before stepping.
+- The learning rate and its scheduler adjust the most important hyperparameter and how it decays over the run.
 
 You do not need these for a first run, but knowing they are one keyword away is what makes the Trainer scale from a toy example to a serious training job.
 
 ## Why this matters when you use AI
 
-Fine-tuning is the step that turns a generic model into *your* model. Most applied AI work is not pre-training a model from scratch (you will almost never do that) and is often not even prompting alone; it is taking a strong base model and shaping it to a specific task with a modest labeled dataset. The `Trainer` is what makes that accessible: the parts that are genuinely hard (a correct training loop, evaluation plumbing, mixed precision, multi-GPU) are handled, and the parts you own (which data, which metric, which hyperparameters) are the parts that actually encode your problem. And the discipline of `compute_metrics` matters beyond this lesson: a falling training loss is not proof of a good model, a metric on held-out data is. Carry that habit into every model you train.
+Fine-tuning is the step that turns a generic model into *your* model. Most applied AI work is not pre-training a model from scratch (you will almost never do that) and is often not even prompting alone; it is taking a strong base model and shaping it to a specific task with a modest labeled dataset. The *Trainer* is what makes that accessible: the parts that are genuinely hard (a correct training loop, evaluation plumbing, mixed precision, multi-GPU) are handled, and the parts you own (which data, which metric, which hyperparameters) are the parts that actually encode your problem. And the discipline of computing metrics matters beyond this lesson: a falling training loss is not proof of a good model, a metric on held-out data is. Carry that habit into every model you train.
 
 ## What you should remember
 
 - **Fine-tuning continues training a pretrained model on your task-specific data.** It is the cheap part from lesson 1, made concrete; you will do it far more often than you pre-train.
-- **A data collator handles dynamic padding:** `DataCollatorWithPadding` pads each batch to its own longest example instead of padding the whole dataset to one length.
+- **A data collator handles dynamic padding:** the padding data collator pads each batch to its own longest example instead of padding the whole dataset to one length.
 - **Loading a model with a task head triggers an expected warning:** the pretraining head is discarded and a fresh, randomly initialized head is added. That warning means the setup is correct; training makes the new head useful.
-- **`TrainingArguments` is the single config object** for the whole run; only an output directory is required, defaults handle the rest.
-- **`Trainer` assembles model, args, datasets, collator, and tokenizer**, and `trainer.train()` runs the loop.
-- **A falling training loss is not enough.** Set an `eval_strategy` and a `compute_metrics` function (logits to predictions with `argmax`, then score with `evaluate`) to measure quality on held-out data.
+- **TrainingArguments is the single config object** for the whole run; only an output directory is required, defaults handle the rest.
+- **Trainer assembles model, args, datasets, collator, and tokenizer**, and a trainer train call runs the loop.
+- **A falling training loss is not enough.** Set an evaluation strategy and a metrics function: turn logits into predictions (the argmax step), then score them with the *evaluate* library, to measure quality on held-out data.
 
 Pre-training builds a model that knows language; fine-tuning, in a few minutes and a few lines, makes it know your task.

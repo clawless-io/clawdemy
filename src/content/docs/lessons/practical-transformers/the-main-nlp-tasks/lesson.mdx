@@ -7,17 +7,26 @@ sidebar:
 artifact: lesson
 ---
 
+import ReadAlongDim from '../../../../../components/ReadAlongDim.astro';
+
+<ReadAlongDim
+  src="https://audio.clawdemy.org/lessons/the-main-nlp-tasks-lesson.mp3"
+  slug="the-main-nlp-tasks"
+  cacheVersion="20260529-5"
+  approxMinutes={11}
+/>
+
 You now have every piece: run a model (lesson 2), fine-tune one (lesson 3), share it (lesson 4), wrangle data (lesson 5), and understand the tokenizer (lesson 6). This is the lesson where the pieces assemble. We will not write a full training script for every task; that would be a book. Instead we will build the skill that actually matters in practice: looking at a problem, naming which NLP task it is, and choosing the right model head, data shape, and metric. Get that mapping right and the code is nearly the same every time.
 
 ## The one pattern under all of them
 
 Every task in this lesson follows the same loop you already know from lesson 3:
 
-1. Load and clean a dataset (`datasets`, `map`, `filter`).
+1. Load and clean a dataset (*datasets*, *map*, *filter*).
 2. Tokenize it, with any task-specific alignment.
-3. Load a model with the right head (`AutoModelFor<Task>`).
+3. Load a model with the right head (the matching task-specific model class).
 4. Pick a data collator and a metric.
-5. Train with the `Trainer` (or its sequence-to-sequence variant).
+5. Train with the *Trainer* (or its sequence-to-sequence variant).
 6. Evaluate and push to the Hub.
 
 What changes from task to task is small and specific: **which head** you load, **what shape** the labels take, and **which metric** tells you if it worked. Hold that frame and the rest of this lesson is just filling in a table.
@@ -26,45 +35,45 @@ What changes from task to task is small and specific: **which head** you load, *
 
 | Task | What it does | Head class | Typical metric | Model family |
 | --- | --- | --- | --- | --- |
-| Sequence classification | Label a whole input | `AutoModelForSequenceClassification` | accuracy, F1 | encoder (BERT) |
-| Token classification (NER) | Label each token | `AutoModelForTokenClassification` | seqeval (entity F1) | encoder (BERT) |
-| Question answering (extractive) | Find an answer span in a context | `AutoModelForQuestionAnswering` | exact match, F1 (SQuAD) | encoder (BERT) |
-| Masked language modeling | Fill in blanked tokens | `AutoModelForMaskedLM` | perplexity | encoder (BERT) |
-| Causal language modeling | Predict the next token | `AutoModelForCausalLM` | perplexity | decoder (GPT) |
-| Summarization | Long text to short text | `AutoModelForSeq2SeqLM` | ROUGE | encoder-decoder (T5, BART) |
-| Translation | One language to another | `AutoModelForSeq2SeqLM` | BLEU / SacreBLEU | encoder-decoder (T5, BART) |
+| Sequence classification | Label a whole input | *AutoModelForSequenceClassification* | accuracy, F1 | encoder (BERT) |
+| Token classification (NER) | Label each token | *AutoModelForTokenClassification* | seqeval (entity F1) | encoder (BERT) |
+| Question answering (extractive) | Find an answer span in a context | *AutoModelForQuestionAnswering* | exact match, F1 (SQuAD) | encoder (BERT) |
+| Masked language modeling | Fill in blanked tokens | *AutoModelForMaskedLM* | perplexity | encoder (BERT) |
+| Causal language modeling | Predict the next token | *AutoModelForCausalLM* | perplexity | decoder (GPT) |
+| Summarization | Long text to short text | *AutoModelForSeq2SeqLM* | ROUGE | encoder-decoder (T5, BART) |
+| Translation | One language to another | *AutoModelForSeq2SeqLM* | BLEU / SacreBLEU | encoder-decoder (T5, BART) |
 
 Notice the column you already know how to read: the **model family** is the architectural shape from lesson 1. Understanding tasks want an encoder, generation wants a decoder, and sequence-to-sequence wants an encoder-decoder. Choosing the task is mostly choosing the shape, then choosing its head.
 
 ## The understanding tasks (encoder + a head)
 
-Sequence classification you already did in lesson 3: feed the whole input, get one label. **Token classification** (named-entity recognition is the classic case) is the same idea one level finer: instead of one label for the input, you predict a label for every token (is this token part of a person, a place, an organization, or nothing). The head is `AutoModelForTokenClassification`, and the data is a list of tokens each carrying a label.
+Sequence classification you already did in lesson 3: feed the whole input, get one label. **Token classification** (named-entity recognition is the classic case) is the same idea one level finer: instead of one label for the input, you predict a label for every token (is this token part of a person, a place, an organization, or nothing). The head is the token-classification model, and the data is a list of tokens each carrying a label.
 
-This is where lesson 6 pays off. Your labels are attached to *words*, but the tokenizer produces *tokens*, and one word can become several tokens. You need to line them back up, and the fast tokenizer's **word IDs** are exactly the tool: they tell you which word each token came from, so you can spread each word's label across its tokens. Without fast tokenizers this task is painful; with them it is a few lines. The metric is `seqeval`, which scores whole entities (precision, recall, F1) rather than individual tokens.
+This is where lesson 6 pays off. Your labels are attached to *words*, but the tokenizer produces *tokens*, and one word can become several tokens. You need to line them back up, and the fast tokenizer's **word IDs** are exactly the tool: they tell you which word each token came from, so you can spread each word's label across its tokens. Without fast tokenizers this task is painful; with them it is a few lines. The metric is *seqeval*, which scores whole entities (precision, recall, F1) rather than individual tokens.
 
-**Extractive question answering** is the other token-level task. Given a question and a context paragraph, the model predicts a start position and an end position: the span of the context that answers the question. The head is `AutoModelForQuestionAnswering`, and again the fast tokenizer's **offsets** are essential, because the model works in token positions but the answer must be returned as a span of the original characters. The standard metrics are exact match and F1 on the answer text, from the SQuAD benchmark.
+**Extractive question answering** is the other token-level task. Given a question and a context paragraph, the model predicts a start position and an end position: the span of the context that answers the question. The head is the question-answering model, and again the fast tokenizer's **offsets** are essential, because the model works in token positions but the answer must be returned as a span of the original characters. The standard metrics are exact match and F1 on the answer text, from the SQuAD benchmark.
 
 ## The language-modeling tasks (no labels needed)
 
-**Masked language modeling** is BERT's pretraining objective: blank out some tokens and train the model to fill them in. You rarely train this from zero, but you often *domain-adapt*, continuing MLM training on your own corpus so a general model picks up your field's vocabulary. The head is `AutoModelForMaskedLM`, and the key new piece is the data collator: `DataCollatorForLanguageModeling` does the random masking on the fly. There are no hand-made labels, the text is its own supervision, and the metric is **perplexity** (lower is better).
+**Masked language modeling** is BERT's pretraining objective: blank out some tokens and train the model to fill them in. You rarely train this from zero, but you often *domain-adapt*, continuing MLM training on your own corpus so a general model picks up your field's vocabulary. The head is the masked-language-modeling model, and the key new piece is the data collator: the language-modeling data collator does the random masking on the fly. There are no hand-made labels, the text is its own supervision, and the metric is **perplexity** (lower is better).
 
-**Causal language modeling** is the GPT objective: predict the next token given everything before it. Same self-supervised idea, different head (`AutoModelForCausalLM`) and the same collator with `mlm=False`. This is how you would pretrain a small model from scratch, or continue training one on your own text. Perplexity again.
+**Causal language modeling** is the GPT objective: predict the next token given everything before it. Same self-supervised idea, different head (the causal-language-modeling model) and the same collator with masking turned off. This is how you would pretrain a small model from scratch, or continue training one on your own text. Perplexity again.
 
 ## The sequence-to-sequence tasks (encoder-decoder, and two wrinkles)
 
-**Summarization** and **translation** are both sequence-to-sequence: an input sequence in, a different sequence out. They use `AutoModelForSeq2SeqLM` (T5, BART) and share two wrinkles you have not met yet:
+**Summarization** and **translation** are both sequence-to-sequence: an input sequence in, a different sequence out. They use the sequence-to-sequence model (T5, BART) and share two wrinkles you have not met yet:
 
-- They need the **`Seq2SeqTrainer`** and **`DataCollatorForSeq2Seq`**, not the plain versions, because the targets are themselves sequences that must be padded and shifted.
+- They need the sequence-to-sequence Trainer and the sequence-to-sequence data collator, not the plain versions, because the targets are themselves sequences that must be padded and shifted.
 - Their metrics are **generation-based**: ROUGE for summarization (overlap between generated and reference summaries) and BLEU or SacreBLEU for translation. These compare produced text to reference text, so evaluation actually generates output rather than just reading logits.
 
-Everything else, the `map`-to-tokenize, the `TrainingArguments` (here `Seq2SeqTrainingArguments`), the `compute_metrics` discipline, the push to the Hub, is the loop you already know.
+Everything else, the *map*-to-tokenize step, the *TrainingArguments* (here the sequence-to-sequence variant), the compute-metrics discipline, the push to the Hub, is the loop you already know.
 
 ## The two recurring wrinkles, summarized
 
 Across all six tasks, only two things genuinely differ from the lesson-3 loop, and both are worth committing to memory:
 
 1. **Token-level tasks need alignment.** Token classification and question answering work in token positions, but labels and answers live at the word or character level. Fast-tokenizer **word IDs and offsets** are how you bridge the two. This is the practical reason lesson 6 insisted fast tokenizers matter.
-2. **Sequence-to-sequence needs its own tools.** Summarization and translation use `Seq2SeqTrainer`, `DataCollatorForSeq2Seq`, and generation-based metrics (ROUGE, BLEU), because the target is a sequence, not a label.
+2. **Sequence-to-sequence needs its own tools.** Summarization and translation use the sequence-to-sequence Trainer, the sequence-to-sequence data collator, and generation-based metrics (ROUGE, BLEU), because the target is a sequence, not a label.
 
 Recognize which of these (if either) your task triggers, and you know what to change.
 
@@ -74,11 +83,11 @@ The genuinely hard part of an applied NLP project is almost never the training c
 
 ## What you should remember
 
-- **One loop underlies every task:** load and clean data, tokenize (with any alignment), load `AutoModelFor<Task>`, pick a collator and metric, train, evaluate, push. Only the head, the label shape, and the metric change.
+- **One loop underlies every task:** load and clean data, tokenize (with any alignment), load the task-specific model head, pick a collator and metric, train, evaluate, push. Only the head, the label shape, and the metric change.
 - **Choosing the task is choosing the shape.** Understanding tasks want an encoder, generation wants a decoder, sequence-to-sequence wants an encoder-decoder, then you add the matching head.
 - **Token classification and question answering are token-level** and depend on fast-tokenizer word IDs and offsets to align labels and answer spans. Metrics: seqeval; SQuAD exact-match and F1.
-- **Masked and causal language modeling need no hand-made labels:** the text supervises itself via `DataCollatorForLanguageModeling` (set `mlm=False` for causal). Metric: perplexity.
-- **Summarization and translation are sequence-to-sequence:** `AutoModelForSeq2SeqLM`, `Seq2SeqTrainer`, `DataCollatorForSeq2Seq`, and generation-based metrics (ROUGE, BLEU).
+- **Masked and causal language modeling need no hand-made labels:** the text supervises itself via the language-modeling data collator (with masking turned off for the causal version). Metric: perplexity.
+- **Summarization and translation are sequence-to-sequence:** the sequence-to-sequence model, Trainer, and data collator, and generation-based metrics (ROUGE, BLEU).
 - **The applied skill is diagnosis.** Naming the task correctly picks the head, data shape, and metric for you; most real-world mistakes are framing mistakes, not coding ones.
 
 The training loop barely changes from task to task. The skill that does the work is looking at a problem and naming which task it is, because that single choice hands you the head, the data shape, and the metric all at once.
