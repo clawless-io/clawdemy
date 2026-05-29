@@ -12,7 +12,7 @@ import ReadAlongDim from '../../../../../components/ReadAlongDim.astro';
 <ReadAlongDim
   src="https://audio.clawdemy.org/lessons/wrangle-data-with-datasets-lesson.mp3"
   slug="wrangle-data-with-datasets"
-  cacheVersion="20260529"
+  cacheVersion="20260529-2"
   approxMinutes={8}
 />
 
@@ -36,7 +36,7 @@ data_files = {"train": "drugsComTrain_raw.tsv", "test": "drugsComTest_raw.tsv"}
 drug_dataset = load_dataset("csv", data_files=data_files, delimiter="\t")
 ```
 
-What comes back is a *DatasetDict*: a dictionary of splits, each one a *Dataset*. Print it and you see the shape of your data at a glance, its column names (the *features*) and row count (`num_rows`):
+What comes back is a *DatasetDict*: a dictionary of splits, each one a *Dataset*. Print it and you see the shape of your data at a glance, its column names (the *features*) and row count:
 
 ```python
 DatasetDict({
@@ -59,13 +59,13 @@ drug_sample = drug_dataset["train"].shuffle(seed=42).select(range(1000))
 drug_sample[:3]
 ```
 
-A quick look reveals the usual problems: a mystery `Unnamed: 0` column, `condition` labels in mixed case, and reviews full of HTML escape codes and stray line breaks. Now you clean.
+A quick look reveals the usual problems: a mystery unnamed first column, condition labels in mixed case, and reviews full of HTML escape codes and stray line breaks. Now you clean.
 
 ## Transform with *map*
 
 The *map* method is the workhorse, the same method you used to tokenize in lesson 3. You give it a function that takes one example (a dict of that row's fields) and returns a dict of fields to update or add. Returning an existing key overwrites it; returning a new key adds a column.
 
-Normalize the `condition` labels to lowercase:
+Normalize the condition labels to lowercase:
 
 ```python
 def lowercase_condition(example):
@@ -74,7 +74,7 @@ def lowercase_condition(example):
 drug_dataset = drug_dataset.map(lowercase_condition)
 ```
 
-Add a brand-new `review_length` column by returning a key that does not yet exist:
+Add a brand-new review-length column by returning a key that does not yet exist:
 
 ```python
 def compute_review_length(example):
@@ -83,7 +83,7 @@ def compute_review_length(example):
 drug_dataset = drug_dataset.map(compute_review_length)
 ```
 
-After this, every row has a `review_length` column. Cleaning text works the same way; here using Python's `html` module to unescape those character codes:
+After this, every row has a review-length column. Cleaning text works the same way; here using Python's html module to unescape those character codes:
 
 ```python
 import html
@@ -92,7 +92,7 @@ drug_dataset = drug_dataset.map(lambda x: {"review": html.unescape(x["review"])}
 
 ## Filter out what you do not want
 
-The *filter* method is *map*'s sibling: give it a function that returns *True* to keep a row and *False* to drop it. A lambda is the natural fit. Some `condition` values are *None* (and would crash the `.lower()` call), so drop them; and very short reviews carry little signal, so drop those too:
+The *filter* method is *map*'s sibling: give it a function that returns *True* to keep a row and *False* to drop it. A lambda is the natural fit. Some condition values are *None* (and would crash the lowercase call), so drop them; and very short reviews carry little signal, so drop those too:
 
 ```python
 drug_dataset = drug_dataset.filter(lambda x: x["condition"] is not None)
@@ -103,7 +103,7 @@ The second filter removes roughly 15% of the rows. The pattern, *map* to add or 
 
 ## The *map* superpower: batching
 
-Here is the switch that makes this practical on real data. Pass the `batched=True` flag and *map* hands your function a batch of examples at once (1,000 by default) instead of one at a time. Your function now receives a dict whose values are *lists*, and should return lists:
+Here is the switch that makes this practical on real data. Pass the batched flag and *map* hands your function a batch of examples at once (1,000 by default) instead of one at a time. Your function now receives a dict whose values are *lists*, and should return lists:
 
 ```python
 drug_dataset = drug_dataset.map(
@@ -123,7 +123,7 @@ def tokenize_function(examples):
 tokenized = drug_dataset.map(tokenize_function, batched=True)
 ```
 
-For functions without a fast Rust path, *map* also accepts a process-count argument (`num_proc=N`) to spread work across processes. As a rule, reach for batching first; it is the single biggest speedup available.
+For functions without a fast Rust path, *map* also accepts a process-count argument to spread work across processes. As a rule, reach for batching first; it is the single biggest speedup available.
 
 ## A few more tools you will reach for
 
@@ -158,7 +158,7 @@ Most of applied machine learning is data work, not model work. The model archite
 - **The load-dataset call loads from the Hub or your own files.** Pass a loader (*csv*, *json*) and a data-files mapping for local data; you get a *DatasetDict* of splits, each a *Dataset* with its *features* and row count.
 - **A Dataset is Arrow-backed on disk, not held in RAM,** which is why it scales past your memory.
 - **map transforms, filter removes.** *map* takes a function returning a dict (update a column or add a new one); *filter* takes a function returning *True*/*False* to keep or drop rows.
-- **The `batched=True` flag is the key speedup.** It passes 1,000 examples at once (values become lists) and is essential for fast tokenizers; reach for it before the `num_proc` option.
+- **The batched flag is the key speedup.** It passes 1,000 examples at once (values become lists) and is essential for fast tokenizers; reach for it before the process-count option.
 - **Handy extras** include renaming columns, sorting, finding unique values, and splitting off a validation set while leaving the test set alone.
 - **You can drop to pandas and back.** A set-format call changes only the output format; a from-pandas call returns to a *Dataset*. Save the cleaned dataset to disk and reload it later, each in one call.
 
