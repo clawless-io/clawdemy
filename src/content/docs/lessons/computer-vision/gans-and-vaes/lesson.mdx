@@ -7,6 +7,15 @@ sidebar:
   label: Lesson
 ---
 
+import ReadAlongDim from '../../../../../components/ReadAlongDim.astro';
+
+<ReadAlongDim
+  src="https://audio.clawdemy.org/lessons/gans-and-vaes-lesson.mp3"
+  slug="gans-and-vaes"
+  cacheVersion="20260529"
+  approxMinutes={20}
+/>
+
 Look back at the lessons so far. Every architecture, from the linear classifier in lesson 2 through the conv nets, detectors, segmenters, video models, and self-supervised encoders, has been **discriminative**: it takes an image in and produces a label, a box, a mask, a heatmap, or a feature vector that distinguishes images from each other. That is one of the two halves of machine learning.
 
 The other half is **generative**: produce a new image, given some signal (random noise, a class label, a text caption, or no input at all). A generative vision model does not classify; it synthesizes. The history of how the field built these is a fast-moving story, and the lessons in the rest of Phase 3 cover three distinct generations of generative-image models. This lesson covers the first two families: the **Variational Autoencoder (VAE)** and the **Generative Adversarial Network (GAN)**, both introduced in 2013-2014. The next lesson covers **diffusion models**, which have largely replaced both at the high end since around 2020. Their differences are instructive, and the trade-offs you meet in this lesson set up what diffusion is solving.
@@ -15,13 +24,13 @@ Note on scope: full derivations for both VAEs and GANs (the evidence lower bound
 
 ## Discriminative vs generative, the conceptual split
 
-A **discriminative** model learns `P(label | image)`, the probability of a label given an image. That is what every architecture so far has done.
+A **discriminative** model learns the probability of a label given an image. That is what every architecture so far has done.
 
-A **generative** model learns something about `P(image)`, the probability distribution over images themselves, or at least how to sample from it. With a learned `P(image)` (or a learned sampling procedure for it) you can do something a discriminative model fundamentally cannot: produce a new image that looks plausible, that "comes from the same distribution" as your training images.
+A **generative** model learns something about the probability distribution over images themselves, or at least how to sample from it. With a learned distribution over images (or a learned sampling procedure for it) you can do something a discriminative model fundamentally cannot: produce a new image that looks plausible, that "comes from the same distribution" as your training images.
 
 That capability unlocks a different set of tasks. Discriminative tasks (the entire track so far): classification, detection, segmentation, retrieval, recognition. Generative tasks (this and the next two lessons): image synthesis from scratch, conditional image generation (class-conditional, text-conditional), inpainting, super-resolution, style transfer, image-to-image translation, data augmentation by synthesis, latent-space manipulation for semantic editing.
 
-A useful way to hold the two: discriminative models slice up image space ("this region is `cat`, this region is `dog`"); generative models *describe* image space ("here is what a plausible image looks like; here, sample one").
+A useful way to hold the two: discriminative models slice up image space ("this region is cat, this region is dog"); generative models *describe* image space ("here is what a plausible image looks like; here, sample one").
 
 ## The Variational Autoencoder (VAE)
 
@@ -29,15 +38,15 @@ The first family. **Variational Autoencoders** (Kingma and Welling 2014; Rezende
 
 The shape is encoder-decoder, similar to U-Net (lesson 8) but with a different middle:
 
-- An **encoder** maps an input image `x` to a **distribution** over a latent vector `z`. Specifically, it outputs two vectors: a mean `μ` and a standard deviation `σ` (typically of the same dimensionality as the latent vector). The latent `z` is then sampled from `N(μ, σ²)`, the normal distribution with that mean and variance.
-- A **decoder** maps a latent sample `z` back to a reconstruction of the image `x̂`.
+- An **encoder** maps an input image x to a **distribution** over a latent vector z. Specifically, it outputs two vectors: a mean and a standard deviation (typically of the same dimensionality as the latent vector). The latent z is then sampled from the normal distribution with that mean and variance.
+- A **decoder** maps a latent sample z back to a reconstruction of the image.
 
-To **generate** a new image, skip the encoder. Sample `z` directly from the standard normal `N(0, I)` (a fixed prior over the latent space), feed it to the decoder, and read out the synthesized image. The decoder learned during training to map random-looking latent vectors into plausible image-space outputs.
+To **generate** a new image, skip the encoder. Sample z directly from the standard normal (a fixed prior over the latent space), feed it to the decoder, and read out the synthesized image. The decoder learned during training to map random-looking latent vectors into plausible image-space outputs.
 
 The training objective is two terms added together:
 
 1. A **reconstruction loss** that penalizes how badly the decoder reproduces the input image from its latent sample (typically pixel MSE or cross-entropy).
-2. A **KL-divergence regularizer** that pushes the encoder's per-image distribution `N(μ, σ²)` toward the standard normal prior `N(0, I)`. This is what keeps the latent space "well-organized": every point in the latent space has to correspond to *some* plausible image, not just the exact training images.
+2. A **KL-divergence regularizer** that pushes the encoder's per-image distribution toward the standard normal prior. This is what keeps the latent space "well-organized": every point in the latent space has to correspond to *some* plausible image, not just the exact training images.
 
 The combined loss is called the **Evidence Lower Bound (ELBO)**. Full derivation lives in T19; here you only need that "minimize reconstruction error AND keep latent close to a known prior" is the intuition.
 
@@ -45,11 +54,11 @@ The combined loss is called the **Evidence Lower Bound (ELBO)**. Full derivation
 
 There is one structural piece worth doing concretely, because it shows up everywhere in modern generative modeling: the **reparameterization trick**.
 
-The problem: training the VAE needs gradients to flow back from the decoder's loss, through the sampled `z`, to the encoder's `μ` and `σ`. But sampling is a non-differentiable random operation; you cannot backpropagate through "draw a random number."
+The problem: training the VAE needs gradients to flow back from the decoder's loss, through the sampled z, to the encoder's mean and standard deviation. But sampling is a non-differentiable random operation; you cannot backpropagate through "draw a random number."
 
-The fix: rewrite the sampling so the randomness comes from a separate, parameter-free source. Instead of `z ~ N(μ, σ²)`, write `z = μ + σ * ε`, where `ε ~ N(0, I)` is drawn from a fixed, parameter-free standard normal. Now `z` is a deterministic function of `μ`, `σ`, and the random `ε`, so gradients can flow through `μ` and `σ` (the parts you want to train) while the randomness sits in `ε` (which has no parameters and needs no gradient).
+The fix: rewrite the sampling so the randomness comes from a separate, parameter-free source. Instead of sampling z directly from that distribution, write z as the mean plus the standard deviation times a noise term epsilon, where epsilon is drawn from a fixed, parameter-free standard normal. Now z is a deterministic function of the mean, the standard deviation, and the random epsilon, so gradients can flow through the mean and standard deviation (the parts you want to train) while the randomness sits in epsilon (which has no parameters and needs no gradient).
 
-A small numerical example. Say the encoder produces `μ = [0.5, -0.2]` and `σ = [0.1, 0.3]`. Sample one `ε = [0.5, -1.0]` from the standard normal. Apply the trick:
+A small numerical example. Say the encoder produces a mean of 0.5 and -0.2, and a standard deviation of 0.1 and 0.3. Sample one noise vector epsilon of 0.5 and -1.0 from the standard normal. Apply the trick:
 
 ```
 z = μ + σ * ε
@@ -58,7 +67,7 @@ z = μ + σ * ε
   = [0.55,             -0.5]
 ```
 
-That `z` is the input to the decoder; gradients flow back from the loss through the `μ` and `σ` paths. The reparameterization trick is short, elegant, and the reason VAEs train at all; it now also shows up in many other models that need differentiable sampling.
+That z is the input to the decoder; gradients flow back from the loss through the mean and standard deviation paths. The reparameterization trick is short, elegant, and the reason VAEs train at all; it now also shows up in many other models that need differentiable sampling.
 
 ### VAE characteristics
 
@@ -72,14 +81,14 @@ VAEs have a recognizable strength and a recognizable weakness.
 
 The other family. **Generative Adversarial Networks** (Goodfellow et al. 2014) took a completely different approach: train two networks against each other.
 
-- A **generator G** takes random noise `z` (sampled from some fixed prior, often `N(0, I)`) and produces an image. Goal: produce images that fool the discriminator.
+- A **generator G** takes random noise z (sampled from some fixed prior, often the standard normal) and produces an image. Goal: produce images that fool the discriminator.
 - A **discriminator D** takes an image (either a real one from the training set, or a fake one produced by G) and outputs the probability that it is real. Goal: classify correctly.
 
 The two are trained jointly in an adversarial loop. The discriminator tries to get better at distinguishing real from fake; the generator tries to get better at fooling the discriminator. At a hypothetical equilibrium, the generator's outputs are indistinguishable from real images, and the discriminator is forced to output 0.5 (it cannot tell which is which).
 
-There is no encoder in a vanilla GAN: G goes straight from random `z` to an image. To generate, sample `z` and run G. That is the whole inference path.
+There is no encoder in a vanilla GAN: G goes straight from random z to an image. To generate, sample z and run G. That is the whole inference path.
 
-The training procedure is the min-max game `min_G max_D V(D, G)` where `V` is the discriminator's classification loss. Operationally: alternate between updating D (sharpen the real-vs-fake discrimination) and updating G (push G's outputs toward what D currently calls real). Full derivation and the convergence story live in T24.
+The training procedure is the min-max game (minimize over the generator, maximize over the discriminator) where V is the discriminator's classification loss. Operationally: alternate between updating D (sharpen the real-vs-fake discrimination) and updating G (push G's outputs toward what D currently calls real). Full derivation and the convergence story live in T24.
 
 ### GAN characteristics
 
@@ -87,9 +96,9 @@ GANs have a recognizably opposite trade-off from VAEs.
 
 **Strength: sharp, photorealistic outputs.** Trained well, GANs produce strikingly realistic images, often with crisper fine detail than VAEs. The discriminator's pressure to distinguish real from fake forces the generator to match real-image statistics at high spatial frequencies, which is what gives the sharp look.
 
-**Weakness: hard to train.** The two-network adversarial dynamics are unstable: the generator and discriminator can fall into oscillations, the generator can collapse to producing only a few image modes (**mode collapse**, where every random `z` decodes to a similar image), and the loss values are not directly meaningful as a training signal (the generator's loss going down can mean it is improving, or that the discriminator got worse, or both). GAN training is a substantial engineering art; many subsequent papers (DCGAN, WGAN, Spectral Norm, StyleGAN's progressive growing) refined the recipe.
+**Weakness: hard to train.** The two-network adversarial dynamics are unstable: the generator and discriminator can fall into oscillations, the generator can collapse to producing only a few image modes (**mode collapse**, where every random z decodes to a similar image), and the loss values are not directly meaningful as a training signal (the generator's loss going down can mean it is improving, or that the discriminator got worse, or both). GAN training is a substantial engineering art; many subsequent papers (DCGAN, WGAN, Spectral Norm, StyleGAN's progressive growing) refined the recipe.
 
-**Other catches.** GANs do not give you a likelihood `P(image)`; they only give you a sampler. They also typically have no encoder, so going from a given image *back* to its latent code is non-trivial (techniques like GAN inversion address this with extra work).
+**Other catches.** GANs do not give you a likelihood over images; they only give you a sampler. They also typically have no encoder, so going from a given image *back* to its latent code is non-trivial (techniques like GAN inversion address this with extra work).
 
 ### Modern GAN landmarks (briefly)
 
@@ -130,7 +139,7 @@ The VAE-vs-GAN trade-off also shows up in how you choose architecture for a gene
 
 ## Common pitfalls
 
-**Conflating generative with discriminative just because both are "deep models."** They learn fundamentally different things (`P(image)` vs `P(label | image)`), and the architectures and training procedures are different. A discriminative model cannot generate; a generative model can be used to classify but it is usually not the right tool for that.
+**Conflating generative with discriminative just because both are "deep models."** They learn fundamentally different things (a distribution over images versus the probability of a label given an image), and the architectures and training procedures are different. A discriminative model cannot generate; a generative model can be used to classify but it is usually not the right tool for that.
 
 **Treating GAN training as standard supervised training.** It is a min-max adversarial loop, not a single loss minimization. The loss values do not behave like classification losses (going down does not always mean improving), and the stability tricks (gradient penalty, spectral normalization, progressive growing) are essential, not optional.
 
@@ -140,8 +149,8 @@ The VAE-vs-GAN trade-off also shows up in how you choose architecture for a gene
 
 ## What you should remember
 
-- **Discriminative vs generative.** Discriminative models learn `P(label | image)` and slice up image space; generative models learn `P(image)` or how to sample from it, and describe image space.
-- **VAEs (Kingma & Welling 2014).** Encoder maps image to a latent distribution (mean μ, std σ); the **reparameterization trick** `z = μ + σ * ε` (with `ε ~ N(0, I)`) makes sampling differentiable; decoder reconstructs. Trained with reconstruction + KL-to-prior (the ELBO). Smooth latent space, slightly blurry outputs.
+- **Discriminative vs generative.** Discriminative models learn the probability of a label given an image and slice up image space; generative models learn the distribution over images or how to sample from it, and describe image space.
+- **VAEs (Kingma & Welling 2014).** Encoder maps image to a latent distribution (a mean and a standard deviation); the **reparameterization trick** writes z as the mean plus the standard deviation times a standard-normal noise term, which makes sampling differentiable; decoder reconstructs. Trained with reconstruction + KL-to-prior (the ELBO). Smooth latent space, slightly blurry outputs.
 - **GANs (Goodfellow et al. 2014).** Generator G takes noise to image, discriminator D classifies real-vs-fake, trained adversarially. Sharp / photorealistic outputs; training is unstable (mode collapse, oscillation); no likelihood, no built-in encoder. Modern landmarks: DCGAN, StyleGAN, BigGAN.
 - **Use the right tool for the job.** Smooth latent space / interpretability: VAE-family. Maximum photorealism: GAN or diffusion. Encode-only (no generation): self-supervised encoders from lesson 10. Diffusion (next lesson) has largely replaced both at the high end since around 2020, but VAEs and GANs remain in production for cost and latency reasons.
 
