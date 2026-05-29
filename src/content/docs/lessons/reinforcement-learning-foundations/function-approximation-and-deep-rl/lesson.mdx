@@ -44,15 +44,15 @@ The move is straightforward: **replace the table with a parameterized function**
 
 ## From a table to a parameterized function
 
-Replace Q(s, a) (a number per (s, a) entry) with **Q_theta(s, a)** (a function of (s, a) and parameters theta). In the linear case:
+Replace Q(s, a) (a number per (s, a) entry) with **the parameterized Q function at that state-action pair** (a function of (s, a) and parameters theta). In the linear case:
 
 ```
 Q_theta(s, a)  =  theta . phi(s, a)         (dot product with a feature vector phi)
 ```
 
-where phi(s, a) is a hand-designed feature vector for the state-action pair. In the neural-network case, Q_theta is the output of a neural network with parameters theta (weights and biases) given (s, a), or given s with one output per action. The point is the same: a small number of parameters theta represents Q across a (potentially infinite) state space, and updating theta updates Q **everywhere at once**, not just at a single (s, a).
+where phi(s, a) is a hand-designed feature vector for the state-action pair. In the neural-network case, the parameterized Q function is the output of a neural network with parameters theta (weights and biases) given (s, a), or given s with one output per action. The point is the same: a small number of parameters theta represents Q across a (potentially infinite) state space, and updating theta updates Q **everywhere at once**, not just at a single (s, a).
 
-The objective is to make Q_theta(s, a) close to a target estimating Q^pi or Q^*. For Q-learning the target is the same one as the previous lesson:
+The objective is to make the parameterized Q function at that state-action pair close to a target estimating the action-value function under policy pi or the optimal action-value function. For Q-learning the target is the same one as the previous lesson:
 
 ```
 target(s, a, r, s')  =  r  +  gamma * max_{a'} Q_theta(s', a')
@@ -74,13 +74,13 @@ Take the gradient of the loss with respect to theta and step downhill:
 theta  <-  theta  -  eta * ( Q_theta(s, a) - target ) * grad_theta Q_theta(s, a)
 ```
 
-Equivalently, with delta = target - Q_theta(s, a) (the TD error on Q):
+Equivalently, with delta = target - the parameterized Q function at that state-action pair (the TD error on Q):
 
 ```
 theta  <-  theta  +  eta * delta * grad_theta Q_theta(s, a)
 ```
 
-This is called a **semi-gradient** step because the target depends on theta too (it uses Q_theta at s'), but we treat it as **fixed** when computing the gradient. Propagating the gradient through the target as well (the full-gradient or "residual-gradient" method) is theoretically cleaner but practically much worse; semi-gradient is what works.
+This is called a **semi-gradient** step because the target depends on theta too (it uses the parameterized Q function at s'), but we treat it as **fixed** when computing the gradient. Propagating the gradient through the target as well (the full-gradient or "residual-gradient" method) is theoretically cleaner but practically much worse; semi-gradient is what works.
 
 ## Worked: one semi-gradient step on a linear Q
 
@@ -90,7 +90,7 @@ The easiest way to see the update is on a single-feature linear case. Let the st
 Q_theta(x)  =  theta_0  +  theta_1 * x
 ```
 
-(One action only, so dropping `a` for brevity.) Suppose theta_0 = 0, theta_1 = 0 initially. Observe a transition: x_t = 2, reward r = 1, next state x_(t+1) = 3, gamma = 0.9, step size eta = 0.1.
+(One action only, so dropping a for brevity.) Suppose theta at iteration 0 = 0, theta at iteration 1 = 0 initially. Observe a transition: x at time t = 2, reward r = 1, next state x = 3, gamma = 0.9, step size eta = 0.1.
 
 ```
 Q_theta(x_t)     = 0 + 0 * 2 = 0
@@ -118,8 +118,8 @@ One observed transition moved Q's value at **every** x via the two shared parame
 
 Last lesson named the deadly triad. With function approximation in hand we can see why each piece matters.
 
-- **TD bootstrap.** The target uses Q_theta(s'), an estimate from the same network. If the network is wrong at s', the target is wrong, and the update at (s, a) follows a wrong signal.
-- **Off-policy.** Q-learning's target uses the max over actions, not the action the agent actually took. So the network is being asked to fit a function (Q^*) that does not match the distribution of (s, a) it actually sees, the data distribution and the target distribution disagree.
+- **TD bootstrap.** The target uses the parameterized Q function(s'), an estimate from the same network. If the network is wrong at s', the target is wrong, and the update at (s, a) follows a wrong signal.
+- **Off-policy.** Q-learning's target uses the max over actions, not the action the agent actually took. So the network is being asked to fit a function (the optimal action-value function) that does not match the distribution of (s, a) it actually sees, the data distribution and the target distribution disagree.
 - **Function approximation.** An update at (s, a) changes theta, which changes Q at **all** other states too. So an update intended to fix Q(s, a) may inadvertently move Q(s', a') in the target of some other transition, which then changes that transition's target on the next update, and so on. Estimates can chase each other.
 
 Any two of these are usually fine. **All three together can diverge.** It is not just a theoretical risk; naive deep Q-learning often does diverge in practice when run without the fixes below.
@@ -149,12 +149,12 @@ Function approximation is the move that unlocks RL on real systems.
 
 - **Deep RL exists because of this lesson.** Atari, AlphaGo's value network, robotic manipulation, autonomous-driving policies, and the value side of RLHF (lesson 10's bridge) all rely on the Bellman recursion sitting on top of a learned function approximator. The algorithms in lessons 2-8 do not change; they get a new representation.
 - **The deadly triad is a constant practical concern.** Whenever you read about a "training instability" in a value-based deep RL paper, it is usually one face of the triad. The fixes are engineering: target networks, replay buffers, clip the target, double-Q to reduce maximization bias, distributional value, and so on.
-- **Function approximation introduces a bias-variance trade of its own.** A small network may underfit (high bias, can't represent Q^*); a large one may overfit and amplify the triad's instability (high variance, brittle training). Tuning capacity is a design knob practitioners spend real time on.
+- **Function approximation introduces a bias-variance trade of its own.** A small network may underfit (high bias, can't represent the optimal action-value function); a large one may overfit and amplify the triad's instability (high variance, brittle training). Tuning capacity is a design knob practitioners spend real time on.
 - **The line to modern systems is straight.** This is the recipe inside the value side of nearly every value-based deep RL system. Lesson 10 will do for the policy side what this lesson does for the value side, with policy gradients and the bridge to RLHF.
 
 ## Common pitfalls
 
-- **Believing the Bellman recursion changes with function approximation.** It does not. The same r + gamma * max_`{a'}` Q(s', a') target sits inside, just computed by a learned function instead of a table lookup.
+- **Believing the Bellman recursion changes with function approximation.** It does not. The same Bellman target — immediate reward plus discounted max over actions of Q at the next state — sits inside, just computed by a learned function instead of a table lookup.
 - **Treating semi-gradient as a quirk.** It is the standard practical choice for a reason: propagating the gradient through the target as well (full residual gradient) is theoretically nicer but empirically much worse. Stick with semi-gradient.
 - **Running deep Q-learning without target networks or experience replay.** This is the deadly-triad scenario and it commonly diverges. The "tricks" are not optional polish, they are what makes the algorithm work.
 - **Overestimating the size of a state space the table approach can handle.** Even a few thousand states with a few actions each can be table-sized in principle; **anything that looks like raw observations** (pixels, joint positions, continuous sensor readings) is not, and demands function approximation immediately.
@@ -162,8 +162,8 @@ Function approximation is the move that unlocks RL on real systems.
 
 ## What you should remember
 
-- **Tabular methods do not scale.** Beyond a few thousand discrete states, you need a **function approximator** (linear features or a neural network) parameterized by theta: **Q_theta(s, a)**.
-- The objective is the **squared TD error** against the Bellman target: Loss(theta) = E[ (target - Q_theta(s, a))^2 ], with target = r + gamma * max_`{a'}` Q_theta(s', a') for Q-learning.
-- The **semi-gradient update** is **theta `<-` theta + eta * delta * grad_theta Q_theta(s, a)**, where delta is the TD error and the target is treated as fixed when computing the gradient.
+- **Tabular methods do not scale.** Beyond a few thousand discrete states, you need a **function approximator** (linear features or a neural network) parameterized by theta: **the parameterized Q function at that state-action pair**.
+- The objective is the **squared TD error** against the Bellman target: the loss is the expected squared difference between the Bellman target (immediate reward plus discounted max over actions of Q at the next state) and the current parameterized Q value.
+- The **semi-gradient update** nudges theta in the direction of the TD error times the gradient of the parameterized Q (the target is treated as fixed when computing the gradient).
 - The **deadly triad** (TD bootstrap + off-policy + function approximation) can diverge naively. **DQN** tames it with two engineering fixes: **experience replay** (random minibatches from a transition buffer, for decorrelation and data reuse) and a **target network** (a slowly-updated frozen copy of Q used in the target, so the live network is not chasing its own tail).
 - Function approximation **generalizes** across states: an update at one (s, a) moves Q **everywhere at once** via shared parameters. That is the power of the move, and the source of the instability the deadly triad describes.
