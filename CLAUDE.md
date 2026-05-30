@@ -196,3 +196,53 @@ This repo participates in the ClaudeLink multi-agent setup defined in the user's
 ## 7. Internal supplemental rules
 
 For internal cross-project protocols, the pointer table to `Doc/*` reference material, the HANDOVER discipline rule, the parent-site update protocol, the legal-doc sync protocol, and the cross-project relay protocol, read `internal/CLAUDE.md`. That file is in a nested private repo (gitignored from this public repo); operators with access to the internal repo should read it explicitly as part of onboarding. Editorial-discipline rules in this file remain canonical for all sessions.
+
+---
+
+## 8. Audio narration & promotion discipline (locked 2026-05-29, after the 6-track PR#20 retro-audit sweep)
+
+> These are durable, do-not-relax disciplines distilled from the T14 + T17 audio cycles (T14 took 3 audio redos before they locked). Full rationale: memory `feedback-audio-narration-key-terms-spoken-bar` + `~/Projects/clawless-v1/clawless/advisor/pre-clear-protocol-2026-05-29.md`. A lesson that reads perfectly can still narrate broken — the gate is the played audio, not the page.
+
+### 8.1 The mechanical audio rule (the bar)
+- **ZERO inline backticks in narrated prose.** Backticks live in code FENCES only. The audio pipeline (`scripts/generate-audio.ts` `mdxToProse`) STRIPS all inline `` `code` `` content from narration, so any backticked token in prose is silently skipped — and if it is the teaching subject (a function name, API class, math identifier) the lesson is gutted.
+- In prose: use *italics* or plain/hyphenated words. If a literal must be named, DESCRIBE it operationally in prose and put the exact token in the fenced display below.
+- **This is mechanical, not judgment.** The per-term "is this skippable?" judgment failed 3× on T14. Don't classify which backticks are OK — there are none in prose.
+- **Verification gate, per lesson, target 0:** `awk '/^```/{f=!f;next} !f && /`/{c++} END{print c+0}' lesson.mdx` (fence-aware). Live tracks T11/T15/T16/T21/T14/T17 are all at 0.
+
+### 8.2 Conversion tiers (how to de-backtick)
+- snake_case identifier → hyphenated spoken word ("load-dataset", "from-pretrained") or describe; italics would narrate the underscore.
+- Pronounceable name → *italics* (*Trainer*, *map*, *pipeline*, *TrainingArguments*).
+- **Compound CamelCase API name → plain spoken English in prose** even in italics (`AutoModelForTokenClassification` → "the token-classification model"; `DataCollatorForSeq2Seq` → "the sequence-to-sequence data collator"). Italics does NOT fix run-on mangling. Exact identifier stays in a fence or audio-skipped table. Bar: "does the narrator mangle this as a run-on?"
+- **Math-notation gloss (math-heavy tracks):** single symbols → spoken concept (V^* → "the optimal value function", pi^* → "the optimal policy", V_k → "V at iteration k", G_t → "the return at time t", s_t/a_t/r_t → "the state/action/reward at time t"); equation-shaped inline math → describe in prose, formula stays in the adjacent fenced display. Greek letters (alpha, gamma, epsilon, lambda) narrate fine, keep them. **Preserve all numbers EXACTLY** (worked-example traces are load-bearing). Before bulk-applying a gloss convention across many lessons, verify it on ONE demo lesson with the founder first (saves an N-lesson redo).
+
+### 8.3 Block-element structural sync (pipeline invariant)
+- `<ReadAlongDim>`'s DOM walker only highlights words inside BLOCK_TAGS (P / LI / Hn / BLOCKQUOTE). `<td>`/`<th>` are NOT block tags. If the pipeline NARRATES a block the walker SKIPS, audio and highlight desync at that block and everything after is offset.
+- **Invariant:** `mdxToProse`'s strip-set MUST equal the walker's skip-set. Current strip-set: fenced code, self-closing JSX, MDX `{/* */}` comments, and markdown table rows (`/^[ \t]*\|.*\|[ \t]*$/gm`). If a new skipped block type appears, extend `mdxToProse` to match BEFORE shipping audio.
+
+### 8.4 Component wiring (placeholders narrate as garbage)
+- MDX `{/* */}` comments are NOT stripped by the pipeline → a commented-out `{/* ... <SourceLecture/> ... */}` placeholder is READ ALOUD. Before audio-gen, replace placeholder comments with LIVE self-closing JSX (`<SourceLecture .../>`, `<LessonFreshness .../>`); the pipeline strips live JSX cleanly. Verify wiring on every lesson before the demo.
+
+### 8.5 Pre-audio gate sequence (do not skip the demo)
+`0-backtick grep + bun astro build clean → founder-review-team consistency pass → founder text review (Lead-shared rendered previews on localhost/dev, NOT post-regen staging) → ONE-LESSON played-audio demo (LOAD-BEARING, not skippable) → founder demo approval → full regen of changed lessons (cache-safe ordering) → dev staging push → 10/10 staging verify → founder direct in-terminal go → dev→main PR → prod verify.`
+- **The played-audio demo is load-bearing:** text gates structurally cannot catch what only audio reveals (formula-skip, backtick-skip, table-desync, TTS mispronunciation of odd tokens like OSError were all caught only by listening). Always demo + ear-check before bulk regen. Founder verbatim: *"If I had given a go after reading, it would have been a disaster again."*
+
+### 8.6 Cache-safe audio regen ordering (prevents CF cache poisoning)
+Per lesson: (1) regen + upload new MP3 to R2 FIRST; (2) THEN bump cacheVersion to a FRESH never-fetched value; (3) THEN warm-verify each `?v=` returns the new MP3 (content-length == local bytes); (4) never reuse a fetched cacheVersion; (5) stop the local dev server first so HMR can't poison the fresh version pre-upload. (`generate-audio.ts` needs `--force` for re-renders — its R2 HEAD-check is identity-only.)
+
+### 8.7 Founder-direct harness gates (production touches)
+Two actions require the founder's DIRECT in-terminal go (advisor relay alone is harness-blocked): (1) R2 audio writes, (2) dev→main PR merge (prod deploy). All other sweep/audit-fix/dev-staging work proceeds on advisor relay.
+
+### 8.8 Branch discipline + repo topology
+- **Assert the branch before EVERY regen/commit** (`git rev-parse --abbrev-ref HEAD`). Parallel multi-track work caused two branch-juggling slips (work committed to the wrong branch; a regen read stale text). Serialize across tracks.
+- **Outer `clawdemy.git` is production canonical** (`src/content/docs/lessons/<track>/<bare-slug>/`). Inner `clawdemy-internal/drafts/` is abandoned pre-cleanup originals (stale). Anything affecting SHIPPED content targets the OUTER repo — "I can `git show` it" ≠ "it's what the user sees."
+
+### 8.9 Redo history (the mistakes catalog — don't repeat)
+| Cycle | What went wrong | Banked |
+|---|---|---|
+| T14 audio pass-1 | Backticked Camel/snake API names → narrator skipped them silently; "perfect" by reading, broken by listening | backtick-narration discipline; pre-gen audit |
+| T14 pass-2 | Sharpened per-term category judgment; still missed taught `load_dataset` | per-term judgment IS the trap |
+| T14 pass-3 | Replaced judgment with mechanical 0-inline-backtick rule | mechanical rule + fence-aware grep |
+| T14 pass-4 (table) | Table↔read-along desync no text gate could detect | block-element sync; demo is load-bearing; table-strip fix |
+| T14 pass-4 (refine) | Italicized CamelCase still mangled | 4th tier: compound API → spoken English |
+| T14 cache chase | cacheVersion fetched pre-upload poisoned CF cache; founder heard old audio | cache-safe ordering |
+| T17 prep | Math-gloss could have been a 10-lesson redo | convention check-in on demo lesson before bulk sweep |
