@@ -20,15 +20,31 @@ authors:
   - clawdemy
 published_at: 2026-05-25
 last_reviewed: 2026-05-25
-status: draft
+status: published
 artifact: lesson
 sidebar:
   order: 2
   label: Lesson
 ---
 
-{/* COMPONENT PLACEHOLDER (Lead wires at promotion): <LessonFreshness lastReviewed={frontmatter.last_reviewed} /> */}
-{/* COMPONENT PLACEHOLDER (Lead wires at promotion): <SourceLecture url="https://davidstarsilver.wordpress.com/teaching/" title="David Silver, UCL Reinforcement Learning Course, Lecture 4: Model-Free Prediction (temporal-difference learning)" instructor="David Silver" /> */}
+import LessonFreshness from "../../../../../components/LessonFreshness.astro";
+import SourceLecture from "../../../../../components/SourceLecture.astro";
+import ReadAlongDim from '../../../../../components/ReadAlongDim.astro';
+
+<LessonFreshness lastReviewed={frontmatter.last_reviewed} />
+
+<SourceLecture
+  url="https://davidstarsilver.wordpress.com/teaching/"
+  title="David Silver, UCL Reinforcement Learning Course, Lecture 4: Model-Free Prediction (temporal-difference learning)"
+  instructor="David Silver"
+/>
+
+<ReadAlongDim
+  src="https://audio.clawdemy.org/lessons/temporal-difference-learning-lesson.mp3"
+  slug="temporal-difference-learning"
+  cacheVersion="20260529"
+  approxMinutes={12}
+/>
 
 Monte Carlo prediction in the previous lesson waited until the end of an episode to compute a return, then nudged V toward it. **Temporal-difference learning** makes one small but profound change: update after **every single step** using a **one-step bootstrapped target** instead of a full return. The change is small in the formula and huge in consequences. TD has lower variance than MC, works on continuing tasks where MC cannot, and learns online as data arrives. It pays for those advantages with a little bias (the bootstrapped target uses the current V, which is itself still being learned), but in practice the trade favors TD overwhelmingly. TD is the foundation of Q-learning (next lesson), of SARSA, and of the value-network half of nearly every modern deep RL algorithm.
 
@@ -42,7 +58,7 @@ Recall the Monte Carlo update, with step size alpha:
 MC:   V(s_t)  <-  V(s_t)  +  alpha * [  G_t  -  V(s_t)  ]
 ```
 
-where G_t is the full return from t to the end of the episode. **TD(0)** replaces G_t with a one-step bootstrapped target:
+where the return at time t is the full return from t to the end of the episode. **TD(0)** replaces the return at time t with a one-step bootstrapped target:
 
 ```
 TD(0):   V(s_t)  <-  V(s_t)  +  alpha * [  r_(t+1) + gamma * V(s_(t+1))  -  V(s_t)  ]
@@ -50,22 +66,22 @@ TD(0):   V(s_t)  <-  V(s_t)  +  alpha * [  r_(t+1) + gamma * V(s_(t+1))  -  V(s_
 
 Two things to notice.
 
-- The **target** `r_(t+1) + gamma * V(s_(t+1))` is the Bellman expectation equation **estimated from a single sampled transition**: one observed reward plus the current estimate of the value at the next state. There is no waiting for the episode to end.
-- The **TD error**, written **delta_t**, is the difference between target and current estimate:
+- The **target** immediate reward plus discounted next-state value is the Bellman expectation equation **estimated from a single sampled transition**: one observed reward plus the current estimate of the value at the next state. There is no waiting for the episode to end.
+- The **TD error**, written **delta-t**, is the difference between target and current estimate:
 
 ```
 delta_t  =  r_(t+1)  +  gamma * V(s_(t+1))  -  V(s_t)
 ```
 
-It measures how much the new evidence (one transition) disagrees with the current V at s_t. The update nudges V(s_t) by alpha times delta_t, in the direction the evidence points. That single update happens at every step, online, while the agent acts.
+It measures how much the new evidence (one transition) disagrees with the current V at the state at time t. The update nudges V(the state at time t) by alpha times delta-t, in the direction the evidence points. That single update happens at every step, online, while the agent acts.
 
-Compare directly with MC: MC waits the whole episode, computes the full return, then takes one big step in the direction of "what actually happened." TD takes a small step at every transition in the direction of "what we just saw plus what we currently believe comes next." TD is **bootstrapping**: it uses an estimate (V(s_(t+1))) to update another estimate (V(s_t)). That is the technical word for it, and it is the one feature that drives everything else about TD.
+Compare directly with MC: MC waits the whole episode, computes the full return, then takes one big step in the direction of "what actually happened." TD takes a small step at every transition in the direction of "what we just saw plus what we currently believe comes next." TD is **bootstrapping**: it uses an estimate (V(the next state)) to update another estimate (V(the state at time t)). That is the technical word for it, and it is the one feature that drives everything else about TD.
 
 ## Worked example: TD(0) on a deterministic chain
 
 The cleanest way to see the bootstrap in action is a deterministic chain, where MC and TD agree in expectation but TD's per-step updates are visibly distinct. Three states **A**, **B**, **C** (terminal), one action everywhere, deterministic transitions A -> B -> C, reward 1 on each step, gamma = 1 (episodic), step size alpha = 0.5. Initialize V(A) = V(B) = V(C) = 0.
 
-True values: V^pi(A) = 1 + 1 = 2 (two reward-1 steps to terminal), V^pi(B) = 1, V^pi(C) = 0. The aim is to see TD converge toward (2, 1, 0).
+True values: the value function under policy pi is 2 at A (two reward-1 steps to terminal), 1 at B, 0 at C. The aim is to see TD converge toward (2, 1, 0).
 
 **Episode 1.**
 
@@ -121,13 +137,13 @@ Step 2   B -> C:
   V(B)  <- 0.875 + 0.5 * 0.125 = 0.9375
 ```
 
-After episode 4: V = (1.625, 0.9375, 0), creeping toward V^pi = (2, 1, 0).
+After episode 4: V = (1.625, 0.9375, 0), creeping toward the value function under policy pi = (2, 1, 0).
 
 A few things to notice in the pattern.
 
-- **V propagates backward.** B learns first (its target uses V(C) = 0, which is correct because C is terminal). A then "discovers" that B has nonzero value via the bootstrap and starts updating accordingly. The information about the terminal reward flows backward one state per episode, which is exactly the cost of bootstrapping from V(s_(t+1)).
+- **V propagates backward.** B learns first (its target uses V(C) = 0, which is correct because C is terminal). A then "discovers" that B has nonzero value via the bootstrap and starts updating accordingly. The information about the terminal reward flows backward one state per episode, which is exactly the cost of bootstrapping from V(the next state).
 - **Monotone convergence (here).** V(A) and V(B) are strictly increasing across episodes, each step's delta is positive because the current estimate is below the truth. Step sizes shrink as estimates close in. With smaller alpha the convergence would be slower but smoother; with larger alpha it could overshoot.
-- **Episode-by-episode bias.** V(A) at episode 2 is 1.0, well below V^pi(A) = 2. That is the bootstrap bias: A's target uses an underestimate of B's value, so A's update undershoots. The bias decays as V approaches V^pi, but at any finite iteration TD is biased away from the truth in a predictable direction.
+- **Episode-by-episode bias.** V(A) at episode 2 is 1.0, well below the value function under policy pi at A, which is 2. That is the bootstrap bias: A's target uses an underestimate of B's value, so A's update undershoots. The bias decays as V approaches the value function under policy pi, but at any finite iteration TD is biased away from the truth in a predictable direction.
 
 If the chain were **stochastic** (the reward random, or the next state random), the TD's per-step variance would be far smaller than MC's variance over a long episode. On the deterministic chain MC would actually converge in one episode (every return is exactly 2 and 1), but the deterministic version makes the **mechanism** of TD's bootstrap visible without distraction; the variance advantage is the conceptual point you transfer to stochastic environments.
 
@@ -137,14 +153,14 @@ Side by side with MC, TD trades on the same axis from the previous lesson.
 
 | Aspect | Monte Carlo (last lesson) | TD(0) (this lesson) |
 | --- | --- | --- |
-| Target | Full return G_t (sum of rewards to episode end) | One-step target r_(t+1) + gamma * V(s_(t+1)) |
-| Bias | Zero (G_t is an unbiased sample of V^pi) | Some (target uses an estimated V which may be wrong) |
+| Target | Full return the return at time t (sum of rewards to episode end) | One-step target the next reward + gamma * V(the next state) |
+| Bias | Zero (the return at time t is an unbiased sample of the value function under policy pi) | Some (target uses an estimated V which may be wrong) |
 | Variance | High (long sum of random rewards) | Low (one reward plus one estimated value) |
 | Requires termination? | Yes (need full return) | No (one step at a time) |
 | Online updates? | Episode-end only | Every transition |
 | Continuing tasks? | No | Yes |
 
-Both converge to V^pi under standard conditions on alpha. TD is biased at any finite step but the bias is bounded and shrinks as V improves; the variance reduction is usually a much bigger deal than the bias cost.
+Both converge to the value function under policy pi under standard conditions on alpha. TD is biased at any finite step but the bias is bounded and shrinks as V improves; the variance reduction is usually a much bigger deal than the bias cost.
 
 **Where on the spectrum?** TD(0) is the **biased / low-variance extreme**, the one-step end. MC is the **unbiased / high-variance extreme**, the full-episode end. **n-step returns** (one to several steps of observed reward followed by a bootstrap) and **TD(lambda)** (a geometric mix of all n-step targets) live in between and are the modern way to pick a point on the trade-off.
 
@@ -159,16 +175,16 @@ TD is the foundation of nearly all model-free RL deployed in practice.
 
 ## Common pitfalls
 
-- **Confusing the TD target with the MC return.** MC's update is V `<-` V + alpha * (G - V), with G the full return. TD's update is V `<-` V + alpha * (r_(t+1) + gamma * V(s_(t+1)) - V), with the bracketed expression being a one-step bootstrap, not a return.
-- **Believing "bootstrap" means "no real data."** TD uses real reward r_(t+1) from the environment; only the future-value part of the target is bootstrapped from current V. The reward is genuine evidence.
+- **Confusing the TD target with the MC return.** The MC update uses the full episode return G as its signal. The TD update uses a one-step bootstrap — the next reward plus discounted next-state value — not a return.
+- **Believing "bootstrap" means "no real data."** TD uses a real next reward from the environment; only the future-value part of the target is bootstrapped from current V. The reward is genuine evidence.
 - **Choosing alpha too large.** Big alpha makes per-step updates jump and can oscillate or diverge, especially under stochastic transitions. Smaller alpha is slower but more stable; decaying alpha to zero is the textbook recipe for guaranteed convergence in tabular settings.
-- **Reading TD's bias as "wrong."** Bias here is a finite-iteration phenomenon; with proper step sizes TD converges to V^pi asymptotically. The bias is usually traded happily for variance reduction.
+- **Reading TD's bias as "wrong."** Bias here is a finite-iteration phenomenon; with proper step sizes TD converges to the value function under policy pi asymptotically. The bias is usually traded happily for variance reduction.
 - **Ignoring the deadly triad with function approximation.** Bootstrap + off-policy + function approximation can diverge. Real systems combat this with replay buffers, target networks, and other tricks (DQN). Naive deep TD without those tricks is fragile.
 
 ## What you should remember
 
-- **TD(0)** updates V at every step using a one-step bootstrapped target: **V(s_t) `<-` V(s_t) + alpha * [r_(t+1) + gamma * V(s_(t+1)) - V(s_t)]**. The bracketed quantity is the **TD error**, delta_t.
+- **TD(0)** updates V at every step using a one-step bootstrapped target: nudge V at the current state toward the next reward plus the discounted next-state value, at step size alpha. The bracketed quantity is the **TD error**, delta-t. The full formula is in the body above.
 - The target is the Bellman expectation equation **estimated from a single sampled transition** (one reward plus the current V at the next state). No waiting for episode end; no model required.
 - TD is **biased but low-variance** relative to MC, **works on continuing tasks**, and **learns online** as transitions arrive.
-- On the deterministic A->B->C chain at alpha = 0.5, gamma = 1: V(A) climbs 0 -> 0.5 -> 1.0 -> 1.375 -> 1.625 across four episodes; V(B) climbs 0 -> 0.5 -> 0.75 -> 0.875 -> 0.9375; both creep toward V^pi = (2, 1, 0). **Value propagates backward** from the terminal state one bootstrap at a time.
+- On the deterministic A->B->C chain at alpha = 0.5, gamma = 1: V(A) climbs 0 -> 0.5 -> 1.0 -> 1.375 -> 1.625 across four episodes; V(B) climbs 0 -> 0.5 -> 0.75 -> 0.875 -> 0.9375; both creep toward the value function under policy pi = (2, 1, 0). **Value propagates backward** from the terminal state one bootstrap at a time.
 - TD is the foundation of **Q-learning** (next lesson), SARSA, DQN, and actor-critic. The combination of TD bootstrap + off-policy + function approximation is the **deadly triad**, fixed in practice with replay buffers and target networks (lesson 9).

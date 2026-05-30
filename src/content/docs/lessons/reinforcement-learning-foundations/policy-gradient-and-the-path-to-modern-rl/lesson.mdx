@@ -20,17 +20,33 @@ authors:
   - clawdemy
 published_at: 2026-05-25
 last_reviewed: 2026-05-25
-status: draft
+status: published
 artifact: lesson
 sidebar:
   order: 2
   label: Lesson
 ---
 
-{/* COMPONENT PLACEHOLDER (Lead wires at promotion): <LessonFreshness lastReviewed={frontmatter.last_reviewed} /> */}
-{/* COMPONENT PLACEHOLDER (Lead wires at promotion): <SourceLecture url="https://davidstarsilver.wordpress.com/teaching/" title="David Silver, UCL Reinforcement Learning Course, Lecture 7: Policy Gradient Methods" instructor="David Silver" /> */}
+import LessonFreshness from "../../../../../components/LessonFreshness.astro";
+import SourceLecture from "../../../../../components/SourceLecture.astro";
+import ReadAlongDim from '../../../../../components/ReadAlongDim.astro';
 
-Every algorithm in lessons 4 through 9 learned a **value** (V or Q), then read the policy off greedily. **Policy gradient** flips that move: parameterize the **policy** directly, pi_theta(a | s), then take gradient steps that increase the probability of actions that lead to high return. The change is conceptual as much as mechanical, the policy is no longer a derived object hanging off Q, it is the thing being learned. That unlocks **continuous action spaces** (where argmax over actions is intractable), gives **stochastic policies** as first-class citizens, and is the entire family behind modern actor-critic methods, PPO, and the RLHF step that fine-tunes large language models.
+<LessonFreshness lastReviewed={frontmatter.last_reviewed} />
+
+<SourceLecture
+  url="https://davidstarsilver.wordpress.com/teaching/"
+  title="David Silver, UCL Reinforcement Learning Course, Lecture 7: Policy Gradient Methods"
+  instructor="David Silver"
+/>
+
+<ReadAlongDim
+  src="https://audio.clawdemy.org/lessons/policy-gradient-and-the-path-to-modern-rl-lesson.mp3"
+  slug="policy-gradient-and-the-path-to-modern-rl"
+  cacheVersion="20260529"
+  approxMinutes={16}
+/>
+
+Every algorithm in lessons 4 through 9 learned a **value** (V or Q), then read the policy off greedily. **Policy gradient** flips that move: parameterize the **policy** directly, the policy at action a given state s, then take gradient steps that increase the probability of actions that lead to high return. The change is conceptual as much as mechanical, the policy is no longer a derived object hanging off Q, it is the thing being learned. That unlocks **continuous action spaces** (where argmax over actions is intractable), gives **stochastic policies** as first-class citizens, and is the entire family behind modern actor-critic methods, PPO, and the RLHF step that fine-tunes large language models.
 
 This is the closing lesson of the track and its capstone. The math is light, the conceptual lift is the move itself: from value-first to policy-first. We will write the REINFORCE update, work one step on a tiny softmax policy so you see the probability of a rewarded action go up by hand, sketch actor-critic as the variance-reduction step that produces the modern algorithms, and bridge explicitly to RLHF and the next track to read.
 
@@ -46,7 +62,7 @@ Policy gradient is the framework for all three. It also pairs naturally with neu
 
 ## The objective and the policy-gradient theorem
 
-Let **pi_theta** be a parameterized policy (theta is the parameter vector). The objective is the expected return under that policy from the initial state distribution:
+Let **the policy under parameters theta** be a parameterized policy (theta is the parameter vector). The objective is the expected return under that policy from the initial state distribution:
 
 ```
 J(theta)  =  E_(pi_theta) [ G_0 ]
@@ -58,28 +74,28 @@ Goal: gradient ascent on theta to push J(theta) up. The **policy-gradient theore
 grad_theta J(theta)  =  E_(pi_theta) [  grad_theta log pi_theta(a | s) * Q^(pi_theta)(s, a)  ]
 ```
 
-Read it slowly. For each (s, a) the policy visits, the contribution to the gradient is the **log-likelihood gradient** of the action taken, scaled by **how good** that action turned out to be (its action-value under the current policy). The theorem is what makes the policy-gradient algorithms estimable from samples; you do not need to know the dynamics P, only to be able to compute `grad_theta log pi_theta(a | s)` for the actions you take and to estimate Q somehow.
+Read it slowly. For each (s, a) the policy visits, the contribution to the gradient is the **log-likelihood gradient** of the action taken, scaled by **how good** that action turned out to be (its action-value under the current policy). The theorem is what makes the policy-gradient algorithms estimable from samples; you do not need to know the dynamics P, only to be able to compute the gradient of log pi for the actions you take and to estimate Q somehow.
 
 You do not need the proof to use the algorithms; the recursion above is the only object the rest of this lesson works with.
 
 ## REINFORCE: Monte Carlo policy gradient
 
-The simplest policy-gradient algorithm, **REINFORCE**, estimates Q^(pi_theta)(s_t, a_t) by the **actual observed return G_t** from time t in an episode (Monte Carlo, lesson 6). The per-step update is:
+The simplest policy-gradient algorithm, **REINFORCE**, estimates the action-value function under the current policy(the state at time t, the action at time t) by the **actual observed return the return at time t** from time t in an episode (Monte Carlo, lesson 6). The per-step update is:
 
 ```
 theta  <-  theta  +  eta * G_t * grad_theta log pi_theta(a_t | s_t)
 ```
 
-Run an episode under the current pi_theta; for each step (s_t, a_t) compute G_t (the return from t to episode end); apply the update. The intuition is straightforward: **increase the probability of actions that led to good returns; decrease the probability of actions that led to bad returns**. Trial and error, made gradient-aware.
+Run an episode under the current policy (parameters theta); for each step (the state at time t, the action at time t) compute the return at time t (the return from t to episode end); apply the update. The intuition is straightforward: **increase the probability of actions that led to good returns; decrease the probability of actions that led to bad returns**. Trial and error, made gradient-aware.
 
 Two practical notes carry over from the MC lesson:
 
-- **Unbiased but high-variance.** The return G_t is the same noisy estimator as in lesson 6, so REINFORCE inherits MC's high variance. Convergence is guaranteed in expectation but slow in practice.
-- **Episodic by default.** Like plain MC, vanilla REINFORCE needs episode boundaries to compute G_t. The next refinement (actor-critic) removes that requirement.
+- **Unbiased but high-variance.** The return the return at time t is the same noisy estimator as in lesson 6, so REINFORCE inherits MC's high variance. Convergence is guaranteed in expectation but slow in practice.
+- **Episodic by default.** Like plain MC, vanilla REINFORCE needs episode boundaries to compute the return at time t. The next refinement (actor-critic) removes that requirement.
 
 ## Worked example: one REINFORCE step on a softmax policy
 
-The cleanest one-step demonstration uses a **softmax** policy over discrete actions. One state, two actions `{a_1, a_2}`, parameters theta = (theta_1, theta_2):
+The cleanest one-step demonstration uses a **softmax** policy over discrete actions. One state, two actions the set a-one and a-two, parameters theta = (theta at iteration 1, theta_2):
 
 ```
 pi_theta(a_i)  =  exp(theta_i) / ( exp(theta_1) + exp(theta_2) )       (softmax)
@@ -113,11 +129,11 @@ pi(a_1)  =  exp(0.1) / ( exp(0.1) + exp(-0.1) )  approx  1.105 / 2.010  approx  
 pi(a_2)  =  exp(-0.1) / ( exp(0.1) + exp(-0.1) ) approx  0.905 / 2.010  approx  0.45
 ```
 
-The probability of a_1 climbed from 0.50 to 0.55, and a_2's correspondingly dropped. **The action that paid off got more likely**; the action that did not got less. That is exactly what REINFORCE is supposed to do, made arithmetic. The same shape generalizes to any parameterization of pi_theta (linear features, neural network); only the form of `grad_theta log pi_theta(a | s)` changes.
+The probability of a_1 climbed from 0.50 to 0.55, and a_2's correspondingly dropped. **The action that paid off got more likely**; the action that did not got less. That is exactly what REINFORCE is supposed to do, made arithmetic. The same shape generalizes to any parameterization of the policy under parameters theta (linear features, neural network); only the form of the gradient of log pi changes.
 
 ## Actor-critic: REINFORCE with a learned baseline
 
-REINFORCE works but suffers from MC's high variance, as the lesson 6 demonstration showed. The standard fix is the **actor-critic** family: replace G_t in the REINFORCE update with a **lower-variance estimate** of Q^(pi)(s_t, a_t) supplied by a learned **value function** (the "critic"), trained with TD methods from lesson 7. The policy network is the **actor**; the value network is the **critic**.
+REINFORCE works but suffers from MC's high variance, as the lesson 6 demonstration showed. The standard fix is the **actor-critic** family: replace the return at time t in the REINFORCE update with a **lower-variance estimate** of the action-value function under policy pi at the current state-action pair, supplied by a learned **value function** (the "critic"), trained with TD methods from lesson 7. The policy network is the **actor**; the value network is the **critic**.
 
 A common form uses the **advantage** A(s, a) = Q(s, a) - V(s) (how much better is this action than the average at this state?) in place of the raw return:
 
@@ -137,7 +153,7 @@ The lesson does not derive PPO's clipping or SAC's entropy term; both are policy
 
 ## The bridge to modern RL: RLHF for large language models
 
-Track 5's `rlhf-and-dpo` lesson covers RLHF on the alignment side; this lesson is the RL-mechanics side. Brought together, the recipe behind aligning a modern large language model with human feedback is:
+Track 5's RLHF-and-DPO lesson covers RLHF on the alignment side; this lesson is the RL-mechanics side. Brought together, the recipe behind aligning a modern large language model with human feedback is:
 
 - **The policy** is the language model itself. It is parameterized (by its weights) and stochastic (it samples next tokens). Acting once means sampling a response.
 - **The state** is the conversation history; the **action** is the next token (or the full response, depending on framing).
@@ -161,14 +177,14 @@ What is **not** in this track and worth flagging: model-based RL (Dyna, MuZero),
 
 - **Conflating policy gradient with random search.** REINFORCE looks like "try things and reinforce what works," but the gradient is precisely defined (the log-likelihood gradient scaled by Q) and the update follows it. It is not undirected search.
 - **Underestimating REINFORCE's variance.** Plain Monte Carlo policy gradient is high-variance enough that practical applications nearly always use a baseline or critic. Calling something "policy gradient" usually implies actor-critic in modern practice.
-- **Confusing the actor and the critic.** The actor is the policy network (pi_theta) trained with the policy-gradient update. The critic is a value network (V_phi or Q_phi) trained with TD. They are two networks with two separate training signals, used together.
+- **Confusing the actor and the critic.** The actor is the policy network (the policy under parameters theta) trained with the policy-gradient update. The critic is a value network (V_phi or Q_phi) trained with TD. They are two networks with two separate training signals, used together.
 - **Mistaking PPO's clipping for an optional refinement.** PPO's clipped objective is what makes large policy-gradient steps safe; without it, vanilla policy gradient on a neural network can take destabilizing jumps. PPO clipping is one of the key reasons it became the workhorse.
 - **Treating RLHF as a different algorithm.** RLHF uses PPO. The RL mechanics are this lesson and the rest of the track; the novelty is the learned reward model trained from human preferences, not a new RL algorithm.
 
 ## What you should remember
 
-- **Policy-based methods** parameterize the policy **pi_theta(a | s)** directly and take **gradient ascent on the expected return** J(theta). This complements the value-based methods from lessons 4-9.
-- The **policy-gradient theorem** gives the gradient as `E [ grad_theta log pi_theta(a | s) * Q^(pi_theta)(s, a) ]`. **REINFORCE** estimates Q by the observed return G_t and updates **theta `<-` theta + eta * G_t * grad_theta log pi_theta(a_t | s_t)**.
-- On a 2-action softmax with theta = (0, 0): sampling a_1 with return G = 2 gives `grad log pi(a_1) = (0.5, -0.5)`, and at eta = 0.1 the update lands at theta = (0.1, -0.1), increasing pi(a_1) from 0.50 to about 0.55. **The probability of a rewarded action went up.**
+- **Policy-based methods** parameterize the policy **the policy at action a given state s** directly and take **gradient ascent on the expected return** J(theta). This complements the value-based methods from lessons 4-9.
+- The **policy-gradient theorem** gives the gradient as the expected log-policy gradient times the action-value. **REINFORCE** estimates Q by the observed return and updates theta in the direction of the log-policy gradient at the sampled action, scaled by the return and the step size. The full update formula is in the body above.
+- On a 2-action softmax with theta = (0, 0): sampling a_1 with return G = 2 gives the log-policy gradient at a-one, and at eta = 0.1 the update lands at theta = (0.1, -0.1), increasing pi(a_1) from 0.50 to about 0.55. **The probability of a rewarded action went up.**
 - **Actor-critic** replaces the raw return with a learned value baseline (typically the advantage A = Q - V) trained with TD. This dramatically reduces variance and is the blueprint of modern policy-gradient methods (A2C, A3C, **PPO**, SAC).
-- **The path to modern RL** runs through this lesson. **PPO** is the everyday workhorse; **RLHF** for large language models uses PPO with a learned reward model from human preferences. Track 5's `rlhf-and-dpo` lesson covers the alignment side; this track gave you the RL mechanics underneath. End of track.
+- **The path to modern RL** runs through this lesson. **PPO** is the everyday workhorse; **RLHF** for large language models uses PPO with a learned reward model from human preferences. Track 5's RLHF-and-DPO lesson covers the alignment side; this track gave you the RL mechanics underneath. End of track.
