@@ -41,6 +41,7 @@ export const collections = {
 						'llm-ops-and-production', // Track 21: Full Stack Deep Learning LLM Bootcamp
 						'build-an-llm-from-scratch', // Track 15: Sebastian Raschka book
 						'computer-vision', // Track 16: Stanford CS231n
+						'visual-math-linear-algebra', // Track 4: 3Blue1Brown Essence of Linear Algebra
 					])
 					.optional(),
 				course: z.string().optional(),
@@ -110,6 +111,10 @@ export const collections = {
 						'foundations-for-vision',
 						'how-machines-see',
 						'generating-and-grounding-vision',
+						// Track 4 (Visual Math: Linear Algebra — 3Blue1Brown Essence of Linear Algebra)
+						'geometric-foundations',
+						'geometry-of-operations',
+						'advanced-perspectives',
 					])
 					.optional(),
 				phase_order: z.number().int().positive().optional(),
