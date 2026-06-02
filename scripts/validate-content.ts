@@ -140,6 +140,20 @@ const BLOOM_VERBS = [
 	'sketch',
 	'cite',
 	'survey',
+	// Track 4 (Visual Math: Linear Algebra) domain verbs, added 2026-05-30
+	'translate', // Understand: move a vector between arrow and coordinate forms
+	'represent', // Understand: represent a polynomial as a coordinate vector
+	'express', // Understand
+	'relate', // Understand: relate eigen-analysis to PCA / gradient stability
+	'reframe', // Understand/Analyze: reframe M·v = b as an inverse-image question
+	'anticipate', // Understand: predict the shape of a result (cross product returns a vector)
+	'extend', // Apply: extend a 2D definition to 3D
+	'find', // Apply: find an eigenvector as the null space of (M − λI)
+	'scale', // Apply: scale a vector and describe the geometric effect
+	'show', // Apply/Analyze: show by example that AB ≠ BA
+	'solve', // Apply: solve a 2x2 system via Cramer's rule
+	'diagonalize', // Apply: diagonalize a matrix via D = P⁻¹·M·P
+	'spot', // Remember/Understand: spot eigenvectors by eye
 ];
 
 const TRACK_5_PHASE_SLUGS = [
@@ -216,6 +230,12 @@ const TRACK_16_PHASE_SLUGS = [
 	'generating-and-grounding-vision',
 ] as const;
 
+const TRACK_4_PHASE_SLUGS = [
+	'geometric-foundations',
+	'geometry-of-operations',
+	'advanced-perspectives',
+] as const;
+
 const PHASE_SLUGS = [
 	...TRACK_5_PHASE_SLUGS,
 	...TRACK_6_PHASE_SLUGS,
@@ -228,6 +248,7 @@ const PHASE_SLUGS = [
 	...TRACK_21_PHASE_SLUGS,
 	...TRACK_15_PHASE_SLUGS,
 	...TRACK_16_PHASE_SLUGS,
+	...TRACK_4_PHASE_SLUGS,
 ] as const;
 
 const BriefSchema = z.object({
@@ -253,6 +274,7 @@ const BriefSchema = z.object({
 		'llm-ops-and-production',
 		'build-an-llm-from-scratch',
 		'computer-vision',
+		'visual-math-linear-algebra',
 	]),
 	difficulty: z.enum(['intro', 'standard', 'deep']),
 	estimated_read_minutes: z.number().int().positive(),
@@ -293,6 +315,7 @@ async function main(): Promise<number> {
 	const phaseSlotsTrack21 = new Map<string, string[]>();
 	const phaseSlotsTrack15 = new Map<string, string[]>();
 	const phaseSlotsTrack16 = new Map<string, string[]>();
+	const phaseSlotsTrack4 = new Map<string, string[]>();
 
 	if (!existsSync(LESSONS_ROOT)) {
 		console.log(
@@ -649,6 +672,33 @@ async function main(): Promise<number> {
 							phaseSlotsTrack16.set(key, seen);
 						}
 					}
+
+					// Track 4 phase context: required when track is visual-math-linear-algebra.
+					if (parsed.data.track === 'visual-math-linear-algebra') {
+						if (parsed.data.phase === undefined) {
+							errors.push({
+								path: relative(ROOT, briefPath),
+								message: `Track 4 lesson missing required field: phase (one of ${TRACK_4_PHASE_SLUGS.join(', ')})`,
+							});
+						} else if (!TRACK_4_PHASE_SLUGS.includes(parsed.data.phase as any)) {
+							errors.push({
+								path: relative(ROOT, briefPath),
+								message: `Track 4 lesson has phase "${parsed.data.phase}" but Track 4 phases are: ${TRACK_4_PHASE_SLUGS.join(', ')}.`,
+							});
+						}
+						if (parsed.data.phase_order === undefined) {
+							errors.push({
+								path: relative(ROOT, briefPath),
+								message: `Track 4 lesson missing required field: phase_order`,
+							});
+						}
+						if (parsed.data.phase !== undefined && parsed.data.phase_order !== undefined) {
+							const key = `${parsed.data.phase}/${parsed.data.phase_order}`;
+							const seen = phaseSlotsTrack4.get(key) ?? [];
+							seen.push(relative(ROOT, briefPath));
+							phaseSlotsTrack4.set(key, seen);
+						}
+					}
 				}
 			}
 		}
@@ -765,6 +815,16 @@ async function main(): Promise<number> {
 				errors.push({
 					path: p,
 					message: `Track 16: duplicate (phase, phase_order) pair "${key}"; also used by: ${paths.filter((q) => q !== p).join(', ')}`,
+				});
+			}
+		}
+	}
+	for (const [key, paths] of phaseSlotsTrack4) {
+		if (paths.length > 1) {
+			for (const p of paths) {
+				errors.push({
+					path: p,
+					message: `Track 4: duplicate (phase, phase_order) pair "${key}"; also used by: ${paths.filter((q) => q !== p).join(', ')}`,
 				});
 			}
 		}
