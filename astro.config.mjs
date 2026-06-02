@@ -814,6 +814,77 @@ export default defineConfig({
 					],
 				},
 				{
+					label: 'Track 8: Visual Math: Calculus',
+					items: [
+						{
+							label: 'Phase 1\nWhat a derivative is',
+							collapsed: true,
+							items: [
+								{
+									label: 'What calculus is',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/visual-math-calculus/essence-of-calculus/brief' },
+										{ label: 'Lesson', slug: 'lessons/visual-math-calculus/essence-of-calculus/lesson' },
+										{ label: 'Practice', slug: 'lessons/visual-math-calculus/essence-of-calculus/practice' },
+										{ label: 'Summary', slug: 'lessons/visual-math-calculus/essence-of-calculus/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/visual-math-calculus/essence-of-calculus/cheatsheet' },
+										{ label: 'References', slug: 'lessons/visual-math-calculus/essence-of-calculus/references' },
+									],
+								},
+							],
+						},
+						{
+							label: 'Phase 2\nThe differentiation toolkit',
+							collapsed: true,
+							items: [
+								{
+									label: 'Why e is special',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/visual-math-calculus/why-e-is-special/brief' },
+										{ label: 'Lesson', slug: 'lessons/visual-math-calculus/why-e-is-special/lesson' },
+										{ label: 'Practice', slug: 'lessons/visual-math-calculus/why-e-is-special/practice' },
+										{ label: 'Summary', slug: 'lessons/visual-math-calculus/why-e-is-special/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/visual-math-calculus/why-e-is-special/cheatsheet' },
+										{ label: 'References', slug: 'lessons/visual-math-calculus/why-e-is-special/references' },
+									],
+								},
+								{
+									label: 'Limits, carefully',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/visual-math-calculus/limits-done-carefully/brief' },
+										{ label: 'Lesson', slug: 'lessons/visual-math-calculus/limits-done-carefully/lesson' },
+										{ label: 'Practice', slug: 'lessons/visual-math-calculus/limits-done-carefully/practice' },
+										{ label: 'Summary', slug: 'lessons/visual-math-calculus/limits-done-carefully/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/visual-math-calculus/limits-done-carefully/cheatsheet' },
+										{ label: 'References', slug: 'lessons/visual-math-calculus/limits-done-carefully/references' },
+									],
+								},
+							],
+						},
+						{
+							label: 'Phase 3\nIntegration and approximation',
+							collapsed: true,
+							items: [
+								{
+									label: 'Integration & the FTC',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/visual-math-calculus/integration-and-the-fundamental-theorem/brief' },
+										{ label: 'Lesson', slug: 'lessons/visual-math-calculus/integration-and-the-fundamental-theorem/lesson' },
+										{ label: 'Practice', slug: 'lessons/visual-math-calculus/integration-and-the-fundamental-theorem/practice' },
+										{ label: 'Summary', slug: 'lessons/visual-math-calculus/integration-and-the-fundamental-theorem/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/visual-math-calculus/integration-and-the-fundamental-theorem/cheatsheet' },
+										{ label: 'References', slug: 'lessons/visual-math-calculus/integration-and-the-fundamental-theorem/references' },
+									],
+								},
+							],
+						},
+					],
+				},
+				{
 					label: 'Track 11: Neural Network Intuition',
 					items: [
 						{
