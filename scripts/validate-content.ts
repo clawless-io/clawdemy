@@ -163,6 +163,8 @@ const BLOOM_VERBS = [
 	'unroll', // Understand: unroll a ring into a thin strip (circle-area derivation)
 	'bound', // Analyze: bound an error term as a step shrinks toward zero
 	'treat', // Understand: treat dx-style quantities as small ordinary numbers
+	'resolve', // Understand: resolve the paradox of the instantaneous rate via the limit
+	'sanity-check', // Evaluate: sanity-check a derivative against the curve's shape
 ];
 
 const TRACK_5_PHASE_SLUGS = [
