@@ -154,6 +154,17 @@ const BLOOM_VERBS = [
 	'solve', // Apply: solve a 2x2 system via Cramer's rule
 	'diagonalize', // Apply: diagonalize a matrix via D = P⁻¹·M·P
 	'spot', // Remember/Understand: spot eigenvectors by eye
+	// Track 8 (Visual Math: Calculus) domain verbs, added 2026-06-01
+	'differentiate', // Apply: differentiate a function from its geometric definition
+	'integrate', // Apply: integrate to recover an accumulated quantity
+	'approximate', // Apply/Understand: approximate a curve with a Taylor polynomial
+	'accumulate', // Understand: accumulate infinitesimal pieces into a total
+	'slice', // Understand: slice a region into thin pieces and sum them
+	'unroll', // Understand: unroll a ring into a thin strip (circle-area derivation)
+	'bound', // Analyze: bound an error term as a step shrinks toward zero
+	'treat', // Understand: treat dx-style quantities as small ordinary numbers
+	'resolve', // Understand: resolve the paradox of the instantaneous rate via the limit
+	'sanity-check', // Evaluate: sanity-check a derivative against the curve's shape
 ];
 
 const TRACK_5_PHASE_SLUGS = [
@@ -236,6 +247,12 @@ const TRACK_4_PHASE_SLUGS = [
 	'advanced-perspectives',
 ] as const;
 
+const TRACK_8_PHASE_SLUGS = [
+	'what-a-derivative-is',
+	'differentiation-toolkit',
+	'integration-and-approximation',
+] as const;
+
 const PHASE_SLUGS = [
 	...TRACK_5_PHASE_SLUGS,
 	...TRACK_6_PHASE_SLUGS,
@@ -249,6 +266,7 @@ const PHASE_SLUGS = [
 	...TRACK_15_PHASE_SLUGS,
 	...TRACK_16_PHASE_SLUGS,
 	...TRACK_4_PHASE_SLUGS,
+	...TRACK_8_PHASE_SLUGS,
 ] as const;
 
 const BriefSchema = z.object({
@@ -275,6 +293,7 @@ const BriefSchema = z.object({
 		'build-an-llm-from-scratch',
 		'computer-vision',
 		'visual-math-linear-algebra',
+		'visual-math-calculus',
 	]),
 	difficulty: z.enum(['intro', 'standard', 'deep']),
 	estimated_read_minutes: z.number().int().positive(),
@@ -316,6 +335,7 @@ async function main(): Promise<number> {
 	const phaseSlotsTrack15 = new Map<string, string[]>();
 	const phaseSlotsTrack16 = new Map<string, string[]>();
 	const phaseSlotsTrack4 = new Map<string, string[]>();
+	const phaseSlotsTrack8 = new Map<string, string[]>();
 
 	if (!existsSync(LESSONS_ROOT)) {
 		console.log(
@@ -699,6 +719,33 @@ async function main(): Promise<number> {
 							phaseSlotsTrack4.set(key, seen);
 						}
 					}
+
+					// Track 8 phase context: required when track is visual-math-calculus.
+					if (parsed.data.track === 'visual-math-calculus') {
+						if (parsed.data.phase === undefined) {
+							errors.push({
+								path: relative(ROOT, briefPath),
+								message: `Track 8 lesson missing required field: phase (one of ${TRACK_8_PHASE_SLUGS.join(', ')})`,
+							});
+						} else if (!TRACK_8_PHASE_SLUGS.includes(parsed.data.phase as any)) {
+							errors.push({
+								path: relative(ROOT, briefPath),
+								message: `Track 8 lesson has phase "${parsed.data.phase}" but Track 8 phases are: ${TRACK_8_PHASE_SLUGS.join(', ')}.`,
+							});
+						}
+						if (parsed.data.phase_order === undefined) {
+							errors.push({
+								path: relative(ROOT, briefPath),
+								message: `Track 8 lesson missing required field: phase_order`,
+							});
+						}
+						if (parsed.data.phase !== undefined && parsed.data.phase_order !== undefined) {
+							const key = `${parsed.data.phase}/${parsed.data.phase_order}`;
+							const seen = phaseSlotsTrack8.get(key) ?? [];
+							seen.push(relative(ROOT, briefPath));
+							phaseSlotsTrack8.set(key, seen);
+						}
+					}
 				}
 			}
 		}
@@ -825,6 +872,16 @@ async function main(): Promise<number> {
 				errors.push({
 					path: p,
 					message: `Track 4: duplicate (phase, phase_order) pair "${key}"; also used by: ${paths.filter((q) => q !== p).join(', ')}`,
+				});
+			}
+		}
+	}
+	for (const [key, paths] of phaseSlotsTrack8) {
+		if (paths.length > 1) {
+			for (const p of paths) {
+				errors.push({
+					path: p,
+					message: `Track 8: duplicate (phase, phase_order) pair "${key}"; also used by: ${paths.filter((q) => q !== p).join(', ')}`,
 				});
 			}
 		}

@@ -42,6 +42,7 @@ export const collections = {
 						'build-an-llm-from-scratch', // Track 15: Sebastian Raschka book
 						'computer-vision', // Track 16: Stanford CS231n
 						'visual-math-linear-algebra', // Track 4: 3Blue1Brown Essence of Linear Algebra
+						'visual-math-calculus', // Track 8: 3Blue1Brown Essence of Calculus
 					])
 					.optional(),
 				course: z.string().optional(),
@@ -115,6 +116,10 @@ export const collections = {
 						'geometric-foundations',
 						'geometry-of-operations',
 						'advanced-perspectives',
+						// Track 8 (Visual Math: Calculus — 3Blue1Brown Essence of Calculus)
+						'what-a-derivative-is',
+						'differentiation-toolkit',
+						'integration-and-approximation',
 					])
 					.optional(),
 				phase_order: z.number().int().positive().optional(),

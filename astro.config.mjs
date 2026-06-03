@@ -814,6 +814,185 @@ export default defineConfig({
 					],
 				},
 				{
+					label: 'Track 8: Visual Math: Calculus',
+					items: [
+						{
+							label: 'Phase 1\nWhat a derivative is',
+							collapsed: true,
+							items: [
+								{
+									label: 'What calculus is',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/visual-math-calculus/essence-of-calculus/brief' },
+										{ label: 'Lesson', slug: 'lessons/visual-math-calculus/essence-of-calculus/lesson' },
+										{ label: 'Practice', slug: 'lessons/visual-math-calculus/essence-of-calculus/practice' },
+										{ label: 'Summary', slug: 'lessons/visual-math-calculus/essence-of-calculus/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/visual-math-calculus/essence-of-calculus/cheatsheet' },
+										{ label: 'References', slug: 'lessons/visual-math-calculus/essence-of-calculus/references' },
+									],
+								},
+								{
+									label: 'The derivative as a rate',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/visual-math-calculus/the-derivative-as-a-rate/brief' },
+										{ label: 'Lesson', slug: 'lessons/visual-math-calculus/the-derivative-as-a-rate/lesson' },
+										{ label: 'Practice', slug: 'lessons/visual-math-calculus/the-derivative-as-a-rate/practice' },
+										{ label: 'Summary', slug: 'lessons/visual-math-calculus/the-derivative-as-a-rate/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/visual-math-calculus/the-derivative-as-a-rate/cheatsheet' },
+										{ label: 'References', slug: 'lessons/visual-math-calculus/the-derivative-as-a-rate/references' },
+									],
+								},
+								{
+									label: 'The power rule',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/visual-math-calculus/power-rule-from-geometry/brief' },
+										{ label: 'Lesson', slug: 'lessons/visual-math-calculus/power-rule-from-geometry/lesson' },
+										{ label: 'Practice', slug: 'lessons/visual-math-calculus/power-rule-from-geometry/practice' },
+										{ label: 'Summary', slug: 'lessons/visual-math-calculus/power-rule-from-geometry/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/visual-math-calculus/power-rule-from-geometry/cheatsheet' },
+										{ label: 'References', slug: 'lessons/visual-math-calculus/power-rule-from-geometry/references' },
+									],
+								},
+								{
+									label: 'Trig derivatives',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/visual-math-calculus/trig-derivatives-from-geometry/brief' },
+										{ label: 'Lesson', slug: 'lessons/visual-math-calculus/trig-derivatives-from-geometry/lesson' },
+										{ label: 'Practice', slug: 'lessons/visual-math-calculus/trig-derivatives-from-geometry/practice' },
+										{ label: 'Summary', slug: 'lessons/visual-math-calculus/trig-derivatives-from-geometry/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/visual-math-calculus/trig-derivatives-from-geometry/cheatsheet' },
+										{ label: 'References', slug: 'lessons/visual-math-calculus/trig-derivatives-from-geometry/references' },
+									],
+								},
+							],
+						},
+						{
+							label: 'Phase 2\nThe differentiation toolkit',
+							collapsed: true,
+							items: [
+								{
+									label: 'The product rule',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/visual-math-calculus/product-rule-visually/brief' },
+										{ label: 'Lesson', slug: 'lessons/visual-math-calculus/product-rule-visually/lesson' },
+										{ label: 'Practice', slug: 'lessons/visual-math-calculus/product-rule-visually/practice' },
+										{ label: 'Summary', slug: 'lessons/visual-math-calculus/product-rule-visually/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/visual-math-calculus/product-rule-visually/cheatsheet' },
+										{ label: 'References', slug: 'lessons/visual-math-calculus/product-rule-visually/references' },
+									],
+								},
+								{
+									label: 'The chain rule',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/visual-math-calculus/chain-rule-visually/brief' },
+										{ label: 'Lesson', slug: 'lessons/visual-math-calculus/chain-rule-visually/lesson' },
+										{ label: 'Practice', slug: 'lessons/visual-math-calculus/chain-rule-visually/practice' },
+										{ label: 'Summary', slug: 'lessons/visual-math-calculus/chain-rule-visually/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/visual-math-calculus/chain-rule-visually/cheatsheet' },
+										{ label: 'References', slug: 'lessons/visual-math-calculus/chain-rule-visually/references' },
+									],
+								},
+								{
+									label: 'Why e is special',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/visual-math-calculus/why-e-is-special/brief' },
+										{ label: 'Lesson', slug: 'lessons/visual-math-calculus/why-e-is-special/lesson' },
+										{ label: 'Practice', slug: 'lessons/visual-math-calculus/why-e-is-special/practice' },
+										{ label: 'Summary', slug: 'lessons/visual-math-calculus/why-e-is-special/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/visual-math-calculus/why-e-is-special/cheatsheet' },
+										{ label: 'References', slug: 'lessons/visual-math-calculus/why-e-is-special/references' },
+									],
+								},
+								{
+									label: 'Implicit differentiation',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/visual-math-calculus/implicit-differentiation/brief' },
+										{ label: 'Lesson', slug: 'lessons/visual-math-calculus/implicit-differentiation/lesson' },
+										{ label: 'Practice', slug: 'lessons/visual-math-calculus/implicit-differentiation/practice' },
+										{ label: 'Summary', slug: 'lessons/visual-math-calculus/implicit-differentiation/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/visual-math-calculus/implicit-differentiation/cheatsheet' },
+										{ label: 'References', slug: 'lessons/visual-math-calculus/implicit-differentiation/references' },
+									],
+								},
+								{
+									label: 'Limits, carefully',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/visual-math-calculus/limits-done-carefully/brief' },
+										{ label: 'Lesson', slug: 'lessons/visual-math-calculus/limits-done-carefully/lesson' },
+										{ label: 'Practice', slug: 'lessons/visual-math-calculus/limits-done-carefully/practice' },
+										{ label: 'Summary', slug: 'lessons/visual-math-calculus/limits-done-carefully/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/visual-math-calculus/limits-done-carefully/cheatsheet' },
+										{ label: 'References', slug: 'lessons/visual-math-calculus/limits-done-carefully/references' },
+									],
+								},
+							],
+						},
+						{
+							label: 'Phase 3\nIntegration and approximation',
+							collapsed: true,
+							items: [
+								{
+									label: 'Integration & the FTC',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/visual-math-calculus/integration-and-the-fundamental-theorem/brief' },
+										{ label: 'Lesson', slug: 'lessons/visual-math-calculus/integration-and-the-fundamental-theorem/lesson' },
+										{ label: 'Practice', slug: 'lessons/visual-math-calculus/integration-and-the-fundamental-theorem/practice' },
+										{ label: 'Summary', slug: 'lessons/visual-math-calculus/integration-and-the-fundamental-theorem/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/visual-math-calculus/integration-and-the-fundamental-theorem/cheatsheet' },
+										{ label: 'References', slug: 'lessons/visual-math-calculus/integration-and-the-fundamental-theorem/references' },
+									],
+								},
+								{
+									label: 'Why area equals slope',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/visual-math-calculus/why-area-equals-slope/brief' },
+										{ label: 'Lesson', slug: 'lessons/visual-math-calculus/why-area-equals-slope/lesson' },
+										{ label: 'Practice', slug: 'lessons/visual-math-calculus/why-area-equals-slope/practice' },
+										{ label: 'Summary', slug: 'lessons/visual-math-calculus/why-area-equals-slope/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/visual-math-calculus/why-area-equals-slope/cheatsheet' },
+										{ label: 'References', slug: 'lessons/visual-math-calculus/why-area-equals-slope/references' },
+									],
+								},
+								{
+									label: 'Higher-order derivatives',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/visual-math-calculus/higher-order-derivatives/brief' },
+										{ label: 'Lesson', slug: 'lessons/visual-math-calculus/higher-order-derivatives/lesson' },
+										{ label: 'Practice', slug: 'lessons/visual-math-calculus/higher-order-derivatives/practice' },
+										{ label: 'Summary', slug: 'lessons/visual-math-calculus/higher-order-derivatives/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/visual-math-calculus/higher-order-derivatives/cheatsheet' },
+										{ label: 'References', slug: 'lessons/visual-math-calculus/higher-order-derivatives/references' },
+									],
+								},
+								{
+									label: 'Taylor series',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/visual-math-calculus/taylor-series/brief' },
+										{ label: 'Lesson', slug: 'lessons/visual-math-calculus/taylor-series/lesson' },
+										{ label: 'Practice', slug: 'lessons/visual-math-calculus/taylor-series/practice' },
+										{ label: 'Summary', slug: 'lessons/visual-math-calculus/taylor-series/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/visual-math-calculus/taylor-series/cheatsheet' },
+										{ label: 'References', slug: 'lessons/visual-math-calculus/taylor-series/references' },
+									],
+								},
+							],
+						},
+					],
+				},
+				{
 					label: 'Track 11: Neural Network Intuition',
 					items: [
 						{
