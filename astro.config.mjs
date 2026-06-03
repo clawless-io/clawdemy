@@ -993,6 +993,203 @@ export default defineConfig({
 					],
 				},
 				{
+					label: 'Track 9: Statistics & Probability for AI',
+					items: [
+						{
+							label: 'Phase 1\nDescribing data',
+							collapsed: true,
+							items: [
+								{
+									label: 'Why AI runs on stats',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/statistics-and-probability/why-ai-runs-on-statistics/brief' },
+										{ label: 'Lesson', slug: 'lessons/statistics-and-probability/why-ai-runs-on-statistics/lesson' },
+										{ label: 'Practice', slug: 'lessons/statistics-and-probability/why-ai-runs-on-statistics/practice' },
+										{ label: 'Summary', slug: 'lessons/statistics-and-probability/why-ai-runs-on-statistics/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/statistics-and-probability/why-ai-runs-on-statistics/cheatsheet' },
+										{ label: 'References', slug: 'lessons/statistics-and-probability/why-ai-runs-on-statistics/references' },
+									],
+								},
+								{
+									label: 'Center and spread',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/statistics-and-probability/summarizing-data-center-and-spread/brief' },
+										{ label: 'Lesson', slug: 'lessons/statistics-and-probability/summarizing-data-center-and-spread/lesson' },
+										{ label: 'Practice', slug: 'lessons/statistics-and-probability/summarizing-data-center-and-spread/practice' },
+										{ label: 'Summary', slug: 'lessons/statistics-and-probability/summarizing-data-center-and-spread/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/statistics-and-probability/summarizing-data-center-and-spread/cheatsheet' },
+										{ label: 'References', slug: 'lessons/statistics-and-probability/summarizing-data-center-and-spread/references' },
+									],
+								},
+								{
+									label: 'The shape of data',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/statistics-and-probability/the-shape-of-data-distributions-and-histograms/brief' },
+										{ label: 'Lesson', slug: 'lessons/statistics-and-probability/the-shape-of-data-distributions-and-histograms/lesson' },
+										{ label: 'Practice', slug: 'lessons/statistics-and-probability/the-shape-of-data-distributions-and-histograms/practice' },
+										{ label: 'Summary', slug: 'lessons/statistics-and-probability/the-shape-of-data-distributions-and-histograms/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/statistics-and-probability/the-shape-of-data-distributions-and-histograms/cheatsheet' },
+										{ label: 'References', slug: 'lessons/statistics-and-probability/the-shape-of-data-distributions-and-histograms/references' },
+									],
+								},
+								{
+									label: 'Correlation',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/statistics-and-probability/when-two-things-move-together-correlation/brief' },
+										{ label: 'Lesson', slug: 'lessons/statistics-and-probability/when-two-things-move-together-correlation/lesson' },
+										{ label: 'Practice', slug: 'lessons/statistics-and-probability/when-two-things-move-together-correlation/practice' },
+										{ label: 'Summary', slug: 'lessons/statistics-and-probability/when-two-things-move-together-correlation/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/statistics-and-probability/when-two-things-move-together-correlation/cheatsheet' },
+										{ label: 'References', slug: 'lessons/statistics-and-probability/when-two-things-move-together-correlation/references' },
+									],
+								},
+							],
+						},
+						{
+							label: 'Phase 2\nThe laws of chance',
+							collapsed: true,
+							items: [
+								{
+									label: 'Probability foundations',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/statistics-and-probability/probability-foundations/brief' },
+										{ label: 'Lesson', slug: 'lessons/statistics-and-probability/probability-foundations/lesson' },
+										{ label: 'Practice', slug: 'lessons/statistics-and-probability/probability-foundations/practice' },
+										{ label: 'Summary', slug: 'lessons/statistics-and-probability/probability-foundations/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/statistics-and-probability/probability-foundations/cheatsheet' },
+										{ label: 'References', slug: 'lessons/statistics-and-probability/probability-foundations/references' },
+									],
+								},
+								{
+									label: 'Conditional probability',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/statistics-and-probability/conditional-probability-and-independence/brief' },
+										{ label: 'Lesson', slug: 'lessons/statistics-and-probability/conditional-probability-and-independence/lesson' },
+										{ label: 'Practice', slug: 'lessons/statistics-and-probability/conditional-probability-and-independence/practice' },
+										{ label: 'Summary', slug: 'lessons/statistics-and-probability/conditional-probability-and-independence/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/statistics-and-probability/conditional-probability-and-independence/cheatsheet' },
+										{ label: 'References', slug: 'lessons/statistics-and-probability/conditional-probability-and-independence/references' },
+									],
+								},
+								{
+									label: 'Bayes\' theorem',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/statistics-and-probability/bayes-theorem/brief' },
+										{ label: 'Lesson', slug: 'lessons/statistics-and-probability/bayes-theorem/lesson' },
+										{ label: 'Practice', slug: 'lessons/statistics-and-probability/bayes-theorem/practice' },
+										{ label: 'Summary', slug: 'lessons/statistics-and-probability/bayes-theorem/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/statistics-and-probability/bayes-theorem/cheatsheet' },
+										{ label: 'References', slug: 'lessons/statistics-and-probability/bayes-theorem/references' },
+									],
+								},
+							],
+						},
+						{
+							label: 'Phase 3\nRandom variables and distributions',
+							collapsed: true,
+							items: [
+								{
+									label: 'Expected value',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/statistics-and-probability/random-variables-and-expected-value/brief' },
+										{ label: 'Lesson', slug: 'lessons/statistics-and-probability/random-variables-and-expected-value/lesson' },
+										{ label: 'Practice', slug: 'lessons/statistics-and-probability/random-variables-and-expected-value/practice' },
+										{ label: 'Summary', slug: 'lessons/statistics-and-probability/random-variables-and-expected-value/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/statistics-and-probability/random-variables-and-expected-value/cheatsheet' },
+										{ label: 'References', slug: 'lessons/statistics-and-probability/random-variables-and-expected-value/references' },
+									],
+								},
+								{
+									label: 'The normal distribution',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/statistics-and-probability/the-normal-distribution/brief' },
+										{ label: 'Lesson', slug: 'lessons/statistics-and-probability/the-normal-distribution/lesson' },
+										{ label: 'Practice', slug: 'lessons/statistics-and-probability/the-normal-distribution/practice' },
+										{ label: 'Summary', slug: 'lessons/statistics-and-probability/the-normal-distribution/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/statistics-and-probability/the-normal-distribution/cheatsheet' },
+										{ label: 'References', slug: 'lessons/statistics-and-probability/the-normal-distribution/references' },
+									],
+								},
+								{
+									label: 'The binomial distribution',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/statistics-and-probability/the-binomial-distribution/brief' },
+										{ label: 'Lesson', slug: 'lessons/statistics-and-probability/the-binomial-distribution/lesson' },
+										{ label: 'Practice', slug: 'lessons/statistics-and-probability/the-binomial-distribution/practice' },
+										{ label: 'Summary', slug: 'lessons/statistics-and-probability/the-binomial-distribution/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/statistics-and-probability/the-binomial-distribution/cheatsheet' },
+										{ label: 'References', slug: 'lessons/statistics-and-probability/the-binomial-distribution/references' },
+									],
+								},
+							],
+						},
+						{
+							label: 'Phase 4\nFrom sample to truth',
+							collapsed: true,
+							items: [
+								{
+									label: 'Sampling and the CLT',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/statistics-and-probability/sampling-and-the-central-limit-theorem/brief' },
+										{ label: 'Lesson', slug: 'lessons/statistics-and-probability/sampling-and-the-central-limit-theorem/lesson' },
+										{ label: 'Practice', slug: 'lessons/statistics-and-probability/sampling-and-the-central-limit-theorem/practice' },
+										{ label: 'Summary', slug: 'lessons/statistics-and-probability/sampling-and-the-central-limit-theorem/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/statistics-and-probability/sampling-and-the-central-limit-theorem/cheatsheet' },
+										{ label: 'References', slug: 'lessons/statistics-and-probability/sampling-and-the-central-limit-theorem/references' },
+									],
+								},
+								{
+									label: 'Confidence intervals',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/statistics-and-probability/confidence-intervals/brief' },
+										{ label: 'Lesson', slug: 'lessons/statistics-and-probability/confidence-intervals/lesson' },
+										{ label: 'Practice', slug: 'lessons/statistics-and-probability/confidence-intervals/practice' },
+										{ label: 'Summary', slug: 'lessons/statistics-and-probability/confidence-intervals/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/statistics-and-probability/confidence-intervals/cheatsheet' },
+										{ label: 'References', slug: 'lessons/statistics-and-probability/confidence-intervals/references' },
+									],
+								},
+								{
+									label: 'Hypothesis testing',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/statistics-and-probability/hypothesis-testing-and-p-values/brief' },
+										{ label: 'Lesson', slug: 'lessons/statistics-and-probability/hypothesis-testing-and-p-values/lesson' },
+										{ label: 'Practice', slug: 'lessons/statistics-and-probability/hypothesis-testing-and-p-values/practice' },
+										{ label: 'Summary', slug: 'lessons/statistics-and-probability/hypothesis-testing-and-p-values/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/statistics-and-probability/hypothesis-testing-and-p-values/cheatsheet' },
+										{ label: 'References', slug: 'lessons/statistics-and-probability/hypothesis-testing-and-p-values/references' },
+									],
+								},
+								{
+									label: 'Stats in ML',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/statistics-and-probability/statistics-in-machine-learning/brief' },
+										{ label: 'Lesson', slug: 'lessons/statistics-and-probability/statistics-in-machine-learning/lesson' },
+										{ label: 'Practice', slug: 'lessons/statistics-and-probability/statistics-in-machine-learning/practice' },
+										{ label: 'Summary', slug: 'lessons/statistics-and-probability/statistics-in-machine-learning/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/statistics-and-probability/statistics-in-machine-learning/cheatsheet' },
+										{ label: 'References', slug: 'lessons/statistics-and-probability/statistics-in-machine-learning/references' },
+									],
+								},
+							],
+						},
+					],
+				},
+				{
 					label: 'Track 11: Neural Network Intuition',
 					items: [
 						{

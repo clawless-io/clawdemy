@@ -43,6 +43,7 @@ export const collections = {
 						'computer-vision', // Track 16: Stanford CS231n
 						'visual-math-linear-algebra', // Track 4: 3Blue1Brown Essence of Linear Algebra
 						'visual-math-calculus', // Track 8: 3Blue1Brown Essence of Calculus
+						'statistics-and-probability', // Track 9: Khan Academy Statistics & Probability (curated for AI)
 					])
 					.optional(),
 				course: z.string().optional(),
@@ -120,6 +121,11 @@ export const collections = {
 						'what-a-derivative-is',
 						'differentiation-toolkit',
 						'integration-and-approximation',
+						// Track 9 (Statistics & Probability for AI — Khan Academy curated)
+						'describing-data',
+						'probability-foundations',
+						'random-variables-and-distributions',
+						'statistical-inference',
 					])
 					.optional(),
 				phase_order: z.number().int().positive().optional(),

@@ -165,6 +165,10 @@ const BLOOM_VERBS = [
 	'treat', // Understand: treat dx-style quantities as small ordinary numbers
 	'resolve', // Understand: resolve the paradox of the instantaneous rate via the limit
 	'sanity-check', // Evaluate: sanity-check a derivative against the curve's shape
+	// Track 9 (Statistics & Probability for AI) domain verbs, added 2026-06-03
+	're-derive', // Apply: re-derive the base-rate result via Bayes
+	'update', // Apply: update a belief using new evidence (Bayesian updating)
+	'reject', // Evaluate: reject the common p-value/confidence misreadings
 ];
 
 const TRACK_5_PHASE_SLUGS = [
@@ -253,6 +257,13 @@ const TRACK_8_PHASE_SLUGS = [
 	'integration-and-approximation',
 ] as const;
 
+const TRACK_9_PHASE_SLUGS = [
+	'describing-data',
+	'probability-foundations',
+	'random-variables-and-distributions',
+	'statistical-inference',
+] as const;
+
 const PHASE_SLUGS = [
 	...TRACK_5_PHASE_SLUGS,
 	...TRACK_6_PHASE_SLUGS,
@@ -267,6 +278,7 @@ const PHASE_SLUGS = [
 	...TRACK_16_PHASE_SLUGS,
 	...TRACK_4_PHASE_SLUGS,
 	...TRACK_8_PHASE_SLUGS,
+	...TRACK_9_PHASE_SLUGS,
 ] as const;
 
 const BriefSchema = z.object({
@@ -294,6 +306,7 @@ const BriefSchema = z.object({
 		'computer-vision',
 		'visual-math-linear-algebra',
 		'visual-math-calculus',
+		'statistics-and-probability',
 	]),
 	difficulty: z.enum(['intro', 'standard', 'deep']),
 	estimated_read_minutes: z.number().int().positive(),
@@ -336,6 +349,7 @@ async function main(): Promise<number> {
 	const phaseSlotsTrack16 = new Map<string, string[]>();
 	const phaseSlotsTrack4 = new Map<string, string[]>();
 	const phaseSlotsTrack8 = new Map<string, string[]>();
+	const phaseSlotsTrack9 = new Map<string, string[]>();
 
 	if (!existsSync(LESSONS_ROOT)) {
 		console.log(
@@ -746,6 +760,33 @@ async function main(): Promise<number> {
 							phaseSlotsTrack8.set(key, seen);
 						}
 					}
+
+					// Track 9 phase context: required when track is statistics-and-probability.
+					if (parsed.data.track === 'statistics-and-probability') {
+						if (parsed.data.phase === undefined) {
+							errors.push({
+								path: relative(ROOT, briefPath),
+								message: `Track 9 lesson missing required field: phase (one of ${TRACK_9_PHASE_SLUGS.join(', ')})`,
+							});
+						} else if (!TRACK_9_PHASE_SLUGS.includes(parsed.data.phase as any)) {
+							errors.push({
+								path: relative(ROOT, briefPath),
+								message: `Track 9 lesson has phase "${parsed.data.phase}" but Track 9 phases are: ${TRACK_9_PHASE_SLUGS.join(', ')}.`,
+							});
+						}
+						if (parsed.data.phase_order === undefined) {
+							errors.push({
+								path: relative(ROOT, briefPath),
+								message: `Track 9 lesson missing required field: phase_order`,
+							});
+						}
+						if (parsed.data.phase !== undefined && parsed.data.phase_order !== undefined) {
+							const key = `${parsed.data.phase}/${parsed.data.phase_order}`;
+							const seen = phaseSlotsTrack9.get(key) ?? [];
+							seen.push(relative(ROOT, briefPath));
+							phaseSlotsTrack9.set(key, seen);
+						}
+					}
 				}
 			}
 		}
@@ -882,6 +923,16 @@ async function main(): Promise<number> {
 				errors.push({
 					path: p,
 					message: `Track 8: duplicate (phase, phase_order) pair "${key}"; also used by: ${paths.filter((q) => q !== p).join(', ')}`,
+				});
+			}
+		}
+	}
+	for (const [key, paths] of phaseSlotsTrack9) {
+		if (paths.length > 1) {
+			for (const p of paths) {
+				errors.push({
+					path: p,
+					message: `Track 9: duplicate (phase, phase_order) pair "${key}"; also used by: ${paths.filter((q) => q !== p).join(', ')}`,
 				});
 			}
 		}
