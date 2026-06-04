@@ -2,18 +2,22 @@
 /**
  * Freshness signal for the Brief artifact.
  *
- * Reads `last_reviewed` from a lesson's Brief frontmatter and renders one of
- * three states, computed at build time (no client JS):
+ * Reads `last_reviewed` and `published_at` from a lesson's frontmatter and
+ * renders one of three states, computed at build time (no client JS):
  *
- *   - Fresh   (<=30 days):  green tip callout, "Recently updated".
- *   - Silent  (31-180 days): nothing rendered. Lesson is evergreen.
- *   - Stale   (>180 days):   yellow caution callout, "Verify before relying on it".
+ *   - Fresh   (updated after publish, <=30 days): green tip, "Recently updated".
+ *   - Silent  (new lesson, or 31-180 days):       nothing rendered.
+ *   - Stale   (>180 days):                        yellow caution, "Verify…".
  *
- * Why both states:
- *   The fresh signal tells returning readers a lesson moved since their last
- *   visit, so they know to re-read. The stale signal is the policy from
- *   Doc/lesson-framework.md §5 ("renderer shows a banner if last_reviewed is
- *   >6 months old"); previously that policy was unimplemented.
+ * Why the published_at gate (added 2026-06-03):
+ *   The fresh signal is for returning readers, "the body changed since your
+ *   last visit". That claim is FALSE on a brand-new lesson nobody has read.
+ *   A new lesson has last_reviewed == published_at; a genuinely-revised one has
+ *   last_reviewed AFTER published_at. We only show the "recently updated" banner
+ *   when last_reviewed is strictly later than published_at, so new lessons stay
+ *   silent and only real post-publication revisions flag a re-read. The stale
+ *   signal (Doc/lesson-framework.md §5, >6 months) is independent and always
+ *   fires regardless of new-vs-updated.
  *
  * Why date format, not relative time:
  *   CDN-cached HTML can outlive its build. "Updated 2 days ago" lies if the
@@ -28,9 +32,10 @@ import { Aside } from '@astrojs/starlight/components';
 
 interface Props {
 	lastReviewed?: Date | string;
+	publishedAt?: Date | string;
 }
 
-const { lastReviewed } = Astro.props;
+const { lastReviewed, publishedAt } = Astro.props;
 
 const FRESH_DAYS = 30;
 const STALE_DAYS = 180;
@@ -60,10 +65,17 @@ function formatDate(d: Date): string {
 
 const now = new Date();
 const reviewed = toDate(lastReviewed);
+const published = toDate(publishedAt);
 const ageDays = reviewed ? Math.max(0, dayDiff(now, reviewed)) : null;
 const formatted = reviewed ? formatDate(reviewed) : null;
 
-const showFresh = ageDays !== null && ageDays <= FRESH_DAYS;
+// A genuine post-publication revision: reviewed strictly after published.
+// A brand-new lesson has reviewed == published (same day) and stays silent.
+// If published_at is missing, we conservatively treat it as new (no fresh banner).
+const updatedAfterPublish =
+	reviewed !== null && published !== null && dayDiff(reviewed, published) > 0;
+
+const showFresh = ageDays !== null && ageDays <= FRESH_DAYS && updatedAfterPublish;
 const showStale = ageDays !== null && ageDays > STALE_DAYS;
 ---
 
