@@ -1,0 +1,167 @@
+---
+title: "Practice: Policy gradients (REINFORCE)"
+description: A self-check on the log-derivative trick and the REINFORCE estimator, a pen-and-paper REINFORCE update on a fresh sigmoid bandit with dual-path verification (sample vs analytic expectation), a where's-the-variance reasoning drill, and flashcards built for retrieval.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Six short questions. Answer each one in your head (or on paper) before opening the collapsible. Trying to retrieve the answer is where the learning sticks; rereading feels productive but does much less.
+
+**1. State the log-derivative trick in one line, and explain why it is useful.**
+
+<details>
+<summary>Show answer</summary>
+
+`∇_θ p(x; θ) = p(x; θ) · ∇_θ log p(x; θ)`. Useful because it converts a gradient of an expectation into an expectation of a gradient times a score: `∇_θ E_(x ~ p) [f(x)] = E_(x ~ p) [f(x) · ∇_θ log p(x; θ)]`. The right-hand side is something you can estimate from samples; the left side is not directly computable when the sampling distribution itself depends on `θ`.
+
+</details>
+
+**2. Apply the trick to the RL objective. Why do the environment dynamics `P` drop out of the policy gradient?**
+
+<details>
+<summary>Show answer</summary>
+
+The trajectory probability factors as `p(τ; θ) = ρ(s_0) · Π_t π_θ(a_t | s_t) · P(s_(t+1) | s_t, a_t)`, so `log p(τ; θ) = log ρ(s_0) + Σ_t log π_θ(a_t | s_t) + Σ_t log P(s_(t+1) | s_t, a_t)`. Only the middle term depends on `θ`; the initial-state distribution `ρ` and the dynamics `P` are constants from the gradient's perspective and contribute zero when differentiated. So `∇_θ log p(τ; θ) = Σ_t ∇_θ log π_θ(a_t | s_t)`. This is what makes deep RL **model-free**: you can compute the policy gradient without ever knowing `P`.
+
+</details>
+
+**3. Write the REINFORCE estimator and read it in intuition.**
+
+<details>
+<summary>Show answer</summary>
+
+`g = (1/N) Σ_i [ R(τ_i) · Σ_t ∇_θ log π_θ(a_(i,t) | s_(i,t)) ]` over `N` sampled trajectories. **Intuition:** `∇_θ log π_θ(a | s)` points in the direction that increases the probability of action `a` at state `s`. Multiplying by `R(τ)` says: raise the probability of actions in good trajectories, lower it for bad ones. Good trajectories get reinforced, bad ones suppressed.
+
+</details>
+
+**4. Name the two variance-reduction refinements, and the value-function object they yield together.**
+
+<details>
+<summary>Show answer</summary>
+
+**Rewards-to-go** (causality): replace `R(τ)` with `G_t = Σ_(k≥t) γ^(k-t) r_k`, because the action at time `t` cannot affect rewards before time `t`. **Baseline subtraction**: replace `G_t` with `G_t - b(s_t)`, unbiased (because `E[b(s)·∇log π(a|s)] = 0`) and variance-reducing when `b(s)` cancels the predictable part of the return. Together, with `b(s) = V^π(s)`, the bracket `G_t - V^π(s_t)` is (approximately) the **advantage** `A^π(s_t, a_t)` from lesson 3.
+
+</details>
+
+**5. Why does REINFORCE have high variance?**
+
+<details>
+<summary>Show answer</summary>
+
+Three compounding reasons. (a) The estimator depends on `R(τ)`, a sum of many random rewards along a stochastic trajectory; different rollouts of the same `π_θ` give very different `R(τ)`. (b) The action sampling at every step is itself random; the gradient term `∇_θ log π_θ(a_t | s_t)` inherits all that noise. (c) **Sparse rewards** make it worse: when most actions produce zero reward, the gradient is mostly zero, so you learn nothing from no-reward steps. The next lessons (actor-critic, advantage estimation, TRPO/PPO) all exist to attack one or more of these.
+
+</details>
+
+**6. Where does REINFORCE show up in modern AI?**
+
+<details>
+<summary>Show answer</summary>
+
+It is the algorithmic spine of the **RLHF (or related preference-based)** pipeline used to post-train modern language models (ChatGPT, Claude, Gemini). The "PPO" in the canonical RLHF recipe is a clipped trust-region refinement of REINFORCE, layered on the same `∇_θ J = E[R · Σ ∇log π]` estimator. The reward is typically the score of a learned reward model (trained from human pairwise preferences in the original recipe, AI-generated preferences in RLAIF / Constitutional-AI variants); DPO-style direct-preference methods skip the explicit reward model. The policy is the language model itself. Same picture for robot policies trained with PPO, agent training in RL-for-code-generation systems, and most modern continuous-control benchmarks.
+
+</details>
+
+## Try it yourself, part 1: a REINFORCE update on a fresh bandit
+
+Pen and paper (a calculator helps), about 8 minutes. Two actions: `R(a=1) = 1`, `R(a=2) = 0`. Sigmoid policy `π_θ(a=1) = σ(θ)`. **New starting point:** `θ_0 = -1` (so the policy starts biased *toward* the wrong action). Learning rate `α = 1`.
+
+**Steps.** (1) Compute `π(a=1)` at `θ_0 = -1`. (2) Suppose the agent samples action 2 (reward 0). What is the REINFORCE update? What is `θ_1`? (3) Suppose the agent then samples action 1 (reward 1). Compute the gradient and the new `θ_2`. (4) Compute `π(a=1)` at `θ_2`.
+
+(Hints. `σ(-1) ≈ 0.2689`. `σ(x) = 1/(1+e^(-x))`. `∇_θ log σ(θ) = 1 - σ(θ)`; `∇_θ log(1 - σ(θ)) = -σ(θ)`.)
+
+<details>
+<summary>Show answer</summary>
+
+**Step 1.** `π(a=1) at θ_0 = -1`: `σ(-1) = 1 / (1 + e^1) ≈ 1 / (1 + 2.7183) ≈ 1 / 3.7183 ≈ 0.2689`. The policy is currently 73% in favor of the *wrong* action.
+
+**Step 2.** Sample action 2, reward `R = 0`. REINFORCE update: `θ ← θ + α·R·∇log π(a=2)`. Because `R = 0`, the update is **zero regardless of the gradient**: `θ_1 = θ_0 = -1`. The policy did not move, which illustrates the sparse-reward failure mode of bare REINFORCE: zero-reward samples produce no learning signal at all.
+
+**Step 3.** Sample action 1, reward `R = 1`. Gradient `∇_θ log σ(θ_1) = 1 - σ(-1) = 1 - 0.2689 = 0.7311`. Update: `θ_2 = -1 + 1 · 1 · 0.7311 = -0.2689`. (Note the gradient is large at `θ = -1` because the rewarding action has low probability there: REINFORCE pushes harder when the policy has more room to move.)
+
+**Step 4.** `π(a=1) at θ_2 = -0.2689`: `σ(-0.2689) = 1 / (1 + e^0.2689) ≈ 1 / (1 + 1.3087) ≈ 1 / 2.3087 ≈ 0.4332`. After one rewarding sample, the policy has shifted from `0.27` to `0.43`, almost flipping its preference. Each future rewarding sample shifts it further toward action 1, with gradients that shrink as `σ → 1` (the saturation that prevents overshooting).
+
+</details>
+
+## Try it yourself, part 2: the dual-path check
+
+About 4 minutes. For the same bandit (`R(a=1) = 1`, `R(a=2) = 0`), the analytic expected gradient is `E[g] = σ(θ)(1 - σ(θ))`. **Question:** at what value of `θ` is `E[g]` maximized? What does that tell you about where REINFORCE makes the largest expected updates, and what is the variance at that point?
+
+<details>
+<summary>Show answer</summary>
+
+`E[g] = σ(θ)(1 - σ(θ))` is the variance of a Bernoulli with success probability `σ(θ)`, and it is **maximized at `σ(θ) = 0.5`**, that is, at `θ = 0`. The maximum value is `0.25`.
+
+This means REINFORCE makes its **largest expected updates when the policy is at maximum uncertainty** (equiprobable actions). As the policy becomes more decisive (`σ → 0` or `σ → 1`), `E[g]` shrinks toward zero: a near-certain policy gets only small updates per step. That is what saturates the learning and prevents the sigmoid from running off to infinity. It is also why initialization matters: a randomly initialized neural policy is naturally at maximum entropy, which is exactly when REINFORCE's expected step is largest.
+
+**Variance at `θ = 0`:** `Var(g) = E[g²] - (E[g])² = 0.5·(0.5)² + 0 - 0.0625 = 0.0625`, so the standard deviation `σ_g = √0.0625 = 0.25`, equal to the expectation. A single sample is a 1-σ guess at the true gradient. The mean of `N` samples brings the standard error down by `1/√N`, so an `N = 100` batch gives a standard error of `0.025`, an order of magnitude tighter than the signal. In a real trajectory-length-`T` problem, the variance is far worse: the next lessons (actor-critic, PPO) attack it.
+
+</details>
+
+## Flashcards
+
+Nine cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay out the full set as one card per page, ready to print or save as a PDF for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="State the log-derivative trick and why it is useful for RL.">
+
+`∇_θ E_(x ~ p(x;θ)) [f(x)] = E_(x ~ p(x;θ)) [f(x) · ∇_θ log p(x;θ)]`. It converts a gradient of an expectation (hard when the sampling distribution depends on `θ`) into an expectation of a gradient times a score (estimable by sampling). The single calculus identity that makes REINFORCE work.
+
+</Flashcard>
+
+<Flashcard question="Why do the environment dynamics P drop out of the policy gradient?">
+
+Because `log p(τ;θ) = log ρ(s_0) + Σ log π_θ(a_t|s_t) + Σ log P(s_(t+1)|s_t,a_t)`, and only the policy term depends on `θ`. So `∇_θ log p(τ;θ) = Σ_t ∇_θ log π_θ(a_t|s_t)`. You never need to know `P` to compute the policy gradient. This is what "model-free" means.
+
+</Flashcard>
+
+<Flashcard question="Write the REINFORCE estimator.">
+
+`g = (1/N) Σ_i [R(τ_i) · Σ_t ∇_θ log π_θ(a_(i,t)|s_(i,t))]` over `N` sampled trajectories. Update: `θ ← θ + α·g`. Unbiased: `E[g] = ∇_θ J(θ)` exactly.
+
+</Flashcard>
+
+<Flashcard question="State the REINFORCE intuition in one sentence.">
+
+`∇_θ log π_θ(a|s)` points in the direction that raises the probability of `a` at `s`. Multiplying by `R(τ)` raises that probability for actions in good trajectories and lowers it for bad ones: good trajectories get reinforced, bad ones suppressed.
+
+</Flashcard>
+
+<Flashcard question="What are the two variance-reduction refinements, and what do they yield together?">
+
+**Rewards-to-go**: replace `R(τ)` with `G_t = Σ_(k≥t) γ^(k-t) r_k` (causality). **Baseline subtraction**: replace `G_t` with `G_t - b(s_t)`; unbiased as long as `b(s)` does not depend on the action; variance-reducing when `b ≈ V^π`. Together (`b = V^π`): the bracket is the advantage `A^π = Q^π - V^π`.
+
+</Flashcard>
+
+<Flashcard question="For the sigmoid bandit (R(a=1)=1, R(a=2)=0), compute ∇log π at θ=0.">
+
+`∇_θ log σ(θ) = 1 - σ(θ)`. At `θ = 0`, `σ(0) = 0.5`, so the gradient is `0.5`. With `α = 1` and a sampled reward of 1: `θ ← 0 + 1·1·0.5 = 0.5`. After one rewarding sample, `π(a=1)` rises from 0.500 to `σ(0.5) ≈ 0.622`.
+
+</Flashcard>
+
+<Flashcard question="What is the dual-path check for REINFORCE on the bandit?">
+
+Analytic expectation `E[g] = σ(θ)(1 - σ(θ))`. At `θ=0`: `E[g] = 0.25`. Single-sample `g` is either `0.5` (action 1) or `0` (action 2); average over many samples converges to `0.25`. **Standard deviation also `0.25`**, equal to the signal at θ=0.
+
+</Flashcard>
+
+<Flashcard question="Why does REINFORCE have high variance?">
+
+Three reasons. (1) Estimator depends on full trajectory `R(τ)`, a sum of many random rewards. (2) Action sampling at every step is also random; gradients inherit the noise. (3) Sparse rewards: most gradient terms are zero, so learning is slow. The rest of the policy-gradient family (actor-critic, TRPO/PPO) exists to reduce one or more.
+
+</Flashcard>
+
+<Flashcard question="Where is REINFORCE the algorithmic spine of modern AI?">
+
+In RLHF or related preference-based methods (lesson 13). The "PPO" used in the canonical RLHF recipe to post-train LLMs (ChatGPT, Claude, Gemini) is a clipped trust-region refinement of REINFORCE, layered on the same `∇_θ J = E[R · Σ ∇log π]` estimator. The reward is typically a learned reward model from human preferences (or AI-generated preferences in RLAIF / Constitutional AI); DPO-style direct-preference methods skip the explicit reward model. The policy is the LM. Same picture for robotics PPO and agent training in code-generation systems.
+
+</Flashcard>
+
+</FlashcardSet>

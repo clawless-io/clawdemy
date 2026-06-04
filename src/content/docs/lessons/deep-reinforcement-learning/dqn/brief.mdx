@@ -1,0 +1,116 @@
+---
+title: "Brief: DQN (replay buffer, target network, double Q-learning)"
+description: "Editorial brief for Lesson 7 of Track 18 (Deep Reinforcement Learning). Phase 2 lesson 2: each DQN engineering trick mapped to a leg of the deadly triad named in L6. Worked: closed-form max-overestimation bias on a small example."
+track: deep-reinforcement-learning
+phase: core-deep-rl-algorithms
+phase_order: 2
+order: 7
+difficulty: standard
+estimated_read_minutes: 15
+estimated_practice_minutes: 15
+prerequisites:
+  - "lessons/deep-reinforcement-learning/value-based-rl"
+learning_outcomes:
+  - "Match each DQN engineering trick to the specific leg of the deadly triad it patches"
+  - "Explain why a replay buffer makes off-policy data closer to i.i.d. for the gradient update"
+  - "Explain why a frozen target network breaks the runaway feedback loop in bootstrapped TD updates"
+  - "Compute the max-overestimation bias for a small example and show how double Q-learning eliminates it"
+  - "Recognize when a real-world value-based RL system needs each of the three patches"
+authors:
+  - "clawdemy"
+published_at: 2026-05-25
+last_reviewed: "2026-05-25"
+status: published
+artifact: brief
+source_material:
+  type: youtube
+  primary_url: http://rail.eecs.berkeley.edu/deeprlcourse/
+sidebar:
+  order: 1
+  label: Brief
+tableOfContents: false
+---
+
+import LessonFreshness from '../../../../../components/LessonFreshness.astro';
+import SourceLecture from '../../../../../components/SourceLecture.astro';
+
+<LessonFreshness lastReviewed="2026-05-25" />
+
+## Capability gained
+
+Map each DQN engineering trick (replay buffer, target network, double Q-learning) to the specific deadly-triad leg it patches. Derive the max-overestimation bias for a small action space using order statistics, and verify the double-Q correction eliminates it in the idealized independent-noise case.
+
+## Why this lesson exists
+
+Lesson 6 left the reader with a problem: deep Q-learning combines all three deadly-triad legs (function approximation, bootstrapping, off-policy data) and naively diverges. Lesson 7 is the resolution: three engineering patches, one per triad-related issue. Each patch maps cleanly to its problem, which means the reader leaves understanding **why** each piece of DQN exists, not just **that** DQN works.
+
+The lesson is also the deep-RL existence proof. Mnih et al. (Nature 2015) was the moment deep RL became real. Every later breakthrough (AlphaGo, AlphaZero, AlphaStar, RLHF) inherited the engineering ethos from this paper. Without the L6 → L7 derivation pair, readers see DQN as a pile of unmotivated heuristics.
+
+## Source
+
+<SourceLecture course="Berkeley CS285" lecture="Deep RL with Q-Functions" url="https://rail.eecs.berkeley.edu/deeprlcourse/" />
+
+Berkeley CS285 lecture on Deep RL with Q-Functions), Sergey Levine, 2023. Primary papers: Mnih et al. (Nature 2015) DQN; van Hasselt et al. (AAAI 2016) double DQN; Hessel et al. (AAAI 2018) Rainbow. Math source for the overestimation-bias closed form: order-statistic moments of iid Gaussians (David & Nagaraja 2003; Cramér 1946).
+
+## Phase advance
+
+Phase 2 lesson 2 (`phase_order: 2`). Builds directly on L6's deadly-triad framework. Sets up L8 (PPO) as the alternative resolution: instead of patching the OP leg with engineering, stay near-on-policy and weaken the leg by construction.
+
+## Lesson body (lesson.mdx)
+
+- Recap of the deadly triad from L6 (FA, BS, OP).
+- DQN architecture: 84x84x4 frame stack → 3 conv layers → 512 FC → |A| outputs. The objective from L6 with two annotations: replay buffer `D` and target network `Q_{θ⁻}`.
+- Trick 1: replay buffer (1M circular buffer, sample uniformly). Patches OP by approximating i.i.d. and decorrelating consecutive frames. Memory cost mentioned (~7 GB at byte precision); later refinements (prioritized replay, n-step) flagged for Rainbow.
+- Trick 2: target network (`θ⁻` frozen, refreshed every `C = 10,000` steps in DQN 2015). Patches BS by giving the regression a fixed objective for `C` steps; runaway feedback loop broken.
+- Trick 3: double Q-learning. Decouples action selection (online net `Q_θ`) from action evaluation (target net `Q_{θ⁻}`). Worked example: 3 actions, true `Q* = 0`, ε_a ~ N(0,1). Single-net max gives `E[max] = 3/(2√π) ≈ 0.846`. Double-Q with independent noise: bias = 0. With real lagged target net: partial reduction.
+- DQN training loop pseudocode with double-DQN target.
+- The Atari benchmark hyperparameters reported with cautious language about exact median numbers (the paper's normalization varies across reports). 49 games, one architecture, median at professional-human-tester level.
+- Forward-references to Rainbow (six combined improvements) and to PPO (L8, alternative resolution).
+- Common pitfalls: skipping target network, `C` too small, confusing double Q (2010) with double DQN (2016), underestimating max bias for large action spaces, mistakenly transferring DQN hyperparameters to continuous control.
+- "Why this matters when you use AI" anchors DQN as the existence proof; traces the off-policy lineage to RLHF (without claiming RLHF inherits DQN's specific engineering).
+
+## Practice (practice.mdx)
+
+Two exercises:
+
+1. **Derive the max-overestimation bias from first principles**: starts with the identity `max(X, Y) = (X+Y)/2 + |X-Y|/2`, applies to iid N(0,1) to get `E[|X-Y|] = 2/√π` via the half-normal formula, lands at `E[max(X, Y)] = 1/√π ≈ 0.5642`. Dual-path check via comparing to the n=3 closed form from the lesson (`0.8463`) and the asymptotic `√(2 ln n)` approximation (which gives `2.404` for n=18 vs the actual `~1.82`; the asymptotic overestimates for moderate n). Part C extends to the double-Q correction: with two independent noise samples, the selected action `a*` is independent of the evaluation noise, so `E[Q̂_eval(a*)] = 0`.
+
+2. **Trace one target-network update period**: 12 steps with `C = 4`. Reader fills in a table of (θ at start, θ⁻ at start, target uses, θ at end, θ⁻ at end) for each step. The full solution table is shown after. Highlights the discrete refresh at steps 4, 8, 12. Variation: what if `C = 1`? Recovers the degenerate no-target-network case. What if `C = ∞`? Network never improves past the initial frozen target.
+
+5 flashcards: triad-leg-to-patch mapping; `E[max(X, Y)] = 1/√π` derivation; how double Q removes bias in the independent case; why discrete `C`-step refresh works (vs every-step); what transfers from DQN to DDPG/SAC and what doesn't.
+
+## Cheatsheet (cheatsheet.mdx)
+
+One-page reference. Patches-to-triad-legs table. DQN loss (both original and double-DQN targets). Max-overestimation bias numerics for n=2, 3, 4, 10, 18 with closed forms where they exist. DQN 2015 hyperparameter reference table. Training loop skeleton. Rainbow refinements table (each linked to its primary paper). Common pitfalls.
+
+## Summary (summary.mdx)
+
+5-minute distillation. One-paragraph framing of DQN as Q-learning + 3 patches. Five things to remember. Why-this-matters paragraph anchoring AlphaGo/AlphaZero/RLHF on the DQN existence proof. Worked-check memory anchor (the n=3 bias of `0.846` reduced to `0` with independent noise). Where this fits in the track arc.
+
+## References (references.mdx)
+
+Primary: Mnih et al. (2015 Nature, 2013 NeurIPS workshop), van Hasselt (2010 NeurIPS, 2016 AAAI double DQN), Hessel et al. (2018 AAAI Rainbow). Component refinements with primary citations: prioritized replay (Schaul 2016), dueling (Wang 2016), C51 (Bellemare 2017), IQN (Dabney 2018), noisy nets (Fortunato 2018). ALE benchmark: Bellemare et al. (2013 JAIR). Math: David & Nagaraja (2003) and Cramér (1946) for order statistics. Course source: Berkeley CS285 L8. Sutton & Barto chapters 6, 7, 11, 16.
+
+## Editorial discipline
+
+- Stage 2 sweep: em/en dashes, U+2212 vs hyphen, caps emphasis, dead `/topics/` links. Acronyms allowed in caps: DQN, FA, BS, OP, MDP, TD, MC, GAE, SGD, PPO, SAC, DDPG, IMPALA, MSE, RL, RMSProp, IQN, C51, ALE, AlphaGo, AlphaZero, AlphaStar, ICML, AAAI, NeurIPS, JAIR, ICLR.
+- No vendor naming triggers (CS285 is the course; paper authors are not vendor context). No security claims; the Atari hyperparameters are a published reference.
+- §6 status: standard pipeline, no triggers. PPO/RLHF forward references properly deferred to Lessons 8 + 13.
+
+## Word counts
+
+- Lesson 2616
+- Cheatsheet 691
+- Practice 1797
+- Summary 575
+- Brief 805
+- References 597
+
+Total ≈ 7081 words across 6 artifacts. Math-heavy band with the order-statistic derivation; in line with L5-L6 calibration.
+
+## Notes for promotion
+
+- Component placeholders (` J0 `, ` J1 `) live as MDX comments in the brief; Lead wires real components at promotion.
+- Practice imports real ` J0 ` + ` J1 ` components (children API, not front/back props).
+- Numerics on the Mnih et al. paper's "median normalized score" are deliberately cautious; the paper's exact figures depend on normalization choices that vary across follow-up papers. Lesson states "professional human-tester level" rather than a specific percentage.
+- Continues phase-boundary cadence; no per-lesson hold expected. Phase 2 boundary check after L12.

@@ -140,6 +140,12 @@ const BLOOM_VERBS = [
 	'sketch',
 	'cite',
 	'survey',
+	// Track 18 (Deep RL) domain verbs, added 2026-06-04 at promotion
+	'quantify',
+	'fit',
+	'formulate',
+	'construct',
+	'sketch',
 	// Track 4 (Visual Math: Linear Algebra) domain verbs, added 2026-05-30
 	'translate', // Understand: move a vector between arrow and coordinate forms
 	'represent', // Understand: represent a polynomial as a coordinate vector
@@ -284,6 +290,12 @@ const TRACK_19_PHASE_SLUGS = [
 	'energy-score-diffusion',
 ] as const;
 
+const TRACK_18_PHASE_SLUGS = [
+	'rl-foundations',
+	'core-deep-rl-algorithms',
+	'rl-frontiers',
+] as const;
+
 const PHASE_SLUGS = [
 	...TRACK_5_PHASE_SLUGS,
 	...TRACK_6_PHASE_SLUGS,
@@ -302,6 +314,7 @@ const PHASE_SLUGS = [
 	...TRACK_24_PHASE_SLUGS,
 	...TRACK_10_PHASE_SLUGS,
 	...TRACK_19_PHASE_SLUGS,
+	...TRACK_18_PHASE_SLUGS,
 ] as const;
 
 const BriefSchema = z.object({
@@ -333,6 +346,7 @@ const BriefSchema = z.object({
 		'multimodal-ai',
 		'classical-machine-learning',
 		'generative-models-and-diffusion',
+		'deep-reinforcement-learning',
 	]),
 	difficulty: z.enum(['intro', 'standard', 'deep']),
 	estimated_read_minutes: z.number().int().positive(),

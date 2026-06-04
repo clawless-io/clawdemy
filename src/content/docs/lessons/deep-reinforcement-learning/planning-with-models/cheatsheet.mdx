@@ -1,0 +1,134 @@
+---
+title: "Cheatsheet: Planning with a learned model"
+description: "One-page reference: random shooting, CEM, MPC, MuZero. Each planner mapped to action-space size and problem class."
+phase: "core-deep-rl-algorithms"
+phase_order: 5
+order: 10
+last_reviewed: "2026-05-25"
+---
+
+## The planning problem
+
+Given a learned model `P̂(s' | s, a)` and `R̂(s, a)`, at state `s_t` find:
+
+```
+(a_0, ..., a_{H-1})* = argmax E [ Σ_{t=0}^{H-1} γ^t · R̂(s_t, a_t) + γ^H · V̂(s_H) ]
+```
+
+The terminal `V̂(s_H)` (often from a learned critic) patches the truncation past horizon `H`. Set `H` to where the model's validation error stays bounded.
+
+## Three planners, from simple to sophisticated
+
+| Planner | Family | Best for | Compute per step |
+|---------|--------|----------|------------------|
+| **Random shooting** | Sample-and-score | Low-dim actions, baseline | Embarrassingly parallel; N rollouts |
+| **CEM** (cross-entropy method) | Iterative Gaussian fit | Continuous control, default | J·N rollouts (typical J = 5-10, N = 100-1000) |
+| **CMA-ES** | CEM + rank-µ cov updates | Higher dimensions | Same order as CEM, better convergence |
+| **MPPI** | Softmax-weighted CEM | Smooth dynamics, robotics | Same order as CEM |
+| **MCTS** (with learned model) | Tree search | Discrete actions, games | Tree size × simulation cost |
+
+## Random shooting (the baseline)
+
+```
+1. Sample N action sequences uniformly
+2. For each, roll the model forward H steps; compute score
+3. Pick the best; execute its first action
+```
+
+Embarrassingly parallel. Wasteful but bulletproof. Use when N is large and `dim_a · H < 10`.
+
+## CEM iteration (the workhorse)
+
+```
+Initialize q_0 = N(μ_0, Σ_0) over action sequences
+For j = 1, ..., J:
+  1. Sample N candidates from q_{j-1}
+  2. Score by model rollouts
+  3. Pick top K elites (typical K = 0.1 · N)
+  4. Refit: μ_j = mean(elites), Σ_j = cov(elites)
+Return μ_J as the planned action sequence
+```
+
+Typical: `N = 200`, `K = 20`, `J = 5`. Adjust per-problem.
+
+### Worked example, one iteration
+
+1D, `a ∈ [-1, 1]`, dynamics `s' = s + a`, reward `-(s-1)²`, `s_0 = 0`, `H = 1`, `q_0 = N(0, 1)`. Samples `{-0.5, 0.0, 0.5, 0.8}`.
+
+| `a` | `s_1` | reward |
+|-----|-------|--------|
+| -0.5 | -0.5 | -2.25 |
+| 0.0 | 0.0 | -1.00 |
+| 0.5 | 0.5 | -0.25 |
+| 0.8 | 0.8 | -0.04 |
+
+Top 2 elites: `{0.5, 0.8}` → `μ_1 = 0.65, σ_1 = 0.15`. Iteration 2 samples from `N(0.65, 0.15²)`, much tighter. Converges to `a* = 1` in ~5 iterations.
+
+## Model Predictive Control (MPC)
+
+```
+For each timestep t:
+  1. Plan an H-step sequence (a_t, ..., a_{t+H-1}) with CEM
+  2. Execute only a_t
+  3. Observe s_{t+1}; discard the rest; re-plan from s_{t+1}
+```
+
+"Receding horizon." The model only needs accuracy over the H-step horizon, not the full episode.
+
+### Choosing H
+
+| Too small | Too large |
+|-----------|-----------|
+| Greedy; misses multi-step opportunities | Compounds model error |
+| Fast | Slow |
+| Robust to model bias | Sensitive to model bias |
+
+Typical: `H = 5` to `30` for continuous control. Pin it to where model validation error stays bounded.
+
+## MuZero (end-to-end learned model + MCTS)
+
+Three jointly trained networks:
+
+| Network | Job |
+|---------|-----|
+| Representation `h_θ` | observation → hidden state |
+| Dynamics `g_θ` | (hidden state, action) → (next hidden state, reward) |
+| Prediction `f_θ` | hidden state → (policy, value) |
+
+Key insight: the model lives in **hidden-state space**, never predicts raw observations. Trained for **planning quality** (policy + value + reward losses), not for one-step observation accuracy.
+
+| Result | Where |
+|--------|-------|
+| Master Go, chess, shogi without knowing rules | (Schrittwieser 2020) |
+| Match AlphaZero strength on board games | (Schrittwieser 2020) |
+| Match or exceed DQN on Atari at time of publication | (Schrittwieser 2020) |
+
+Variants: EfficientZero (Atari median human from 2 hours of real-time game experience, the Atari 100k data budget), Sampled MuZero (continuous actions), MuZero Unplugged (offline RL).
+
+## Family decision rubric
+
+| Problem | Use |
+|---------|-----|
+| Continuous control + learned model + short horizon | MPC + CEM (PETS-style) |
+| Discrete board / Atari games + lots of training compute | MuZero, AlphaZero |
+| Continuous control + Dyna-style imagined rollouts | Dreamer, MBPO (L9) |
+| Language model agents | Model-free PPO (L8); planning at prompt level |
+| Most everything else | Model-free PPO or actor-critic |
+
+## Common pitfalls
+
+- Planning past the model's reliable horizon
+- Using random shooting where CEM would obviously win (`dim_a · H > 10`)
+- Forgetting the terminal `V̂(s_H)` value (truncating loses the tail)
+- Treating MPC horizon as fixed instead of receding
+- Trying to train MuZero from scratch on a single GPU (use EfficientZero for accessibility)
+- Conflating MCTS with random rollouts (MCTS uses learned priors via the PUCT formula)
+
+## What you should remember
+
+- Random shooting is the baseline; CEM is the workhorse; MuZero is the end-to-end learned-model MCTS.
+- MPC wraps any planner in a receding-horizon loop, limits how far the model needs to be reliable.
+- The CEM iteration is sample → score → top-K elites → refit Gaussian; converges in 5 to 10 iterations.
+- MuZero's hidden-state-only model is the key innovation: never predict raw observations, only what supports good planning.
+
+This closes the P-branch and the Phase 2 dispatch-table tour.

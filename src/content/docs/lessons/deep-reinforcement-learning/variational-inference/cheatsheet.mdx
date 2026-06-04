@@ -1,0 +1,125 @@
+---
+title: "Cheatsheet: Variational inference for RL"
+description: "One-page reference: the ELBO, reparameterization trick, Gaussian-to-Gaussian KL, two RL applications."
+phase: "core-deep-rl-algorithms"
+phase_order: 6
+order: 11
+last_reviewed: "2026-05-25"
+---
+
+## The central identity
+
+```
+log p(x) = ELBO + KL(q(z|x) || p(z|x))
+```
+
+ELBO is a lower bound on `log p(x)`; gap is the KL between variational and true posterior. Maximizing the ELBO simultaneously maximizes likelihood and minimizes posterior-approximation error.
+
+## The ELBO formula
+
+```
+ELBO = E_{z ~ q(z|x)} [ log p(x | z) ] - KL(q(z|x) || p(z))
+```
+
+| Term | Role |
+|------|------|
+| `E_q [log p(x | z)]` | Reconstruction; expected log-likelihood under the variational posterior |
+| `KL(q(z|x) || p(z))` | Regularizer; how far q deviates from the prior |
+
+## Gaussian-to-Gaussian KL (closed form)
+
+For `q = N(μ_q, σ_q²)`, `p = N(μ_p, σ_p²)`:
+
+```
+KL(q || p) = log(σ_p / σ_q) + (σ_q² + (μ_q - μ_p)²) / (2 σ_p²) - 1/2
+```
+
+For multivariate Gaussians with diagonal Σ, sum over dimensions.
+
+## Reparameterization trick
+
+```
+z = g_φ(ε, x)   where ε ~ p(ε)   (fixed, no parameters)
+```
+
+For `q_φ(z|x) = N(μ_φ(x), σ_φ²(x))`:
+
+```
+z = μ_φ(x) + σ_φ(x) · ε,   ε ~ N(0, 1)
+```
+
+Lets gradient flow through samples. Critical for trainable VAEs and the SAC actor.
+
+## Worked example (lesson body)
+
+Model: `p(z) = N(0, 1)`, `p(x|z) = N(z, 1)`. Observe `x = 1`.
+
+**True posterior** (closed form by Bayes + complete-the-square): `p(z|x=1) = N(0.5, 0.5)`.
+
+**Marginal**: `p(x) = N(0, 2)`. So `log p(x=1) = -0.5 log(4π) - 0.25 ≈ -1.516`.
+
+**Mismatched variational**: `q(z|x=1) = N(0.3, 1)`. Compute:
+
+```
+E_q[(1-z)²] = (1-0.3)² + 1 = 1.49
+E_q[log p(x|z)] = -0.5 log(2π) - 0.5 · 1.49 ≈ -0.919 - 0.745 = -1.664
+KL(q || p) = 0 + (1 + 0.09)/2 - 0.5 = 0.045
+ELBO = -1.664 - 0.045 = -1.709
+```
+
+**ELBO gap**: `log p(x) - ELBO = -1.516 - (-1.709) = 0.193`.
+
+**Dual-path**: compute `KL(q(z|x) || p(z|x))` directly:
+
+```
+KL(N(0.3, 1) || N(0.5, 0.5))
+= log(√0.5 / 1) + (1 + 0.04)/1 - 0.5
+= -0.347 + 1.04 - 0.5
+= 0.193 ✓
+```
+
+Both paths arrive at gap = 0.193. The central identity holds to the digit.
+
+## Where VI shows up in RL
+
+| Setting | Variational object | Algorithm |
+|---------|--------------------|-----------|
+| Partially observed RL, latent-state world models | Sequential q(s_t|o_1:t) over latent states | PlaNet (Hafner 2019), Dreamer (V1-V3) |
+| Maximum-entropy RL | KL(π(·|s) || prior) as objective term | SAC (Haarnoja 2018) |
+| KL-regularized RLHF | KL(π_θ || π_pretrained) as objective term | InstructGPT (Ouyang 2022), Bai (2022) |
+| Inverse RL with energy-based models | Variational max-likelihood of expert trajectories | MaxEnt IRL (Ziebart 2008) |
+
+The unifying view: the entropy bonus, the KL-to-pretrained penalty, and the variational world model are all instances of the same machinery applied to different parts of the RL pipeline.
+
+## MaxEnt RL as variational (the SAC view)
+
+Standard policy gradient maximizes `E[r(s, a)]`. SAC adds entropy:
+
+```
+J_SAC(π) = E [ r(s, a) + α · H(π(·|s)) ]
+       = E [ r(s, a) ] - α · KL(π(·|s) || uniform)   (up to constants)
+```
+
+The entropy bonus IS a KL regularizer toward the uniform action prior. Picking a different prior gives a different objective:
+
+| Prior | Objective | Use case |
+|-------|-----------|----------|
+| Uniform | SAC, MaxEnt RL | Exploration regularization |
+| Pretrained model | KL-regularized PPO | RLHF |
+| Demonstration policy | Behavioral-cloning regularizer | Imitation-bootstrap |
+
+## Common pitfalls
+
+- Forgetting the ELBO is a lower bound, not the likelihood
+- Treating KL as a "free" regularizer (it's real regularization with real consequences)
+- Confusing reparameterization with rejection sampling
+- MC-estimating Gaussian-to-Gaussian KL when closed form exists
+- Treating SAC's entropy bonus as separate from variational inference (it's identical)
+
+## What you should remember
+
+- The ELBO is `E_q[log p(x|z)] - KL(q || p)`; derivable from Jensen's inequality.
+- ELBO gap = `KL(q(z|x) || p(z|x))`; tight when q matches the true posterior.
+- Reparameterization makes sampling differentiable.
+- Two RL uses: latent-state world models (Dreamer), MaxEnt RL (SAC).
+- L12 generalizes: full RL = variational inference with "optimality" as evidence.

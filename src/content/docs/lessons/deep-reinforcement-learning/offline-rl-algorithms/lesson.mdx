@@ -1,0 +1,155 @@
+---
+title: "Lesson: Offline RL algorithms (BCQ, CQL, IQL)"
+description: "Three algorithm families address the offline-RL failure mode by different mechanisms. BCQ constrains the policy to actions the behavior policy would have taken. CQL penalizes Q-values on out-of-distribution actions. IQL sidesteps the max operator entirely via expectile regression on in-distribution actions. The mechanisms are different, the goal is shared: keep the Bellman update from querying Q at OOD actions."
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+The previous lesson named the failure mode: in offline RL, the Bellman max operator selects out-of-distribution actions where the function approximator extrapolates uninformed Q-values, Bellman propagation amplifies the error, and with no environment feedback the Q-function diverges. The greedy policy at deployment performs worse than the behavior policy that generated the dataset.
+
+Three algorithm families address this failure by different mechanisms. Each is named after a paper, each is widely used, and each is the practical answer in a different region of the offline-RL problem space. This lesson walks through all three.
+
+The shared design principle is simple: prevent the Bellman update from querying Q at out-of-distribution actions. Where the algorithms differ is in how they implement the prevention.
+
+- **BCQ** (Batch-Constrained Q-Learning, Fujimoto et al. 2019) restricts the policy itself to actions the behavior policy would have taken. The max operator never sees OOD actions because the candidate action set is constrained.
+- **CQL** (Conservative Q-Learning, Kumar et al. 2020) penalizes Q-values on out-of-distribution actions during training. The max still operates over all actions but the Q-function it operates on has been shaped so OOD actions cannot win.
+- **IQL** (Implicit Q-Learning, Kostrikov et al. 2021) replaces the max with an expectile regression that only references in-distribution actions. The OOD-action question never arises because the Bellman target never queries OOD-action Q-values.
+
+Three mechanisms, one goal. The rest of the lesson explains each and gives the practical decision rubric.
+
+## BCQ: constrain the action set
+
+The BCQ insight is direct: if the OOD action problem comes from the max selecting out-of-distribution actions, then restrict the max to actions the behavior policy plausibly took.
+
+Algorithmically, BCQ trains three networks:
+
+- A **generative model** of the behavior policy, conditioned on state. Specifically a variational autoencoder (VAE) that learns p(a | s) from the dataset. Sample from it to get plausible actions at any state.
+- A **perturbation network** that takes a state and a candidate action and outputs a small perturbation, intended to push the action slightly toward better Q-values while remaining close to the behavior policy distribution.
+- A **Q-network** (or two, for double-Q stabilization) that estimates Q(s, a) as usual.
+
+At any state s, BCQ:
+
+1. Sample N candidate actions from the VAE conditioned on s.
+2. Perturb each via the perturbation network.
+3. Evaluate Q on each (state, perturbed action) pair.
+4. Pick the action with the highest Q-value.
+
+The crucial property: the candidate actions are all near the support of the behavior policy. The Q-network is only queried at these in-distribution actions. The max therefore never selects an extrapolated value.
+
+The training loop alternates between updating the VAE to match the dataset's (state, action) marginal, updating the Q-network with the standard Bellman loss (where the target uses the same constrained max), and updating the perturbation network to push actions toward higher Q values without straying too far from the VAE sample.
+
+BCQ works well when the behavior policy is well-defined and learnable by a VAE. It struggles when the dataset is a heterogeneous mix of behavior policies (different operators, different vintages of older controllers) because the VAE then must model a multi-modal action distribution, which is harder.
+
+## CQL: penalize Q on OOD actions
+
+CQL takes a different route. Instead of restricting the action set, it shapes the Q-function so the max naturally avoids OOD actions.
+
+The standard offline Q-learning loss is the Bellman error:
+
+```
+L_Bellman = E over (s, a, r, s') in D of  ( Q(s, a) - target )²
+```
+
+where target = r + gamma · max over a' of Q(s', a'). CQL adds a conservative penalty:
+
+```
+L_CQL = L_Bellman + alpha · ( E over (s, a) in D of  log(sum over a' of exp(Q(s, a'))) - Q(s, a) )
+```
+
+The penalty term has two parts. The first part, the log-sum-exp over all actions at the dataset states, is dominated by the actions with the highest Q-values, which are exactly the OOD actions that the standard offline Q-learning would inflate. The penalty pushes these values down. The second part, Q at the in-distribution action that was actually taken, gets subtracted, which pushes the in-distribution Q-values up. The net effect: at every dataset state, the penalty creates a gap that pushes Q-values at OOD actions below Q-values at in-distribution actions.
+
+After training, the learned Q-function is a **conservative lower bound** on the true Q-function for any in-distribution policy. The bound is what the "conservative" in CQL refers to. The max operator, applied to this conservative Q, no longer prefers OOD actions because their Q-values have been penalized below the in-distribution values.
+
+The alpha parameter controls the penalty's strength. Too small, and the penalty does not suppress OOD inflation. Too large, and the penalty over-suppresses in-distribution Q-values, hurting the policy. Calibrating alpha is the practical challenge.
+
+CQL handles heterogeneous datasets better than BCQ because the penalty operates per-state on Q-values rather than requiring a single generative model of the behavior policy. Its cost is a less interpretable training loop (the penalty term is mathematically clean but operationally opaque about why a particular Q-value moved).
+
+## IQL: sidestep the max
+
+The IQL insight is the most elegant of the three: if the problem is the max operator querying OOD actions, do not use the max. Use a regression target that only references in-distribution actions.
+
+Specifically, IQL trains:
+
+- A **state-value network** V(s) trained via **expectile regression** on the Q-values at observed dataset actions:
+
+```
+L_V = E over (s, a) in D of  expectile_tau ( Q(s, a) - V(s) )
+```
+
+The expectile_tau loss is a generalization of squared error. For tau = 0.5, it reduces to the standard squared-error regression that recovers the mean (the expected Q-value over actions at state s). For tau approaching 1, it recovers an upper expectile, an estimate of "the high-quantile Q-value over in-distribution actions at s." This high-expectile V(s) plays the role of "max over in-distribution actions of Q(s, a)" without explicitly evaluating Q on OOD actions.
+
+- A **Q-network** trained with the Bellman target using V(s') in place of the max:
+
+```
+target = r + gamma · V(s')
+L_Q = E over (s, a, r, s') in D of  ( Q(s, a) - target )²
+```
+
+The Bellman target never references any action at s'. It uses V(s'), which was estimated only from in-distribution actions. The OOD-action problem is structurally avoided.
+
+- A **policy network** trained via advantage-weighted regression toward the dataset's actions:
+
+```
+L_policy = E over (s, a) in D of  exp( beta · (Q(s, a) - V(s)) ) · log policy(a | s)
+```
+
+The policy is trained to put more weight on dataset actions that have above-average Q-values. The beta parameter controls how strongly to upweight high-advantage actions. The policy itself never explores OOD actions because it is trained as a weighted imitation of the dataset.
+
+The complete pipeline has no max anywhere. The Bellman target uses V(s'), V is learned via expectile regression on dataset actions only, and the policy is a weighted imitation. The OOD-action question never arises.
+
+IQL is the simplest of the three to tune (one expectile parameter tau, one inverse-temperature beta), often the best on standard benchmarks, and the cleanest to reason about. It is the current default offline-RL algorithm in many research settings.
+
+## Worked decision example
+
+The two-state MDP from L14 made naive offline Q-learning diverge to expected return -10 at deployment, with Q(s2, a2) extrapolated to 5 and never corrected.
+
+- **BCQ at this MDP**: the VAE learns to assign mass to a1 at s2 (the only action observed). At s2, BCQ samples candidate actions from the VAE, gets a1 each time, perturbs it slightly, picks the highest-Q (still a1). The greedy policy at s2 is a1, collecting reward +1. Recovers the optimal policy.
+- **CQL at this MDP**: the conservative penalty pushes down Q(s2, a2) and up Q(s2, a1). After training, Q(s2, a1) > Q(s2, a2). The greedy policy at s2 picks a1, collecting reward +1.
+- **IQL at this MDP**: V(s2) is the upper expectile of Q(s2, a1) over dataset transitions, which is approximately 1 (the observed reward). The Bellman target at s1 uses V(s2) = 1, so Q(s1, a1) = gamma · 1 = 0.9. The policy at s2 is a weighted imitation of dataset action a1. The deployed policy collects reward 1 at s2.
+
+All three algorithms recover the optimal policy on this toy. The differences emerge on harder benchmarks (D4RL locomotion, manipulation, navigation) where the dataset's coverage of the optimal-policy state distribution is partial, the action space is continuous, and the behavior policy is itself a mixture. In those settings, IQL is often the best across the suite, CQL is the strongest when the dataset is highly heterogeneous, and BCQ is the best when the behavior policy is single-modal and learnable.
+
+## Algorithmic decision rubric
+
+A short table for when to reach for which:
+
+| Setting | Recommended | Why |
+|---|---|---|
+| Single, well-defined behavior policy | BCQ | The VAE constraint maps cleanly onto a single-modal action distribution |
+| Heterogeneous mixture of behavior policies | CQL | The per-state Q penalty handles multi-modal data better than a single VAE |
+| Continuous, high-dimensional actions | IQL | Avoids the max-over-actions optimization that BCQ and CQL still depend on |
+| First try on a standard benchmark | IQL | Simplest tuning, strong default performance |
+| Theoretical lower bound on Q is needed | CQL | The conservative bound is explicitly provable |
+| Tight integration with behavioral cloning baseline | IQL | The advantage-weighted regression is closest to BC + advantage filtering |
+
+The three are not exclusive. Several recent papers combine elements (CQL-style penalty added to an IQL pipeline, BCQ-style action constraint combined with CQL's conservative penalty). The principles are stable; the engineering keeps evolving.
+
+## Why this matters when you use AI
+
+Offline-RL algorithms are the practical answer in deployment settings where data is plentiful but interaction is forbidden or costly. Healthcare policy improvement uses CQL-style conservative methods to avoid recommending out-of-distribution treatments. Recommender systems use IQL-style off-policy learning to ship policies that improve on logged baselines without prospective experiments. Robot manipulation uses BCQ or CQL pretraining on demonstration data before any on-robot fine-tuning. Language-model RLHF (covered in L13) uses an explicit KL regularization to a reference policy, which plays structurally the same role as BCQ's action constraint: keep the trained policy near the data distribution where the reward model is trustworthy.
+
+The shared idea across applications: the offline phase extracts a candidate policy under explicit OOD-action constraints, the online phase (if any) refines that policy with bounded data collection and explicit risk budgets. Understanding which algorithm to reach for when is what makes the offline phase tractable.
+
+## Common pitfalls
+
+**Treating BCQ, CQL, IQL as interchangeable.** They share a goal but differ in mechanism and in failure mode. A wrong choice for the dataset's structure can underperform BC.
+
+**Ignoring the behavior-policy assumption in BCQ.** BCQ assumes the behavior policy is well-defined enough to be learned by a VAE. Heterogeneous datasets break this assumption and degrade BCQ to near-BC performance, sometimes worse.
+
+**Under-tuning alpha in CQL.** CQL's penalty strength is the practical lever, and the default value in the original paper is not always right. Validation against BC on the same dataset is the sanity check.
+
+**Over-trusting IQL's defaults.** IQL is simpler to tune but the expectile tau and the inverse-temperature beta still matter. The original paper's defaults are calibrated to D4RL; production datasets often want different values.
+
+**Skipping the BC sanity check.** Every offline-RL deployment should compare against BC on the same dataset. An offline-RL algorithm that does not exceed BC has paid the engineering cost of constraint or penalty design with no return.
+
+## What you should remember
+
+- **Three offline-RL families, one design principle.** BCQ constrains the action set; CQL penalizes Q at OOD actions; IQL sidesteps the max via expectile regression. All three prevent the Bellman update from querying Q at out-of-distribution actions, which is what makes them stable where naive offline Q-learning diverges.
+- **BCQ trains a VAE plus perturbation plus Q.** The VAE generates plausible actions at each state; the perturbation pushes toward better Q-values; the max picks the highest-Q from this constrained set. Best when the behavior policy is single-modal and learnable.
+- **CQL adds a conservative penalty to the Q-loss.** The penalty pushes Q down on OOD actions and up on in-distribution actions. The trained Q is a provable lower bound on the true Q. Best when the dataset is heterogeneous.
+- **IQL avoids the max entirely.** Expectile regression estimates V(s) using in-distribution actions only; the Bellman target uses V(s') in place of max-over-actions. The policy is advantage-weighted imitation. Cleanest to tune and often the best default.
+- **Always compare against BC.** BC is the safe baseline. An offline-RL algorithm worth deploying must exceed BC on the same dataset.
+
+The next lesson takes a different problem from the offline setting: when the agent CAN act, but the reward is sparse or hard to find, how does it explore efficiently?

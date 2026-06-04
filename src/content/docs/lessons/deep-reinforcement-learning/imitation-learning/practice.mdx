@@ -1,0 +1,178 @@
+---
+title: "Practice: Imitation learning and behavioral cloning"
+description: A self-check on BC and the distribution-shift failure, a pen-and-paper bound computation across episode lengths, a "where does BC break?" scenario drill, and flashcards built for retrieval.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Six short questions. Answer each one in your head (or on paper) before opening the collapsible. Trying to retrieve the answer is where the learning sticks; rereading feels productive but does much less.
+
+**1. State the behavioral-cloning algorithm in one sentence and give its training objective.**
+
+<details>
+<summary>Show answer</summary>
+
+Collect a dataset `D = { (s_t, a_t*) }` of (state, expert action) pairs from expert demonstrations, and train a policy `π_θ(s)` to predict the expert's action by minimizing a standard supervised loss over `D`: `θ* = argmin_θ Σ L(π_θ(s), a*)`. No reward, no environment interaction, no exploration during training.
+
+</details>
+
+**2. Why is behavioral cloning structurally tempting?**
+
+<details>
+<summary>Show answer</summary>
+
+It turns RL into supervised learning, so every supervised tool (efficient batch training, well-understood losses, mature optimizers, scaling laws) carries over without modification. It needs no environment interaction during training, which matters when acting is expensive (robotics) or unsafe (driving). It often appears to work on the first few steps of a rollout, with the failure mode only showing up at longer horizons.
+
+</details>
+
+**3. Explain distribution shift in BC, in your own words.**
+
+<details>
+<summary>Show answer</summary>
+
+The training data comes from the *expert's* distribution of states, `p_expert(s)`, the states the expert visits while behaving well. At deployment the policy makes small errors, which put it in states the expert never visited, which means the policy is now making decisions in states it was never trained on, where it makes bigger errors, which drift it further off-distribution. The policy's test distribution `p_policy(s)` diverges from the training distribution `p_expert(s)`, and the gap *grows* with episode length.
+
+</details>
+
+**4. What does the `T²` in `O(εT²)` mean, intuitively?**
+
+<details>
+<summary>Show answer</summary>
+
+It is the compounding-error phenomenon written down: errors do not just accumulate linearly, they accumulate *and* shift the agent into worse-supported states where future errors are more likely. So the expected number of mistakes over a T-step rollout scales quadratically, not linearly, with the horizon. Double the episode length and the worst-case mistakes go up by a factor of four.
+
+</details>
+
+**5. What does DAgger do differently from BC, and what does it cost?**
+
+<details>
+<summary>Show answer</summary>
+
+DAgger trains on states the *policy* visits (not just states the expert visited), by rolling out the current policy, asking the expert what they would do at each visited state, adding those (state, expert action) pairs to the dataset, and retraining. This brings the bound to `O(εT)` (linear), because the policy gets corrective signal at exactly the off-distribution states it tends to drift into. The cost is access to the expert: the expert must be queryable on demand, which is fine when the expert is a planner in simulation, awkward when the expert is a human.
+
+</details>
+
+**6. Name two settings where BC is the right tool, despite the `O(εT²)` warning.**
+
+<details>
+<summary>Show answer</summary>
+
+Any two of: (a) **short-horizon tasks** where `T` is small enough that `εT² ≈ εT` (single-step prediction tasks like next-token prediction have `T = 1`, where BC and DAgger coincide; this is most of LLM supervised fine-tuning). (b) **Tasks with self-correcting noise injected during demonstration**, e.g., NVIDIA's PilotNet trick of perturbing the demonstrator's view and capturing the corrective action, populating the training set with off-distribution recoveries. (c) **Abundant expert data with a genuinely tiny `ε` on a task where a few mistakes do not cascade catastrophically.**
+
+</details>
+
+## Try it yourself, part 1: compute the bound
+
+Pen and paper, about 5 minutes. The worst-case bounds are `O(εT²)` for BC and `O(εT)` for DAgger. Fill in the table for `ε = 0.05` (a 5% per-step error rate, generously realistic for a deep policy on a hard task) across three episode lengths, then say what the contrast tells you.
+
+```
+ε = 0.05.    Fill in the BC and DAgger bounds (use ε·T² and ε·T).
+T = 50:   BC = ____   DAgger = ____
+T = 200:  BC = ____   DAgger = ____
+T = 1000: BC = ____   DAgger = ____
+```
+
+<details>
+<summary>Show answer</summary>
+
+```
+T = 50:   BC = 0.05 · 50²   = 0.05 · 2500   = 125    DAgger = 0.05 · 50   = 2.5
+T = 200:  BC = 0.05 · 200²  = 0.05 · 40000  = 2000   DAgger = 0.05 · 200  = 10
+T = 1000: BC = 0.05 · 1000² = 0.05 · 1000000 = 50000  DAgger = 0.05 · 1000 = 50
+```
+
+The DAgger bounds (`2.5`, `10`, `50`) scale linearly with `T`: tenfold longer episode, tenfold more mistakes. The BC bounds (`125`, `2000`, `50000`) scale quadratically: tenfold longer episode, **a hundredfold** more mistakes. The bounds are pessimistic (worst-case), so a real BC policy with `ε = 0.05` will often do better on a `T = 50` task and may still be fine. But by `T = 1000` the `50000` BC bound is so far above the `50` DAgger bound that the qualitative warning is the whole point: BC's worst case becomes uninformative on long horizons, and a single per-step error rate of 5% no longer implies "the policy is roughly 95% right" once you ask it to act for a thousand steps.
+
+</details>
+
+## Try it yourself, part 2: where does BC break?
+
+About 4 minutes. For each scenario, decide whether BC is likely to be **adequate** (short horizon and/or error-tolerant) or **likely to break** (long horizon and/or error-sensitive), and give a one-line reason citing this lesson's framing.
+
+1. Fine-tune a language model to produce a one-sentence response to short prompts, trained on a dataset of (prompt, response) pairs.
+2. Train a self-driving policy on 100 hours of human driving and deploy it to drive solo for 30 minutes per trip.
+3. Train a robot to pick up an object in one motion (about 50 control steps), from 1,000 human teleoperation demonstrations.
+4. Fine-tune a language model to be a multi-step coding agent: write code, run it, read the error, debug, repeat, over conversations of 30+ tool-use turns.
+5. Train a model to classify whether a single still image contains a cat, from a labeled dataset of cat / not-cat images.
+
+<details>
+<summary>Show answer</summary>
+
+1. **Adequate.** Effectively single-step (`T = 1` per response); BC and DAgger coincide. This is most of supervised LLM fine-tuning, and it works.
+2. **Likely to break.** Long horizon (`T` in the thousands of control steps at 30 minutes), error-sensitive (a small steering drift can put the car in a state the expert never visited and where the policy fails worse). Real self-driving systems use BC as a starting point but heavily augment with DAgger-style correction or genuine RL.
+3. **Adequate (probably).** Short horizon (`T ≈ 50`), abundant data; even with a per-step error rate around 1-2%, the worst-case bound is in the low hundreds and real performance is usually much better. The lesson's "short, error-tolerant, abundant data" regime.
+4. **Likely to break.** Long horizon (30+ steps with strongly compounding effects: a bad early decision corrupts the whole trajectory), error-sensitive. This is exactly why RLHF (and longer-horizon RL training of agentic models) exists.
+5. **Not RL at all.** This is straight supervised learning on labeled images. There is no agent, no environment, no policy in a loop, and no distribution shift in the BC sense. The framing of this lesson does not apply.
+
+The discriminating questions: How long is `T`? How error-sensitive is the task? How abundant is the expert data?
+
+</details>
+
+## Flashcards
+
+Nine cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay out the full set as one card per page, ready to print or save as a PDF for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="What is behavioral cloning, in one equation?">
+
+`θ* = argmin_θ Σ over (s, a*) in D of L(π_θ(s), a*)`. Supervised learning on (state, expert action) pairs from a dataset of demonstrations. No reward, no environment interaction, no exploration during training.
+
+</Flashcard>
+
+<Flashcard question="Why is behavioral cloning structurally tempting?">
+
+It turns RL into supervised learning, so every supervised tool (batching, losses, optimizers, scaling) carries over. It needs no environment interaction during training. It scales with the dataset. And it often works on the first few steps, which makes the failure mode invisible until long-horizon rollouts.
+
+</Flashcard>
+
+<Flashcard question="What is distribution shift in behavioral cloning?">
+
+The training data comes from the expert's state distribution `p_expert(s)`. The policy makes small errors, putting it in states the expert never visited, where it was never trained, so it makes bigger errors and drifts further. The test distribution `p_policy(s)` diverges from the training distribution, and the gap grows with episode length.
+
+</Flashcard>
+
+<Flashcard question="State the BC vs DAgger bound.">
+
+BC: expected mistakes scale as `O(ε·T²)` (quadratic in horizon `T`). DAgger: `O(ε·T)` (linear). `ε` is the per-step error rate on the expert's distribution. At `ε = 0.01`, `T = 200`: BC ≤ 400, DAgger ≤ 2.
+
+</Flashcard>
+
+<Flashcard question="What does the T² in O(εT²) mean intuitively?">
+
+Errors compound: each error puts the agent in a state where future errors are more likely, so mistakes grow quadratically with episode length, not linearly. Double `T` and the worst-case mistake count goes up by a factor of four.
+
+</Flashcard>
+
+<Flashcard question="What is DAgger and what does it cost?">
+
+Dataset Aggregation: roll out the current policy, ask the expert what they would do at each visited state, add those pairs to the dataset, retrain, repeat. Trains on `p_policy(s)`, giving `O(εT)`. Cost: the expert must be queryable on demand, which is fine for a simulator-side planner, awkward for a human.
+
+</Flashcard>
+
+<Flashcard question="When is BC enough despite the O(εT²) warning?">
+
+Short-horizon tasks (small `T`), tasks with self-correcting noise injected during demonstration (NVIDIA PilotNet's view-perturbation trick), and tasks with abundant expert data + genuine error-tolerance. LLM supervised fine-tuning on single-completion responses is effectively `T = 1` where BC and DAgger coincide.
+
+</Flashcard>
+
+<Flashcard question="Why does evaluating BC on held-out expert data mislead?">
+
+Held-out expert data is still from `p_expert(s)`. A BC policy can have near-zero loss on `p_expert(s)` and still fail catastrophically when actually rolled out, because deployment performance lives on `p_policy(s)`, which the held-out test set says nothing about. Evaluate on rollouts.
+
+</Flashcard>
+
+<Flashcard question="Where does BC show up in modern AI, and where does it break?">
+
+It is most of LLM supervised fine-tuning (instruction-response pairs, effectively `T = 1`). It breaks for long-horizon agentic LLM behavior (multi-step coding agents) and long-horizon robotics tasks, which is part of why RLHF and DAgger-style corrections exist. Imitation alone is bounded by the expert; RL can in principle do better, given an honest reward.
+
+</Flashcard>
+
+</FlashcardSet>

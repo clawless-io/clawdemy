@@ -1,0 +1,118 @@
+---
+title: "Brief: Model-based RL, learning the dynamics"
+description: "Editorial brief for Lesson 9 of Track 18. Phase 2 L9: opens the P-branch of the dispatch table. Worked: least-squares fit of a linear-Gaussian model (dual-path with inspection); compounding-error rollout."
+track: deep-reinforcement-learning
+phase: core-deep-rl-algorithms
+phase_order: 4
+order: 9
+difficulty: standard
+estimated_read_minutes: 16
+estimated_practice_minutes: 15
+prerequisites:
+  - "lessons/deep-reinforcement-learning/rl-fundamentals"
+  - "lessons/deep-reinforcement-learning/value-based-rl"
+learning_outcomes:
+  - "Explain why model-based RL is more sample-efficient than model-free RL, and where the trade-off lands"
+  - "Fit a linear-Gaussian dynamics model by least squares and recover the true parameters in the zero-noise case"
+  - "Compute one-step prediction error and trace how it compounds over a multi-step model rollout"
+  - "Name three common model classes (linear, deterministic neural net, probabilistic neural net) and the situations each is suited for"
+  - "Identify when model-based RL is the right family for a problem (samples expensive) vs when model-free wins (samples cheap, asymptotic performance matters)"
+authors:
+  - "clawdemy"
+published_at: 2026-05-25
+last_reviewed: "2026-05-25"
+status: published
+artifact: brief
+source_material:
+  type: youtube
+  primary_url: http://rail.eecs.berkeley.edu/deeprlcourse/
+sidebar:
+  order: 1
+  label: Brief
+tableOfContents: false
+---
+
+import LessonFreshness from '../../../../../components/LessonFreshness.astro';
+import SourceLecture from '../../../../../components/SourceLecture.astro';
+
+<LessonFreshness lastReviewed="2026-05-25" />
+
+## Capability gained
+
+Fit a linear-Gaussian dynamics model `P(s' | s, a) = N(As + Ba + c, Σ)` from collected transitions by closed-form least squares. Quantify the sample-efficiency gain of model-based over model-free on continuous-control benchmarks (10× to 100× per PETS / MBPO). Trace how a 5% one-step model error compounds into a 59% error over 10 steps under expansive dynamics. Pick the right model class and the right algorithmic family for a given problem.
+
+## Why this lesson exists
+
+The L3 dispatch table named five algorithmic families: π, V, Q, A, P. The lessons so far have covered π (L4 REINFORCE, L5 actor-critic, L8 PPO) and Q (L6 value-based RL, L7 DQN); V and A appeared as critic components inside actor-critic and PPO. L9 opens the **P-branch**: learn the dynamics directly. This is the family with the highest theoretical ceiling (perfect model = optimal planning) and the most structural fragility (model bias compounds geometrically over rollouts).
+
+L9 is the first half of the P-branch coverage. L9 covers **learning** the dynamics; L10 covers **using** the learned model (MPC, cross-entropy method for action-sequence optimization, MuZero-style learned-model MCTS). The pairing mirrors the L6/L7 (Bellman foundations + DQN engineering) and L8 (PPO as alternative resolution) pattern: foundations first, then a tour of the practical algorithms that solve the engineering problems.
+
+## Source
+
+<SourceLecture course="Berkeley CS285" lecture="Model-Based RL" url="https://rail.eecs.berkeley.edu/deeprlcourse/" />
+
+Berkeley CS285 lecture on Model-Based Reinforcement Learning), Sergey Levine, 2023. Primary papers: PETS (Chua et al., 2018), MBPO (Janner et al., 2019), Dyna (Sutton, 1991), DreamerV3 (Hafner et al., 2023), MuZero (Schrittwieser et al., 2020). Sutton & Barto chapter 8 for the canonical treatment.
+
+## Phase advance
+
+Phase 2 lesson 4 (`phase_order: 4`). Completes the dispatch-table tour (π/V/Q/A/P all covered or motivated) and opens the P-branch with the foundational learning step. L10 will complete the P-branch with planning. The dispatch-table-as-organizing-principle reaches its natural conclusion here.
+
+## Lesson body (lesson.mdx)
+
+- Recap of the dispatch table; lessons so far covered π, Q, V, A; this lesson opens P.
+- Why model-based RL: sample efficiency. The 10× to 100× headline number from PETS, explained as a transfer of sample cost from environment to model.
+- Two ways to use a model: plan (MPC) or imagine (Dyna).
+- Model classes: linear-Gaussian (closed-form), deterministic NN (MSE), probabilistic NN (NLL), ensemble of probabilistic NNs (PETS).
+- Worked least-squares fit for linear-Gaussian dynamics: 5 zero-noise samples with `A_true = 0.5, B_true = 1.0`. Compute `X^T X = [[6.25, -2.5], [-2.5, 3.25]]` (det 14.0625) and `X^T Y = [0.625, 2.0]`. Solve to recover `[Â, B̂] = [0.5, 1.0]` exactly.
+- Compounding error: small 1-step bias → exponential N-step bias. Worked example: `A_true = 1.1`, `Â = 1.05`. Relative error 21% at 5 steps; 37% at 10 (closed form `1 - (1.05/1.1)^t`). Mitigation overview: short rollout horizons, ensemble uncertainty, frequent re-planning.
+- Dyna architecture pseudocode with the `K` imagined-step parameter.
+- Decision rubric (model-based when samples expensive and dynamics learnable; model-free when samples cheap and asymptotic performance matters).
+- Common pitfalls (validation error, data distribution coverage, rollout horizon, aleatoric vs epistemic, deterministic vs probabilistic).
+- "Why this matters when you use AI" anchors World Models (Ha & Schmidhuber, 2018), DreamerV3 (Hafner, 2023), MuZero (Schrittwieser, 2020), and notes that LLM-based agents almost never use model-based RL (the dynamics are too hard to model).
+
+## Practice (practice.mdx)
+
+Two exercises:
+
+1. **Linear-Gaussian fit by hand, dual-path validation.** 4-sample dataset where the true parameters are `A_true = 0.4, B_true = 0.8`. Part A: predict by inspection (`s=1, a=0 → s'=0.4`, etc.). Part B: compute `X^T X = [[3, -1], [-1, 6]]` (det 17) and `X^T Y = [0.4, 4.4]`. Part C: solve to get `[Â, B̂] = [0.4, 0.8]` exactly. Part D: add small noise to the targets, recompute, observe ~3% bias on `Â` and confirm fit is unbiased in expectation but noisy on a single dataset.
+
+2. **Compounding error trace, 10 steps.** True `A = 1.05`, fit `Â = 1.10`. Start `s_0 = 1`, action 0 every step. Reader computes both true and model rollouts and the resulting error growth. At `t = 1`: 5% error. At `t = 5`: 26%. At `t = 10`: 59%. Growth rate verified two ways: empirically (from the table) and analytically (`ŝ_t / s_t = (1.10/1.05)^t`). Part D discusses the three mitigations (cap horizon, MPC, ensemble) and explains compounding error is a structural property, not a fit bug.
+
+5 flashcards: why model-based wins on sample efficiency; the least-squares-recovers-true-params identity; how 5% one-step bias becomes 59% ten-step bias; aleatoric vs epistemic uncertainty; decision rubric for model-based vs model-free.
+
+## Cheatsheet (cheatsheet.mdx)
+
+One-page reference. P-branch placement in the dispatch table; the why-model-based sample-efficiency table; model classes with fit method and use cases; the lesson's worked least-squares numerics reproduced as a memory anchor; the compounding-error table reproduced as a memory anchor; mitigations table mapping each fix to its canonical algorithm; Dyna pseudocode; decision rubric; common pitfalls.
+
+## Summary (summary.mdx)
+
+5-minute distillation. One-paragraph framing of model-based RL as the P-branch with sample-efficiency win and compounding-error binding constraint. Five things to remember. Why-this-matters paragraph anchoring the contemporary stack (DreamerV3, MuZero, PETS, MBPO). Worked-check memory anchor with both the least-squares recovery and the compounding-error numerics. Where this fits (L10 is the planning half).
+
+## References (references.mdx)
+
+Foundational: Sutton (1991) Dyna; Sutton & Barto chapter 8. Linear-Gaussian / iLQR: Todorov & Li (2005); Levine & Koltun (2013) Guided Policy Search. PETS: Chua et al. (2018). MBPO: Janner et al. (2019). World models / Dreamer: Ha & Schmidhuber (2018); Hafner DreamerV1/V2/V3. MuZero: Schrittwieser et al. (2020). Uncertainty: Lakshminarayanan et al. (2017) deep ensembles; Kendall & Gal (2017) aleatoric/epistemic split. Linear-algebra references: Boyd & Vandenberghe (free online). Course source: CS285 L15.
+
+## Editorial discipline
+
+- Stage 2 sweep: em/en dashes, U+2212 vs hyphen, caps emphasis, dead `/topics/` links. Acronyms allowed in caps: RL, MDP, MSE, NLL, MPC, MCTS, LQR, iLQR, LQG, MBPO, PETS, SAC, DDPG, PPO, DQN, SGD, GAE, KL, JAIR, NeurIPS, ICLR, ICML, AAAI, MuJoCo, OpenAI, MIT, MuZero, DreamerV3, AlphaZero.
+- No vendor naming triggers; paper authors + course instructors + algorithm names only. No security claims.
+- §6 status: standard pipeline, no triggers. Forward references (L10 planning, L13 RLHF) properly deferred.
+
+## Word counts
+
+- Lesson 2680
+- Cheatsheet 605
+- Practice 1855
+- Summary 692
+- Brief 940
+- References 558
+
+Total ≈ 7330 words across 6 artifacts. Math-heavy band; in line with L5-L8 calibration.
+
+## Notes for promotion
+
+- Component placeholders (` J0 `, ` J1 `) live as MDX comments; Lead wires at promotion.
+- Practice imports real ` J0 ` + ` J1 ` components.
+- Numerics: the least-squares fit recovering `[0.5, 1.0]` is exact arithmetic (no rounding). The compounding-error table is computed to 4 decimals from `1.05^t` and `1.10^t`. Both should pass independent verification.
+- Continues phase-boundary cadence; Phase 2 boundary check after L12.
+- The "dispatch table reaches its natural conclusion" framing is the load-bearing pedagogical move: by L9, the reader has seen every entry in the dispatch table from L3 instantiated as an algorithm family. L10 completes the P-branch with planning. L11/L12 (variational inference, control as inference) shift to a different angle on the same RL problem.

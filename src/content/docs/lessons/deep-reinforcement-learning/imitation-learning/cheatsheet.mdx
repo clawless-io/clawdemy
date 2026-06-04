@@ -1,0 +1,82 @@
+---
+title: "Cheatsheet: Imitation learning and behavioral cloning"
+description: One-page reference. The BC algorithm, why it appeals, distribution shift, the O(εT²) versus O(εT) bound, DAgger, and where BC works anyway.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## Behavioral cloning, in one equation
+
+```
+D = { (s_t, a_t*) }  (expert demonstrations: state, expert action)
+θ* = argmin_θ  Σ over (s, a*) in D of  L( π_θ(s),  a* )
+```
+
+Supervised learning on (state, expert action) pairs. No reward, no environment interaction, no exploration during training.
+
+## Why it appeals
+
+- Turns RL into supervised learning (all the tooling carries over).
+- Needs no environment interaction during training.
+- Scales with the dataset like any supervised model.
+- Often works on the first few steps; failure only shows up later.
+
+## Why it fails: distribution shift
+
+The expert dataset comes from `p_expert(s)`. The trained policy makes small errors. Each error puts the agent in a state the expert never visited, where the policy was never trained, so it makes a bigger error, and the agent drifts further off-distribution. The test distribution `p_policy(s)` diverges from the training distribution `p_expert(s)`, and the gap grows with episode length.
+
+## The quantitative bound (Ross and Bagnell 2010; DAgger from Ross, Gordon, and Bagnell 2011)
+
+| Algorithm | Expected mistakes over T steps |
+| --- | --- |
+| **Behavioral cloning** | `O(ε · T²)` (quadratic in horizon) |
+| **DAgger** (on-policy correction) | `O(ε · T)` (linear in horizon) |
+
+`ε` = per-step error rate on the expert's distribution.
+
+**Plug in numbers** (`ε = 0.01`, per-step error 1%):
+
+| `T` | BC bound | DAgger bound |
+| --- | --- | --- |
+| 200 | 400 | 2 |
+| 1000 | 10,000 | 10 |
+
+The qualitative warning: BC's worst-case scales quadratically with episode length.
+
+## DAgger (Dataset Aggregation)
+
+```
+1. Train π_1 by BC on the expert dataset D_1.
+2. Roll out π_t in the environment; collect the states it visits.
+3. Ask the expert what they would do at each visited state.
+4. Add those (state, expert action) pairs: D_(t+1) = D_t ∪ { new pairs }.
+5. Retrain on D_(t+1) → π_(t+1). Loop back to step 2.
+```
+
+Crucial difference: the dataset eventually contains states from `p_policy(s)`, so the policy learns to recover from its own mistakes. Cost: the expert must be queryable on demand (fine if the expert is a planner; awkward if the expert is a human).
+
+## Where BC works anyway
+
+- **Short episodes (T small).** `εT²` ≈ `εT` when `T` is small. Single-step supervised tasks are `T = 1` (BC and DAgger coincide).
+- **Self-correcting noise during demonstration.** NVIDIA PilotNet trick: perturb the demonstrator's view and capture the expert's corrective response, populating the training set with off-distribution states and their recoveries.
+- **Abundant expert data + error-tolerant task.** When `ε` is genuinely tiny and a few mistakes do not cascade, BC is good enough.
+
+## Where it shows up in modern AI
+
+- **LLM supervised fine-tuning (SFT)** is BC over instruction-response pairs. Works for short responses, breaks for long-horizon agentic behavior.
+- **RLHF** (lesson 13) is, in part, the answer to SFT's `εT²` problem: get training signal from the *model's* state distribution, not the labeler's.
+- **Robotics manipulation demos**: the unspoken `T` determines whether BC is enough.
+
+## Pitfalls to dodge
+
+- **"BC is supervised learning, end of story."** It is supervised at training; at deployment the policy creates the test distribution, which disagrees with the training distribution by an amount growing in `T`.
+- **Low training loss as evidence the policy works.** Low loss on `p_expert(s)` says nothing about `p_policy(s)`. Evaluate on rollouts.
+- **Confusing imitation with reinforcement.** BC is bounded by the expert; RL can in principle exceed any demonstrator (given an honest reward).
+- **Underestimating DAgger's expert-query cost.** Linear `O(εT)` comes with a per-iteration human cost that can dwarf the original demonstration cost.
+
+## The one-line version
+
+Behavioral cloning is supervised learning on expert demonstrations, scaling as `O(εT²)` in episode length because the policy creates its own test distribution; DAgger's on-policy correction brings it to `O(εT)`, which is why long-horizon imitation needs either DAgger or genuine RL.

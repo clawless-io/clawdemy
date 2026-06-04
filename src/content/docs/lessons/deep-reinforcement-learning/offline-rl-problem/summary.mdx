@@ -1,0 +1,35 @@
+---
+title: "Summary: Offline RL, the problem"
+description: Fixed dataset, no further environment interaction, Q-learning's max operator picks out-of-distribution actions where Q is uninformed and inflated, Bellman propagation amplifies the error, and the policy diverges. The next lesson covers the fixes.
+artifact: summary
+sidebar:
+  order: 4
+  label: Summary
+---
+
+## The one-paragraph version
+
+Standard RL assumes the agent can act in the environment. Many real settings (healthcare, recommender systems, industrial control, robot demonstration learning, language-model post-training) only provide a fixed dataset of past interactions and forbid further data collection. This is **offline RL**. Naive off-policy methods (Q-learning, DQN) catastrophically diverge in this setting. The mechanism: Q-learning's Bellman target uses the max over actions at the next state, and the max selects out-of-distribution actions where the function approximator extrapolates Q-values driven by inductive bias rather than data. These extrapolated values are often inflated. Bellman propagation pushes the inflation backward through the value function, and with no environment feedback to correct it, the Q-function diverges. The greedy policy at deployment prefers OOD actions and performs much worse than the behavior policy that generated the data. The fix is constraint or penalty on OOD actions, covered in the next lesson by BCQ, CQL, and IQL.
+
+## Five things to remember
+
+1. **Offline RL fixes the dataset.** No new data collection. This is the deployment-realistic setting for healthcare, recommender systems, industrial control, robotics demonstration learning, and language-model post-training. It is strictly harder than off-policy RL.
+2. **Off-policy is not offline.** Off-policy means the data came from a different policy; offline means no new data ever arrives. DQN (off-policy) handles drift online because new data corrects the value function each step. Offline forbids that correction.
+3. **The failure mode is extrapolation error.** Q-learning's max operator selects the highest-Q action at the next state, including out-of-distribution actions where the network extrapolates a value with no constraint. Inflated values propagate backward via Bellman updates and grow unchecked.
+4. **Behavioral cloning is the safe baseline.** BC stays inside the data distribution by construction (no Q-values, no OOD-action queries) and is bounded by the behavior policy's performance. Any offline-RL algorithm worth deploying should exceed BC on the same dataset.
+5. **The fix is in the next lesson: BCQ, CQL, IQL.** Three families. BCQ constrains the policy to in-distribution actions. CQL penalizes Q-values on OOD actions. IQL sidesteps the max via expectile regression on in-distribution actions only.
+
+## Why this matters
+
+Most real deployment settings are offline at the start. Healthcare, recommender systems, industrial control, and robotics never get to randomize policy choice on the production system from day one. The offline phase is whatever extracts a candidate policy from logged data, before any online experiment is sanctioned. Understanding what naively fails and why determines whether you reach for BC (always safe but bounded), an offline-RL algorithm (potentially better but only if the OOD-action constraint or penalty is right for your dataset), or a hybrid pipeline (offline-trained, evaluated against the dataset, then incrementally allowed online with explicit risk budgets).
+
+## Worked check (memory anchor)
+
+Two-state, two-action MDP. The behavior policy collected transitions covering (s1, a1), (s1, a2), and (s2, a1), but never (s2, a2). The true rewards: a1 at s2 returns +1, a2 at s2 returns -10. The behavior policy at deployment achieves expected discounted return (γ=0.9) ≈ 0.878 from s1 (it picks a1 at s2 always, and a1 at s1 with 80% probability; the 20% self-loop on a2 at s1 reduces the return slightly below the optimal 0.9 via the recursive solution V = 0.8·0.9·1 + 0.2·0.9·V → V = 0.72/0.82). Naive offline Q-learning with extrapolated Q(s2, a2) = 5 converges to a Q-function where the greedy action at s2 is a2 (Q = 5 > Q = 1). The deployed policy collects discounted return 0 + 0.9·(-10) = -9 from s1 instead of ≈ 0.878. The "learned" policy is worse than the data-generating policy by about 9.878 in expected discounted return on a problem where the optimal policy achieves 0.9.
+
+## Where this fits in the broader curriculum
+
+- **L13 RLHF** opened Phase 3 with the language-model post-training application. RLHF is effectively offline (preference dataset is fixed) but escapes the divergence trap by using a different optimization (PPO with KL regularization to a reference policy, which acts as an implicit policy constraint).
+- **L7 DQN** introduced the off-policy Q-learning machinery and the practical stabilizers (replay buffer, target network, double Q) that work online. L14 establishes what those stabilizers cannot fix once the buffer stops refreshing.
+- **L2 imitation learning** introduced behavioral cloning as the simplest offline method. BC is the natural baseline for any offline RL deployment and L14 makes the case for when offline RL aspires to exceed BC.
+- **L15 next** introduces the three algorithmic families that fix the L14 failure: BCQ (action constraint), CQL (Q penalty), IQL (max sidestep).

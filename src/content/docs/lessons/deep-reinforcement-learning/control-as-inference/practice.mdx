@@ -1,0 +1,275 @@
+---
+title: "Practice: Control as inference (compute soft Q by hand + verify the two limits)"
+description: "Two exercises: trace soft Bellman on a 3-action terminal example and verify α → 0 / α → ∞ limits numerically; identify the variational framework in three RL algorithms."
+phase: "core-deep-rl-algorithms"
+phase_order: 7
+order: 12
+last_reviewed: "2026-05-25"
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Exercise 1: soft Bellman by hand + dual limit-verification
+
+Set up a fresh single-state MDP, three actions, terminal after one step. Vary `α` and observe the limits.
+
+- `r(s, a_1) = 2`
+- `r(s, a_2) = 1`
+- `r(s, a_3) = 0`
+
+Three temperature settings: `α = 0.5`, `α = 1`, `α = 5`.
+
+### Part A: compute soft Q-values
+
+Since the episode terminates after one action with no continuation, `Q_soft(s, a) = r(s, a)`:
+
+```
+Q_soft(s, a_1) = 2
+Q_soft(s, a_2) = 1
+Q_soft(s, a_3) = 0
+```
+
+### Part B: compute `V_soft` at `α = 1`
+
+`V_soft(s) = α · log Σ_a exp(Q_soft(s, a) / α) = 1 · log(e² + e¹ + e⁰)`:
+
+```
+e² = 7.3891
+e¹ = 2.7183
+e⁰ = 1.0000
+Sum = 11.1074
+log(11.1074) ≈ 2.4076
+```
+
+So `V_soft(s) ≈ 2.408` at `α = 1`.
+
+### Part C: compute soft policy at `α = 1`
+
+```
+π_soft(a_1) = exp(2 - 2.408) = exp(-0.408) ≈ 0.665
+π_soft(a_2) = exp(1 - 2.408) = exp(-1.408) ≈ 0.245
+π_soft(a_3) = exp(0 - 2.408) = exp(-2.408) ≈ 0.090
+```
+
+Check: `0.665 + 0.245 + 0.090 = 1.000` ✓.
+
+**Cross-lesson recurrence**: this same distribution `(0.665, 0.245, 0.090)` appeared in Lesson 8's PPO practice (the 3-action softmax with advantages `[+1, 0, -1]` and the same `exp(A)/Z` proposal). Not a coincidence: SAC's soft policy `π_soft = exp(Q/α) / Z` reduces to REINFORCE-style softmax-of-advantages when `Q − V ≈ A` and `α = 1`. The variational framework names the recurrence: every Boltzmann-style policy over actions is a special case of the soft Bellman posterior, no matter which lesson's frame we are using to introduce it.
+
+### Part D: verify the `α → 0` limit (hard Bellman)
+
+Set `α = 0.5` (closer to zero). Compute:
+
+```
+exp(Q/α) = (exp(4), exp(2), exp(0)) = (54.598, 7.389, 1.000)
+Sum = 62.987
+V_soft = 0.5 · log(62.987) = 0.5 · 4.143 = 2.072
+```
+
+Policy:
+
+```
+π_soft(a_1) = exp((2 - 2.072) / 0.5) = exp(-0.144) ≈ 0.866
+π_soft(a_2) = exp((1 - 2.072) / 0.5) = exp(-2.144) ≈ 0.117
+π_soft(a_3) = exp((0 - 2.072) / 0.5) = exp(-4.144) ≈ 0.016
+```
+
+Compared to `α = 1` (0.665, 0.245, 0.090): the policy at lower `α` concentrates more mass on the best action.
+
+For an even smaller temperature, e.g., `α = 0.01`:
+
+```
+exp(Q/α) = (exp(200), exp(100), exp(0))
+```
+
+`exp(200)` dominates by a factor of `exp(100) ≈ 10^43`. So `π_soft(a_1) ≈ 1.0`, `π_soft(a_2) ≈ exp(-100) ≈ 0`, `π_soft(a_3) ≈ 0`. The policy converges to the greedy deterministic policy `a* = a_1`. **Soft Bellman → hard Bellman** as `α → 0`. ✓
+
+### Part E: verify the `α → ∞` limit (uniform)
+
+Set `α = 5`:
+
+```
+exp(Q/α) = (exp(0.4), exp(0.2), exp(0)) = (1.492, 1.221, 1.000)
+Sum = 3.713
+V_soft = 5 · log(3.713) ≈ 5 · 1.312 = 6.560
+```
+
+Policy:
+
+```
+π_soft(a_1) = exp((2 - 6.560) / 5) = exp(-0.912) ≈ 0.402
+π_soft(a_2) = exp((1 - 6.560) / 5) = exp(-1.112) ≈ 0.329
+π_soft(a_3) = exp((0 - 6.560) / 5) = exp(-1.312) ≈ 0.269
+```
+
+At `α = 5`, the gap between the three policy probabilities shrinks (0.402 vs 0.329 vs 0.269; uniform would be 0.333 each). For `α = 100`:
+
+```
+exp(Q/α) ≈ (1.020, 1.010, 1.000),  Sum ≈ 3.030
+V_soft = 100 · log(3.030) ≈ 110.9
+π_soft(a_1) = exp((2 - 110.9)/100) = exp(-1.089) ≈ 0.337
+π_soft(a_2) ≈ 0.333,  π_soft(a_3) ≈ 0.330
+```
+
+Very close to uniform (1/3 each). **Soft Bellman → uniform** as `α → ∞`. ✓
+
+### Synthesis
+
+The temperature `α` continuously interpolates between hard Bellman (`α → 0`) and uniform (`α → ∞`). At moderate `α = 1`, the policy is "softly greedy": preferentially picks the best action but retains exploration over the others. The same framework with different `α` values reproduces every point on this spectrum.
+
+## Exercise 2: identify the variational framework in three RL algorithms
+
+For each algorithm, identify:
+
+1. The latent variable
+2. The prior
+3. The temperature parameter
+4. What "evidence" the framework conditions on
+
+### Scenario A: SAC
+
+- Latent: action `a`
+- Prior: uniform over actions
+- Temperature: `α` (the SAC entropy weight, typically auto-tuned)
+- Evidence: `O_t = 1` for all timesteps in the rollout (trajectory was "optimal" in the soft-Boltzmann sense)
+
+The soft Bellman backup follows from variational message-passing in this graphical model. SAC's actor-critic structure (Q-critic + stochastic actor + reparameterization) is the practical optimizer.
+
+### Scenario B: KL-regularized PPO (RLHF)
+
+- Latent: response `y` to a prompt `x`
+- Prior: pretrained language model `π_pretrained(y | x)`
+- Temperature: `β` (the RLHF KL weight, typically 0.01 to 0.1)
+- Evidence: the response was "optimal" under the reward model, `O = 1` with `p(O = 1 | x, y) ∝ exp(R(x, y) / β)`
+
+The full RLHF objective `L = L^CLIP - β · KL(π_θ || π_pretrained)` is the variational ELBO. The clipped surrogate `L^CLIP` is the practical optimizer (PPO trust-region machinery) for the variational target.
+
+### Scenario C: Direct Preference Optimization (DPO)
+
+- Latent: response `y` to a prompt `x` (same as RLHF)
+- Prior: pretrained language model `π_pretrained(y | x)` (same as RLHF)
+- Temperature: `β` (same parameter, same meaning)
+- Evidence: a labeled preference pair `(y_w, y_l)` where `y_w` is preferred to `y_l`
+
+The DPO trick (Rafailov et al., 2023): the implicit reward model is determined by the policy via the variational identity. Solving the variational problem directly on preferences yields a maximum-likelihood objective:
+
+```
+L_DPO = -log σ(β · log(π_θ(y_w|x) / π_pretrained(y_w|x)) - β · log(π_θ(y_l|x) / π_pretrained(y_l|x)))
+```
+
+This is the same variational problem as RLHF, but the explicit reward model and PPO stage are skipped. The "secret reward model" the DPO paper title alludes to is just the policy itself, evaluated via the variational identity.
+
+### Synthesis
+
+Three algorithms, same framework. The only differences:
+
+1. **SAC**: uniform prior, per-step optimality, full RL inference.
+2. **RLHF**: pretrained prior, sequence-level optimality, full RL inference via reward model + PPO.
+3. **DPO**: pretrained prior, sequence-level optimality, direct max-likelihood on preferences (skips reward model + PPO).
+
+The "killer feature" of control-as-inference is that it makes these comparisons visible. Without the framework, SAC, RLHF, and DPO look like three different algorithms with three different motivations. With the framework, they are three samplers from the same variational posterior, differing in implementation detail.
+
+## Flashcards
+
+<FlashcardSet>
+
+<Flashcard question="State the soft Bellman backup. How does it differ from the hard Bellman optimality equation (Lesson 6)?">
+
+**Soft Bellman backup**:
+
+```
+Q_soft(s, a) = r(s, a) + γ · E_{s' ~ P(·|s, a)} [V_soft(s')]
+V_soft(s)    = α · log Σ_a exp(Q_soft(s, a) / α)
+π_soft(a|s)  = exp((Q_soft(s, a) - V_soft(s)) / α)
+```
+
+**Hard Bellman optimality** (Lesson 6):
+
+```
+Q*(s, a) = r(s, a) + γ · E_{s'} [max_{a'} Q*(s', a')]
+V*(s)    = max_a Q*(s, a)
+π*(a|s)  = δ(a - argmax_a Q*(s, a))
+```
+
+The only difference: `max_a` (hard) vs `α · log Σ_a exp(/α)` (soft, the log-sum-exp).
+
+As `α → 0`, `α · log Σ_a exp(Q/α) → max_a Q`; soft Bellman reduces to hard Bellman. As `α → ∞`, the policy becomes uniform. Real RL picks `α` in between to balance reward maximization against policy entropy / exploration.
+
+</Flashcard>
+
+<Flashcard question="What graphical-model construction turns RL into a probabilistic-inference problem?">
+
+Introduce binary "optimality" variables `O_t ∈ {0, 1}` at each timestep, with un-normalized likelihood:
+
+```
+p(O_t = 1 | s_t, a_t) = exp(r(s_t, a_t) / α)
+```
+
+The full joint distribution over a trajectory + optimality evidence:
+
+```
+p(τ, O_{1:T}) = p(s_0) · Π_t [ p(a_t | s_t) · p(s_{t+1} | s_t, a_t) · p(O_t | s_t, a_t) ]
+```
+
+The RL problem: **infer `p(a_t | s_t, O_{t:T} = 1)`**, the posterior over actions given that all future timesteps were optimal. By Bayes + backward message passing through the graphical model, this gives the soft Bellman backup.
+
+Different choices of action prior `p(a_t | s_t)` produce different algorithms: uniform → SAC; pretrained model → RLHF; demonstration policy → imitation-bootstrap.
+
+</Flashcard>
+
+<Flashcard question="Compute V_soft and π_soft for r = (1, 0) at α = 1 (a 2-action terminal problem).">
+
+```
+Q_soft(s, a_1) = 1
+Q_soft(s, a_2) = 0
+V_soft(s) = 1 · log(exp(1) + exp(0)) = log(e + 1) = log(3.7183) ≈ 1.3133
+π_soft(a_1 | s) = exp(1 - 1.3133) = exp(-0.3133) ≈ 0.7311
+π_soft(a_2 | s) = exp(0 - 1.3133) = exp(-1.3133) ≈ 0.2689
+```
+
+Check: `0.7311 + 0.2689 = 1.0000` ✓.
+
+Compared to the hard Bellman: `V* = 1`, π* puts probability 1 on `a_1`. The soft version keeps 27% probability on `a_2` due to entropy.
+
+Compared to uniform: each action would be 0.5. The soft version puts more mass on the higher-reward action while retaining nonzero probability on the lower-reward one.
+
+This is the "softly greedy" behavior of soft Bellman: peak at the best action, tail extending over the others, peak sharpness controlled by `α`.
+
+</Flashcard>
+
+<Flashcard question="How does control-as-inference unify SAC, RLHF, and DPO?">
+
+All three are samplers from the same variational posterior `p(a | s, O = 1)` in the optimality-conditioned graphical model. They differ only in:
+
+| | SAC | RLHF (KL-PPO) | DPO |
+|---|-----|----------------|-----|
+| Action prior | Uniform | `π_pretrained` | `π_pretrained` |
+| Optimality scope | Per-step `O_t` | Sequence `O` | Sequence `O`, inferred from preference pairs |
+| Optimizer | Actor-critic + soft Bellman | PPO + clipped surrogate | Direct max-likelihood |
+| Explicit reward model | None | Yes, learned | No (implicit in policy) |
+
+The "different algorithm" appearance dissolves once you see them as variants of the same variational construction with different priors and different samplers.
+
+The framework also predicts: any algorithm that puts a KL penalty between a learned policy and some prior is some flavor of this construction. Imitation learning (`KL(π_θ || π_demo)`), safety RL with KL-to-safe-policy, value alignment with KL-to-aligned-policy: all the same.
+
+</Flashcard>
+
+<Flashcard question="What is the temperature α intuitively, and how does it differ from the discount γ?">
+
+`α` is the **information rate**: how sharply the rewards drive the policy.
+
+- Small `α`: greedy use of reward signal; policy is concentrated on high-reward actions; low entropy.
+- Large `α`: high entropy; policy doesn't strongly prefer high-reward actions; lots of exploration / regularization.
+
+`γ` is the **discount factor**: how heavily future rewards count vs present rewards.
+
+- Small `γ`: short-sighted; only nearby rewards matter.
+- Large `γ`: far-sighted; future rewards count almost as much as present.
+
+They serve different roles. `α` shows up in the **policy form**: `π_soft = exp(Q/α) / Z`, controlling how peaked the policy is around the best action. `γ` shows up in the **temporal recursion**: `Q(s, a) = r(s, a) + γ · E[V(s')]`, controlling how future is discounted.
+
+Both can be tuned independently. Typical: `γ ∈ [0.95, 0.99]` for episodic tasks; `α ∈ [0.01, 1.0]` (or `β ∈ [0.01, 0.1]` in RLHF) for the entropy / KL trade-off. SAC's automatic temperature variant (Haarnoja 2018b) tunes `α` to target a fixed expected policy entropy.
+
+</Flashcard>
+
+</FlashcardSet>

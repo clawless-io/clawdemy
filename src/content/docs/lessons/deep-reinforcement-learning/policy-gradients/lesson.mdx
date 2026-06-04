@@ -1,0 +1,225 @@
+---
+title: "Lesson: Policy gradients (REINFORCE)"
+description: The most direct way to improve a policy parameterized by a neural network is to follow the gradient of the expected return with respect to the parameters. The REINFORCE estimator, derived in a single line by the log-derivative trick, makes that gradient computable from sampled trajectories without ever needing to know the environment's dynamics. The price is variance, and most of the rest of the track is about taming it.
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+Lesson 3 ended on the **deep-RL dispatch table**: every method in this track estimates one of pi, V, Q, A, or P. This lesson takes the policy-gradient branch: parameterize the policy as the policy parameterized by theta (a neural network with parameters theta), and improve it by following the gradient of the expected return with respect to theta. The algorithm that falls out is called **REINFORCE** (Williams, 1992), and at five lines of pseudocode it is the simplest deep-RL algorithm in this track. By the end you will have derived it from scratch using a single calculus trick (the **log-derivative identity**), seen why the trick lets you compute the policy gradient without knowing the environment's dynamics, run one update by hand on a small bandit, and named the high-variance failure mode that the rest of the track exists to manage.
+
+## The objective and what we want to compute
+
+The agent's job, written in MDP language from the last lesson, is to choose its policy the policy parameterized by theta so that the expected discounted return is large:
+
+```
+J(θ)  =  E_(τ ~ π_θ) [ R(τ) ]   where R(τ) = Σ over t of γ^t · r_t
+```
+
+tau (tau) is a full trajectory (s_0, a_0, r_0, s_1, a_1, r_1, ...) sampled by running the policy parameterized by theta in the environment. We want to compute nabla-theta J(theta) and step in its direction:
+
+```
+θ  ←  θ + α · ∇_θ J(θ)
+```
+
+That is plain gradient ascent on the policy's parameters. The interesting part is computing nabla-theta J(theta) when the expectation is over trajectories sampled by the policy parameterized by theta itself: every time you change theta, the distribution of trajectories changes, and standard "differentiate the integrand" rules do not apply directly.
+
+## The log-derivative trick
+
+Here is the single identity that makes everything work. For any distribution p(x; theta) and any function f(x) not depending on theta:
+
+```
+∇_θ  E_(x ~ p(x; θ)) [ f(x) ]   =   E_(x ~ p(x; θ)) [ f(x) · ∇_θ log p(x; θ) ]
+```
+
+It is true because
+
+```
+∇_θ p(x; θ)  =  p(x; θ) · ∇_θ log p(x; θ)
+```
+
+(differentiate log p to get (nablap)/p, then multiply both sides by p), so
+
+```
+∇_θ ∫ f(x) · p(x; θ) dx  =  ∫ f(x) · ∇_θ p(x; θ) dx  =  ∫ f(x) · p(x; θ) · ∇_θ log p(x; θ) dx
+                          =  E_(x ~ p) [ f(x) · ∇_θ log p(x; θ) ]
+```
+
+The expectation of a thing-times-a-score is something you can estimate by sampling. That is the whole game.
+
+## Applying the trick to RL
+
+Set x = tau, f(x) = R(tau), p(x; theta) = p(tau; theta) (the probability of trajectory tau under policy the policy parameterized by theta):
+
+```
+∇_θ J(θ)  =  ∇_θ  E_(τ ~ p(τ; θ)) [ R(τ) ]   =   E_(τ ~ p(τ; θ)) [ R(τ) · ∇_θ log p(τ; θ) ]
+```
+
+Now factor the trajectory probability. By the Markov property,
+
+```
+p(τ; θ)  =  ρ(s_0) · ∏ over t of π_θ(a_t | s_t) · P(s_(t+1) | s_t, a_t)
+```
+
+where rho is the initial-state distribution and P is the (unknown) environment dynamics. Take logs:
+
+```
+log p(τ; θ)  =  log ρ(s_0)  +  Σ over t of log π_θ(a_t | s_t)  +  Σ over t of log P(s_(t+1) | s_t, a_t)
+```
+
+And here is the move that makes deep RL practical. Differentiate with respect to theta. **Only the policy term depends on theta**; the initial-state and dynamics terms are constants from the gradient's perspective and drop out:
+
+```
+∇_θ log p(τ; θ)  =  Σ over t of ∇_θ log π_θ(a_t | s_t)
+```
+
+The environment's dynamics P could be arbitrarily complicated, and the agent need not know them. This is what "model-free" means: the policy gradient is computable without any model of P. Plug back in:
+
+```
+∇_θ J(θ)  =  E_(τ ~ π_θ) [ R(τ) · Σ over t of ∇_θ log π_θ(a_t | s_t) ]
+```
+
+That is the **policy gradient theorem**, written in its most direct form.
+
+## The REINFORCE algorithm
+
+The expectation is over trajectories, so estimate it by sampling. **REINFORCE** in five lines:
+
+```
+1. for each iteration:
+2.     sample N trajectories τ_1, ..., τ_N by running π_θ in the environment
+3.     g  ≈  (1/N) · Σ over i of [ R(τ_i) · Σ over t of ∇_θ log π_θ(a_(i,t) | s_(i,t)) ]
+4.     θ  ←  θ + α · g
+5. end
+```
+
+That is it. Run the policy, watch the trajectories, multiply each trajectory's return by the sum of log-policy gradients along the actions taken, average, and take a gradient step. The estimator g is **unbiased**: its expectation equals the true nabla-theta J(theta) exactly.
+
+The intuition the formula encodes is plain in retrospect: the gradient nabla-theta log the policy parameterized by theta(a_t | s_t) points in the direction that **increases the probability of action a_t at state s_t**. Multiplying by R(tau) then says: if the trajectory was good (large positive return), increase the probability of those actions; if it was bad (small or negative return), decrease them. Good trajectories get reinforced; bad ones get suppressed; hence the name.
+
+## Two refinements: rewards-to-go and the baseline
+
+REINFORCE works, but the bare estimator has more variance than it needs to. Two cheap fixes.
+
+**Rewards-to-go (causality).** The action taken at time t cannot affect rewards received before time t. So instead of multiplying every log-gradient by the full trajectory return R(tau), multiply each by the **return from t onward**:
+
+```
+g  ≈  Σ over t of  G_t · ∇_θ log π_θ(a_t | s_t)    where  G_t = Σ over k ≥ t of γ^(k-t) · r_k
+```
+
+This is still unbiased (the dropped pre-t rewards have zero conditional gradient) and cuts variance because each gradient term is weighted by fewer random rewards.
+
+**Baseline subtraction.** For any function b(s) of the **state** (not the action being taken), the estimator with a baseline:
+
+```
+g  ≈  Σ over t of  ( G_t  -  b(s_t) ) · ∇_θ log π_θ(a_t | s_t)
+```
+
+is still unbiased. The reason: at any state, the expectation of nabla-theta log the policy parameterized by theta(a|s) under the action distribution is zero (the gradient of a normalized probability distribution sums to zero), so E[ b(s) · nabla-theta log the policy parameterized by theta(a|s) ] = b(s) · 0 = 0, and the subtraction does not change E[g]. It does, in general, reduce variance: pick b(s) close to E[G_t | s_t = s] = V^pi(s) and you are subtracting the predictable part of the return, leaving the noisier "how much better than expected was this action" signal.
+
+Setting b(s) = V^pi(s) gives the advantage from lesson 3:
+
+```
+G_t - V^π(s_t)  ≈  A^π(s_t, a_t)
+```
+
+so the variance-reduced policy gradient is
+
+```
+g  ≈  Σ over t of  A^π(s_t, a_t) · ∇_θ log π_θ(a_t | s_t)
+```
+
+This is the form the rest of the track will use. It is also the bridge to the next lesson: **actor-critic** methods learn a value function V_phi to use as the baseline, giving a learned, low-variance advantage estimate.
+
+## Worked example: a sigmoid bandit
+
+Make the algorithm concrete on the smallest non-trivial problem. A **bandit** has no state (or equivalently, one state) and two actions. Reward: action 1 always gives +1, action 2 always gives 0. The policy is a sigmoid:
+
+```
+π_θ(a = 1)  =  σ(θ)  =  1 / (1 + e^(-θ))
+π_θ(a = 2)  =  1 - σ(θ)
+```
+
+So theta is a single scalar, and the only thing the agent can do is shift the action probability. The log-gradient of choosing action 1 works out to:
+
+```
+∇_θ log σ(θ)  =  σ'(θ) / σ(θ)  =  σ(θ)(1 - σ(θ)) / σ(θ)  =  1 - σ(θ)
+```
+
+and similarly nabla-theta log(1 - sigma(theta)) = -sigma(theta). With reward R = 1 for action 1 and R = 0 for action 2, the REINFORCE single-sample update is:
+
+```
+θ  ←  θ + α · R · ∇_θ log π_θ(a)
+```
+
+**Step 0.** Start at theta_0 = 0. Then pi(a=1) = sigma(0) = 0.5, equiprobable.
+
+**Step 1.** Sample. Suppose the agent samples action a = 1 (reward 1). Gradient = 1 - sigma(0) = 1 - 0.5 = 0.5. With learning rate alpha = 1:
+
+```
+θ_1  =  0 + 1 · 1 · 0.5  =  0.5
+π(a=1) at θ_1  =  σ(0.5) = 1 / (1 + e^(-0.5)) = 1 / (1 + 0.6065) ≈ 1 / 1.6065 ≈ 0.6225
+```
+
+The probability of the rewarding action just rose from 0.500 to 0.622.
+
+**Step 2.** Sample again, suppose action a = 1 again (reward 1). Gradient = 1 - 0.6225 = 0.3775. Update:
+
+```
+θ_2  =  0.5 + 1 · 1 · 0.3775  =  0.8775
+π(a=1) at θ_2  =  σ(0.8775) ≈ 1 / (1 + e^(-0.8775)) ≈ 1 / 1.4158 ≈ 0.7064
+```
+
+Probability climbs from 0.622 to 0.706. Each rewarding sample shifts the policy toward the rewarding action, by an amount proportional to how much room is left to move (the 1 - sigma(theta) factor goes to zero as sigma approaches 1, so the algorithm saturates rather than overshooting).
+
+## Dual-path check: analytic expectation versus the sample
+
+Per the dispatch table, an estimator is supposed to recover an analytic expectation. Verify it on the bandit. The expectation of REINFORCE's single-sample gradient g = R · nabla-theta log the policy parameterized by theta(a) under the policy is:
+
+```
+E[g]  =  π(a=1) · 1 · (1 - σ(θ))  +  π(a=2) · 0 · (-σ(θ))
+      =  σ(θ) · (1 - σ(θ))  +  0
+      =  σ(θ) · (1 - σ(θ))
+```
+
+At theta = 0: E[g] = 0.5 · 0.5 = 0.25. With learning rate 1, the **expected** update at theta = 0 is 0.25. But individual samples give either 0.5 (when action 1 is drawn) or 0 (when action 2 is drawn). The variance of g at theta = 0 is
+
+```
+Var(g)  =  E[g²] - (E[g])²  =  ( 0.5 · 0.5²  +  0.5 · 0² )  -  0.25²  =  0.125 - 0.0625  =  0.0625
+```
+
+so the standard deviation is √0.0625 = 0.25, **equal to the expectation itself**. A single sample is a 1-sigma guess at the true gradient; even on this trivial problem, the variance is large relative to the signal. The mean of N samples shrinks the standard deviation by 1/√N, but with sparse rewards and long episodes the practical noise is far worse than this two-action bandit suggests. Variance is the central problem with REINFORCE in practice, and the rest of this section of the track is about reducing it.
+
+## Why REINFORCE has high variance
+
+Three reasons that compound:
+
+- **The estimator depends on the full trajectory.** R(tau) is a sum of many random rewards along a stochastic path. Two trajectories from the same the policy parameterized by theta will have very different R(tau), and the gradient estimator inherits all that variability.
+- **The action sampling at every step is also random.** Each nabla-theta log the policy parameterized by theta(a_t | s_t) is itself a random variable; multiplying by a noisy return amplifies the noise.
+- **Sparse rewards make it worse.** When R = 0 for most actions and only occasional ones produce reward, the gradient is mostly zero (you learn nothing from no-reward steps). Bare REINFORCE on a hard exploration problem can take a very long time to find the first reward and longer still to lock onto it.
+
+Rewards-to-go reduces the first source. Baselines (especially the advantage A^pi) reduces all three. The next lesson, on actor-critic, learns the baseline V_phi and uses it to compute a lower-variance advantage estimate at every step, which is exactly the dominant family of deep-RL algorithms used in practice today (the policy-gradient half of PPO, A2C/A3C, and IMPALA). SAC sits adjacent but uses a reparameterization-gradient actor update rather than the score-function REINFORCE lineage; covered in L12.
+
+## Why this matters when you use AI
+
+REINFORCE is the algorithmic spine of the **RLHF** pipeline (lesson 13). The reward is the score of a learned reward model; the policy is the language model itself; the policy gradient (in practice a **PPO**, lesson 8, refinement of REINFORCE) updates the LM's weights to increase the probability of high-reward responses. When a paper writes "RLHF training updates the policy with PPO," it is writing this lesson's estimator with one variance-reduction refinement (clipped surrogate objective) layered on. Knowing what is underneath turns the acronym into a recognizable algorithm. The same applies to robot policies trained with PPO, the agent training step in RL-for-code-generation systems, and anywhere a policy is being updated by sampling trajectories from itself. The log-derivative trick is the single calculus identity behind it all.
+
+## Common pitfalls
+
+**Treating nabla-theta J as something you can compute exactly.** It is an expectation over trajectories of the underlying (often unknown) environment dynamics. You estimate it by sampling. REINFORCE's g is an unbiased estimator, not the true gradient.
+
+**Forgetting the reward factor.** The estimator is R(tau) · Sum nabla-theta log the policy parameterized by theta(a_t | s_t), not just Sum nabla-theta log the policy parameterized by theta(a_t | s_t). Without the reward, you would be moving toward any sampled trajectory regardless of how good it was, which is just behavioral cloning of the policy's current samples.
+
+**Thinking the baseline biases the estimator.** It does not, as long as b(s_t) does not depend on the action being taken. The proof is E[b(s) · nabla-theta log the policy parameterized by theta(a|s)] = b(s) · 0 = 0. A learned V_phi(s) is fine; an A_phi(s, a) used as a baseline is not (it would bias the gradient).
+
+**Setting the learning rate too aggressively.** Each REINFORCE update changes the policy, which changes the distribution of trajectories, which changes the next gradient estimate. Large steps push the policy off the distribution where the gradient was sampled, breaking the on-policy assumption. Trust-region methods (TRPO, PPO in lesson 8) exist to bound this drift.
+
+## What you should remember
+
+- **REINFORCE follows the policy gradient nabla-theta J(theta) = E_tau [R(tau) · Sum_t nabla-theta log the policy parameterized by theta(a_t | s_t)]**, derived in one line by the log-derivative trick. The dynamics P drop out because they do not depend on theta, which is why the algorithm is **model-free**.
+- **The five-line algorithm:** sample N trajectories, compute g = (1/N) Sum R(tau_i) · Sum_t nabla-theta log the policy parameterized by theta(a_(i,t) | s_(i,t)), update theta ← theta + alpha · g. Two cheap refinements: **rewards-to-go** (use G_t instead of R(tau) per causality) and **baseline subtraction** (use G_t - b(s_t), unbiased and variance-reducing; with b = V^pi, the bracket is the advantage A^pi(s, a) from lesson 3).
+- **REINFORCE works, but with high variance.** On a two-action bandit at theta = 0, the single-sample gradient has expectation sigma(theta)(1-sigma(theta)) = 0.25 and standard deviation also 0.25, equal to the signal. Long episodes and sparse rewards make this dramatically worse. The next lesson, **actor-critic**, replaces the bare G_t with a learned advantage estimate, giving the lower-variance estimator that is the workhorse of modern deep-RL training.
+- **REINFORCE is the spine of RLHF (lesson 13).** Modern post-training of language models uses PPO (lesson 8), which is REINFORCE plus a clipped trust-region term to keep updates safe. Knowing the bare estimator makes the practical algorithm legible rather than an opaque acronym.
+
+The next lesson takes the obvious variance-reduction step: learn the baseline. An **actor-critic** algorithm trains a value-function estimate V_phi(s) alongside the policy the policy parameterized by theta and uses it to compute the advantage at every step, replacing REINFORCE's high-variance Monte Carlo returns with a lower-variance bootstrapped target. Same gradient direction, less noise, and a much more practical training loop.

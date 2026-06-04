@@ -1,0 +1,23 @@
+---
+title: "Summary: Imitation learning and behavioral cloning"
+description: The 5-minute scan version. The BC algorithm, why it appeals, why distribution shift breaks it (O(εT²) vs O(εT)), DAgger as the fix, and where BC works anyway.
+artifact: summary
+sidebar:
+  order: 4
+  label: Summary
+---
+
+The simplest approach to producing a policy is to ignore the reward entirely. Collect a dataset of (state, expert action) pairs from demonstrations, and train a network by supervised learning to predict the expert's action given the state. That is **behavioral cloning**. It is appealing because it turns reinforcement learning into supervised learning; it breaks because small errors compound over long trajectories, and the way it breaks is the reason genuine RL exists. This is the scan-it-in-five-minutes version.
+
+## Core ideas
+
+- **The BC algorithm.** `D = { (s_t, a_t*) }` of (state, expert action) pairs. Train `π_θ(s)` by minimizing a supervised loss: `θ* = argmin_θ Σ L(π_θ(s), a*)`. No reward, no environment interaction, no exploration during training.
+- **Why it appeals.** RL becomes supervised learning, so all the supervised tooling (batched training, mature optimizers, scaling laws) carries over. No environment interaction means no risk during training, useful when acting is expensive (robotics) or unsafe (driving). It often appears to work for the first few steps.
+- **Why it fails: distribution shift.** Training data comes from the expert's state distribution `p_expert(s)`. The policy makes small errors, putting it in states the expert never visited, where it was never trained, so it makes bigger errors and drifts further off-distribution. The test distribution `p_policy(s)` diverges from training, and the gap **grows** with episode length.
+- **The bound: `O(εT²)` vs `O(εT)`.** With per-step error rate `ε` on the expert's distribution, BC's expected mistakes over a `T`-step rollout scale as `O(εT²)` (quadratic in horizon, the compounding-error phenomenon). An on-policy alternative scales as `O(εT)` (linear). At `ε = 0.01`, `T = 200`: BC bound is 400 mistakes, DAgger bound is 2.
+- **The fix: DAgger.** Roll out the current policy, ask the expert what they would do at each visited state, add those (state, expert action) pairs to the dataset, retrain, loop. The dataset eventually contains states from `p_policy(s)`, so the policy learns to recover from its own mistakes. Cost: the expert must be queryable on demand.
+- **Where BC works anyway.** Short horizons (`T` small enough that `εT² ≈ εT`); tasks with self-correcting noise injected during demonstration (the NVIDIA PilotNet view-perturbation trick); abundant data with a genuinely tiny `ε` on an error-tolerant task. LLM supervised fine-tuning on single-completion responses is effectively `T = 1`, where BC and DAgger coincide.
+
+## What changes for you
+
+You now have the precise reason RL exists as a separate field. If you could get away with copying an expert, you would; BC is what "copying an expert" looks like at scale, and its `O(εT²)` failure mode is what limits it. Every algorithm in the rest of this track is, in some sense, a response to this. The same lesson explains why **supervised fine-tuning** of an LLM works well for short responses and breaks down for long-horizon agentic behavior (multi-step coding agents, multi-turn tool use): SFT is BC at scale, and the `T²` problem reappears unchanged at the LLM scale. **RLHF** (lesson 13) is, in part, the field's answer to that: get training signal from the model's own state distribution, not just the labeler's. The next lesson goes back to first principles to give the formal language, **Markov decision processes**, returns, and value functions, that lets us state precisely what an RL agent is trying to do, and lets the rest of the track's algorithms be derived rather than asserted.

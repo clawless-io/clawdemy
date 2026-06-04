@@ -47,6 +47,7 @@ export const collections = {
 						'classical-machine-learning', // Track 10: StatQuest (Josh Starmer) + Microsoft ML-For-Beginners
 						'multimodal-ai', // Track 24: Stanford CS25 "Transformers United" V4/V5/V6
 						'generative-models-and-diffusion', // Track 19: Stanford CS236 + Berkeley CS294-158
+						'deep-reinforcement-learning', // Track 18: Berkeley CS285 (Sergey Levine)
 					])
 					.optional(),
 				course: z.string().optional(),
@@ -143,6 +144,10 @@ export const collections = {
 						'generative-foundations',
 						'latent-and-adversarial',
 						'energy-score-diffusion',
+						// Track 18 (Deep RL)
+						'rl-foundations',
+						'core-deep-rl-algorithms',
+						'rl-frontiers',
 					])
 					.optional(),
 				phase_order: z.number().int().positive().optional(),

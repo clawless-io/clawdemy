@@ -1,0 +1,257 @@
+---
+title: "Lesson: Model-based RL, learning the dynamics (least-squares fit, compounding error)"
+description: "The P-branch of the dispatch table: estimate P(s'|s,a) directly, then use the model for planning or imagined rollouts. Massive sample-efficiency gains over model-free; compounding-error is the failure mode that defines the field."
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+## What you'll be able to do after this lesson
+
+The dispatch table from Lesson 3 named five things any RL algorithm can estimate: a policy pi, a state value V, an action value Q, an advantage A, or a model of the dynamics P. Phase 1 covered the pi branch (REINFORCE, actor-critic). Phase 2 so far covered the Q branch (DQN, Lesson 7) and refined pi (PPO, Lesson 8). This lesson opens the **P branch**: learn the dynamics directly.
+
+By the end of this lesson you can:
+
+- Explain why model-based RL achieves 10× to 100× better sample efficiency than model-free on continuous control benchmarks, and why this matters more for robotics than for Atari.
+- Fit a **linear-Gaussian dynamics model** P(s' | s, a) = N(As + Ba + c, Sum) to a small dataset by ordinary least squares, and verify that the fit recovers the true parameters exactly when the data is noise-free.
+- Compute the **one-step prediction error** for a small model bias and trace how that error **compounds** over a multi-step rollout. Quantify why "small 1-step error" does not mean "small N-step error."
+- Pick a model class (linear, deterministic neural net, probabilistic ensemble) appropriate to the problem.
+- Decide when model-based RL is the right family (samples are precious, the dynamics are learnable, you have time to plan).
+
+## Why model-based RL exists
+
+Model-free methods like DQN and PPO treat the environment as a black box. Every gradient step burns environment interactions: 50M frames for the Atari DQN, hundreds of millions for production PPO on robotics. When samples are cheap (an Atari simulator runs at 60 frames per second on commodity hardware), this is fine.
+
+When samples are expensive, it is catastrophic. A real robot collecting a hundred thousand contact-rich manipulation trials takes weeks. A self-driving car cannot crash a hundred thousand times to learn lane-keeping. A surgical robot has no exploration budget at all. For these settings, **sample efficiency** is the binding constraint.
+
+The model-based pitch: learn a dynamics model P̂(s' | s, a) and a reward model R̂(s, a) from a small number of real-world transitions. Then use the model in two ways:
+
+- **Plan with the model.** For each control decision, run the model forward over candidate action sequences, score them by predicted reward, and execute the best one. Model Predictive Control (MPC) style. Re-plan every step.
+- **Imagine rollouts to train a policy.** Use the model to generate cheap "imagined" trajectories. Train a policy on the imagined data the same way you would train it on real data. The Dyna family (Sutton, 1991) is the canonical formulation.
+
+Either way, the real-environment sample cost has been **transferred** to the model. If the model is cheaper to query than the real environment, you save samples.
+
+The headline number from the field: on continuous-control benchmarks where SAC (a strong model-free actor-critic algorithm) needs 1M environment steps to reach a target performance, PETS (a model-based method based on probabilistic ensembles) reaches the same performance in about 50K to 100K steps. That is a 10× to 20× sample-efficiency win (Chua et al., 2018). For real-robot work, this margin is the difference between "tractable" and "intractable."
+
+The catch, foreshadowed: this savings is only real if your model is good. The next sections work out the math of how models can be good, and where they fail.
+
+## The model-learning problem
+
+Suppose you have a dataset D = \{(s_i, a_i, s_i')\} of N transitions collected by some exploration policy. You want to estimate P(s' | s, a). This is supervised learning: the inputs are (s, a) pairs, the targets are s'.
+
+The choice of model class depends on the problem.
+
+### Linear-Gaussian dynamics
+
+The simplest non-trivial model:
+
+```
+P(s' | s, a) = N( A s + B a + c, Σ )
+```
+
+A is a dim_s × dim_s matrix, B is dim_s × dim_a, c is a bias vector, Sum is a covariance matrix (often diagonal, sometimes tied to the dataset variance).
+
+This is exact for genuinely linear systems (linearized quadrotors near hover, LQR control problems) and surprisingly good as a **local** approximation for nonlinear systems: many continuous-control problems are well-approximated by linearizations within a single planning horizon. The classic iterative LQR (iLQR) algorithm exploits this: linearize, plan, relinearize at the new state.
+
+### Deterministic neural network
+
+```
+ŝ' = f_θ(s, a)
+```
+
+Predict the next state directly. Train with mean squared error on a dataset of transitions. Works for deterministic dynamics or where noise is small. Used widely as a building block in algorithms like MBPO.
+
+### Probabilistic neural network
+
+```
+P̂(s' | s, a) = N(μ_θ(s, a), Σ_θ(s, a))
+```
+
+The network outputs both a mean and a covariance. Train with negative log likelihood. Captures aleatoric (irreducible) noise. PETS uses this with an ensemble of K = 5 networks and propagates uncertainty through multi-step rollouts.
+
+### Ensemble of probabilistic networks (PETS)
+
+Train K independent probabilistic networks. The variance across the ensemble captures **epistemic** uncertainty (how much you do not know because the data is sparse), separate from the per-network Sum_theta capturing aleatoric uncertainty (noise that even infinite data would not remove). Use the epistemic uncertainty to reject high-risk plans during MPC.
+
+For this lesson, the linear-Gaussian case is the worked example because the math is closed-form. The same fit logic applies to the neural network cases with stochastic gradient descent instead of matrix inversion.
+
+## Worked example: linear-Gaussian fit by least squares
+
+Suppose the true dynamics is one-dimensional in state and one-dimensional in action:
+
+```
+s' = A_true · s + B_true · a + ε,   ε ~ N(0, σ²)
+```
+
+with A_true = 0.5, B_true = 1.0. We collect five transitions. To make the arithmetic clean, take sigma = 0 (no noise). The samples are:
+
+| i | s_i | a_i | s_i' (= 0.5·s + 1·a) |
+|---|-------|-------|------------------------|
+| 1 | 0 | 1 | 1.000 |
+| 2 | 1 | 0 | 0.500 |
+| 3 | 0.5 | -1 | -0.750 |
+| 4 | -1 | 1 | 0.500 |
+| 5 | 2 | -0.5 | 0.500 |
+
+The least-squares estimator finds [Â, B̂] minimizing Sum_i (s_i' - Â·s_i - B̂·a_i)². Setting derivatives to zero gives the normal equations:
+
+```
+[Â, B̂]^T = (X^T X)^{-1} X^T Y
+```
+
+where X is the N × 2 matrix of (s_i, a_i) rows and Y is the N × 1 vector of s_i'.
+
+### Compute X^T X
+
+The (1, 1) entry is Sum_i s_i² = 0 + 1 + 0.25 + 1 + 4 = 6.25.
+
+The (2, 2) entry is Sum_i a_i² = 1 + 0 + 1 + 1 + 0.25 = 3.25.
+
+The off-diagonal Sum_i s_i a_i = (0)(1) + (1)(0) + (0.5)(-1) + (-1)(1) + (2)(-0.5) = -2.5.
+
+So X^T X = [[6.25, -2.5], [-2.5, 3.25]]. The determinant is 6.25 · 3.25 - (-2.5)² = 20.3125 - 6.25 = 14.0625.
+
+### Invert X^T X
+
+For a 2 × 2 matrix [[a, b], [c, d]], the inverse is (1/det) · [[d, -b], [-c, a]]:
+
+```
+(X^T X)^{-1} = (1/14.0625) · [[3.25, 2.5], [2.5, 6.25]]
+```
+
+### Compute X^T Y
+
+The first entry is Sum_i s_i · s_i':
+
+```
+0·1 + 1·0.5 + 0.5·(-0.75) + (-1)·0.5 + 2·0.5
+= 0 + 0.5 - 0.375 - 0.5 + 1.0 = 0.625
+```
+
+The second entry is Sum_i a_i · s_i':
+
+```
+1·1 + 0·0.5 + (-1)·(-0.75) + 1·0.5 + (-0.5)·0.5
+= 1 + 0 + 0.75 + 0.5 - 0.25 = 2.0
+```
+
+So X^T Y = [0.625, 2.0].
+
+### Solve
+
+```
+[Â, B̂] = (1/14.0625) · [[3.25, 2.5], [2.5, 6.25]] · [0.625, 2.0]
+       = (1/14.0625) · [3.25 · 0.625 + 2.5 · 2.0,  2.5 · 0.625 + 6.25 · 2.0]
+       = (1/14.0625) · [2.03125 + 5.0,  1.5625 + 12.5]
+       = (1/14.0625) · [7.03125, 14.0625]
+       = [0.5, 1.0]
+```
+
+The fit recovers the true parameters **exactly**. With zero noise and full-rank features, least squares is an unbiased estimator that achieves zero error when given enough samples. This is the dual-path verification: the fit returns 0.5 and 1.0, which were the true A_true and B_true we started with.
+
+With noise (any sigma > 0), the fit becomes noisy too. The estimator is still unbiased (E[Â] = A_true), but the variance scales as sigma² · (X^T X)^(-1). More data shrinks the variance; better-conditioned designs ((X^T X) further from singular) shrink it faster.
+
+This is the easy part. The hard part is what happens when the fit is **slightly wrong**.
+
+## Compounding error: why "small 1-step error" is not enough
+
+A useful model has to make accurate predictions over a **multi-step horizon**, not just one step. Planning runs forward 5, 10, 50 steps. Imagined rollouts can be longer still. Errors compound.
+
+Consider a slightly expansive 1D system with A_true = 1.1, B_true = 1.0. Suppose our fit returned Â = 1.05 (a 5% underestimate of A) and B̂ = 1.0 (correct).
+
+Roll forward from s_0 = 1 with action a = 0 for five steps. True dynamics: s_(t+1) = 1.1 · s_t. Model dynamics: ŝ_(t+1) = 1.05 · ŝ_t. Both start from s_0 = 1.
+
+| t | True s_t | Model ŝ_t | Absolute error |
+|---|-------------|--------------|----------------|
+| 0 | 1.0000 | 1.0000 | 0.0000 |
+| 1 | 1.1000 | 1.0500 | 0.0500 |
+| 2 | 1.2100 | 1.1025 | 0.1075 |
+| 3 | 1.3310 | 1.1576 | 0.1734 |
+| 4 | 1.4641 | 1.2155 | 0.2486 |
+| 5 | 1.6105 | 1.2763 | 0.3342 |
+
+Five percent one-step bias → about twenty-one percent relative error after five steps (computed as 1 - (1.05/1.1)^5 ≈ 0.208). The error grows geometrically; each step the model accumulates fresh error on top of a starting point that is already biased. By step ten the relative error grows to 1 - (1.05/1.1)^10 ≈ 37% of the true state.
+
+The lesson: a model with one-step error of five percent is **useless for planning over more than a few steps** in expansive dynamics. Even for contractive dynamics (|A| \< 1), errors compound additively from the noise and bias terms, just less catastrophically.
+
+There are a handful of standard mitigations:
+
+- **Short rollout horizons.** Limit the model to N-step predictions where N is small enough that compounding error stays bounded. MBPO (Janner et al., 2019) uses model rollouts of 1 to 5 steps, then trains an SAC policy on the resulting imagined data.
+- **Ensemble disagreement as uncertainty.** When the K-network ensemble disagrees about s_(t+1), you are in a region the model does not know. Reject those rollouts (PETS). The variance across the ensemble is a usable epistemic uncertainty estimate.
+- **Probabilistic rollouts.** Instead of a single deterministic forward pass, sample from P̂(s' | s, a) at each step and propagate the distribution. The variance grows visibly; you can see when the model becomes unreliable.
+- **Re-plan often.** MPC re-plans every control step using the latest real state. The model only needs to be accurate for the H-step horizon used in planning, not for the full episode.
+
+## The Dyna architecture
+
+Sutton (1991) proposed the Dyna architecture: integrate real and imagined experience in a single learner. Pseudocode:
+
+```
+Initialize: policy π_θ, model P̂_φ, dataset D (empty)
+For each step:
+  1. Act in the real environment using π_θ. Observe (s, a, r, s'). Add to D.
+  2. Update P̂_φ on D (gradient step on prediction loss).
+  3. For K imagined steps:
+     Sample (s, a) from D (or roll out under π_θ via the model).
+     Use P̂_φ to predict s'_imagined, r̂_imagined.
+     Update π_θ on the imagined transition (any model-free RL update).
+  4. Continue.
+```
+
+The key parameter is K: how many imagined updates per real update. K = 0 recovers model-free RL. K = ∞ recovers pure planning (use only the model, never the real environment). Real systems pick a K that balances real-data fidelity against imagined-data abundance.
+
+Modern Dyna-style algorithms (MBPO, PETS, Dreamer) are sophisticated descendants of this skeleton. The common thread: a learned model amplifies a small amount of real data into a large amount of training signal.
+
+## When to use model-based RL
+
+The dispatch table from Lesson 3 named the algorithmic families. The choice between model-based (P branch) and model-free (pi or Q branches) is a separate decision:
+
+| Use model-based when | Use model-free when |
+|----------------------|---------------------|
+| Samples are expensive (real robots, surgical training, simulation is slow) | Samples are cheap (Atari, MuJoCo at scale) |
+| Dynamics are smooth and learnable (continuous control, physics-based) | Dynamics are hard to model (Atari pixel transitions, language) |
+| Planning horizons are short (1 to 10 steps) | You want asymptotic performance, time-budget unlimited |
+| You can re-plan frequently (MPC-style control loop) | One-shot policy execution (game tree search at decision time is expensive) |
+
+Notice that LLM-based agents almost never use model-based RL: the dynamics are the world (impossible to model), the action space is the vocabulary (huge), and samples are relatively cheap (synthetic rollouts via prompt engineering, RLHF preference data). For language, model-free PPO wins.
+
+## Common pitfalls
+
+- **Believing the fit when the validation error is high.** A linear-Gaussian model fits anything (it never refuses), but the fit may be poor. Always check held-out one-step prediction error before using the model for rollouts.
+- **Ignoring the data distribution.** A model fit on slow trajectories will not extrapolate to fast ones, no matter how flexible the function class. Cover the (s, a) regions the policy will visit.
+- **Running rollouts past where the model is reliable.** The compounding-error argument is not theoretical; it bites every model-based RL implementation. Cap rollouts at the horizon where validation error stays bounded.
+- **Conflating epistemic and aleatoric uncertainty.** A probabilistic neural net captures aleatoric noise (the dynamics genuinely include randomness). An ensemble captures epistemic uncertainty (you do not know because the data is sparse). They are different and call for different mitigations.
+- **Using a single deterministic model for stochastic dynamics.** Real-world contact dynamics are stochastic; deterministic predictions average them out and lose the variance. Use a probabilistic model whenever the variance matters for planning.
+
+## Why this matters when you use AI
+
+Model-based RL is the engine behind several recent breakthroughs.
+
+- **World Models** (Ha & Schmidhuber, 2018) trained policies entirely in a learned dream-world, transferring back to the real environment. Demonstrated that imagined data alone could solve dynamics-rich tasks.
+- **Dreamer** (Hafner et al., 2019, 2021, 2023): the canonical "learn a world model, train the policy inside the model" recipe at scale. DreamerV3 achieves strong performance across 150+ tasks with the same hyperparameters.
+- **MuZero** (Schrittwieser et al., 2020): combines a learned model with Monte Carlo Tree Search. Plays Go, chess, shogi, and Atari without being told the rules of any of them; the model is learned end-to-end from gameplay.
+- **Diffusion policies** in robotics (Chi et al., 2023; many follow-ups in 2024-2025) use learned dynamics models implicitly: the diffusion noise schedule is a generative model of trajectories conditioned on goals.
+
+For language models, the situation is different. The "dynamics" of next-token generation is the language model itself. Some 2025 work on long-horizon agentic systems uses learned models of tool use or of user behavior, but the action-space and stochasticity tradeoffs typically favor model-free RL (PPO) for the policy itself, with the world-modeling effort going into better simulators or environments.
+
+The L3 dispatch table predicted this: pick your algorithmic family by what is easiest to estimate and most useful for the task. For language, the policy. For robotics, increasingly, the model.
+
+## What you should remember from this lesson
+
+- **The P-branch of the dispatch table** is model-based RL: learn P(s' | s, a), then use it for planning or for generating imagined rollouts (Dyna).
+- **Sample efficiency** is the main reason: 10× to 100× fewer real-world interactions for the same asymptotic performance. Matters most when samples are expensive (real robots, scarce data).
+- **Least-squares fit of a linear-Gaussian dynamics model** is closed-form and tractable. Zero-noise data recovers the true parameters exactly. The lesson worked through this on A_true = 0.5, B_true = 1.0 with five samples and got [Â, B̂] = [0.5, 1.0] to the digit.
+- **Compounding error** is the dominant failure mode: 5% one-step bias becomes 21% relative error in five steps and 37% in ten under expansive dynamics. Mitigate via short rollout horizons, ensemble uncertainty, and frequent re-planning.
+- **Pick model-based** when samples are expensive and the dynamics are learnable; **pick model-free** when samples are cheap and you want asymptotic performance.
+
+Next lesson: **planning with a learned model**. Lesson 9 covered learning the dynamics; Lesson 10 covers using it. Topics: MPC, the cross-entropy method (CEM) for action-sequence optimization, learned-model variants of Monte Carlo Tree Search (MuZero), and the contemporary Dreamer recipe.
+
+## References
+
+- Chua, K., Calandra, R., McAllister, R., & Levine, S. (2018). Deep Reinforcement Learning in a Handful of Trials using Probabilistic Dynamics Models. *NeurIPS 2018*. https://arxiv.org/abs/1805.12114 The PETS paper. The headline 10× to 100× sample-efficiency claim. Probabilistic ensembles with trajectory sampling.
+- Janner, M., Fu, J., Zhang, M., & Levine, S. (2019). When to Trust Your Model: Model-Based Policy Optimization. *NeurIPS 2019*. https://arxiv.org/abs/1906.08253 MBPO. Short model rollouts (1 to 5 steps) combined with model-free SAC; the practical recipe.
+- Sutton, R. S. (1991). Dyna, an integrated architecture for learning, planning, and reacting. *ACM SIGART Bulletin*, 2(4), 160-163. https://dl.acm.org/doi/10.1145/122344.122377 The original Dyna paper. Sutton & Barto Chapter 8 covers the modern treatment.
+- Ha, D., & Schmidhuber, J. (2018). World Models. *NeurIPS 2018*. https://arxiv.org/abs/1803.10122 Training policies entirely in a learned dream-world.
+- Hafner, D., Pasukonis, J., Ba, J., & Lillicrap, T. (2023). Mastering Diverse Domains through World Models. *arXiv:2301.04104*. https://arxiv.org/abs/2301.04104 DreamerV3.
+- Schrittwieser, J., Antonoglou, I., Hubert, T., et al. (2020). Mastering Atari, Go, chess and shogi by planning with a learned model. *Nature*, 588, 604-609. https://www.nature.com/articles/s41586-020-03051-4 MuZero.
+- Levine, S. (2023). CS285 lecture on Model-Based Reinforcement Learning. UC Berkeley. https://rail.eecs.berkeley.edu/deeprlcourse/

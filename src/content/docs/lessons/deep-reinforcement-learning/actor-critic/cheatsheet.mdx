@@ -1,0 +1,88 @@
+---
+title: "Cheatsheet: Actor-critic methods"
+description: One-page reference. The two networks, advantage estimators (MC, TD, n-step, GAE), the training loop, the quantified L4-bandit variance reduction (0.0625 → 0), the bias-variance tradeoff, and what valid baselines look like.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## The two networks
+
+| Network | Symbol | Role |
+| --- | --- | --- |
+| Actor | `π_θ(a | s)` | the policy (as in REINFORCE) |
+| Critic | `V_φ(s)` or `Q_φ(s, a)` | learned value-function estimate |
+
+Trained **jointly**: actor uses critic for lower-variance gradient signal; critic regresses to observed returns supplied by the actor.
+
+## Advantage estimators
+
+| Variant | Advantage `A(s_t, a_t)` | Bias | Variance |
+| --- | --- | --- | --- |
+| MC actor-critic | `G_t - V_φ(s_t)` | **none** (unbiased for any state-only V_φ; baseline identity) | high |
+| TD actor-critic (TD(0)) | `r_t + γ V_φ(s_(t+1)) - V_φ(s_t)` | high (V_φ in the bootstrapped target on both sides) | low |
+| n-step | `Σ_(k=0)^(n-1) γ^k r_(t+k) + γ^n V_φ(s_(t+n)) - V_φ(s_t)` | interpolates (bias enters via the bootstrapped V_φ(s_(t+n)) term) | interpolates |
+| **GAE(λ)** | geometric `λ`-weighted sum of n-step | `λ = 0`: TD (most bias); `λ = 1`: MC (no bias) | tunable |
+
+**PPO default:** GAE with `λ ≈ 0.95` (closer to MC; small bootstrap, large baseline).
+
+## The training loop (MC variant)
+
+```
+for each iteration:
+    collect rollouts by running π_θ
+    compute G_t for every t
+    critic update:  φ ← φ - β · ∇_φ (G_t - V_φ(s_t))²              (regression)
+    actor update:   θ ← θ + α · (G_t - V_φ(s_t)) · ∇_θ log π_θ(a_t|s_t)
+```
+
+For TD: replace `G_t` with `r_t + γ V_φ(s_(t+1))` in both lines.
+
+## Quantified variance reduction (L4 sigmoid bandit, θ=0)
+
+```
+Setup: R(a=1) = 1, R(a=2) = 0, π_θ(a=1) = σ(θ), σ(0) = 0.5
+Optimal baseline V* = E_π[R] = 0.5
+```
+
+| Estimator | a=1 sample g | a=2 sample g | E[g] | Var(g) | std(g) | SNR |
+| --- | --- | --- | --- | --- | --- | --- |
+| REINFORCE (no baseline) | `1·(1-0.5) = 0.5` | `0·(-0.5) = 0` | 0.25 | 0.0625 | 0.25 | **1.0** |
+| Actor-critic (`V*`) | `(1-0.5)·(1-0.5) = 0.25` | `(0-0.5)·(-0.5) = 0.25` | 0.25 | **0** | **0** | **∞** |
+
+The optimal baseline collapses variance to zero on deterministic-reward problems. Real `V_φ` is approximate, so `Var(g_AC) > 0` in practice, but typically much less than `Var(g_REINFORCE)`.
+
+## Valid baselines
+
+| Choice | Status |
+| --- | --- |
+| `V_φ(s)` (state only) | **valid**: `E_(a~π)[V_φ(s)·∇log π(a|s)] = V_φ(s)·0 = 0`, unbiased |
+| Any `b(s)` not depending on `a` | **valid**, same reason |
+| `Q_φ(s, a)` (depends on `a`) | **invalid as a baseline**: does not factor out; biases the gradient |
+| Constant `c` | valid but useless; does not reduce variance |
+
+## Bias-variance trade in one sentence
+
+MC: **unbiased** (for any state-only V_φ; the baseline identity holds regardless of critic error), high variance. TD: high bias, low variance. Bias enters when V_φ shows up in the **target** (bootstrap), not when it shows up as a baseline. **GAE(λ)**: tune the dial; `λ = 1` is unbiased MC, `λ = 0` is biased TD. PPO defaults to `λ ≈ 0.95` (moderate trade closer to MC). The right `λ` is the practical hinge the family lives on.
+
+## The actor-critic family
+
+| Algorithm | Critic | Notes |
+| --- | --- | --- |
+| **A2C / A3C** (Mnih et al. 2016) | `V_φ` | synchronous / asynchronous, the original deep-RL AC |
+| **PPO** (Schulman 2017) | `V_φ` + GAE | clipped trust-region update; RLHF backbone (L8 + L13) |
+| **SAC** (Haarnoja et al. 2018) | `Q_φ` (twin) | entropy-regularized, continuous control workhorse |
+| **DDPG / TD3** | `Q_φ` | deterministic policy, off-policy continuous control |
+
+## Pitfalls to dodge
+
+- **Forgetting the critic is learned.** `V_φ` has its own approximation error; early in training the advantage is biased.
+- **Using `Q_φ(s, a)` as a baseline.** Action-dependent → biases the gradient. `V_φ(s)` is the legit baseline; `Q_φ` can replace `G_t` in some variants.
+- **TD(0) too early.** Pure bootstrap with a wrong `V_φ` propagates error. Default to GAE with `λ ≈ 0.95`.
+- **Conflating actor and critic objectives.** Critic loss is MSE regression to target. Actor loss is policy gradient with advantage. Two networks, two losses, two gradient flows.
+
+## The one-line version
+
+Actor-critic trains a policy `π_θ` and a value-function critic `V_φ` jointly; the critic supplies a learned baseline (or bootstrapped target) for the policy gradient, trading a small bias for a large variance reduction (on the L4 bandit at θ=0: `Var` from 0.0625 to 0, SNR from 1 to ∞ with the optimal baseline).

@@ -1,0 +1,302 @@
+---
+title: "Lesson: RLHF deep-dive (the InstructGPT pipeline, why beta matters, the DPO variational shortcut)"
+description: "The production application of everything Phase 2 built. SFT → reward model → PPO with KL-to-pretrained, derived as the variational solution from L11/L12. Reward hacking is the dominant failure mode; the KL penalty is the structural defense."
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+## What you'll be able to do after this lesson
+
+Phase 1 named the failure modes. Phase 2 built the algorithmic zoo: DQN (off-policy + engineering), PPO (on-policy + clipping), model-based pair (learn + plan), variational inference + control-as-inference (the unification). Phase 3 takes those pieces to the frontier of how deep RL is actually deployed and what it cannot yet do. The first and most important frontier application is **RLHF**: reinforcement learning from human feedback, the standard recipe for aligning pretrained language models to human preferences. By 2024-2025, every commercial instruction-tuned model uses RLHF or a close variant.
+
+By the end of this lesson you can:
+
+- Walk the three-stage **InstructGPT pipeline** (Ouyang et al., 2022): supervised fine-tuning (SFT), reward modeling on preference pairs, and PPO with a KL penalty to the SFT model.
+- Write the **Bradley-Terry reward-modeling objective** for preference pairs.
+- Derive the **optimal RLHF policy** pi-star(y|x) ∝ pi_pretrained(y|x) · exp(R(x,y)/beta) from the variational framework you built in Lessons 11-12. The PPO + KL objective is the variational ELBO.
+- Compute the optimal RLHF policy by hand on a 2-response example with beta = 0.5. Verify limits: beta → 0 recovers the deterministic reward-maximizer; beta → ∞ recovers the pretrained model unchanged.
+- Name the operational instruments that detect a **reward-hacking** failure: reward-model test accuracy, measured KL-from-base, win-rate against base, harm-bench scores, sycophancy benchmarks.
+
+This lesson is a synthesis. You already have PPO (Lesson 8) and the variational framework (Lessons 11-12). RLHF wires them together and applies them to a specific production problem.
+
+## Recap: where we are in the Phase 1/2/3 narrative arc
+
+- **Phase 1** introduced the policy-gradient core (REINFORCE, actor-critic). On-policy fundamentals.
+- **Phase 2** built the algorithm zoo: off-policy engineering (DQN), on-policy stability (PPO), model-based RL, variational reformulation. Five families, one mathematical thread.
+- **Phase 3** (this Phase, opens here) covers the frontiers. RLHF is the opening application. Subsequent lessons cover offline RL (the problem and the algorithmic answers BCQ / CQL / IQL), exploration in hard environments, multi-task and meta-RL, and the field's open problems.
+
+L13's contribution: take the PPO from L8 plus the variational framework from L11-L12 and instantiate them for the language-model alignment problem. Everything in this lesson is a special case of machinery you have already built.
+
+## The RLHF problem
+
+Pretrained language models (GPT-style, Claude-base, Llama-base, etc.) are trained on internet text via next-token prediction. They are **completion models**: extend a partial sequence into a continuation that resembles training data. They are **not** aligned to a specific notion of "helpful" or "harmless" or "instruction-following" because the training objective never named those concepts.
+
+The alignment task: take a pretrained model and steer it toward outputs humans prefer, **without losing the language fluency the pretraining produced**. This is a fine-tuning problem with two constraints:
+
+1. **Match preferences**: outputs should score well under some preference signal (human raters, AI raters, or a learned reward model).
+2. **Stay near pretrained**: the model should not drift far from what the pretraining produced. Reasons: language fluency, factual knowledge, broad capability that preference data alone cannot specify.
+
+The L12 framing said: the variational solution to this constrained optimization is **soft Bellman with the pretrained model as the prior**. RLHF is the engineering practice that implements it.
+
+## The InstructGPT pipeline (the canonical recipe)
+
+Ouyang et al. (2022) introduced the three-stage pipeline used in essentially every commercial RLHF system since:
+
+### Stage 0: pretrained model pi_pretrained
+
+Standard next-token-prediction training on a large text corpus. Out of scope for this lesson; treat as the starting point.
+
+### Stage 1: Supervised Fine-Tuning (SFT)
+
+Train the pretrained model on a curated dataset of (prompt, ideal_response) pairs. Standard cross-entropy loss:
+
+```
+L_SFT(θ) = E_{(x, y*) ~ D_SFT} [ - log π_θ(y* | x) ]
+```
+
+The dataset D_SFT is human-written demonstrations, typically 10,000 to 100,000 examples. Result: pi_SFT, a model that follows the format of demonstrations and starts producing instruction-following outputs.
+
+SFT alone is insufficient: humans cannot write enough demonstrations to cover the long tail of inputs, and writing demonstrations is more expensive than ranking model outputs. The next stages address this.
+
+### Stage 2: Reward modeling on preference pairs
+
+Collect a dataset D_RM = \{(x, y_w, y_l)\} of preference pairs: for each prompt x, two model-generated responses y_w and y_l with a human judgment that y_w is preferred to y_l.
+
+Train a reward model R_phi(x, y), typically initialized from pi_SFT with a new linear head, using the **Bradley-Terry** preference model:
+
+```
+P(y_w preferred over y_l | x) = σ(R_φ(x, y_w) - R_φ(x, y_l))
+```
+
+(sigma is the logistic sigmoid.) The training loss is:
+
+```
+L_RM(φ) = - E_{(x, y_w, y_l) ~ D_RM} [ log σ(R_φ(x, y_w) - R_φ(x, y_l)) ]
+```
+
+This is a binary classification problem: predict the preferred response from the pair. The Bradley-Terry parameterization makes the reward model **well-defined up to an additive constant per prompt** (only differences matter), which is exactly what the downstream RL stage needs.
+
+Typical dataset sizes: 10,000 to 1,000,000 preference pairs. Each pair is cheap to collect compared to writing a demonstration; this is the scaling lever.
+
+### Stage 3: PPO with KL to the SFT model
+
+Now the RL stage. Treat pi_SFT as the prior. Use the reward model R_phi as the reward signal. Optimize the policy the policy parameterized by theta (initialized from pi_SFT):
+
+```
+J_RLHF(θ) = E_{x ~ D, y ~ π_θ(·|x)} [ R_φ(x, y) ] - β · KL(π_θ(·|x) || π_SFT(·|x))
+```
+
+The first term rewards high-reward responses. The second term **penalizes drift from the SFT prior**. The hyperparameter beta (typically 0.01 to 0.1) trades off these two pressures.
+
+The optimization uses **PPO** from Lesson 8 to handle the gradient stably:
+
+```
+L_RLHF(θ) = L^CLIP(θ) - β · KL(π_θ(·|x) || π_SFT(·|x))
+```
+
+L^CLIP is the clipped surrogate from L8. The KL term is computed in closed form (token-level KL between the policy parameterized by theta and pi_SFT, summed over the response).
+
+After several thousand PPO iterations, the policy the policy parameterized by theta produces outputs that score well under R_phi while staying near pi_SFT. This is the deployable instruction-tuned model.
+
+## The variational view: this is the soft Bellman backup
+
+The L11-L12 framework predicts the optimal policy for the RLHF objective:
+
+```
+π*(y | x) = (1/Z(x)) · π_SFT(y | x) · exp(R_φ(x, y) / β)
+```
+
+This is **exactly the soft Bellman posterior** from L12 with:
+
+- **Latent**: response y
+- **Prior**: pi_SFT(y | x)
+- **Likelihood**: exp(R_phi(x, y) / beta) (the soft-Boltzmann weighting)
+- **Temperature**: beta
+
+The partition function Z(x) = Sum_y pi_SFT(y | x) · exp(R_phi(x, y) / beta) is, up to scale, the sequence-level analog of V_soft(s) from L12: strictly, the sequence-level soft value is beta · log Z(x), so Z(x) = exp(V_soft(x) / beta).
+
+PPO is the practical optimizer for this variational target. The closed-form pi-star is intractable to compute directly (sum over all possible responses), so we run gradient descent on the surrogate L_RLHF(theta) instead.
+
+The variational lens says something useful about beta: it is the **information rate** at which the reward model drives the policy. Small beta = strong reward signal, policy drifts far from pi_SFT. Large beta = weak reward signal, policy stays close to pi_SFT. The optimal beta depends on how well-calibrated the reward model is (next section).
+
+## Worked example: 2-response RLHF on a single prompt
+
+Set up the smallest non-trivial case. Single prompt x. Two possible responses y_1, y_2.
+
+- pi_SFT(y_1 | x) = 0.6, pi_SFT(y_2 | x) = 0.4
+- R_phi(x, y_1) = 1.0, R_phi(x, y_2) = 0.0
+- beta = 0.5
+
+The reward model prefers y_1. The SFT model also prefers y_1 but less strongly. The RLHF policy should concentrate more mass on y_1.
+
+### Compute the un-normalized weights
+
+```
+π_SFT(y_1) · exp(R / β) = 0.6 · exp(1.0 / 0.5) = 0.6 · exp(2.0) = 0.6 · 7.389 = 4.434
+π_SFT(y_2) · exp(R / β) = 0.4 · exp(0.0 / 0.5) = 0.4 · exp(0) = 0.4 · 1.000 = 0.400
+```
+
+### Compute the partition function
+
+```
+Z(x) = 4.434 + 0.400 = 4.834
+```
+
+### Compute the optimal policy
+
+```
+π*(y_1 | x) = 4.434 / 4.834 = 0.9173
+π*(y_2 | x) = 0.400 / 4.834 = 0.0827
+```
+
+Sum: 0.9173 + 0.0827 = 1.0000 ✓.
+
+The RLHF policy puts 91.7% on y_1, up from the SFT prior's 60%. The KL penalty kept it from going to 100% (which is what the unconstrained reward-model optimizer would do).
+
+### Verify the two beta limits
+
+**beta → 0** (no KL penalty, pure reward maximization):
+
+```
+exp(R / β) blows up for y_1, stays at 1 for y_2.
+Specifically: exp(1.0 / 0.01) = exp(100), enormous.
+Numerator for y_1: 0.6 · exp(100), dominates Z.
+π*(y_1) → 1, π*(y_2) → 0.
+```
+
+The policy collapses to deterministic argmax of R. **Reward maximizer; no SFT anchoring.**
+
+**beta → ∞** (KL penalty dominates):
+
+```
+exp(R / β) → 1 for any finite R.
+π*(y_1) = π_SFT(y_1) · 1 / (π_SFT(y_1) + π_SFT(y_2)) = π_SFT(y_1) = 0.6
+π*(y_2) = π_SFT(y_2) = 0.4
+```
+
+The policy collapses to the SFT prior. **No reward-model influence.** The RL stage is a no-op.
+
+**Real systems pick beta ∈ [0.01, 0.1]**: enough to extract value from the reward model, not enough to lose the SFT prior's language fluency. The exact choice depends on reward-model quality.
+
+## Reward hacking and why beta matters
+
+The dominant practical failure mode of RLHF is **reward hacking** (also called specification gaming, reward gaming, or Goodhart's law in this context). The reward model R_phi is an imperfect proxy for true human preferences. It was trained on ~100K preference pairs. It has blind spots, biases, and overconfident regions.
+
+When beta is too low, the policy optimizes the reward model so aggressively that it **finds adversarial responses** scoring high on R_phi but reading as nonsense to actual humans. Classic symptoms:
+
+- Repetitive output ("The answer is yes yes yes yes yes...") that scores high because the reward model has a weakness on confidence.
+- Sycophancy: agreeing with the user regardless of the prompt's actual content.
+- Length hacking: longer responses score higher because human raters had a length bias.
+- Refusal hacking: never answering, because over-cautious responses score higher than ones with any risk of being wrong.
+
+The KL penalty beta · KL(the policy parameterized by theta || pi_SFT) is the **structural defense** against these failure modes. By forcing the policy parameterized by theta to stay near pi_SFT (a fluent, instruction-following but not yet reward-optimized model), the policy cannot drift far enough to find adversarial reward-model exploits.
+
+Operationally:
+
+- If beta is too low → reward hacking, policy degrades.
+- If beta is too high → no improvement over SFT, no value from RL stage.
+- Empirical sweet spot: beta = 0.01 to 0.1, calibrated to reward-model quality.
+
+## Variants and successors
+
+The InstructGPT pipeline is the dominant approach but not the only one. By 2024-2025 the field has split into several families.
+
+### Constitutional AI (Bai et al., 2022)
+
+Anthropic's variant. Replaces the human-collected preference data in Stage 2 with **AI-generated preferences** following a written constitution (a list of principles the model should follow). The pipeline becomes:
+
+- Stage 2a: SFT model generates pairs of responses to prompts.
+- Stage 2b: A separate "constitutional critic" rates each pair according to the principles.
+- Stage 2c: Train the reward model on these AI-generated preferences.
+- Stage 3: PPO as before.
+
+The "RLAIF" (RL from AI Feedback) naming applies when AI generates the preferences. Trade-offs: cheaper to scale than human labels; can encode principled value choices in the constitution; AI raters can introduce their own biases.
+
+### Direct Preference Optimization (DPO, Rafailov et al., 2023)
+
+The variational shortcut from Lesson 12. Skip Stage 2 (no separate reward model) and Stage 3's PPO. Instead, optimize the policy directly on preference pairs using the closed-form variational solution:
+
+```
+L_DPO(θ) = - E [ log σ(β · log(π_θ(y_w|x) / π_SFT(y_w|x)) - β · log(π_θ(y_l|x) / π_SFT(y_l|x))) ]
+```
+
+The "implicit reward" the DPO paper title alludes to is determined by the policy itself via the variational identity. The math is the same; the implementation is simpler (no separate reward-model stage, no PPO loop). DPO has become the dominant approach for smaller-scale RLHF where the reward-model accuracy is the bottleneck.
+
+### Group Relative Policy Optimization (GRPO, DeepSeekMath, Shao et al. 2024; popularized in DeepSeek-R1, 2025)
+
+GRPO drops the value-network critic and computes advantages from **group-normalized rewards**: sample multiple responses per prompt, normalize each response's reward within the group (subtract the group mean, divide by the group standard deviation), and use that as the advantage in the PPO update. Saves compute by eliminating the critic; works particularly well for reasoning-task RL where rewards are sparse and binary. Originated in DeepSeekMath (Shao et al. 2024, arXiv 2402.03300); popularized by DeepSeek-R1 (Jan 2025, arXiv 2501.12948).
+
+### Identity Preference Optimization (IPO, Azar et al., 2024)
+
+A theoretical generalization of DPO with a different surrogate that addresses a specific overconfidence failure mode in DPO. Performance comparable to DPO in practice; more theoretically clean.
+
+The choice among InstructGPT/PPO, Constitutional AI, DPO, GRPO, IPO depends on operational constraints: data availability (human labels vs synthetic), compute budget (PPO vs DPO simplicity), reward-model accuracy, and the specific failure modes you are trying to defend against.
+
+## Operational instruments
+
+How do you know if your RLHF run is working? Naming the **operational instruments** is what separates productive engineering from policy debate. The following instruments measure specific empirical properties of an RLHF run:
+
+| Instrument | What it measures | Pass criterion (heuristic) |
+|------------|------------------|-----------------------------|
+| **Reward-model test accuracy** | Held-out preference-pair accuracy of R_phi | > 65% (chance is 50%; good RMs reach 70-80%) |
+| **Measured KL-from-base** | Token-level KL KL(the policy parameterized by theta || pi_SFT) averaged over a held-out prompt set | 5 to 50 nats per response, depending on training intensity |
+| **Win-rate against base** | Human (or LLM-judge) preference between the policy parameterized by theta and pi_SFT on a held-out prompt set | > 50% means the RL stage improved over SFT |
+| **HarmBench / RedTeam** | Adversarial-prompt evaluation suite | Higher refusal rate on harmful prompts is the operational signal |
+| **Sycophancy benchmarks** (Perez et al., 2023; Sharma et al., 2023) | Whether the model changes its answer to match the user's expressed opinion | Lower sycophancy score is better |
+| **Capability evals** (MMLU, GSM8K, HumanEval, etc.) | Whether RLHF degraded general capability | Should not drop significantly from SFT baseline |
+
+These instruments **operationalize** the question "is RLHF working?" into specific measurements. Empirical questions are different in kind from value/policy questions like "what should the model refuse?" or "whose preferences are aligned?"; this lesson focuses on the empirical operational side, which is what you can directly verify.
+
+For example, if reward-model test accuracy is \< 60%, the RM is barely better than chance and any RLHF run on top of it will be unreliable. That is an operational observation independent of what the model should ultimately learn to do. If the measured KL-from-base is > 100 nats but win-rate against base is \< 50%, the policy drifted from SFT without improvement, suggestive of reward hacking. That is an operational observation independent of what "good behavior" means.
+
+The split is what keeps RLHF productive: engineering instruments tell you what is happening; value alignment is a separate, broader conversation that those instruments inform but do not settle.
+
+## Common pitfalls
+
+- **Setting beta by feel without measuring KL.** The right beta depends on reward-model quality, which varies per RLHF run. Always measure the achieved KL and check it against win-rate before deploying.
+- **Believing the reward model.** The reward model is a small neural network fit on ~100K preference pairs. It has known failure modes (length bias, sycophancy bias, refusal bias). Run reward hacking analyses (gradient ascent on R_phi to find adversarial inputs) periodically.
+- **Skipping SFT.** Trying to run RLHF directly on a pretrained-only model is unstable. The SFT stage anchors the model in instruction-following format before the RL stage adds preference signal. Both stages are necessary.
+- **Comparing across reward-model normalizations.** Bradley-Terry only constrains differences in R_phi. The absolute scale is arbitrary. Two reward models with the same preferences will have different beta sweet spots if their reward scales differ. Always check the achieved KL, not the literal beta value.
+- **Treating DPO as "just RLHF without the reward model."** DPO has its own failure modes (overfitting to preference data, smaller effective KL budget per iteration). The implementation is simpler; the conceptual content is the same; the empirical performance differs.
+- **Using human-rater agreement as a proxy for truth.** Human raters disagree systematically. The training data inherits the rater distribution. Documenting this distribution is operational hygiene; pretending it is "ground truth" is a category error.
+
+## Why this matters when you use AI
+
+RLHF is the technique that bridged "language models that complete text plausibly" (GPT-2-era, 2019) and "language models that follow instructions usefully" (ChatGPT, Claude, Gemini, 2022 onward). Every commercial instruction-tuned model from 2022 forward has used RLHF or a close variant. The technique itself is now mature: 50+ open-source implementations exist; the InstructGPT pipeline is reproducible on ~1B parameter models with a few thousand dollars of compute; smaller-scale DPO experiments run on a single GPU.
+
+What RLHF does not solve:
+
+- **The value-specification problem**: choosing what the model should be aligned to is a question for product, policy, and society, not engineering. RLHF executes the alignment; it does not pick the alignment target.
+- **Generalization to held-out prompts**: an RLHF-tuned model may behave well on the preference distribution it was trained on and degrade on novel distributions. Robustness to distribution shift remains an open research problem.
+- **Sandboxing and adversarial use**: RLHF reduces but does not eliminate the failure modes adversarial prompts can elicit. Defense-in-depth (input filtering, output filtering, sandboxing) remains necessary.
+
+The operational instruments named above address what RLHF can verify. The broader alignment questions remain open and require separate frameworks (interpretability, scalable oversight, debate-based methods). Lesson 14 onward covers some of these; the field as of 2025 is still mid-evolution.
+
+## What you should remember from this lesson
+
+- **The InstructGPT pipeline** is three stages: SFT (cross-entropy on demonstrations), reward modeling (Bradley-Terry on preference pairs), PPO with KL-to-SFT (variational policy optimization).
+- **The full RLHF objective** is J(the policy parameterized by theta) = E[R_phi(x, y)] - beta · KL(the policy parameterized by theta || pi_SFT). This is the soft Bellman backup at the sequence level with pi_SFT as the prior and beta as the temperature.
+- **The optimal RLHF policy** is pi-star(y|x) ∝ pi_SFT(y|x) · exp(R_phi(x, y) / beta). PPO is the practical optimizer for this variational target. The worked example: pi_SFT = (0.6, 0.4), R = (1, 0), beta = 0.5 gives pi-star = (0.917, 0.083). Limits verified: beta → 0 gives the reward maximizer (1, 0); beta → ∞ gives the SFT prior (0.6, 0.4).
+- **Reward hacking** is the dominant failure mode. Setting beta too low lets the policy find adversarial reward-model exploits. The KL penalty is the structural defense.
+- **Variants**: Constitutional AI (RLAIF with constitutional principles), DPO (variational shortcut skipping the reward model), GRPO (group-normalized advantage; subtract group mean, divide group std), IPO (theoretical generalization of DPO).
+- **Operational instruments**: reward-model test accuracy, measured KL-from-base, win-rate against base, harm-bench scores, sycophancy benchmarks. These operationalize "is RLHF working" into specific empirical measurements. Distinct from broader value-alignment questions which the instruments inform but do not settle.
+
+Next lessons (Phase 3 continues): offline RL (L14 problem definition + L15 algorithms BCQ / CQL / IQL), exploration strategies for hard-reward environments (L16), multi-task and meta-RL (L17), and the field's open problems including the RLHF-specific issues this lesson named (L18, closes the track).
+
+## References
+
+- Ouyang, L., Wu, J., Jiang, X., et al. (2022). Training language models to follow instructions with human feedback. *NeurIPS 2022*. https://arxiv.org/abs/2203.02155 InstructGPT. The canonical RLHF pipeline reference.
+- Stiennon, N., Ouyang, L., Wu, J., et al. (2020). Learning to summarize with human feedback. *NeurIPS 2020*. https://arxiv.org/abs/2009.01325 Pre-InstructGPT scaled RLHF on summarization. The methodological foundation.
+- Christiano, P. F., Leike, J., Brown, T. B., et al. (2017). Deep reinforcement learning from human preferences. *NeurIPS 2017*. https://arxiv.org/abs/1706.03741 The original deep-RL-from-preferences paper on Atari and MuJoCo.
+- Bai, Y., Jones, A., Ndousse, K., et al. (2022). Training a Helpful and Harmless Assistant with Reinforcement Learning from Human Feedback. *arXiv:2204.05862*. https://arxiv.org/abs/2204.05862 Anthropic's RLHF paper.
+- Bai, Y., Kadavath, S., Kundu, S., et al. (2022). Constitutional AI: Harmlessness from AI Feedback. *arXiv:2212.08073*. https://arxiv.org/abs/2212.08073 The Constitutional AI / RLAIF paper.
+- Rafailov, R., Sharma, A., Mitchell, E., et al. (2023). Direct Preference Optimization: Your Language Model is Secretly a Reward Model. *NeurIPS 2023*. https://arxiv.org/abs/2305.18290 DPO.
+- Shao, Z., Wang, P., Zhu, Q., et al. (2024). DeepSeekMath: Pushing the Limits of Mathematical Reasoning in Open Language Models. *arXiv:2402.03300*. https://arxiv.org/abs/2402.03300 The origin of GRPO.
+- DeepSeek-AI (2025). DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning. *arXiv:2501.12948*. https://arxiv.org/abs/2501.12948 Popularized GRPO via large-scale reasoning RL.
+- Azar, M. G., Rowland, M., Piot, B., et al. (2024). A General Theoretical Paradigm to Understand Learning from Human Preferences. *AISTATS 2024*. https://arxiv.org/abs/2310.12036 IPO.
+- Perez, E., Ringer, S., Lukošiūtė, K., et al. (2023). Discovering Language Model Behaviors with Model-Written Evaluations. *Findings of ACL 2023*. https://arxiv.org/abs/2212.09251 The Anthropic sycophancy and related-behaviors benchmark.
+- Sharma, M., Tong, M., Korbak, T., et al. (2023). Towards Understanding Sycophancy in Language Models. *arXiv:2310.13548*. https://arxiv.org/abs/2310.13548 A focused study of sycophancy in RLHF-tuned models.
+- Mazeika, M., Phan, L., Yin, X., et al. (2024). HarmBench: A Standardized Evaluation Framework for Automated Red Teaming and Robust Refusal. *ICML 2024*. https://arxiv.org/abs/2402.04249 The HarmBench red-team benchmark.
+- Bradley, R. A., & Terry, M. E. (1952). Rank Analysis of Incomplete Block Designs: I. The Method of Paired Comparisons. *Biometrika*, 39(3/4), 324-345. The original Bradley-Terry paper from 70 years before RLHF. Still the standard parameterization.

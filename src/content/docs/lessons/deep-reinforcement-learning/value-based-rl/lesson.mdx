@@ -1,0 +1,207 @@
+---
+title: "Lesson: Value-based RL (deriving Q-learning from the Bellman optimality equation)"
+description: "Learn the second branch of the deep-RL dispatch table: estimate Q* directly, derive the greedy policy by argmax, and see why function approximation breaks the classical tabular convergence guarantees."
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+## What you'll be able to do after this lesson
+
+Phase 1 built the **policy branch** of the dispatch table you wrote down in Lesson 3: REINFORCE estimates the gradient of expected return with respect to policy parameters; actor-critic reduces its variance by adding a learned value function. The whole family is **on-policy**, the math runs through the policy you are currently following.
+
+Phase 2 opens the **value branch**. Instead of nudging policy parameters by gradient, you will learn the optimal action-value function Q*(s, a) directly, and then read off the optimal policy as pi-star(s) = argmax_a Q*(s, a). The policy never appears as a separate parameterized object; it falls out of Q*.
+
+By the end of this lesson you can:
+
+- Write the Bellman optimality equation and explain why the max makes it non-linear (no closed-form solution).
+- Trace tabular **Q-iteration** on a tiny MDP for a few rounds and check the result against the analytic value.
+- Define **off-policy** learning and explain why Q-learning is off-policy by construction (its target uses the greedy policy, regardless of what generated the data).
+- Name the **deadly triad** (off-policy + bootstrapping + function approximation) and explain why combining all three can diverge even though any two are safe.
+- Choose value-based RL over policy-gradient RL when the action space is small and discrete and you want a deterministic optimal policy.
+
+## Recap: the dispatch table
+
+Lesson 3 ended with a sketch of every algorithm you would meet later in the track:
+
+> Every deep-RL algorithm estimates one or more of: a policy pi, a state value V, an action value Q, an advantage A, or a model of the dynamics P. The rest is engineering.
+
+Phase 1 spent four lessons on the **π branch** (REINFORCE, actor-critic). This lesson covers the **Q branch**. Lessons 9 and 10 will cover the **P branch** (model-based RL). The V and A branches are sub-components of the others; you already met both inside actor-critic.
+
+The four branches are not competitors. Modern algorithms blend them. PPO (Lesson 8) is a policy-gradient method that uses a critic (V branch). DQN (Lesson 7) is a Q-learning method with deep-network engineering tricks. SAC (a strong continuous-control algorithm) is actor-critic with a Q-network. The dispatch table tells you **what each piece is estimating**, not **which algorithm to pick**.
+
+This lesson stays in the tabular setting, where the math is provably clean. Lesson 7 will replace the table with a neural network and you will see what breaks.
+
+## The Bellman optimality equation
+
+Recall the Bellman equation from Lesson 3, written for Q^π:
+
+```
+Q^π(s, a) = R(s, a) + γ · E_{s' ~ P(·|s, a)} [ V^π(s') ]
+         = R(s, a) + γ · E_{s' ~ P(·|s, a)} [ Σ_a' π(a'|s') · Q^π(s', a') ]
+```
+
+This is the value of taking action a in state s, then following policy pi thereafter. It is **linear** in Q^π for a fixed pi, because the inner sum over actions is just an average weighted by pi.
+
+Now consider the **optimal** action-value Q*(s, a), defined as the value of taking action a in state s and then acting optimally forever after. The optimal policy, whatever it is, picks the best action at every future state. So instead of averaging over π's action distribution, you take the max:
+
+```
+Q*(s, a) = R(s, a) + γ · E_{s' ~ P(·|s, a)} [ max_a' Q*(s', a') ]
+```
+
+This is the **Bellman optimality equation**. The right-hand side has a max inside an expectation, which makes the system non-linear in Q*. There is no closed-form Gaussian-elimination solution like there is for Q^π with a fixed pi. You have to solve it iteratively.
+
+The good news: the operator on the right (call it T*) is a **gamma-contraction** in the sup-norm. For any two functions Q_1 and Q_2:
+
+```
+|| T* Q_1 - T* Q_2 ||_∞  ≤  γ · || Q_1 - Q_2 ||_∞
+```
+
+By the Banach fixed-point theorem, repeated application converges geometrically to a unique fixed point, which is Q*. That gives you the algorithm.
+
+## Tabular Q-iteration
+
+The cleanest algorithm: start with Q_0 arbitrary (zero is fine), and apply T* over and over:
+
+```
+Q_{k+1}(s, a) ← R(s, a) + γ · Σ_{s'} P(s'|s, a) · max_{a'} Q_k(s', a')
+```
+
+Iterate over all (s, a) pairs each round. The geometric-contraction bound says || Q_k - Q* ||_∞ ≤ gamma^k · || Q_0 - Q* ||_∞, so error shrinks by a factor of gamma per iteration. For gamma = 0.9, gamma^22 ≈ 0.098 (about an order of magnitude per twenty-two iterations); one decimal place takes roughly 22 iterations, not 10.
+
+### Worked example: the L3 two-state MDP
+
+Lesson 3 used a deterministic two-state loop: s0 → s1 with reward 1, s1 → s0 with reward 0, one action per state, gamma = 0.9. Because there is only one action, Q*(s, ·) = V*(s), so you already know the answer from Lesson 3:
+
+```
+V*(s0) = 1 / (1 - γ²) = 1 / 0.19 ≈ 5.263
+V*(s1) = γ · V*(s0) ≈ 4.737
+```
+
+Run Q-iteration with Q_0 = 0 everywhere. Since each state has one action, the max is trivial and the update is just Q_(k+1)(s) = R(s) + gamma · Q_k(s'):
+
+| k | Q_k(s0) | Q_k(s1) |
+|---|---------|---------|
+| 0 | 0       | 0       |
+| 1 | 1.000   | 0.000   |
+| 2 | 1.000   | 0.900   |
+| 3 | 1.810   | 0.900   |
+| 4 | 1.810   | 1.629   |
+| 5 | 2.466   | 1.629   |
+| 6 | 2.466   | 2.219   |
+| 7 | 2.998   | 2.219   |
+| 8 | 2.998   | 2.698   |
+| ... | ... | ... |
+| ∞ | 5.263 | 4.737 |
+
+The geometric ratio between successive errors is gamma squared = 0.81 (because the loop is two steps long; one step picks up the reward, the next bootstraps the value). At iteration 50 the error is still about 0.027; reaching || Q_k - Q* ||_∞ \< 10⁻⁴ takes about 100 iterations. The numbers match Lesson 3's closed-form computation exactly. The same value, derived two ways: this is the dual-path discipline applied to the algorithm itself.
+
+### Where the max actually does something
+
+The single-action example is clean but misses the point of value-based RL: action selection. Add a second action stay at s0 with reward −0.5 and self-transition (s0 → s0). Now Q-iteration has a genuine max to compute:
+
+```
+Q*(s0, go)   = 1 + γ · max(Q*(s1, go))                    [s1 has one action]
+Q*(s0, stay) = -0.5 + γ · max(Q*(s0, go), Q*(s0, stay))
+```
+
+By inspection, stay is dominated: it pays a negative reward and lands you back in s0, from which the best you can do is take go for Q*(s0, go) ≈ 5.263. So Q*(s0, stay) = -0.5 + 0.9 · 5.263 ≈ 4.237 \< 5.263. The greedy policy pi-star(s0) = argmax_a Q*(s0, a) = go picks go, as it should.
+
+The lesson: **Q* encodes both the values and the optimal action choice**. You do not need a separate policy network. Just compute Q* and take the argmax.
+
+## From Q-iteration to Q-learning
+
+Q-iteration requires knowing the dynamics P(s'|s, a) and the reward function R(s, a). In real RL you do not; you only observe samples. The fix is to replace the expectation over P with a single sampled next-state. After observing the transition (s_t, a_t, r_t, s_(t+1)):
+
+```
+Q(s_t, a_t)  ←  Q(s_t, a_t)  +  α · ( r_t + γ · max_{a'} Q(s_{t+1}, a')  -  Q(s_t, a_t) )
+```
+
+This is **Q-learning** (Watkins, 1989). The bracketed quantity is the **TD error** or **Bellman error**: the difference between what you currently estimate Q(s_t, a_t) to be and the new sample-based estimate r_t + gamma · max_(a') Q(s_(t+1), a'). The step size alpha is a learning rate; with appropriate schedules (alpha_t → 0 slowly), tabular Q-learning converges to Q* with probability one under mild ergodicity assumptions.
+
+### Why Q-learning is off-policy by construction
+
+The target r_t + gamma · max_(a') Q(s_(t+1), a') uses the **greedy** policy at s_(t+1) (it picks the best action). But the data collection that produced the transition can use **any** policy, typically an exploring one like epsilon-greedy (with probability epsilon, pick a random action; otherwise, pick the greedy one). The policy that **generated the data** can differ from the policy being **evaluated and improved**. That separation is what off-policy means.
+
+Compare to REINFORCE (Lesson 4): the gradient estimator E_(τ ~ the policy parameterized by theta)[ ∇log the policy parameterized by theta(τ) · R(τ) ] is an expectation under the policy parameterized by theta, the policy you are currently following. Switching policies invalidates the estimator (unless you correct with importance sampling, which is its own can of worms). That is on-policy.
+
+Off-policy is a real advantage. You can:
+
+- Replay old experience from a buffer (Lesson 7 will build this engineering on top of Q-learning).
+- Learn from demonstrations collected by a human or another agent.
+- Decouple exploration (use epsilon-greedy to discover) from exploitation (the learned target uses greedy).
+
+You will see in Lesson 8 that PPO sits in a middle ground: it allows small amounts of off-policy reuse (a few epochs over recent data) with a clipping correction.
+
+## Deep Q-learning: replace the table with a network
+
+Tabular Q-learning works for small discrete state spaces (a 3 by 3 grid world, a tic-tac-toe board). For Atari frames (84 × 84 × 4 pixel stacks), the state space is astronomically large; you cannot store a Q-table. The fix is **function approximation**: parameterize Q as a neural network Q_theta(s, a), and minimize the squared TD error:
+
+```
+L(θ) = E_{(s, a, r, s') ~ D} [ ( r + γ · max_{a'} Q_θ(s', a')  -  Q_θ(s, a) )² ]
+```
+
+D is a dataset of transitions (a replay buffer in DQN). The minimizer is theta such that Q_theta approximately satisfies the Bellman optimality equation on the support of D.
+
+This looks like a clean supervised-learning regression problem. It is not. Three things break at once.
+
+## The deadly triad
+
+Sutton's name for the failure mode (the same Richard Sutton from Lesson 4's actor-critic foundations). When you combine **all three** of the following, learning can diverge even on problems where any **two** of the three would be safe:
+
+1. **Function approximation.** Q_theta is not a lookup table; it generalizes across states. A weight update for one (s, a) shifts Q_theta at many other (s', a') pairs.
+2. **Bootstrapping.** The target r + gamma · max_(a') Q_theta(s', a') uses Q_theta itself, not a true Monte Carlo return. The target moves as you update.
+3. **Off-policy data.** The transitions you train on come from a different distribution than the greedy policy your target assumes.
+
+Any one of these on its own is safe. Any two are safe. All three together can produce **arbitrarily large divergence**: Q_theta weights blow up and the policy becomes nonsense. This is why naive deep Q-learning (just running gradient descent on the loss above) does not work on Atari.
+
+Lesson 7 is about the engineering that tames the triad: **replay buffers** (decorrelate samples, approximate i.i.d.), **target networks** (freeze the bootstrapped target for many steps so it stops chasing itself), and **double Q-learning** (decouple action selection from action evaluation to fix the max overestimation bias). With those three tricks bolted on, the deep Q-network of Mnih et al. (2015) plays Atari at human level.
+
+## Where value-based RL fits the dispatch table
+
+Use the Q branch when:
+
+- The **action space is small and discrete**. The max_a is a quick scan. With continuous actions, the argmax is its own optimization problem (this is why most continuous-control algorithms are policy-gradient or actor-critic).
+- You want a **deterministic optimal policy**. Stochastic optimal policies are rare in fully observed MDPs anyway, but if your problem genuinely needs one (partially observed environments, multi-agent games), policy-gradient methods handle them more naturally.
+- You can afford **off-policy data reuse**. If you have a replay buffer or human demonstrations, Q-learning can use them; on-policy policy gradients cannot without correction.
+
+Use the pi branch (Phase 1) when:
+
+- The action space is **continuous** or very large.
+- The policy needs to be **stochastic** (exploration baked in, multi-agent equilibria).
+- You can afford fresh on-policy samples each update.
+
+Modern systems often combine the two (SAC, IMPALA). The dispatch table is the menu, not the choice.
+
+## Common pitfalls
+
+- **Confusing the Bellman equation with the Bellman optimality equation.** The first uses the policy's action distribution (linear in Q^π); the second uses max (non-linear). Tabular policy iteration solves the first; tabular Q-iteration solves the second.
+- **Calling Q-learning on-policy because the data uses epsilon-greedy.** The policy used for **action selection during data collection** is irrelevant. What makes Q-learning off-policy is that the target uses max_(a'), not E_(a' ~ π). epsilon-greedy is just an exploration mechanism.
+- **Assuming Q-iteration converges with function approximation.** The geometric-contraction proof relies on T* being a contraction in sup-norm, which fails when Q_theta generalizes. You can verify this empirically: write a naive deep-Q implementation, train on a toy MDP, and watch the weights diverge.
+- **Mistaking the max overestimation bias for noise.** E[max_a X(a)] ≥ max_a E[X(a)] by Jensen's inequality. With noisy Q_theta, the max systematically overestimates. Double Q-learning (Lesson 7) addresses this by using two networks: one picks the action, the other evaluates it.
+
+## Why this matters when you use AI
+
+Deep Q-networks were the breakthrough that put deep RL on the map. The 2015 Nature paper (Mnih et al.) showed a single DQN architecture mastering 49 Atari games from raw pixels, no game-specific tuning. AlphaGo (2016) was a hybrid: policy network and value network, with Monte Carlo tree search at decision time, and the value network was a state-value (V-style) estimate of board win probability. AlphaZero (2017) refined the recipe. AlphaStar (StarCraft II, 2019) and OpenAI Five (Dota 2, 2019) used policy-gradient methods, not Q-learning, because the action spaces were too large for argmax. The dispatch table predicts these choices.
+
+The reason every deep-RL course teaches Q-learning before DQN: Q-learning is provably correct in the tabular setting. Once you understand why the proof works, you understand exactly what each DQN engineering trick is buying you (the replay buffer recovers i.i.d., the target network recovers a fixed target, double Q-learning corrects the max bias). Without the tabular foundation, DQN looks like a pile of unmotivated heuristics.
+
+## What you should remember from this lesson
+
+- **The Bellman optimality equation** is Q*(s, a) = R(s, a) + gamma · E_(s')[ max_(a') Q*(s', a') ]. The max makes it non-linear; no closed form, only iterative solutions.
+- **Q-iteration** applies the Bellman operator until convergence. It is a gamma-contraction, so error shrinks geometrically. On the L3 two-state MDP it converges to the same 5.263, 4.737 that the closed-form geometric series gave you.
+- **Q-learning** is the model-free, sample-based version: Q(s, a) ← Q(s, a) + alpha · TD-error, where the TD error uses max_(a') Q(s', a'). The max in the target is what makes Q-learning **off-policy**.
+- **Deep Q-learning** replaces the table with a network and minimizes squared TD error. Naively, it diverges because of the **deadly triad** (function approximation + bootstrapping + off-policy). Lesson 7 covers the engineering tricks that fix it.
+- **Greedy policy extraction**: pi-star(s) = argmax_a Q*(s, a). No policy network needed.
+- Use the Q branch when **actions are discrete and few** and you can reuse off-policy data. Use the pi branch when actions are continuous or the optimal policy is stochastic.
+
+Next lesson: DQN itself: replay buffers, target networks, double Q-learning, and the rainbow of refinements that turn Q-learning into a working deep-RL algorithm.
+
+## References
+
+- Watkins, C. J. C. H. (1989). *Learning from delayed rewards* (Ph.D. dissertation, Cambridge). The original Q-learning algorithm and convergence proof.
+- Sutton, R. S., & Barto, A. G. (2018). *Reinforcement Learning: An Introduction* (2nd ed.), Chapters 4 (dynamic programming), 6 (TD learning), 11 (off-policy with function approximation, the deadly triad). MIT Press. Free online: http://incompleteideas.net/book/the-book-2nd.html
+- Bertsekas, D. P. (2019). *Reinforcement Learning and Optimal Control*. Athena Scientific. Chapter 2 on contraction-mapping convergence of value iteration.
+- Mnih, V., Kavukcuoglu, K., Silver, D., et al. (2015). Human-level control through deep reinforcement learning. *Nature*, 518, 529-533. The DQN paper. Forward reference for Lesson 7.
+- Levine, S. (2023). CS285 lecture on Value Function Methods. UC Berkeley. https://rail.eecs.berkeley.edu/deeprlcourse/

@@ -1,0 +1,105 @@
+---
+title: "Cheatsheet: DQN (replay buffer, target network, double Q-learning)"
+description: "One-page reference: each DQN engineering trick mapped to the deadly-triad leg it patches, plus the max-overestimation bias numbers."
+phase: "core-deep-rl-algorithms"
+phase_order: 2
+order: 7
+last_reviewed: "2026-05-25"
+---
+
+## The three patches, mapped to the three triad legs
+
+| Triad leg | Patch | What it does |
+|-----------|-------|--------------|
+| **OP** (off-policy data) | Replay buffer | Sample uniformly from `D` (~1M past transitions); decorrelates consecutive frames, approximates i.i.d. |
+| **BS** (bootstrapping) | Target network `Q_{θ⁻}` | Frozen copy of `Q_θ`, refreshed every `C` steps; target stops chasing itself |
+| **`max` overestimation bias** (related) | Double Q-learning | Online net picks action `a* = argmax_{a'} Q_θ(s', a')`; target net evaluates `Q_{θ⁻}(s', a*)` |
+| **FA** (function approximation) | (no patch: the whole point of deep RL) | Other two patches make FA safe |
+
+## The DQN loss (with double DQN target)
+
+```
+L(θ) = E_{(s,a,r,s') ~ D} [ ( y  -  Q_θ(s, a) )² ]
+y    = r + γ · (1 - done) · Q_{θ⁻}(s', argmax_{a'} Q_θ(s', a'))
+```
+
+Original DQN target (without double Q):
+
+```
+y_original = r + γ · max_{a'} Q_{θ⁻}(s', a')
+```
+
+The difference: original uses `θ⁻` for both selection and evaluation; double DQN uses `θ` (online) for selection, `θ⁻` (target) for evaluation. Decoupling kills the overestimation.
+
+## Max overestimation bias numerics (E[max of n iid N(0,1)])
+
+| n actions | E[max] | Closed form |
+|-----------|--------|-------------|
+| 2 | 0.5642 | `1/√π` |
+| 3 | 0.8463 | `3/(2√π)` |
+| 4 | 1.0294 | numerical |
+| 10 | 1.5388 | numerical |
+| 18 (Atari max) | ~1.82 | numerical |
+
+Bias grows roughly as `√(2 ln n)` for large `n` (the asymptotic always lies **above** the true value for finite `n`; convergence is from above). With true `Q = 0` and unit-variance noise, single-net max returns `0.85` (n=3) or `~1.82` (n=18) in expectation. Double-Q with **independent** noise drops the bias to zero. With a lagged target network the noise is correlated, so the drop is partial but still material.
+
+## DQN 2015 hyperparameters (canonical reference)
+
+| Hyperparameter | Value |
+|----------------|-------|
+| Replay buffer size | 1,000,000 transitions |
+| Mini-batch size | 32 |
+| Target update period `C` | 10,000 steps |
+| Discount `γ` | 0.99 |
+| Optimizer | RMSProp |
+| ε schedule | 1.0 → 0.1 linear over first 1M frames |
+| Frame stack | 4 |
+| Action repeat | 4 |
+| Reward clipping | `[-1, +1]` |
+| Training frames per game | 50,000,000 |
+
+49 Atari games. Single architecture. No per-game tuning.
+
+## DQN training loop (skeleton)
+
+```
+Initialize: Q_θ random; Q_{θ⁻} ← Q_θ; D empty
+For each step:
+  Observe s
+  a ← ε-greedy on Q_θ(s, ·)
+  s', r, done ← env.step(a)
+  D.push(s, a, r, s', done)
+  Sample mini-batch B from D
+  Compute y_i for each transition (double DQN target)
+  Loss = mean((Q_θ(s_i, a_i) - y_i)^2)
+  Gradient step on θ
+  Every C steps: θ⁻ ← θ
+```
+
+## Later refinements (Rainbow components)
+
+| Refinement | What it adds | Reference |
+|------------|--------------|-----------|
+| Double DQN | Decouple selection / evaluation | van Hasselt 2016 |
+| Prioritized replay | Sample high-TD-error transitions more often | Schaul 2016 |
+| Dueling networks | Architectural split into V(s) + A(s,a) | Wang 2016 |
+| Multi-step returns | n-step TD lowers bias at the cost of variance | Sutton & Barto ch 7 |
+| Distributional Q (C51, IQN) | Predict full reward distribution, not just mean | Bellemare 2017 |
+| Noisy nets | Parametric exploration in network weights | Fortunato 2018 |
+| Rainbow | All six combined | Hessel 2018 |
+
+## Common pitfalls
+
+- Skipping the target network and expecting DQN to converge. It will diverge.
+- `C` too small. The target needs to stay fixed long enough to provide a stable regression objective.
+- Confusing "double Q-learning" (NeurIPS 2010, two independent online nets) with "double DQN" (AAAI 2016, reuse the target net).
+- Assuming `max` bias is small. With 18 Atari actions, the bias is `~1.82` std-devs of estimator noise (matches the table above + lesson + summary).
+- Transferring DQN's exact hyperparameters to continuous control. DDPG and SAC use smaller buffers and Polyak target updates instead.
+
+## What you should remember
+
+- DQN = Q-learning + (replay + target net + double Q). Each piece patches a specific triad-related problem.
+- Max overestimation bias has a clean closed form for the iid-Gaussian case: `E[max of n iid N(0,1)]`. Use it to ground intuition.
+- DQN was the existence proof: 49 Atari games, one architecture, professional-human-level median.
+- FA is the leg you cannot patch; the other patches make it safe.
+- For continuous control or RLHF, the off-policy mindset transfers but the specific DQN engineering does not.

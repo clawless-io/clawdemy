@@ -1,0 +1,213 @@
+---
+title: "Practice: PPO (compute L^CLIP and identify where the gradient saturates)"
+description: "Two exercises: fill in a complete L^CLIP table for both positive and negative advantages, then trace a 3-action softmax policy through one PPO update to see the clip kick in."
+phase: "core-deep-rl-algorithms"
+phase_order: 3
+order: 8
+last_reviewed: "2026-05-25"
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Exercise 1: complete `L^CLIP` tables for both sign cases
+
+You collect data under `π_{θ_old}` and compute advantages. For one `(s, a)` pair, work out `L^CLIP(θ)` at various values of the probability ratio `r = π_θ(a|s) / π_{θ_old}(a|s)` with `ε = 0.2` and two advantage values: `A = +1` and `A = -1`.
+
+### Part A: A = +1 (good action)
+
+Fill in the table.
+
+| `r` | `r · A` | `clip(r, 0.8, 1.2)` | `clip · A` | `L^CLIP = min(…)` | clipped? |
+|-----|---------|---------------------|-----------|-------------------|----------|
+| 0.5 | ? | ? | ? | ? | ? |
+| 0.8 | ? | ? | ? | ? | ? |
+| 1.0 | ? | ? | ? | ? | ? |
+| 1.1 | ? | ? | ? | ? | ? |
+| 1.2 | ? | ? | ? | ? | ? |
+| 1.3 | ? | ? | ? | ? | ? |
+| 1.5 | ? | ? | ? | ? | ? |
+| 2.0 | ? | ? | ? | ? | ? |
+
+**Solution.**
+
+| `r` | `r · A` | `clip(r, 0.8, 1.2)` | `clip · A` | `L^CLIP = min(…)` | clipped? |
+|-----|---------|---------------------|-----------|-------------------|----------|
+| 0.5 | 0.5 | 0.8 | 0.8 | 0.5 | no |
+| 0.8 | 0.8 | 0.8 | 0.8 | 0.8 | no |
+| 1.0 | 1.0 | 1.0 | 1.0 | 1.0 | no |
+| 1.1 | 1.1 | 1.1 | 1.1 | 1.1 | no |
+| 1.2 | 1.2 | 1.2 | 1.2 | 1.2 | no |
+| 1.3 | 1.3 | 1.2 | 1.2 | **1.2** | **yes** |
+| 1.5 | 1.5 | 1.2 | 1.2 | **1.2** | **yes** |
+| 2.0 | 2.0 | 1.2 | 1.2 | **1.2** | **yes** |
+
+For `r > 1.2`, the objective flatlines at `1.2`. **Gradient is zero in this region.** No matter how much further the optimizer tries to push `r` up this epoch, it gets no additional credit.
+
+Note: for `r < 0.8` (e.g., `r = 0.5`), the objective is `0.5`, not the clipped value `0.8`. The min picks the **smaller** of `r · A` and `clip · A`, and `0.5 < 0.8`. The unclipped term is chosen here. This is the asymmetric design at work.
+
+### Part B: A = -1 (bad action)
+
+Fill in the table.
+
+| `r` | `r · A` | `clip(r, 0.8, 1.2)` | `clip · A` | `L^CLIP = min(…)` | clipped? |
+|-----|---------|---------------------|-----------|-------------------|----------|
+| 0.5 | ? | ? | ? | ? | ? |
+| 0.7 | ? | ? | ? | ? | ? |
+| 0.8 | ? | ? | ? | ? | ? |
+| 1.0 | ? | ? | ? | ? | ? |
+| 1.2 | ? | ? | ? | ? | ? |
+| 1.5 | ? | ? | ? | ? | ? |
+| 2.0 | ? | ? | ? | ? | ? |
+
+**Solution.**
+
+| `r` | `r · A` | `clip(r, 0.8, 1.2)` | `clip · A` | `L^CLIP = min(…)` | clipped? |
+|-----|---------|---------------------|-----------|-------------------|----------|
+| 0.5 | -0.5 | 0.8 | -0.8 | **-0.8** | **yes** |
+| 0.7 | -0.7 | 0.8 | -0.8 | **-0.8** | **yes** |
+| 0.8 | -0.8 | 0.8 | -0.8 | -0.8 | boundary |
+| 1.0 | -1.0 | 1.0 | -1.0 | -1.0 | no |
+| 1.2 | -1.2 | 1.2 | -1.2 | -1.2 | boundary |
+| 1.5 | -1.5 | 1.2 | -1.2 | **-1.5** | no |
+| 2.0 | -2.0 | 1.2 | -1.2 | **-2.0** | no |
+
+Two things to notice:
+
+1. **For `r < 0.8` (over-shot in the good direction):** the objective floors at `-0.8`. The optimizer was already rewarded down to `r = 0.8`; pushing further is not rewarded. **Gradient is zero in this region.**
+
+2. **For `r > 1.2` (over-shot in the BAD direction, increasing probability of a bad action):** the objective is `-1.5` or `-2.0`, **not** clipped. The min picks the unclipped `r · A = -r`, which is more negative than the clipped `-1.2`. **The optimizer still registers the loss.**
+
+This is the asymmetric design. The clip caps **upside** rewards but does **not cap downside** losses. If the policy makes a clearly bad move (increasing the probability of a bad action), PPO punishes it fully. If the policy makes a clearly good move beyond the trust region (increasing the probability of a good action past `1 + ε`), PPO simply stops giving extra credit. The optimizer learns to take steps, not leaps.
+
+### Part C: plot the function in your head
+
+For `A = +1`: `L^CLIP(r)` rises linearly from `0` at `r = 0` to `1.2` at `r = 1.2`, then flat at `1.2` for `r > 1.2`. Piecewise linear, one knee.
+
+For `A = -1`: `L^CLIP(r)` is flat at `-0.8` for `r ∈ [0, 0.8]`, then declines linearly from `-0.8` at `r = 0.8` to arbitrarily negative for large `r`. Piecewise linear, one knee.
+
+Both functions are continuous (no jumps) but not differentiable at the knees. The gradient is well-defined almost everywhere; the discontinuity at the knee is a measure-zero event in practice.
+
+## Exercise 2: trace a 3-action softmax policy through one update
+
+Suppose your policy is a softmax over three actions: `π_θ(a | s) = exp(z_a) / Σ_a' exp(z_{a'})`. The current state has all action logits at zero: `z_old = [0, 0, 0]`, giving uniform `π_old = [1/3, 1/3, 1/3]`.
+
+You collect one sample under `π_old`. After fitting a critic, you compute advantages `A = [+1, 0, -1]` for actions `[a_1, a_2, a_3]` at this state.
+
+### Part A: what does the unconstrained gradient want to do?
+
+The standard policy-gradient direction (Lesson 4) wants to increase `π_θ(a_1)` (good action), leave `π_θ(a_2)` alone, and decrease `π_θ(a_3)` (bad action). A natural exponentiated-advantage proposal:
+
+```
+π_new(a) ∝ exp(A_a / T)
+```
+
+For `T = 1` (no temperature softening):
+
+- `exp(+1) = 2.718`
+- `exp(0)  = 1.000`
+- `exp(-1) = 0.368`
+- Sum: `4.086`
+
+So:
+
+- `π_new(a_1) ≈ 2.718 / 4.086 ≈ 0.665`
+- `π_new(a_2) ≈ 1.000 / 4.086 ≈ 0.245`
+- `π_new(a_3) ≈ 0.368 / 4.086 ≈ 0.090`
+
+### Part B: compute `r` and check against the clip with `ε = 0.2`
+
+| Action | `π_old(a)` | `π_new(a)` | `r = π_new / π_old` | Inside `[0.8, 1.2]`? |
+|--------|------------|------------|---------------------|---------------------|
+| a_1 | 1/3 ≈ 0.333 | 0.665 | 1.995 | **NO** (above 1.2) |
+| a_2 | 1/3 ≈ 0.333 | 0.245 | 0.735 | **NO** (below 0.8) |
+| a_3 | 1/3 ≈ 0.333 | 0.090 | 0.270 | **NO** (below 0.8) |
+
+**Every action is outside the clip range.** The unconstrained gradient wants to move the policy too far for one PPO epoch.
+
+### Part C: what does PPO actually allow?
+
+PPO's clip caps the **per-epoch** move. With `ε = 0.2`:
+
+- `r(a_1)` capped at `1.2`, so `π_θ(a_1)` capped at `0.333 · 1.2 = 0.400`
+- `r(a_3)` floored at `0.8`, so `π_θ(a_3)` floored at `0.333 · 0.8 = 0.267`
+
+So in one PPO epoch, instead of moving from `[0.333, 0.333, 0.333]` to `[0.665, 0.245, 0.090]`, the policy can only move to roughly `[0.400, ?, 0.267]` (the middle action `a_2` has `A = 0`, no pressure either way).
+
+After several PPO epochs (with `θ_old` fixed at the original `z = [0, 0, 0]` throughout), the policy can move further toward the unconstrained target. After several PPO **iterations** (each iteration uses fresh data and resets `θ_old`), the policy reaches the optimum.
+
+### Part D: why this gradualism is the point
+
+If PPO let the policy jump to `[0.665, 0.245, 0.090]` in one step, the importance-sampling surrogate `E[r · A]` would be evaluated at `r` values far from `1`, where the surrogate is a poor approximation to the true objective. The advantage estimates `A^{π_old}` are also no longer accurate, since they assume `π_old` is the data-generating policy.
+
+By limiting per-epoch moves to factor `1 ± ε`, PPO keeps the surrogate close to the true objective on every gradient step. The cost is slower per-iteration progress; the benefit is that what progress you make is reliable. This is the trust-region intuition that TRPO formalized and PPO operationalized in 30 lines of code.
+
+## Flashcards
+
+<FlashcardSet>
+
+<Flashcard question="Why does naively reusing on-policy data across multiple gradient steps break the unbiasedness of the policy-gradient estimator?">
+
+The REINFORCE gradient `∇J(θ) = E_{τ ~ π_θ}[ ∇ log π_θ(τ) · A(τ) ]` is an expectation under the **current** policy `π_θ`. If you collect a batch under `π_{θ_old}` and take a first gradient step to get `π_θ`, a **second** gradient step on the same batch computes `E_{τ ~ π_{θ_old}}[ ∇ log π_θ(τ) · A^{π_old}(τ) ]`, which is **not** the true gradient of `J(θ)`. The further `θ` drifts from `θ_old`, the worse the approximation gets.
+
+The fix is importance sampling: replace `E_{τ ~ π_θ}[f(τ)]` with `E_{τ ~ π_{θ_old}}[(π_θ(τ) / π_{θ_old}(τ)) · f(τ)]`. The importance ratio `r(θ) = π_θ / π_{θ_old}` corrects for the distribution mismatch. PPO and TRPO are both built on this correction.
+
+</Flashcard>
+
+<Flashcard question="What does each piece of the PPO clipped surrogate `L^CLIP = E[min(r·A, clip(r, 1-ε, 1+ε)·A)]` do?">
+
+- `r(θ) = π_θ(a|s) / π_{θ_old}(a|s)` is the importance ratio. At `θ = θ_old`, `r = 1`.
+- `r · A` is the standard importance-sampled surrogate. Correct at `θ_old`, degrades as `r` drifts.
+- `clip(r, 1 - ε, 1 + ε)` is a "trust boundary": with `ε = 0.2`, the boundaries are `[0.8, 1.2]`.
+- `clip(r) · A` is the clipped surrogate, locally constant outside the trust boundary (so gradient = 0 there).
+- `min(…)` picks the **smaller** of unclipped and clipped. The intent: cap the upside (saturate reward for over-shooting in the good direction); don't cap the downside (still register losses on clearly bad moves).
+
+The asymmetric clipping behavior is what makes PPO conservative without being timid.
+
+</Flashcard>
+
+<Flashcard question="For a bad action (A < 0), why does L^CLIP not clip the loss when r > 1 + ε?">
+
+Suppose `A = -1` and `r = 1.5` (policy increased the probability of a clearly bad action way past the trust boundary).
+
+- Unclipped: `r · A = -1.5`
+- Clipped: `clip(r, 0.8, 1.2) · A = 1.2 · (-1) = -1.2`
+- `min(-1.5, -1.2) = -1.5` (the **unclipped** term)
+
+The min picks the more negative value. PPO registers the full loss `-1.5`, not the clipped `-1.2`.
+
+This is by design. The clip caps **rewards** for over-shooting in the favorable direction (good action, push probability up; or bad action, push probability down). It does **not** cap **losses** from over-shooting in the harmful direction (good action down, or bad action up). The asymmetry means the optimizer always sees the full pain of a clearly bad move, but never gets bonus credit for an over-aggressive move in the right direction.
+
+</Flashcard>
+
+<Flashcard question="Why is PPO the right algorithm for RLHF, while DQN isn't?">
+
+Three reasons:
+
+1. **Action space size.** RLHF acts at the token level: actions are the next token over a vocabulary of 50K to 250K. DQN's `argmax_a Q(s, a)` is infeasible at this scale. PPO uses a parameterized policy `π_θ(token | context)` that does not need an argmax.
+2. **On-policy fits autoregressive generation.** Generating a completion is sequential: produce token, sample, append, repeat. PPO's on-policy structure aligns naturally; collect a batch of completions, evaluate, do a few clipped-surrogate epochs.
+3. **Trust region constrains reward hacking.** RLHF is fine-tuning a pretrained model against a learned reward model. Letting the policy drift far from the pretrained distribution produces "reward hackers" that score high on the reward model but read as nonsense to humans. The PPO clip keeps the policy near the pretrained distribution per epoch; an extra KL penalty `β · KL(π_θ || π_pretrained)` keeps it near over the entire run.
+
+This is why every major instruction-tuned model from 2022 onward used PPO, a close variant like GRPO (which keeps the PPO surrogate with grouped advantages), or a successor like DPO (which replaces the PPO step entirely with a direct-preference objective) for the RL fine-tuning stage.
+
+</Flashcard>
+
+<Flashcard question="What is the relationship between TRPO and PPO?">
+
+**TRPO** (Trust Region Policy Optimization, Schulman et al., 2015):
+- Objective: maximize `E[r(θ) · A]` subject to `E[KL(π_old || π_θ)] ≤ δ` (hard constraint).
+- Solver: natural gradient via conjugate-gradient, with backtracking line search to enforce the KL bound.
+- Implementation: ~100 lines of subtle linear algebra.
+- Provably stable; computationally expensive.
+
+**PPO** (Proximal Policy Optimization, Schulman et al., 2017):
+- Objective: maximize `E[min(r · A, clip(r, 1-ε, 1+ε) · A)]` (no constraint; soft penalty baked into objective).
+- Solver: plain stochastic gradient on the clipped surrogate.
+- Implementation: ~30 lines.
+- Empirically nearly as good as TRPO; vastly easier to implement and tune.
+
+Both are by the same first author. Both work. PPO is the practical workhorse because the engineering wins matter more than the theoretical tightness in most production settings.
+
+</Flashcard>
+
+</FlashcardSet>

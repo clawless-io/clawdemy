@@ -1,0 +1,287 @@
+---
+title: "Practice: Variational inference for RL (ELBO by hand + identify VI in two RL algorithms)"
+description: "Two exercises: compute the ELBO and verify the gap = posterior KL on a fresh linear-Gaussian model; then identify the variational ingredients hiding inside SAC and KL-regularized PPO."
+phase: "core-deep-rl-algorithms"
+phase_order: 6
+order: 11
+last_reviewed: "2026-05-25"
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Exercise 1: ELBO computation with dual-path verification
+
+A new linear-Gaussian latent-variable model:
+
+```
+p(z)    = N(0, 4)          (prior, σ_p² = 4)
+p(x|z)  = N(z, 1)          (likelihood, σ_x² = 1)
+```
+
+You observe `x = 2`.
+
+### Part A: derive the true posterior `p(z | x)`
+
+Use Bayes' rule and complete the square. `p(z | x) ∝ p(x | z) · p(z)`.
+
+```
+p(x | z) · p(z) ∝ exp(-(x - z)²/2) · exp(-z²/8)
+              = exp(-((4(x-z)² + z²)/8))
+              = exp(-(4x² - 8xz + 4z² + z²)/8)
+              = exp(-(5z² - 8xz + 4x²)/8)
+```
+
+Complete the square in `z`:
+
+```
+5z² - 8xz = 5(z² - (8/5) x z) = 5(z - 4x/5)² - 5 · (4x/5)² = 5(z - 4x/5)² - 16x²/5
+```
+
+So the exponent is `-(5(z - 4x/5)² - 16x²/5 + 4x²) / 8 = -(5(z - 4x/5)²) / 8 + ...` (constant in `z`).
+
+The Gaussian in `z` has variance `4/5 = 0.8` (from coefficient `5/8` of `(z - mean)²`) and mean `4x/5`.
+
+For `x = 2`: true posterior `p(z | x = 2) = N(8/5, 4/5) = N(1.6, 0.8)`.
+
+### Part B: derive the marginal `p(x)`
+
+Sum of independent Gaussians: the marginal `p(x) = ∫ p(x | z) p(z) dz = N(0, σ_p² + σ_x²) = N(0, 5)`.
+
+For `x = 2`:
+
+```
+log p(x = 2) = -0.5 log(2π · 5) - 0.5 · 4/5
+           = -0.5 log(10π) - 0.4
+           ≈ -0.5 · 3.447 - 0.4
+           ≈ -1.724 - 0.4
+           = -2.124
+```
+
+(With `log(10π) ≈ log(31.42) ≈ 3.447`.)
+
+### Part C: compute the ELBO with a deliberately mismatched `q`
+
+Take the variational `q(z | x = 2) = N(1.0, 1.5)` (so `μ_q = 1.0`, `σ_q² = 1.5`).
+
+#### `E_q[log p(x | z)]`
+
+`log p(x | z) = -0.5 log(2π) - 0.5 (x - z)²`. For `x = 2`:
+
+```
+E_q [(2 - z)²] = (2 - μ_q)² + σ_q² = (2 - 1.0)² + 1.5 = 1.0 + 1.5 = 2.5
+E_q [log p(2 | z)] = -0.5 log(2π) - 0.5 · 2.5
+                 = -0.5 log(2π) - 1.25
+                 ≈ -0.919 - 1.25
+                 = -2.169
+```
+
+#### `KL(q || p)` where `p = N(0, 4)`
+
+```
+KL(N(μ_q, σ_q²) || N(μ_p, σ_p²))
+  = log(σ_p / σ_q) + (σ_q² + (μ_q - μ_p)²) / (2 σ_p²) - 1/2
+```
+
+With `q = N(1.0, 1.5)`, `p = N(0, 4)`, so `σ_q = √1.5 ≈ 1.225`, `σ_p = 2`:
+
+```
+KL(q || p) = log(2 / 1.225) + (1.5 + 1.0) / 8 - 0.5
+          = log(1.633) + 0.3125 - 0.5
+          ≈ 0.490 + 0.3125 - 0.5
+          = 0.303
+```
+
+#### ELBO
+
+```
+ELBO = E_q [log p(x | z)] - KL(q || p)
+    ≈ -2.169 - 0.303
+    = -2.472
+```
+
+### Part D: compute the ELBO gap
+
+```
+log p(x = 2) - ELBO ≈ -2.124 - (-2.472) = 0.348
+```
+
+Positive, as expected. The variational fit is `0.348` nats below the true log-marginal.
+
+### Part E: dual-path verification via `KL(q(z|x) || p(z|x))`
+
+Compute the KL between the variational `q = N(1.0, 1.5)` and the true `p(z | x = 2) = N(1.6, 0.8)`:
+
+```
+KL(N(1.0, 1.5) || N(1.6, 0.8))
+  = log(σ_p / σ_q) + (σ_q² + (μ_q - μ_p)²) / (2 σ_p²) - 0.5
+  = log(√0.8 / √1.5) + (1.5 + 0.36) / (2 · 0.8) - 0.5
+  = 0.5 · log(0.8/1.5) + 1.86 / 1.6 - 0.5
+  = 0.5 · log(0.5333) + 1.1625 - 0.5
+  = 0.5 · (-0.629) + 0.6625
+  = -0.314 + 0.6625
+  = 0.348
+```
+
+Both paths arrive at `0.348`. The identity `log p(x) - ELBO = KL(q(z|x) || p(z|x))` holds to the digit. The ELBO machinery passes the dual-path check.
+
+## Exercise 2: identify the variational ingredients in two RL algorithms
+
+For each algorithm below, identify:
+- What is the latent variable `z`?
+- What is the prior `p(z)`?
+- What is the variational posterior `q(z | x)`?
+- What is the "likelihood" term?
+
+### Scenario 1: SAC (Soft Actor-Critic)
+
+The SAC objective is `J(π) = E[r(s, a) + α H(π(·|s))]`, which can be rewritten:
+
+```
+J(π) = E[r(s, a)] - α · KL(π(·|s) || uniform)   (up to constants)
+```
+
+#### Identify the components:
+
+- **Latent variable `z`** = the action `a`.
+- **Prior `p(z)`** = uniform distribution over actions.
+- **Variational posterior `q(z | x)`** = the policy `π(a | s)` (conditioned on state `s`).
+- **"Likelihood" term** = `exp(r(s, a) / α)`, the soft-Boltzmann weighting by reward.
+
+The SAC objective is **maximize ELBO** where:
+
+```
+ELBO = E_π [r(s, a) / α] - KL(π(·|s) || uniform)   (in nats)
+```
+
+The full Bellman recursion for SAC follows from this variational view. The "soft" Bellman update `Q*(s, a) = r(s, a) + γ E [V*(s')]` with `V*(s) = α · log Σ_a exp(Q*(s, a) / α)` is exactly the variational message-passing in the corresponding graphical model. L12 will derive this from scratch.
+
+### Scenario 2: KL-regularized PPO (RLHF version)
+
+The RLHF objective from Lesson 8 is `L = L^CLIP - β · KL(π_θ || π_pretrained)`.
+
+#### Identify the components:
+
+- **Latent variable `z`** = the response (sequence of tokens conditioned on a prompt).
+- **Prior `p(z)`** = the pretrained language model `π_pretrained(z | prompt)`.
+- **Variational posterior `q(z | x)`** = the fine-tuned policy `π_θ(z | prompt)`.
+- **"Likelihood" term** = `exp(R(prompt, z) / β)`, the soft-Boltzmann weighting by reward.
+
+The RLHF objective is variational policy improvement against the prior of "what the pretrained model would say." A high-reward response that the pretrained model would not have produced costs a KL penalty proportional to how surprising it is under the prior. This is exactly the right shape: rewards drive the policy toward high-reward responses; the KL penalty keeps the policy from drifting into reward-hacker territory that the prior would not have endorsed.
+
+The interpretation tells you something practical: the right `β` depends on how much you trust the reward model. If the reward model is well-calibrated, drop `β` (let the policy drift further from the prior). If the reward model has known biases (the "reward hacking" failure mode), raise `β` (anchor the policy to the prior more strongly). The variational view makes this trade-off explicit.
+
+### Synthesis
+
+Both SAC and RLHF-PPO are variational inference applied to RL. The objective shape `E[reward] - KL(policy || prior)` is the unifying frame. The choice of prior is the design knob:
+
+- **Uniform prior** (SAC) → MaxEnt RL → exploration regularization.
+- **Pretrained-model prior** (RLHF) → fine-tuning anchor → reward-hacking guard.
+- **Demonstration-policy prior** → imitation-bootstrapped RL.
+
+This is what L12 builds out fully: the entire RL problem (not just the entropy or KL bonuses) is variational inference in a graphical model where "the trajectory was optimal" is the evidence we condition on. The bridge from "entropy bonus in objective" to "full Bellman recursion from inference" is what Lesson 12 will derive.
+
+## Flashcards
+
+<FlashcardSet>
+
+<Flashcard question="Derive the ELBO from Jensen's inequality applied to log p(x).">
+
+Start from the log marginal and insert a variational distribution `q(z | x)`:
+
+```
+log p(x) = log ∫ p(x, z) dz
+        = log ∫ q(z | x) · (p(x, z) / q(z | x)) dz
+        = log E_{z ~ q(z | x)} [ p(x, z) / q(z | x) ]
+```
+
+Apply Jensen's inequality (`log E[Y] ≥ E[log Y]` for concave `log`):
+
+```
+log p(x) ≥ E_q [ log p(x, z) - log q(z | x) ]
+       = E_q [ log p(x | z) + log p(z) - log q(z | x) ]
+       = E_q [ log p(x | z) ] - KL(q(z | x) || p(z))
+       = ELBO
+```
+
+The bound is tight when `q(z | x) = p(z | x)` (the true posterior); otherwise the gap is `KL(q(z|x) || p(z|x))`.
+
+</Flashcard>
+
+<Flashcard question="State the closed-form KL divergence between two univariate Gaussians.">
+
+For `q = N(μ_q, σ_q²)` and `p = N(μ_p, σ_p²)`:
+
+```
+KL(q || p) = log(σ_p / σ_q) + (σ_q² + (μ_q - μ_p)²) / (2 σ_p²) - 1/2
+```
+
+Special cases:
+- Same variance, different means: `KL = (μ_q - μ_p)² / (2 σ²)` (with `σ = σ_q = σ_p`).
+- Same mean, different variances: `KL = log(σ_p / σ_q) + σ_q² / (2 σ_p²) - 1/2`.
+
+The KL is asymmetric: `KL(q || p) ≠ KL(p || q)`. **Reverse KL `KL(q || p)`** (the variational-inference objective in the standard ELBO) is **mode-seeking / zero-forcing**: `q` is penalized for putting mass where `p` is small, so `q` concentrates on a mode of `p`. **Forward KL `KL(p || q)`** is **mass-covering / zero-avoiding**: `q` is penalized for failing to cover `p`'s support, so `q` spreads to cover all modes. Variational inference minimizes the reverse KL.
+
+</Flashcard>
+
+<Flashcard question="What is the reparameterization trick and why is it necessary?">
+
+A sampling step `z ~ q_φ(z | x)` is non-differentiable: there is no gradient of "draw a random number" with respect to `φ`.
+
+**Reparameterization** replaces the sampling step with:
+
+```
+z = g_φ(ε, x)   where ε ~ p(ε)   (fixed, parameter-free)
+```
+
+For a Gaussian `q_φ = N(μ_φ(x), σ_φ²(x))`:
+
+```
+z = μ_φ(x) + σ_φ(x) · ε,   ε ~ N(0, 1)
+```
+
+`g_φ` is deterministic in `(ε, x)`; the gradient `∂ELBO/∂φ` passes through it directly. Without reparameterization, you'd need the score-function (REINFORCE) gradient estimator, which has much higher variance.
+
+The trick is what makes VAEs trainable by backpropagation (Kingma & Welling 2014; Rezende et al. 2014). It also underlies the trainable Gaussian actor in SAC.
+
+</Flashcard>
+
+<Flashcard question="How does the entropy bonus in SAC connect to variational inference?">
+
+SAC's objective `E[r(s, a) + α H(π(·|s))]` can be rewritten:
+
+```
+E[r(s, a)] - α · KL(π(·|s) || uniform)   (up to constants)
+```
+
+The entropy bonus `H(π)` is equivalent to the negative KL from `π` to the uniform distribution (since `H(π) = -E[log π(a|s)]` and `-log(1/N) = log N` is constant for uniform with `N` actions).
+
+So SAC is variational policy optimization with:
+- Latent: action `a`
+- Prior: uniform over actions
+- Variational posterior: `π(a | s)`
+- Soft-Boltzmann "likelihood": `exp(r / α)`
+
+The soft Bellman backup `V*(s) = α · log Σ_a exp(Q*(s,a) / α)` is the variational message-passing in this view. Picking a different prior (pretrained model for RLHF; demonstrations for imitation-bootstrap) gives a different algorithm with the same structure.
+
+</Flashcard>
+
+<Flashcard question="When should you use closed-form KL vs Monte Carlo estimation of KL?">
+
+**Use closed-form KL** when both `q` and `p` are in the same parametric family with a known KL formula:
+- Gaussian-to-Gaussian (univariate or diagonal multivariate)
+- Categorical-to-categorical
+- Bernoulli-to-Bernoulli
+- Concentration-mismatched Dirichlets, etc.
+
+**Use Monte Carlo KL estimation** only when:
+- One or both distributions are implicit (e.g., a normalizing flow you can sample from but not evaluate analytically)
+- The closed form is intractable (different families, complex parameterizations)
+
+In modern deep-learning practice, the encoder `q_φ(z | x)` and prior `p(z)` are both Gaussian, so the KL term has a closed form. MC estimation here is wasteful (adds variance for no reason). The reconstruction term `E_q[log p(x | z)]` typically does need MC (because `p(x | z)` is a deep decoder); reparameterization makes this estimator low-variance.
+
+Rule of thumb: closed-form whenever possible; MC only when forced by the model.
+
+</Flashcard>
+
+</FlashcardSet>

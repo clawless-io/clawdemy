@@ -1,0 +1,217 @@
+---
+title: "Practice: Value-based RL (Q-iteration by hand + diagnose the deadly triad)"
+description: "Two exercises: trace Q-iteration on a fresh two-state MDP and verify with the analytic geometric series; classify five RL setups by whether each one risks the deadly triad."
+phase: "core-deep-rl-algorithms"
+phase_order: 1
+order: 6
+last_reviewed: "2026-05-25"
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Exercise 1: Q-iteration by hand, with the dual-path check
+
+A small change to the Lesson 3 worked example, with two design choices that let you test the algorithm against the closed form.
+
+**Setup.** Two states `s0` and `s1`, one action per state, deterministic transitions, `γ = 0.5`.
+
+- From `s0`: reward `R(s0) = 2`, transition to `s1`.
+- From `s1`: reward `R(s1) = 4`, transition to `s0`.
+
+### Part A: derive `V*` analytically (closed form)
+
+Starting at `s0`, you collect reward sequence `2, 4, 2, 4, 2, 4, ...`. With discount `γ`:
+
+`V*(s0) = 2 + γ·4 + γ²·2 + γ³·4 + γ⁴·2 + ...`
+
+Split into even and odd terms:
+
+`V*(s0) = 2·(1 + γ² + γ⁴ + ...) + 4γ·(1 + γ² + γ⁴ + ...) = (2 + 4γ) / (1 − γ²)`
+
+With `γ = 0.5`: numerator `= 2 + 2 = 4`. Denominator `= 1 − 0.25 = 0.75`. So **`V*(s0) = 4 / 0.75 ≈ 5.333`**.
+
+Symmetrically, `V*(s1) = (4 + 2γ) / (1 − γ²) = (4 + 1) / 0.75 = 5 / 0.75 ≈ 6.667`.
+
+Sanity check the Bellman recursion:
+- `V*(s0) = 2 + γ · V*(s1) = 2 + 0.5 · 6.667 = 2 + 3.333 = 5.333` ✓
+- `V*(s1) = 4 + γ · V*(s0) = 4 + 0.5 · 5.333 = 4 + 2.667 = 6.667` ✓
+
+Since there's one action per state, `Q*(s, ·) = V*(s)`, so the targets for Q-iteration are also `5.333` and `6.667`.
+
+### Part B: run Q-iteration for six iterations from `Q_0 = 0`
+
+Update rule (single action ⇒ `max` is trivial): `Q_{k+1}(s) = R(s) + γ · Q_k(s')`.
+
+Fill in the table. Decimals to three places.
+
+| k | Q_k(s0) | Q_k(s1) |
+|---|---------|---------|
+| 0 | 0.000   | 0.000   |
+| 1 | ?       | ?       |
+| 2 | ?       | ?       |
+| 3 | ?       | ?       |
+| 4 | ?       | ?       |
+| 5 | ?       | ?       |
+| 6 | ?       | ?       |
+
+**Solution table** (work through one row at a time before peeking):
+
+| k | Q_k(s0) | Q_k(s1) |
+|---|---------|---------|
+| 0 | 0.000 | 0.000 |
+| 1 | 2.000 | 4.000 |
+| 2 | 4.000 | 5.000 |
+| 3 | 4.500 | 6.000 |
+| 4 | 5.000 | 6.250 |
+| 5 | 5.125 | 6.500 |
+| 6 | 5.250 | 6.563 |
+
+Work shown for row 2: `Q_2(s0) = 2 + 0.5 · Q_1(s1) = 2 + 0.5 · 4 = 4.000`. `Q_2(s1) = 4 + 0.5 · Q_1(s0) = 4 + 0.5 · 2 = 5.000`.
+
+Row 3: `Q_3(s0) = 2 + 0.5 · 5 = 4.500`. `Q_3(s1) = 4 + 0.5 · 4 = 6.000`.
+
+Row 6: `Q_6(s0) = 2 + 0.5 · Q_5(s1) = 2 + 0.5 · 6.500 = 5.250`. `Q_6(s1) = 4 + 0.5 · Q_5(s0) = 4 + 0.5 · 5.125 = 6.563`.
+
+### Part C: dual-path validation (the point of the exercise)
+
+You computed `V*(s0) ≈ 5.333` two different ways:
+
+1. **Closed-form geometric series:** split the reward sequence by parity, sum each geometric series, get `(2 + 4γ)/(1 − γ²) = 5.333`.
+2. **Q-iteration:** apply the Bellman operator repeatedly, watch the values march toward `5.333` (after 6 iterations you're already at `5.250`, error `0.083`).
+
+The error shrinks by `γ² = 0.25` per pair of iterations. Check: row 1 error was `5.333 − 2 = 3.333`. Row 3 error: `5.333 − 4.5 = 0.833`. Ratio: `0.833 / 3.333 = 0.25 ✓`. Row 5 error: `5.333 − 5.125 = 0.208`. Ratio: `0.208 / 0.833 = 0.25 ✓`.
+
+If your iteration converges to a number that does not match the closed form, you have a bug. That's the dual-path validation discipline in action.
+
+## Exercise 2: deadly-triad classifier
+
+For each scenario below, mark which of the three ingredients are present:
+
+- **FA** = function approximation
+- **BS** = bootstrapping
+- **OP** = off-policy data
+
+Then decide: is this setup at risk of the deadly-triad divergence?
+
+### Scenario 1: tabular Q-learning on a 4×4 gridworld, ε-greedy exploration
+
+- FA: ?
+- BS: ?
+- OP: ?
+- At risk? Yes / No
+
+**Answer.** FA: NO (it's a table, no generalization). BS: YES (target uses `max_{a'} Q(s', a')`). OP: YES (data from ε-greedy, target from greedy). **At risk? NO**, because only two of the three are present. Tabular Q-learning is provably convergent (Watkins 1989).
+
+### Scenario 2: Monte Carlo policy evaluation with a neural network on transition data from an old policy
+
+- FA: ?
+- BS: ?
+- OP: ?
+- At risk?
+
+**Answer.** FA: YES (neural net). BS: NO (MC uses full returns, no bootstrapping). OP: YES (old policy data). **At risk? NO**, because BS is missing. The classical counter-examples (Baird's counterexample, Tsitsiklis & Van Roy 1997) all require bootstrapping.
+
+### Scenario 3: on-policy actor-critic with a value-network critic (A2C, fresh data each update)
+
+- FA: ?
+- BS: ?
+- OP: ?
+- At risk?
+
+**Answer.** FA: YES. BS: YES (the critic uses TD bootstrapping, the actor uses the critic's bootstrapped advantage). OP: NO (on-policy by construction). **At risk? NO**, the on-policy guarantee removes the third leg. This is why A2C works without the engineering DQN needs.
+
+### Scenario 4: deep Q-learning on Atari with no replay buffer, no target network
+
+- FA: ?
+- BS: ?
+- OP: ?
+- At risk?
+
+**Answer.** FA: YES (conv net). BS: YES. OP: YES (the target uses the greedy max; the data has ε-greedy stochasticity). **At risk? YES**. This is the configuration the original DQN paper explicitly says diverges. The replay buffer and target network are the patches.
+
+### Scenario 5: PPO on a continuous-control task with a value-network critic
+
+- FA: ?
+- BS: ?
+- OP: ?
+- At risk?
+
+**Answer.** FA: YES. BS: YES (GAE uses bootstrapping). OP: PARTIAL (PPO reuses data for a few epochs, with clipping correction). **At risk? Mostly NO**, the clipping ratio keeps the effective off-policy-ness small. This is the design lesson of PPO: stay near-on-policy to dodge the deadly triad while gaining some sample efficiency.
+
+### Synthesis
+
+Notice the pattern: in 4 of 5 scenarios above, **only two legs of the triad are active**, and the system is fine. Scenario 4 (naive deep Q) hits all three and diverges. Scenario 5 (PPO) deliberately weakens one leg (limited off-policy reuse) to stay safe.
+
+The three DQN engineering tricks you'll meet in Lesson 7 each weaken a specific leg:
+
+- **Replay buffer** weakens the off-policy harm (decorrelates, approximates i.i.d.).
+- **Target network** weakens the bootstrapping (target frozen, stops moving).
+- **Double Q-learning** addresses the related `max`-overestimation bias.
+
+The deadly triad is a useful diagnostic: when an algorithm misbehaves, check which leg is unrestrained.
+
+## Flashcards
+
+<FlashcardSet>
+
+<Flashcard question="Why does the `max` in the Bellman optimality equation make it harder to solve than the regular Bellman equation?">
+
+The regular Bellman equation, `Q^π(s,a) = R + γ E_{a' ~ π}[Q^π(s', a')]`, is **linear** in `Q^π` (the inner expectation is just a weighted average). You can solve it by Gaussian elimination.
+
+The optimality equation `Q*(s,a) = R + γ E_{s'}[max_{a'} Q*(s', a')]` is **non-linear** because of `max`. No closed form; must iterate.
+
+</Flashcard>
+
+<Flashcard question="What makes Q-learning off-policy?">
+
+The **target** uses `max_{a'} Q(s', a')`, the greedy policy. The **data** can come from any policy (typically ε-greedy for exploration). Because the data-generating policy and the target-evaluating policy differ, Q-learning is off-policy by construction.
+
+Note: ε-greedy itself does not make Q-learning off-policy; it's the `max` in the target that does.
+
+</Flashcard>
+
+<Flashcard question="Name the three ingredients of the deadly triad and explain why each one alone is safe.">
+
+1. **Function approximation:** generalizes across states; weight update shifts many `Q` values.
+2. **Bootstrapping:** target depends on current network estimate.
+3. **Off-policy data:** training distribution differs from greedy-policy distribution.
+
+Any two together are safe:
+- FA + BS, on-policy: A2C-style actor-critic. Works fine.
+- FA + OP, no BS: MC methods with function approximation and importance sampling. Works.
+- BS + OP, no FA: tabular Q-learning. Provably converges.
+
+All three at once: can diverge arbitrarily.
+
+</Flashcard>
+
+<Flashcard question="What is the `max` overestimation bias, and what fixes it?">
+
+By Jensen's inequality, `E[max_a X(a)] ≥ max_a E[X(a)]`. When `Q_θ(s', a')` is a noisy estimate, the target `r + γ · max_{a'} Q_θ(s', a')` systematically overestimates.
+
+**Fix:** double Q-learning. Use two networks (`Q_θ` and `Q_{θ'}`). One selects the action; the other evaluates it: target = `r + γ · Q_{θ'}(s', argmax_{a'} Q_θ(s', a'))`. The selection noise and evaluation noise become independent, breaking the bias.
+
+</Flashcard>
+
+<Flashcard question="When should you pick value-based RL (Q-branch) over policy-gradient (π-branch)?">
+
+Pick Q-branch when:
+- Action space is **discrete and small** (`max_a` is cheap).
+- You want a **deterministic optimal policy**.
+- You can reuse **off-policy data** (replay buffer, demonstrations).
+
+Examples: Atari, board games, gridworlds.
+
+Pick π-branch when:
+- Action space is **continuous** or huge.
+- Optimal policy is naturally **stochastic** (multi-agent, partial observability).
+- Fresh on-policy samples are affordable.
+
+Examples: robotics, RLHF fine-tuning of language models.
+
+Modern systems often hybridize (SAC, IMPALA).
+
+</Flashcard>
+
+</FlashcardSet>

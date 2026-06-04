@@ -1,0 +1,58 @@
+---
+title: "Summary: PPO (the on-policy resolution to the deadly triad)"
+description: "Five-minute distillation. PPO replaces TRPO's hard KL constraint with a clipped surrogate; the asymmetric clip caps the upside but not the downside; the result is the RLHF workhorse."
+phase: "core-deep-rl-algorithms"
+phase_order: 3
+order: 8
+last_reviewed: "2026-05-25"
+---
+
+## The one paragraph version
+
+PPO is the on-policy alternative to DQN's off-policy engineering. Same stability goal (deep RL without divergence), totally different mechanism: instead of patching the off-policy leg of the deadly triad with engineering tricks, stay near-on-policy by construction and clip how much the policy can change per update epoch. The probability ratio `r_t(θ) = π_θ(a_t|s_t) / π_{θ_old}(a_t|s_t)` measures the policy shift; the surrogate `E[r · A]` is correct when `r ≈ 1` and degrades as `r` drifts. TRPO enforces this with a hard KL constraint and a natural-gradient solver. PPO replaces both with a single clipped objective `L^CLIP = E[min(r · A, clip(r, 1 - ε, 1 + ε) · A)]`, typically `ε = 0.2`. The asymmetric clip caps the **upside** for over-shooting in the good direction (no extra reward for pushing past the trust boundary) but does **not** cap the **downside** for over-shooting in the bad direction (full loss still registered). This conservative-without-being-timid behavior, combined with simplicity of implementation, made PPO the workhorse of modern RLHF: every major instruction-tuned language model since 2022 was finetuned with PPO or a close variant.
+
+## Five things to remember
+
+1. **PPO is the on-policy resolution to the deadly triad.** DQN patches off-policy with engineering; PPO avoids off-policy by construction (limited reuse only, via importance sampling) and clips the policy change per epoch.
+2. **The importance ratio `r_t(θ) = π_θ / π_{θ_old}`** corrects for distribution mismatch. The surrogate `r · A` is exact at `θ_old`, degrades as `r` drifts. PPO keeps `r` near `1`.
+3. **The clipped surrogate `L^CLIP = E[min(r · A, clip(r, 1-ε, 1+ε) · A)]`** with `ε = 0.2` replaces TRPO's KL constraint. Simpler to implement, almost as good empirically.
+4. **The asymmetric clip behavior**: cap the upside (no extra reward beyond `1 + ε` for good actions or below `1 - ε` for bad actions), do not cap the downside (full loss still registered for clearly bad moves like `A < 0, r > 1 + ε`). The asymmetry is the design choice.
+5. **PPO is the RLHF workhorse**: vocabulary-sized action spaces make DQN infeasible; on-policy rollouts fit autoregressive generation; the trust region constrains reward hacking. Foundational for InstructGPT (2022) and every modern instruction-tuned LLM.
+
+## Why this matters
+
+The L6 → L7 → L8 triplet completes the picture of why deep RL took its current shape:
+
+- **L6** named the deadly triad (FA + BS + OP) as the failure mode.
+- **L7** showed the off-policy resolution: DQN's engineering tricks (replay buffer, target net, double-Q) patch each leg of the triad.
+- **L8** shows the on-policy resolution: PPO avoids the off-policy leg by construction, clips per-epoch policy change, gets the trust-region effect without TRPO's constrained-optimization machinery.
+
+These two resolutions explain the current algorithm zoo. Discrete-action games (Atari, Go) → Q-family (DQN, Rainbow). Continuous control (robotics, MuJoCo) → actor-critic (SAC, PPO). LLM fine-tuning (RLHF) → PPO. Each algorithm choice maps to which legs of the triad you're willing to engineer around vs avoid by construction.
+
+## Worked check (memory anchor)
+
+For one (s, a) pair with `A = +1` and `ε = 0.2`:
+
+- `r = 1.0`: `L^CLIP = 1.0` (no clip).
+- `r = 1.2`: `L^CLIP = 1.2` (boundary).
+- `r = 1.5`: `L^CLIP = 1.2` (clipped; gradient zero beyond this).
+- `r = 2.0`: `L^CLIP = 1.2` (clipped; gradient zero).
+
+For `A = -1` and `ε = 0.2`:
+
+- `r = 0.5`: `L^CLIP = -0.8` (clipped to floor).
+- `r = 1.0`: `L^CLIP = -1.0` (no clip).
+- `r = 1.5`: `L^CLIP = -1.5` (unclipped; full loss registered).
+
+The asymmetry on the `r > 1.2` row for `A = -1` is what makes PPO conservative without being timid. The optimizer always pays for clearly bad moves; it just never gets bonus credit for over-aggressive good moves.
+
+## Where this fits
+
+- **Previous (Lesson 7):** DQN. Off-policy resolution via engineering.
+- **This lesson:** PPO. On-policy resolution via clipping.
+- **Next (Lesson 9):** Model-based RL: learning a model `P(s' | s, a)`. The P branch of the dispatch table; the third major family alongside policy and value methods.
+- **Later (Lesson 13):** RLHF deep-dive. PPO applied to language model fine-tuning, with the KL-to-pretrained term added on top.
+
+## What you should remember
+
+PPO is the algorithm that made deep RL practical for production systems by trading TRPO's theoretical tightness for engineering simplicity. The clipped surrogate is the workhorse; the asymmetric design is what makes it work. Every LLM you have ever interacted with that was finetuned for instructions used a variant of this algorithm to learn from human preferences.

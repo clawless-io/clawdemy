@@ -1,0 +1,88 @@
+---
+title: "Cheatsheet: Offline RL algorithms (BCQ, CQL, IQL)"
+description: One-page reference. Three algorithms side by side, mechanism, what they train, decision rubric, and the BC sanity check.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+---
+
+## The three algorithms side by side
+
+| Algorithm | Paper | Mechanism | Networks trained |
+|---|---|---|---|
+| **BCQ** | Fujimoto, Meger, Precup 2019 | Constrain the policy to actions a VAE generates from the dataset | VAE p(a\|s), perturbation, Q (or double-Q) |
+| **CQL** | Kumar, Zhou, Tucker, Levine 2020 | Penalize Q at OOD actions; push up Q at in-distribution actions | Q (or double-Q) with conservative loss term |
+| **IQL** | Kostrikov, Nair, Levine 2021 | Replace max with expectile regression on in-distribution actions only; policy is advantage-weighted imitation | V (state value), Q, policy |
+
+## What each prevents
+
+| Failure source | BCQ | CQL | IQL |
+|---|---|---|---|
+| Max selects OOD action | Action set restricted to VAE samples | OOD Q-values penalized below in-distribution Q | Max not used at all |
+| Function approximator extrapolates | Constrained at the action level | Penalized at the value level | Avoided by expectile design |
+| Bellman propagation amplifies | Inflation cannot enter (action set is constrained) | Inflation is bounded (lower-bound Q) | No path for inflation (max is replaced) |
+
+## Decision rubric
+
+| Setting | Recommended | Why |
+|---|---|---|
+| Single, well-defined behavior policy | BCQ | Single-modal action distribution maps cleanly onto a VAE |
+| Heterogeneous mixture of behavior policies | CQL | Per-state Q penalty handles multi-modal data |
+| Continuous high-dimensional actions | IQL | Avoids costly max-over-actions evaluation |
+| First try on standard benchmark | IQL | Simplest tuning, strongest defaults on D4RL |
+| Theoretical lower bound on Q is required | CQL | Provable conservative bound |
+| Tight integration with BC baseline | IQL | Advantage-weighted regression is closest to BC + advantage filtering |
+| Regulated setting requiring explicit action constraint | BCQ | The action constraint is the safety story |
+
+## CQL loss (the most opaque of the three)
+
+The total objective:
+
+```
+L = E over (s,a,r,s') of (Q(s,a) - target)²
+    + alpha · E over s of (log-sum-exp over a' of Q(s,a')) - Q(s,a))
+```
+
+- First term: standard Bellman error.
+- Second term: the conservative penalty.
+  - log-sum-exp picks up the highest-Q actions (typically OOD), pushing them down.
+  - Minus Q at the in-distribution action pushes that value up.
+- alpha controls penalty strength. Tune against BC baseline.
+
+## IQL three-loss training
+
+```
+L_V = E over (s,a) of expectile_tau(Q(s,a) - V(s))     [expectile regression on dataset Q]
+L_Q = E over (s,a,r,s') of (Q(s,a) - (r + gamma · V(s')))²    [Bellman with V(s'), no max]
+L_policy = E over (s,a) of exp(beta · (Q(s,a) - V(s))) · log policy(a|s)    [advantage-weighted imitation]
+```
+
+- tau approaching 1 makes V(s) act as a max-over-in-distribution-actions surrogate.
+- beta controls how strongly to upweight high-advantage dataset actions.
+- No max anywhere.
+
+## BCQ deployment loop
+
+At state s:
+1. Sample N candidate actions from VAE p(a | s).
+2. Perturb each via the perturbation network.
+3. Evaluate Q at each (s, perturbed action).
+4. Return the action with the highest Q.
+
+The Q-network is only ever evaluated at near-in-distribution actions.
+
+## Common pitfalls
+
+- Treating BCQ, CQL, IQL as interchangeable (mechanism and best-use differ)
+- Ignoring the single-modal-behavior-policy assumption in BCQ
+- Under-tuning alpha in CQL (the original-paper default is not always right)
+- Over-trusting IQL's defaults (tau and beta still matter on production data)
+- Skipping the BC sanity check (every offline-RL deploy must beat BC on the same dataset)
+
+## What you should remember
+
+- One design principle, three mechanisms: prevent the Bellman update from querying Q at OOD actions.
+- BCQ: action constraint via VAE. CQL: conservative Q penalty. IQL: expectile regression sidesteps the max.
+- Decision rubric matters: BCQ for single-modal, CQL for heterogeneous, IQL for continuous-action or first-try defaults.
+- Always benchmark against BC; offline RL must exceed it to justify the engineering cost.

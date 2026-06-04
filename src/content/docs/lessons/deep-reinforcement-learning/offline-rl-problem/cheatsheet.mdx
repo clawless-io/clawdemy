@@ -1,0 +1,94 @@
+---
+title: "Cheatsheet: Offline RL, the problem"
+description: One-page reference. Offline vs off-policy vs online distinction; extrapolation error mechanism; two-state worked example numbers; BC bound; fix preview (BCQ / CQL / IQL).
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+---
+
+## Three settings, one table
+
+| Setting | New data per step | Behavior policy | Failure mode |
+|---|---|---|---|
+| **Online** | Yes, from the current policy | Same as training policy | Sample efficiency only |
+| **Off-policy (online interaction)** | Yes, from any policy | Different from training policy | Drift, partial corrections, DQN-style fixes work |
+| **Offline** | No (dataset is fixed) | Different from training policy | Extrapolation error + Bellman amplification, naive Q-learning diverges |
+
+## The naive offline Q-learning failure mechanism
+
+Bellman target: `target = r + gamma · max over a' of Q(s', a')`
+
+The max selects the action with the highest Q-value at the next state. In offline data:
+- Some (state, action) pairs are in-distribution (the dataset has them).
+- The rest are out-of-distribution (OOD). The function approximator extrapolates a Q-value for these.
+
+If an OOD action has an inflated extrapolated Q-value (often the case, since the max is biased toward overestimates), the Bellman update at the previous state inherits that inflated value as its target. The inflation propagates backward. With no environment to provide the actual reward at the OOD action, the inflation persists and amplifies across training iterations. The Q-function diverges; the greedy policy prefers OOD actions; deployment performance is much worse than the behavior policy.
+
+## Three sources of extrapolation error
+
+1. **Function approximation extrapolates without signal.** Neural networks output a value for any input; there is no built-in uncertainty estimate that distinguishes "in-distribution" from "OOD."
+2. **The max operator is biased toward overestimates.** Whatever the network's noise, the max picks the upper tail. Already known from double-Q's motivation, now compounded by no online correction.
+3. **Bellman propagation amplifies the error.** An inflated value at one state becomes the Bellman target at the previous state, then the previous, and so on across iterations.
+
+## Why online correction is not available offline
+
+| Online correction channel | Open online? | Open offline? |
+|---|---|---|
+| Policy explores and observes true reward at inflated-Q action | Yes (epsilon-greedy and similar) | No (no acting allowed) |
+| Replay buffer refreshes with current-policy distribution | Yes (FIFO eviction or prioritized) | No (dataset is fixed) |
+| Bounded number of iterations between policy update and ground-truth feedback | Yes (a few rollouts later) | No (no feedback ever) |
+
+## Worked example numbers
+
+Two-state, two-action MDP, gamma = 0.9:
+
+| (state, action) | Reward | Next state | Dataset coverage |
+|---|---|---|---|
+| (s1, a1) | 0 | s2 | 80 of 100 |
+| (s1, a2) | 0 | s1 | 20 of 100 |
+| (s2, a1) | 1 | terminal | All s2 visits |
+| (s2, a2) | -10 | terminal | NEVER observed |
+
+Initial Q values 0; function approximator extrapolates Q(s2, a2) = 5.
+
+| Quantity | Value |
+|---|---|
+| Behavior policy expected discounted return at s1 (γ=0.9, with the a2-at-s1 self-loop) | ≈ 0.878 |
+| Optimal policy expected discounted return at s1 | 0.9 |
+| Diverged Q-function: Q(s1, a1) | ~4.5 |
+| Diverged Q-function: Q(s2, a2) | ~5 (extrapolated, never corrected) |
+| Greedy policy expected discounted return at deployment (γ=0.9) | -9 |
+| Gap (diverged policy vs behavior policy) | ≈ -9.878 |
+
+## Behavioral cloning baseline
+
+| Property | Behavioral cloning | Naive offline Q-learning | Offline RL (L15) |
+|---|---|---|---|
+| Stays in-distribution | Yes (by construction) | No (max picks OOD) | Yes (by constraint or penalty) |
+| Can exceed behavior policy | No (bounded by BC) | Sometimes catastrophically below | Yes (the design goal) |
+| Reasons about value | No (pure supervised) | Yes (Bellman) | Yes (Bellman + constraint/penalty) |
+| Practical complexity | Trivial | Trivial but broken | Moderate, well-defined |
+
+## The fix (L15 preview)
+
+| Approach | Mechanism | What it constrains |
+|---|---|---|
+| **BCQ** (Fujimoto et al. 2019) | Action-set constraint: policy only takes actions the behavior policy would have taken | Policy never queries Q at OOD actions |
+| **CQL** (Kumar et al. 2020) | Conservative penalty: training objective penalizes high Q-values at OOD actions | Q-values at OOD actions are pushed down; max no longer selects them |
+| **IQL** (Kostrikov et al. 2021) | Expectile regression: replaces max with an expectile estimate using only in-distribution actions | The Bellman target never references OOD actions |
+
+## Common pitfalls
+
+- Conflating off-policy with offline (the textbook confusion)
+- Believing a large dataset solves the problem (it does not, OOD-action surface scales with action space)
+- Treating offline RL as supervised learning with reward (it is not, Bellman update is still active)
+- Underestimating extrapolation error empirically (it may not appear in early iterations)
+- Treating BC as automatic, when it is the explicit baseline an offline-RL deploy must beat
+
+## What you should remember
+
+- Offline RL: fixed dataset, no further interaction. Strictly harder than off-policy RL.
+- Naive Q-learning diverges via extrapolation error + Bellman amplification.
+- BC is the safe-but-bounded baseline.
+- L15 introduces BCQ / CQL / IQL as the three families that fix the failure by different mechanisms.

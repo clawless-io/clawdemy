@@ -1,0 +1,70 @@
+---
+title: "Practice: Offline RL algorithms (BCQ, CQL, IQL)"
+description: Pick the right algorithm for four datasets; trace how each algorithm prevents the L14 divergence on the two-state MDP; five flashcards covering mechanisms and decision criteria.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Exercise 1: Pick the algorithm
+
+For each dataset, pick BCQ, CQL, or IQL and justify in two sentences.
+
+1. A single autonomous-vehicle operator collected three months of logs with one deployed policy. The behavior distribution is roughly single-modal at each state.
+2. A medical-claims dataset spans seven years of policy changes; different vintages of treatment guidelines produced quite different action distributions at the same patient state.
+3. A continuous robotic-arm dataset with 24-dimensional actions, recorded from a teleoperated demonstration setup. The action space is large but the demonstrator is consistent.
+4. A first attempt on the D4RL Hopper benchmark with no prior tuning experience and a deadline.
+
+### Answers
+
+1. **BCQ.** Single-modal behavior policy maps cleanly onto the VAE's generative model. The action constraint will keep the policy near the deployed-vehicle distribution, which is the right safety property here.
+2. **CQL.** Heterogeneous mixture of behavior policies breaks BCQ's single-VAE assumption. CQL's per-state penalty handles multi-modal data without needing to model the behavior policy explicitly. The conservative lower bound is also operationally helpful for a regulated setting.
+3. **IQL.** Continuous high-dimensional actions make the max-over-actions step costly in BCQ and CQL. IQL sidesteps the max via expectile regression; the policy is advantage-weighted imitation, which composes cleanly with the consistent demonstrator data.
+4. **IQL.** Simplest tuning surface (one expectile tau, one beta), strongest default performance on the D4RL suite, fewest sources of "wrong default" failure under deadline pressure.
+
+## Exercise 2: Walk-through on the two-state MDP
+
+The L14 MDP and dataset:
+
+```
+At s1, action a1: reward 0, transitions to s2
+At s1, action a2: reward 0, transitions to s1
+At s2, action a1: reward 1, terminal
+At s2, action a2: reward -10, terminal
+
+Dataset never observes (s2, a2). Naive Q-learning extrapolates Q(s2, a2) = 5 and diverges.
+```
+
+For each algorithm, describe in 3-5 sentences how it prevents the divergence at state s2.
+
+### Answers
+
+**BCQ.** The VAE learns p(a | s) from the dataset. At s2, the dataset only contains (s2, a1) transitions, so the VAE puts essentially all probability mass on a1. When BCQ queries actions at s2, the VAE samples a1 every time; the perturbation network adjusts slightly but cannot push to a2. The Q-network is only evaluated at (s2, a1) and the max trivially picks a1. The Bellman target at s1 uses gamma times Q(s2, a1), and Q(s2, a1) is grounded at reward 1.
+
+**CQL.** The conservative penalty adds (log-sum-exp over actions of Q(s2, a) minus Q(s2, a1)) to the loss. The log-sum-exp is dominated by whichever action has the highest Q, which would be a2 if its extrapolated value persisted. The penalty pushes Q(s2, a2) down. After training, Q(s2, a1) > Q(s2, a2). The max at s2 now picks a1; the Bellman target at s1 propagates Q(s2, a1) instead of the inflated Q(s2, a2). The divergence is prevented because the penalty has shaped the Q-function so the max no longer prefers the OOD action.
+
+**IQL.** V(s2) is trained via expectile regression on Q at dataset actions at s2. The only dataset action at s2 is a1, so V(s2) is essentially Q(s2, a1), approximately 1. The Bellman target at s1 uses V(s2) directly (no max anywhere). The Q-network at s1 is updated toward gamma times V(s2) = 0.9, never queries Q at any action at s2. The policy is advantage-weighted imitation, which assigns weight to a1 at s2 (the only observed dataset action). The OOD-action question never arises in the training pipeline.
+
+## Flashcards
+
+<FlashcardSet>
+  <Flashcard question="What design principle do BCQ, CQL, and IQL share?">
+    All three prevent the Bellman update from querying Q at out-of-distribution actions, which is what causes naive offline Q-learning to diverge. BCQ does this by constraining the action set to plausible behavior-policy actions; CQL does it by penalizing Q-values at OOD actions so the max no longer selects them; IQL does it by replacing the max with an expectile regression that references only in-distribution actions. Mechanism differs; goal is shared.
+  </Flashcard>
+  <Flashcard question="What does BCQ train and how does it act at deployment?">
+    BCQ trains three networks: a VAE that learns p(a | s) from the dataset (the generative model of the behavior policy), a perturbation network that nudges sampled actions toward higher Q-values without straying from the VAE's support, and a Q-network. At deployment, BCQ samples N candidate actions from the VAE at the current state, perturbs each, evaluates Q on each, and picks the highest-Q action. The Q-network is only ever queried at near-in-distribution actions, so the max never selects an extrapolated value.
+  </Flashcard>
+  <Flashcard question="What does CQL add to the standard Q-loss and what is the trained Q a bound on?">
+    CQL adds a conservative penalty: alpha times (log-sum-exp over actions of Q minus Q at the dataset action). The penalty pushes down Q at the highest-value actions at each state (which are the OOD actions extrapolated to inflated values) and pushes up Q at the in-distribution action that was actually observed. After training, the learned Q-function is a provable lower bound on the true Q for any in-distribution policy. The max over this conservative Q never prefers OOD actions because their values have been penalized below in-distribution values.
+  </Flashcard>
+  <Flashcard question="How does IQL avoid the max operator entirely?">
+    IQL trains a state-value V(s) via expectile regression on Q-values at dataset actions; with the expectile parameter tau approaching 1, V(s) estimates the upper expectile of Q over in-distribution actions, which acts as a max-over-in-distribution-actions surrogate. The Bellman target then uses V(s') instead of max over a' of Q(s', a'). Neither the V-loss nor the Bellman target queries Q at out-of-distribution actions; the policy is trained as advantage-weighted imitation of the dataset's actions. No max anywhere in the pipeline; the OOD-action question is structurally avoided.
+  </Flashcard>
+  <Flashcard question="When would you pick BCQ over CQL or IQL?">
+    Pick BCQ when the behavior policy is single-modal and well-defined enough to be learnable by a VAE, and when you want the explicit action constraint as a safety property (the policy at deployment never tries an action the behavior policy would not have plausibly taken). BCQ degrades to near-BC performance on heterogeneous datasets where the VAE cannot model the multi-modal action distribution well; in those cases CQL is the better choice. For continuous high-dimensional actions, IQL is typically more practical because BCQ's max-over-N-VAE-samples becomes expensive.
+  </Flashcard>
+</FlashcardSet>

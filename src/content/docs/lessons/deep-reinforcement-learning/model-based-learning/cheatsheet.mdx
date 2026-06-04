@@ -1,0 +1,114 @@
+---
+title: "Cheatsheet: Model-based RL, learning the dynamics"
+description: "One-page reference: model classes, least-squares fit, compounding error, Dyna architecture, decision rubric."
+phase: "core-deep-rl-algorithms"
+phase_order: 4
+order: 9
+last_reviewed: "2026-05-25"
+---
+
+## The P-branch of the dispatch table
+
+| Branch | Estimate | Lessons |
+|--------|----------|---------|
+| π | Policy directly | L4 REINFORCE, L5 actor-critic, L8 PPO |
+| V | State value | L5 (critic in actor-critic) |
+| Q | Action value | L6, L7 DQN |
+| A | Advantage | L5, L8 (advantage in PPO) |
+| **P** | **Dynamics model `P(s' | s, a)`** | **L9 (learn) + L10 (plan)** |
+
+## Why model-based?
+
+| Metric | Model-based | Model-free |
+|--------|-------------|------------|
+| Sample efficiency | 10× to 100× better | Baseline |
+| Asymptotic performance | Model bias caps it | Eventually optimal |
+| Per-step compute | Higher (re-plan) | Lower |
+| Robustness to bad model | Fragile | N/A |
+
+When samples are expensive (real robots), model-based wins. When samples are cheap (Atari), model-free wins.
+
+## Model classes
+
+| Class | Form | Fit | When to use |
+|-------|------|-----|-------------|
+| Linear-Gaussian | `P(s'|s,a) = N(As + Ba + c, Σ)` | Closed-form least-squares | LQR, local linearization (iLQR) |
+| Deterministic NN | `ŝ' = f_θ(s, a)` | MSE | Deterministic or low-noise dynamics |
+| Probabilistic NN | `N(μ_θ(s,a), Σ_θ(s,a))` | NLL | Aleatoric (irreducible) noise |
+| Ensemble of probabilistic NNs | K independent networks | NLL per network | PETS; captures both aleatoric and epistemic |
+
+## Linear-Gaussian fit by least squares
+
+```
+[Â, B̂] = (X^T X)^{-1} X^T Y
+```
+
+where `X` is `N × (dim_s + dim_a)` with rows `[s_i, a_i]` and `Y` is `N × dim_s` with rows `s_i'`.
+
+**Verification:** with `A_true = 0.5, B_true = 1.0`, five zero-noise samples from the lesson recover `[Â, B̂] = [0.5, 1.0]` to the digit. Closed-form math computes:
+- `X^T X = [[6.25, -2.5], [-2.5, 3.25]]`, det = 14.0625
+- `X^T Y = [0.625, 2.0]`
+- `(X^T X)^{-1} · X^T Y = [0.5, 1.0]` ✓
+
+## Compounding error (the dominant failure mode)
+
+With `A_true = 1.1, Â = 1.05` (5% bias), rolling from `s_0 = 1`, action `a = 0`:
+
+| t | True | Model | Error |
+|---|------|-------|-------|
+| 0 | 1.0000 | 1.0000 | 0.0000 |
+| 1 | 1.1000 | 1.0500 | 0.0500 |
+| 2 | 1.2100 | 1.1025 | 0.1075 |
+| 3 | 1.3310 | 1.1576 | 0.1734 |
+| 4 | 1.4641 | 1.2155 | 0.2486 |
+| 5 | 1.6105 | 1.2763 | 0.3342 |
+
+5% one-step error → 21% five-step relative error → 37% ten-step relative error (computed as `1 - (Â/A_true)^t`). Geometric blowup; model is **useless** for planning past horizon ~5 even with seemingly small bias.
+
+## Mitigations
+
+| Mitigation | What it does | Algorithm |
+|------------|--------------|-----------|
+| Short rollout horizon (1-5 steps) | Cap compounding | MBPO |
+| Ensemble disagreement | Detect epistemic uncertainty | PETS |
+| Probabilistic rollouts | Propagate uncertainty visibly | PETS, Dreamer |
+| Re-plan frequently | Only need accuracy over H-step planning horizon | MPC |
+
+## Dyna architecture (Sutton 1991)
+
+```
+For each step:
+  1. Act in real env; observe transition; add to D
+  2. Update model on D
+  3. For K imagined steps:
+     Sample (s, a) from D or roll out via model
+     Use model to predict s', r
+     Update π on imagined transition
+```
+
+K = 0 ⇒ model-free RL. K large ⇒ heavy reliance on model. MBPO uses small K with short rollouts.
+
+## Decision rubric
+
+| Use model-based | Use model-free |
+|-----------------|----------------|
+| Real robots | Atari games |
+| Continuous-control physics | Pixel-input control |
+| Limited sample budget | Unlimited sample budget |
+| Short planning horizons (MPC) | One-shot policy |
+| Smooth, learnable dynamics | Hard-to-model dynamics (language, vision) |
+
+## Common pitfalls
+
+- Trusting the fit when validation error is high
+- Rolling past where the model is reliable (compounding error)
+- Confusing aleatoric (per-network `Σ`) with epistemic (ensemble disagreement) uncertainty
+- Using a deterministic model for stochastic dynamics
+- Forgetting that data distribution must cover the (s, a) regions the policy will visit
+
+## What you should remember
+
+- Least-squares fit is closed-form for linear-Gaussian; the same loss with SGD trains neural net dynamics.
+- Compounding error is the binding constraint; "small 1-step error" is not enough.
+- Short rollouts + ensemble uncertainty + frequent re-planning are the standard fixes.
+- PETS, MBPO, Dreamer, MuZero are the canonical modern recipes.

@@ -1,0 +1,211 @@
+---
+title: "Practice: RL fundamentals (MDPs, value functions, Bellman)"
+description: A self-check on the MDP tuple and value functions, a pen-and-paper Bellman-equation solve on a fresh 2-state MDP, an MDP-vs-non-Markov scenario drill, and flashcards built for retrieval.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Six short questions. Answer each one in your head (or on paper) before opening the collapsible. Trying to retrieve the answer is where the learning sticks; rereading feels productive but does much less.
+
+**1. State the five components of an MDP and what each does.**
+
+<details>
+<summary>Show answer</summary>
+
+`(S, A, P, R, γ)`: **`S`** is the set of states; **`A`** is the set of actions; **`P(s' | s, a)`** is the transition function (probability of `s'` given `(s, a)`); **`R(s, a)`** is the reward function (the number the environment hands back); **`γ ∈ [0, 1)`** is the discount factor. The full RL problem is defined by this tuple; every algorithm in the track is acting in or learning about one.
+
+</details>
+
+**2. What is the Markov property, and what kind of thing is it a property of?**
+
+<details>
+<summary>Show answer</summary>
+
+`P(s_(t+1), r_t | s_t, a_t, history) = P(s_(t+1), r_t | s_t, a_t)`: the future is independent of the past given the present state and action. It is a property of **the state representation**, not of the world. One Atari frame is not a Markov state (you cannot tell which direction the ball is moving); four stacked consecutive frames is, which is why the original DQN paper stacked four frames. Choosing a Markov state is a design decision.
+
+</details>
+
+**3. Distinguish `V^π(s)`, `Q^π(s, a)`, and `A^π(s, a)` in one sentence each.**
+
+<details>
+<summary>Show answer</summary>
+
+**`V^π(s)`**: the expected return starting in state `s` and following policy `π`. **`Q^π(s, a)`**: the expected return starting in state `s`, taking action `a`, and then following `π`. **`A^π(s, a) = Q^π(s, a) - V^π(s)`**: the advantage, how much better action `a` is than what `π` would do on average from state `s`. The advantage shows up in every advanced policy-gradient method because it has lower variance than the bare return.
+
+</details>
+
+**4. Write the Bellman equation for `Q^π(s, a)` and explain in words what each side says.**
+
+<details>
+<summary>Show answer</summary>
+
+```
+Q^π(s, a) = R(s, a) + γ · Σ over s' of P(s' | s, a) · V^π(s')
+```
+
+The left side is the expected return starting from `(s, a)` and then following `π`. The right side decomposes it: the immediate reward `R(s, a)` plus the discounted expected value of where you land next, averaged over the transition probability `P(s' | s, a)`. Bellman is the recursion that says "return now = reward now + discounted return from next state."
+
+</details>
+
+**5. Why is the Bellman optimality equation harder to solve than the policy-evaluation Bellman equation?**
+
+<details>
+<summary>Show answer</summary>
+
+The policy-evaluation Bellman equation `V^π(s) = Σ_a π(a|s) [R(s,a) + γ Σ_(s') P(s'|s,a) V^π(s')]` is **linear** in the unknowns `V^π(s)` for a fixed policy `π`, so for a finite MDP you can solve it as a system of linear equations. The Bellman optimality equation `V*(s) = max_a [R(s,a) + γ Σ P(s'|s,a) V*(s')]` has a `max` outside, which makes it **non-linear** (no closed form). It is solved iteratively (value iteration, policy iteration in classical RL; Q-learning + neural nets in deep RL).
+
+</details>
+
+**6. What single question lets you parse a deep-RL paper, given the MDP framing?**
+
+<details>
+<summary>Show answer</summary>
+
+"What is this method estimating, and how is it improving the estimate?" The answer is always one of **`π`** (policy-gradient family: gradient ascent on return), **`V`** or **`Q`** (value-based family: minimize Bellman error, act greedily), **`A^π = Q^π - V^π`** (advanced policy-gradient family: variance-reduced signal for the policy), or **`P(s'|s,a)`** (model-based family: supervised regression on transitions, then plan). The dispatch table covers every algorithm in the rest of this track.
+
+</details>
+
+## Try it yourself, part 1: solve a Bellman system
+
+Pen and paper (a calculator helps), about 6 minutes. A 2-state MDP with one action available in each state:
+
+```
+states:   { s0, s1 }
+action:   "go" (only choice)
+dynamics: s0 --go--> s1   reward 2
+          s1 --go--> s0   reward 4
+discount: γ = 0.5
+```
+
+**Steps.** (1) Write the Bellman equations for `V(s0)` and `V(s1)` under the (trivial) policy. (2) Solve the system for `V(s0)` and `V(s1)`. (3) Sanity-check `V(s0)` against the discounted geometric sum of the actual reward sequence starting from `s0`.
+
+<details>
+<summary>Show answer</summary>
+
+**Bellman equations** (single action, so no policy expectation):
+
+```
+V(s0) = 2 + γ · V(s1)
+V(s1) = 4 + γ · V(s0)
+```
+
+**Solve** by substitution:
+
+```
+V(s0) = 2 + γ · ( 4 + γ · V(s0) )
+      = 2 + 4γ + γ² · V(s0)
+V(s0) · (1 - γ²) = 2 + 4γ
+V(s0) = (2 + 4γ) / (1 - γ²)
+```
+
+Plug in `γ = 0.5` (so `γ² = 0.25`, `1 - γ² = 0.75`):
+
+```
+V(s0) = (2 + 4·0.5) / 0.75 = (2 + 2) / 0.75 = 4 / 0.75 ≈ 5.333
+V(s1) = 4 + 0.5 · V(s0) = 4 + 0.5 · 5.333 ≈ 4 + 2.667 = 6.667
+```
+
+**Geometric sanity check** for `V(s0)`. Starting from `s0`, the reward sequence is `2, 4, 2, 4, 2, 4, ...` (alternating). The discounted return is
+
+```
+V(s0) = 2 + γ·4 + γ²·2 + γ³·4 + γ⁴·2 + γ⁵·4 + ...
+      = (2 + γ²·2 + γ⁴·2 + ...) + γ·(4 + γ²·4 + γ⁴·4 + ...)
+      = 2 / (1 - γ²) + γ · 4 / (1 - γ²)
+      = (2 + 4γ) / (1 - γ²)
+```
+
+At `γ = 0.5`: `(2 + 2) / 0.75 = 5.333` ✓. The Bellman system and the geometric expansion agree, as they must.
+
+</details>
+
+## Try it yourself, part 2: is this a Markov state?
+
+About 4 minutes. For each scenario, decide whether the proposed state representation satisfies the Markov property (the next state and reward depend only on the current state and action), and give a one-line reason.
+
+1. Chess agent. **State:** the current board position (piece locations + whose turn).
+2. Atari agent. **State:** a single most-recent screen frame.
+3. Atari agent. **State:** the four most-recent screen frames stacked.
+4. Robot arm in a noisy environment. **State:** current joint angles only (no velocities, no accelerations).
+5. Multi-turn language agent. **State:** the user's most recent message only (no conversation history).
+
+<details>
+<summary>Show answer</summary>
+
+1. **Markov.** A chess position contains all information needed to compute future legal moves and outcomes (under standard rules; technically also need castling rights and en-passant flags, which are part of the standard state). The history is irrelevant given the position.
+2. **Not Markov.** A single frame omits motion: you cannot tell which direction the ball is moving, so the same frame can lead to different next frames. The Markov assumption is violated.
+3. **Markov (effectively).** Four stacked frames let the network infer velocity (the difference between consecutive frames). This is precisely why the original DQN paper stacked four frames; the state representation was chosen to make the assumption hold.
+4. **Not Markov.** Joint *positions* alone do not tell you how fast the arm is moving, so the same position can lead to different futures depending on its velocity. Real robot state representations include velocities (and sometimes accelerations or forces) for this reason.
+5. **Not Markov.** A multi-turn conversation has structure that depends on what was said earlier; without history, the same most-recent message can lead to different correct responses depending on the rest of the conversation. Real LLM agents condition on the full conversation history, which restores the property.
+
+The discriminator: ask "given my proposed state, does the past add any information about the future?" If yes, the representation is not Markov, and you need to enrich it (frame stacks, velocities, history).
+
+</details>
+
+## Flashcards
+
+Nine cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay out the full set as one card per page, ready to print or save as a PDF for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="What are the five components of an MDP?">
+
+`(S, A, P, R, γ)`: states `S`, actions `A`, transition function `P(s' | s, a)`, reward function `R(s, a)`, discount factor `γ ∈ [0, 1)`. The full RL problem is defined by this tuple.
+
+</Flashcard>
+
+<Flashcard question="What is the Markov property, and is it a property of the world or the representation?">
+
+`P(s_(t+1), r_t | s_t, a_t, history) = P(s_(t+1), r_t | s_t, a_t)`: future depends only on current state and action. It is a property of the **state representation**, not the world. One Atari frame: not Markov. Four stacked frames: Markov.
+
+</Flashcard>
+
+<Flashcard question="Distinguish V^π(s), Q^π(s, a), and A^π(s, a).">
+
+`V^π(s)`: expected return from `s` under `π`. `Q^π(s, a)`: expected return from `(s, a)`, then `π`. `A^π(s, a) = Q^π(s, a) - V^π(s)`: how much better `a` is than `π`'s average from `s`. Advantage shows up in every advanced policy-gradient method.
+
+</Flashcard>
+
+<Flashcard question="Write the Bellman equation for Q^π(s, a).">
+
+`Q^π(s, a) = R(s, a) + γ · Σ over s' of P(s' | s, a) · V^π(s')`. Immediate reward plus discounted expected value of where you land next. The recursion every value-based RL method tries to satisfy.
+
+</Flashcard>
+
+<Flashcard question="Why is the Bellman optimality equation harder to solve than the policy-evaluation Bellman equation?">
+
+Policy-evaluation Bellman is linear in `V^π(s)` for fixed `π`, so it is a system of linear equations. Optimality has a `max` outside (`V*(s) = max_a [...]`), making it non-linear. No closed form; solved iteratively (value iteration in classical RL, Q-learning + neural nets in deep RL).
+
+</Flashcard>
+
+<Flashcard question="2-state loop with rewards (1, 0), γ = 0.9. Compute V(s0).">
+
+Bellman: `V(s0) = 1 + γ·V(s1)`, `V(s1) = γ·V(s0)`. Substitute: `V(s0) = 1 + γ²·V(s0)`, so `V(s0) = 1/(1 - γ²) = 1/0.19 ≈ 5.263`. Geometric check: `1 + γ² + γ⁴ + ... = 1/(1-γ²)` ✓.
+
+</Flashcard>
+
+<Flashcard question="What is the optimal policy in terms of Q*?">
+
+`π*(s) = argmax_a Q*(s, a)`: take the action with the highest optimal Q-value. If you have `Q*`, the optimal policy is just being greedy with respect to it. Q-learning and DQN learn an estimate `Q_θ` and act greedily.
+
+</Flashcard>
+
+<Flashcard question="What is the deep-RL dispatch table?">
+
+Every method estimates one of: `π` (policy gradient, gradient ascent on return), `V` or `Q` (value-based, Bellman-error minimization, greedy action), `A^π = Q^π - V^π` (advanced PG, variance-reduced signal), or `P(s'|s,a)` (model-based, supervised regression on transitions, then plan). One question: what does this paper estimate, and how does it improve the estimate?
+
+</Flashcard>
+
+<Flashcard question="Why is the Bellman equation a constraint, not a definition?">
+
+Value is *defined* as the expected return: `V^π(s) = E[G_t | s_t = s, π]`. Bellman is the *recursion* this expected return automatically satisfies, given the MDP and the policy. Value-based RL trains an estimate to minimize the gap between both sides of the Bellman equation (the "Bellman error").
+
+</Flashcard>
+
+</FlashcardSet>

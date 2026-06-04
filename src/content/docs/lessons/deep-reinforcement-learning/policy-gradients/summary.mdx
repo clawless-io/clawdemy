@@ -1,0 +1,24 @@
+---
+title: "Summary: Policy gradients (REINFORCE)"
+description: The 5-minute scan version. The log-derivative trick, the REINFORCE estimator, the dynamics-drop-out result, the rewards-to-go + baseline refinements that give the advantage, and a worked sigmoid bandit with the variance-equals-signal observation.
+artifact: summary
+sidebar:
+  order: 4
+  label: Summary
+---
+
+The most direct way to improve a neural-network policy is to follow the gradient of the expected return with respect to the parameters. The trouble is that the expectation is over trajectories sampled by the policy itself: standard "differentiate the integrand" rules do not apply. The **log-derivative trick** is the one calculus identity that solves it, and the algorithm that falls out is **REINFORCE** (Williams, 1992), the foundation every policy-gradient method in the rest of the track builds on. This is the scan-it-in-five-minutes version.
+
+## Core ideas
+
+- **The objective and the obstacle.** `J(θ) = E_(τ ~ π_θ) [R(τ)]`. The expectation depends on `θ` through the sampling distribution, so you cannot just differentiate the integrand.
+- **The log-derivative trick.** `∇_θ p(x;θ) = p(x;θ) · ∇_θ log p(x;θ)`, so `∇_θ E[f(x)] = E[f(x) · ∇_θ log p(x;θ)]`. An expectation of "thing times score" is something you can estimate from samples.
+- **Applied to RL, the dynamics drop out.** `p(τ;θ) = ρ(s_0) · Π π_θ(a_t|s_t) · P(s_(t+1)|s_t,a_t)`. Taking logs and differentiating: `∇_θ log p(τ;θ) = Σ_t ∇_θ log π_θ(a_t|s_t)`, since the dynamics `P` and initial-state `ρ` are constants from `θ`'s perspective and contribute zero. This is what makes deep RL **model-free**.
+- **The policy gradient theorem.** `∇_θ J(θ) = E_(τ ~ π_θ) [R(τ) · Σ_t ∇_θ log π_θ(a_t|s_t)]`. **REINFORCE** estimates it by sampling `N` trajectories and averaging.
+- **Two variance-reduction refinements.** **Rewards-to-go**: replace `R(τ)` with `G_t = Σ_(k≥t) γ^(k-t) r_k` (causality). **Baseline subtraction**: replace `G_t` with `G_t - b(s_t)`, unbiased (because `E[b(s)·∇log π(a|s)] = 0`) and variance-reducing when `b(s) ≈ V^π(s)`. With `b = V^π`, the bracket is the advantage `A^π(s, a) = Q^π(s, a) - V^π(s)` from lesson 3.
+- **Worked: sigmoid bandit.** `π_θ(a=1) = σ(θ)`, `R(a=1)=1`, `R(a=2)=0`. At `θ=0`, `σ=0.5`. One sampled `a=1` (gradient `1-σ=0.5`, `α=1`) gives `θ_1 = 0.5`, `σ(0.5) ≈ 0.622`. One more rewarding sample takes `θ_2 = 0.878`, `σ ≈ 0.706`. The policy locks onto the rewarding action and saturates as `σ → 1`.
+- **Dual-path validation.** Analytic `E[g] = σ(θ)(1-σ(θ)) = 0.25` at `θ=0`. Variance `0.0625`, standard deviation **also `0.25`**, equal to the signal. A single REINFORCE sample is a 1-σ guess at the true gradient; `N`-sample averaging tightens it by `1/√N`. On real trajectories with long horizons and sparse rewards, the variance is much worse, which is the rest of the track's agenda.
+
+## What changes for you
+
+The log-derivative trick is the calculus identity that underwrites every policy-gradient method in deep RL, from REINFORCE through actor-critic, TRPO, PPO, SAC, and the RLHF pipeline behind ChatGPT/Claude/Gemini. The dynamics-drop-out result is what makes "deep RL" possible at all: you do not need a model of the environment to improve the policy, because the only `θ`-dependent term in `log p(τ;θ)` is the policy's own log-probability of its actions. Knowing this, you can read any modern policy-gradient paper as a layer of variance reduction on top of the same `E[(...) · ∇log π]` skeleton: actor-critic learns the baseline (`V_φ`) to compute lower-variance advantages, GAE blends bootstrapped and Monte-Carlo returns, TRPO and PPO add trust-region constraints to keep the on-policy assumption intact. The next lesson, **actor-critic**, takes the most natural variance-reduction step: train a value function alongside the policy and use it as the baseline, replacing REINFORCE's high-variance Monte-Carlo returns with a lower-variance bootstrapped advantage estimate. Same gradient direction, less noise, and a much more practical training loop.

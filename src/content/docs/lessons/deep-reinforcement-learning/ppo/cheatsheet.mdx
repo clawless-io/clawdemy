@@ -1,0 +1,133 @@
+---
+title: "Cheatsheet: PPO (clipped surrogate objective)"
+description: "One-page reference: importance-sampled surrogate, TRPO constraint, PPO clipped surrogate, the asymmetric clip behavior, RLHF integration."
+phase: "core-deep-rl-algorithms"
+phase_order: 3
+order: 8
+last_reviewed: "2026-05-25"
+---
+
+## The progression: from REINFORCE to PPO
+
+| Method | Data | Stability mechanism |
+|--------|------|--------------------|
+| **REINFORCE** (Lesson 4) | On-policy, one update per batch | None (high variance, low sample efficiency) |
+| **Actor-critic** (Lesson 5) | On-policy, one update per batch | Variance reduction via critic; same on-policy constraint |
+| **TRPO** | On-policy, multi-step via importance sampling | Hard KL constraint: `KL(π_old || π_θ) ≤ δ` |
+| **PPO** (this lesson) | On-policy, multi-step via importance sampling | Clipped surrogate: `min(r·A, clip(r,1-ε,1+ε)·A)` |
+| **DQN** (Lesson 7) | Off-policy, replay buffer | Replay + target net + double-Q (Lesson 7 engineering) |
+
+PPO sits between vanilla on-policy and full off-policy: it allows **bounded** off-policy reuse via importance sampling, with the clip preventing the surrogate from drifting past where it remains a good approximation.
+
+## Key definitions
+
+**Probability ratio**:
+
+```
+r_t(θ) = π_θ(a_t | s_t) / π_{θ_old}(a_t | s_t)
+```
+
+At `θ = θ_old`, `r = 1`. As `θ` moves, `r` measures how much the policy's probability of the observed action has changed.
+
+**Importance-sampled surrogate**:
+
+```
+L^IS(θ) = E_{(s,a) ~ π_{θ_old}} [ r_t(θ) · A^{π_old}(s, a) ]
+```
+
+At `θ = θ_old`, equals the standard policy-gradient objective. Good approximation while `r` stays close to 1.
+
+**TRPO constrained objective**:
+
+```
+maximize_θ   E [ r_t(θ) · A_t ]
+subject to   E [ KL(π_{θ_old}(·|s) || π_θ(·|s)) ] ≤ δ   (typically δ = 0.01)
+```
+
+Hard constraint; requires conjugate-gradient solver + backtracking line search.
+
+**PPO clipped surrogate** (the practical version):
+
+```
+L^CLIP(θ) = E_t [ min( r_t(θ) · A_t,  clip(r_t(θ), 1 - ε, 1 + ε) · A_t ) ]
+```
+
+Typical `ε = 0.2`. No hard constraint; the min provides soft regularization.
+
+## The asymmetric clip behavior
+
+| Region | `A > 0` (good action) | `A < 0` (bad action) |
+|--------|------------------------|------------------------|
+| `r < 1 - ε` | unclipped: `r·A` | **clipped**: `(1-ε)·A` (saturates) |
+| `1 - ε ≤ r ≤ 1 + ε` | `r·A` (no clip) | `r·A` (no clip) |
+| `r > 1 + ε` | **clipped**: `(1+ε)·A` (saturates) | unclipped: `r·A` |
+
+Rule: the clip **caps the upside** (saturates the reward for over-shooting in the favorable direction). It does **not cap the downside** (the optimizer still registers losses on clearly bad moves like `A < 0, r > 1 + ε`).
+
+## Worked example (one (s, a) pair, A = +1, ε = 0.2)
+
+| `r` | unclipped `r·A` | clip `r` to [0.8, 1.2] | clipped `·A` | `L^CLIP = min(…)` |
+|-----|------|------|------|------|
+| 0.5 | 0.5 | 0.8 | 0.8 | 0.5 |
+| 1.0 | 1.0 | 1.0 | 1.0 | 1.0 |
+| 1.2 | 1.2 | 1.2 | 1.2 | 1.2 |
+| 1.5 | 1.5 | 1.2 | 1.2 | **1.2** ← clipped |
+| 2.0 | 2.0 | 1.2 | 1.2 | **1.2** ← clipped |
+
+Gradient saturates above `r = 1.2`; optimizer earns no further credit per epoch.
+
+## PPO training loop
+
+```
+Initialize π_θ, V_φ
+For each iteration:
+  1. Collect N timesteps with π_{θ_old} = π_θ
+  2. Compute A_t via GAE (Lesson 5)
+  3. For K epochs (K = 4 to 10):
+     L = L^CLIP(θ) - c_1 · L^V(φ) + c_2 · S[π_θ]
+     Gradient step on L
+  4. θ_old ← θ
+```
+
+| Hyperparameter | Typical value |
+|----------------|---------------|
+| Clip parameter `ε` | 0.1 to 0.3 (default 0.2) |
+| Epochs per batch `K` | 4 to 10 |
+| Timesteps per batch `N` | 2048 to 4096 (single-env), more if multi-env |
+| GAE `λ` | 0.95 |
+| Value loss coefficient `c_1` | 0.5 to 1.0 |
+| Entropy bonus `c_2` | 0.0 to 0.01 |
+
+## PPO in RLHF (Lesson 13 deep-dive)
+
+Full RLHF objective adds a KL penalty against the **pretrained** model:
+
+```
+L = L^CLIP - β · KL(π_θ || π_pretrained)
+```
+
+| Term | Purpose |
+|------|---------|
+| `L^CLIP` (PPO clip) | Limits policy change per **epoch** within one PPO iteration |
+| `β · KL(π_θ || π_pretrained)` | Limits policy drift over the **whole** finetuning run; constrains reward hacking |
+
+Why PPO for RLHF:
+- Vocabulary-sized action space → DQN `argmax_a` infeasible
+- On-policy rollouts fit autoregressive generation
+- Trust region keeps policy near pretrained distribution → reward hacking constrained
+- Simple to implement vs TRPO's natural-gradient solver
+
+## Common pitfalls
+
+- `ε` too high → trust region too wide → importance-sampling approximation breaks → back to vanilla PG
+- `K` too high → policy drifts within batch → surrogate becomes approximation of approximation
+- Forgetting entropy bonus → premature deterministic collapse
+- Confusing PPO with TRPO; both work, PPO is the practical workhorse
+- Reading `min` as a regularizer instead of the source of the asymmetric clip
+
+## What you should remember
+
+- PPO = on-policy alternative to DQN's off-policy engineering; same stability goal, different mechanism.
+- `r_t(θ) = π_θ / π_{θ_old}`; surrogate `r · A` correct at `θ_old`; degrades as `r` drifts.
+- Clipped surrogate `min(r·A, clip(r, 1-ε, 1+ε)·A)` caps the upside but not the downside.
+- Workhorse of modern RLHF: vocab-sized actions, on-policy rollouts, trust region constrains reward hacking.

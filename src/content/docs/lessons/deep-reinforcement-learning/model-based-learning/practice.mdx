@@ -1,0 +1,225 @@
+---
+title: "Practice: Model-based RL (fit a linear-Gaussian model + trace compounding error)"
+description: "Two exercises: fit a 1D linear-Gaussian dynamics model by least squares (with hand-checkable arithmetic), then quantify how a small fit error grows over a multi-step rollout."
+phase: "core-deep-rl-algorithms"
+phase_order: 4
+order: 9
+last_reviewed: "2026-05-25"
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Exercise 1: fit a linear-Gaussian dynamics model from data
+
+You're investigating a new 1D system. The true dynamics is `s' = A_true · s + B_true · a` (no noise to start; we'll add it in Part D). You collected the following four transitions:
+
+| i | `s_i` | `a_i` | `s_i'` |
+|---|-------|-------|--------|
+| 1 | 1 | 0 | 0.4 |
+| 2 | 0 | 1 | 0.8 |
+| 3 | 1 | 1 | 1.2 |
+| 4 | -1 | 2 | 1.2 |
+
+### Part A: predict `A_true` and `B_true` by inspection
+
+Row 1 with `s=1, a=0` gives `s'=0.4`, so `A_true = 0.4`. Row 2 with `s=0, a=1` gives `s'=0.8`, so `B_true = 0.8`. Sanity-check on row 3: `0.4·1 + 0.8·1 = 1.2` ✓. Sanity-check on row 4: `0.4·(-1) + 0.8·2 = -0.4 + 1.6 = 1.2` ✓.
+
+So the true dynamics are `s' = 0.4·s + 0.8·a`. If least squares is doing its job, it should recover these values exactly.
+
+### Part B: compute `X^T X` and `X^T Y`
+
+`X = [[1, 0], [0, 1], [1, 1], [-1, 2]]`, `Y = [0.4, 0.8, 1.2, 1.2]`.
+
+Compute `X^T X`:
+
+- `(1, 1)`: `Σ s_i² = 1 + 0 + 1 + 1 = 3`
+- `(2, 2)`: `Σ a_i² = 0 + 1 + 1 + 4 = 6`
+- `(1, 2) = (2, 1)`: `Σ s_i · a_i = 1·0 + 0·1 + 1·1 + (-1)·2 = 0 + 0 + 1 - 2 = -1`
+
+So `X^T X = [[3, -1], [-1, 6]]`. Determinant: `3 · 6 - (-1)² = 18 - 1 = 17`.
+
+Compute `X^T Y`:
+
+- `Σ s_i · s_i'`: `1·0.4 + 0·0.8 + 1·1.2 + (-1)·1.2 = 0.4 + 0 + 1.2 - 1.2 = 0.4`
+- `Σ a_i · s_i'`: `0·0.4 + 1·0.8 + 1·1.2 + 2·1.2 = 0 + 0.8 + 1.2 + 2.4 = 4.4`
+
+So `X^T Y = [0.4, 4.4]`.
+
+### Part C: solve for `[Â, B̂]`
+
+```
+[Â, B̂] = (1/17) · [[6, 1], [1, 3]] · [0.4, 4.4]
+       = (1/17) · [6·0.4 + 1·4.4,  1·0.4 + 3·4.4]
+       = (1/17) · [2.4 + 4.4,  0.4 + 13.2]
+       = (1/17) · [6.8, 13.6]
+       = [0.4, 0.8]
+```
+
+The fit recovers `Â = 0.4, B̂ = 0.8` exactly. **Dual-path check**: the inspection answer in Part A (`A_true = 0.4`, `B_true = 0.8`) and the closed-form least-squares fit in Part C (`Â = 0.4, B̂ = 0.8`) agree to the digit. If they did not, you'd have a bug somewhere; the cross-check catches it.
+
+### Part D: add noise and observe the effect
+
+Now suppose the same data has small noise: `s'_1 = 0.42` (was 0.4), `s'_2 = 0.79`, `s'_3 = 1.21`, `s'_4 = 1.19`. Recompute `X^T Y`:
+
+- `Σ s_i · s_i'`: `1·0.42 + 0·0.79 + 1·1.21 + (-1)·1.19 = 0.42 + 0 + 1.21 - 1.19 = 0.44`
+- `Σ a_i · s_i'`: `0·0.42 + 1·0.79 + 1·1.21 + 2·1.19 = 0 + 0.79 + 1.21 + 2.38 = 4.38`
+
+Solve:
+
+```
+[Â, B̂] = (1/17) · [[6, 1], [1, 3]] · [0.44, 4.38]
+       = (1/17) · [6·0.44 + 4.38, 0.44 + 3·4.38]
+       = (1/17) · [2.64 + 4.38, 0.44 + 13.14]
+       = (1/17) · [7.02, 13.58]
+       ≈ [0.413, 0.799]
+```
+
+A roughly 3% bias on `Â` (0.413 vs 0.4) and a 0.1% bias on `B̂` (0.799 vs 0.8). The fit is unbiased in expectation (over many random noise samples it averages to the true values) but on any single dataset it deviates. More samples shrink this variance: with `N = 40` samples instead of 4, the standard error would be roughly `√(40/4) = √10 ≈ 3.16` times smaller.
+
+## Exercise 2: trace compounding error over a 10-step rollout
+
+You fit a linear model to data from a system with true dynamics `s' = 1.05·s + 0.5·a`. Your fit returned `Â = 1.10` (a 5% overestimate) and `B̂ = 0.5` (correct).
+
+You want to plan a 10-step trajectory. Starting at `s_0 = 1`, action `a = 0` at every step. Compute the true and model rollouts.
+
+### Part A: true rollout
+
+The true dynamics with `a = 0` reduce to `s_{t+1} = 1.05 · s_t`. Compute `s_0` through `s_{10}`:
+
+| t | True `s_t` |
+|---|-----------|
+| 0 | 1.0000 |
+| 1 | 1.0500 |
+| 2 | 1.1025 |
+| 3 | 1.1576 |
+| 4 | 1.2155 |
+| 5 | 1.2763 |
+| 6 | 1.3401 |
+| 7 | 1.4071 |
+| 8 | 1.4775 |
+| 9 | 1.5513 |
+| 10 | 1.6289 |
+
+### Part B: model rollout
+
+Model dynamics with `Â = 1.10`: `ŝ_{t+1} = 1.10 · ŝ_t`.
+
+| t | Model `ŝ_t` |
+|---|------------|
+| 0 | 1.0000 |
+| 1 | 1.1000 |
+| 2 | 1.2100 |
+| 3 | 1.3310 |
+| 4 | 1.4641 |
+| 5 | 1.6105 |
+| 6 | 1.7716 |
+| 7 | 1.9487 |
+| 8 | 2.1436 |
+| 9 | 2.3579 |
+| 10 | 2.5937 |
+
+### Part C: errors and growth rate
+
+| t | True | Model | Absolute error | Relative error |
+|---|------|-------|-----------------|----------------|
+| 0 | 1.0000 | 1.0000 | 0.0000 | 0.0% |
+| 1 | 1.0500 | 1.1000 | 0.0500 | 4.8% |
+| 5 | 1.2763 | 1.6105 | 0.3342 | 26.2% |
+| 10 | 1.6289 | 2.5937 | 0.9648 | 59.2% |
+
+Growth pattern: the absolute error roughly doubles every five steps. Equivalent statement: the **ratio** `ŝ_t / s_t = (1.10 / 1.05)^t = (1.0476)^t`. At `t = 10`, that ratio is `1.0476^10 ≈ 1.593`, giving a 59.3% relative error. Matches the table to the digit.
+
+### Part D: implications for planning
+
+If you're planning a 5-step trajectory with this model, your final-state prediction is 26% off. If you're planning a 10-step trajectory, it's 59% off, past any usable accuracy.
+
+Three things you can do about this:
+
+1. **Cap the planning horizon** at where validation error stays bounded. MBPO caps rollouts at 1 to 5 steps; the policy lives in a tight neighborhood of the real data and can't drift far.
+2. **Re-plan after every action.** MPC executes only the first action of each plan, then collects the real next state and re-plans. The model only needs to be accurate over the H-step planning horizon, not the full episode.
+3. **Detect when the model is wrong.** An ensemble of K models that disagree by more than `δ` signals you've left the data distribution. PETS rejects high-uncertainty rollouts.
+
+The compounding-error analysis is not a bug in your fit; it's a structural property of multiplicative dynamics. It would happen to any model with the same one-step bias. Mitigations adjust *how you use* the model, not *whether the model is fittable*.
+
+## Flashcards
+
+<FlashcardSet>
+
+<Flashcard question="Why is model-based RL more sample-efficient than model-free?">
+
+Model-free RL burns one real environment interaction per gradient step (or close to it). Every learning signal requires acting in the real world.
+
+Model-based RL learns a dynamics model from a small number of real interactions, then uses the model to either (a) plan over imagined action sequences without taking those actions for real, or (b) generate synthetic transitions to train a model-free policy on (Dyna).
+
+The headline win: 10× to 100× fewer real-world samples for the same asymptotic performance on continuous-control benchmarks (PETS, MBPO). This matters when real samples are expensive (robots, surgery, autonomous driving) and is irrelevant when they're cheap (Atari, MuJoCo on GPU clusters).
+
+</Flashcard>
+
+<Flashcard question="Show that least squares applied to a linear-Gaussian dynamics fit recovers the true parameters exactly when noise is zero. Use the formula.">
+
+For data `{(s_i, a_i, s_i')}` from `s' = A·s + B·a`, build `X` with rows `[s_i, a_i]` and `Y` with rows `s_i'`. Least squares gives:
+
+```
+[Â, B̂] = (X^T X)^{-1} X^T Y
+```
+
+When `s_i' = A·s_i + B·a_i` exactly (zero noise), the vector `Y = X · [A, B]^T`. Substituting:
+
+```
+[Â, B̂] = (X^T X)^{-1} X^T · X · [A, B]^T = (X^T X)^{-1} (X^T X) · [A, B]^T = [A, B]
+```
+
+The fit returns the true parameters exactly. With noise, `Y = X · [A, B]^T + ε`, the fit becomes `[A, B] + (X^T X)^{-1} X^T ε`, which is unbiased (`E[ε] = 0`) but has variance proportional to `σ² · (X^T X)^{-1}`.
+
+</Flashcard>
+
+<Flashcard question="Why does a 5% one-step model error become a 59% error over 10 steps for expansive dynamics?">
+
+If true dynamics are `s_{t+1} = A · s_t` and the model uses `Â = A · (1 + δ)` (with `δ = 5%` here), then after `t` steps the model state is `ŝ_t = (A · (1 + δ))^t · s_0` while the true state is `s_t = A^t · s_0`. The ratio:
+
+```
+ŝ_t / s_t = (1 + δ)^t
+```
+
+With `δ = 0.0476` (this exercise's case, since 1.10 / 1.05 ≈ 1.0476), at `t = 10`:
+
+```
+(1.0476)^10 ≈ 1.593
+```
+
+So `ŝ_10` is 59% larger than `s_10`. **Errors compound geometrically**, not additively. Small one-step bias → exponential N-step bias for expansive dynamics. This is why even seemingly small one-step model errors make multi-step planning unreliable.
+
+Mitigations: cap rollout horizon (MBPO), re-plan often (MPC), detect via ensemble disagreement (PETS).
+
+</Flashcard>
+
+<Flashcard question="What is the difference between aleatoric and epistemic uncertainty in a model-based RL context?">
+
+**Aleatoric** uncertainty is irreducible noise in the dynamics, i.e., randomness that would persist even with infinite training data. Examples: dice rolls, slip in robot contact, intrinsic stochasticity. Modeled by the `Σ_θ(s, a)` covariance output of a probabilistic neural network: the model says "given this `(s, a)`, the next state has this much spread."
+
+**Epistemic** uncertainty is "the model doesn't know": the prediction is uncertain because the training data didn't cover this region of state-action space. Reducible: more data in this region shrinks it. Captured by **ensemble disagreement**: train K independent networks; if they predict similar values, you're in well-covered territory; if they disagree, you're extrapolating.
+
+PETS exploits the distinction: aleatoric uncertainty contributes to the per-rollout variance you'd plan around anyway; epistemic uncertainty flags when you should reject the rollout entirely or take a different action that gathers more data.
+
+</Flashcard>
+
+<Flashcard question="When should you reach for model-based RL vs model-free?">
+
+**Use model-based when:**
+- Real-world samples are expensive (robots, surgery, scarce data)
+- Dynamics are smooth and learnable (physics-based continuous control)
+- Planning horizons are short (1 to 10 steps, MPC-compatible)
+- You can afford the higher per-step compute (planning at decision time)
+
+**Use model-free when:**
+- Samples are cheap (Atari emulator, MuJoCo, language model rollouts)
+- Dynamics are hard to model (raw pixels, language, multi-agent strategy)
+- You want asymptotic performance (model-bias caps model-based; model-free can be optimal)
+- One-shot policy execution (no planning loop at runtime)
+
+**Modern hybrids** (MuZero, DreamerV3) use both: learn a model end-to-end, plan with it, and treat the policy as a model-free fallback when the model is unreliable.
+
+</Flashcard>
+
+</FlashcardSet>

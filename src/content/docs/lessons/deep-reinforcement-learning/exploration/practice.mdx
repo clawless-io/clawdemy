@@ -1,0 +1,64 @@
+---
+title: "Practice: Exploration"
+description: Classify environments by exploration hardness; pick the right exploration strategy per setting; six flashcards on the three families and their best-use regimes.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Exercise 1: Classify the exploration hardness
+
+For each environment, classify as easy / moderate / hard exploration and justify in one sentence.
+
+1. CartPole: balance a pole on a moving cart, reward of 1 per timestep upright, episode ends if the pole falls.
+2. Montezuma's Revenge: navigate rooms, climb ladders, retrieve keys, avoid skulls; reward only when collecting items or completing rooms.
+3. MuJoCo Hopper: continuous-control hopping locomotion, reward per timestep proportional to forward velocity and survival.
+4. A maze navigation task with reward only at the goal cell (terminal reward), no intermediate signal.
+5. A robotic-arm pick-and-place: reward only if the cube ends up in the target box at episode end.
+
+### Answers
+
+1. **Easy.** Reward is dense (per-timestep upright bonus); random action keeps the pole up briefly and the gradient signal points toward better balance immediately.
+2. **Hard.** Reward requires long specific action sequences (climb ladder, get key, avoid skull, continue); random action probability of reaching the first reward is negligible.
+3. **Easy to moderate.** Reward is per-timestep velocity; random action produces non-zero velocity occasionally and the gradient points toward forward locomotion. Easy in well-tuned implementations; harder than CartPole.
+4. **Hard.** Sparse terminal-only reward, no intermediate signal; random exploration finds the goal exponentially rarely in maze depth.
+5. **Hard.** Sparse terminal-only reward over a multi-step manipulation sequence (reach, grasp, lift, transport, release); random action will not stumble onto the success condition.
+
+## Exercise 2: Pick the strategy
+
+For each environment in Exercise 1, pick an exploration strategy (epsilon-greedy / NoisyNets or Bootstrapped DQN / RND or ICM) and justify in two sentences. Note any additional advice.
+
+### Answers
+
+1. **CartPole**: epsilon-greedy with annealing, or entropy regularization in PPO. Easy exploration is well-served by the simplest method; no need for sophistication.
+2. **Montezuma's Revenge**: RND-augmented PPO. The breakthrough Burda et al. 2018 result was on exactly this environment; intrinsic motivation is the family that handles hard exploration. Tune beta carefully and expect to leave intrinsic reward active for the full training.
+3. **MuJoCo Hopper**: entropy regularization in PPO or SAC. The standard MuJoCo benchmarks are easy enough that entropy-regularized policy gradient methods work. No intrinsic motivation needed.
+4. **Maze with terminal-only reward**: count-based exploration or RND. The state space is small enough that count-based bonuses work; on harder mazes, switch to RND. Consider supplementing with demonstrations if available.
+5. **Robotic pick-and-place**: hierarchical or demonstration-bootstrapped exploration with intrinsic motivation as backup. Pure intrinsic motivation often does not bootstrap the manipulation prior; demonstrations are the practical answer in robotics.
+
+## Flashcards
+
+<FlashcardSet>
+  <Flashcard question="What are the three exploration families and what does each do?">
+    Random exploration (epsilon-greedy, Boltzmann or softmax sampling, entropy regularization): the agent takes a random action with some probability or maintains policy stochasticity throughout training. Optimism-based exploration (UCB, Bootstrapped DQN, NoisyNets, RLSVI): the agent maintains uncertainty estimates over Q-values and acts as if uncertain Q-values were at their upper confidence bound. Intrinsic motivation (count-based bonuses, curiosity / ICM, Random Network Distillation): the agent receives an auxiliary intrinsic reward for visiting novel states or for taking actions whose outcomes its current model does not understand.
+  </Flashcard>
+  <Flashcard question="Why does random exploration fail on hard-exploration environments like Montezuma's Revenge?">
+    Hard-exploration environments require long specific action sequences to reach any reward. The probability of taking a particular fifty-step sequence by uniform random action is one over the number of actions raised to the fiftieth power, which is essentially zero in any reasonable action space. Random exploration in such environments will not encounter the reward within any practical training budget. Epsilon-greedy DQN on Montezuma's Revenge achieved near-zero score for years for this reason.
+  </Flashcard>
+  <Flashcard question="What is Random Network Distillation and why was it the breakthrough on hard exploration?">
+    RND uses a randomly-initialized fixed target network and trains a predictor network to match it. The intrinsic reward at any state is the distillation error: the gap between the predictor and the target at that state. Novel states have high prediction error because the predictor was never trained on them; visited states have low error after the predictor is trained. The clever property is that the target is fixed-random, so the only way the predictor can match is via training on visited states, which is exactly the novelty signal we want. RND-augmented PPO achieved super-human scores on Montezuma's Revenge where epsilon-greedy DQN scored near zero.
+  </Flashcard>
+  <Flashcard question="What is the easy-vs-hard exploration distinction and why does it matter for algorithm choice?">
+    Easy exploration: the reward is dense enough that random action reaches it within the training budget; standard Atari games like Pong and Breakout, CartPole, MuJoCo locomotion all qualify. Hard exploration: the reward is reached only by long specific action sequences that random exploration practically cannot stumble into; Montezuma's Revenge, maze navigation with terminal-only reward, robot manipulation with success-only reward all qualify. The distinction determines the algorithm family: random or entropy-regularized methods work on easy; intrinsic motivation is required for hard. Picking the wrong family wastes compute or, in hard environments, produces a system that never learns the task.
+  </Flashcard>
+  <Flashcard question="What is the role of beta in r_total = r_extrinsic + beta · r_intrinsic, and why is it hard to tune?">
+    The intrinsic-reward weight beta balances the extrinsic and intrinsic reward signals. Too small, and the intrinsic reward does not drive exploration; the agent ignores novelty and never escapes the easy parts of the state space. Too large, and the agent chases novelty even when extrinsic reward is plentiful, sacrificing exploitation. The right value is environment-specific: hard-exploration environments need higher beta; easy-exploration environments need beta near zero. The literature typically reports beta values calibrated to the specific benchmark; production datasets need new calibration.
+  </Flashcard>
+  <Flashcard question="Is entropy regularization a form of exploration?">
+    Partially. Entropy regularization in PPO and SAC adds a bonus term to the training objective that rewards a stochastic policy, preventing the policy from concentrating too quickly on a single action and keeping random exploration active throughout training. This is mild exploration adequate for easy-exploration environments but insufficient for hard exploration. Entropy regularization keeps the policy stochastic at the action-selection step; it does not actively push the agent toward states it has not visited (which is what intrinsic motivation does). Treating entropy regularization as a complete exploration strategy on hard environments is a common pitfall.
+  </Flashcard>
+</FlashcardSet>

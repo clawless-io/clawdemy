@@ -1,0 +1,110 @@
+---
+title: "Cheatsheet: Value-based RL (Q-learning, the deadly triad)"
+description: "One-page reference: Bellman optimality equation, Q-iteration vs Q-learning, off-policy vs on-policy, the deadly triad, when to choose the Q branch."
+phase: "core-deep-rl-algorithms"
+phase_order: 1
+order: 6
+last_reviewed: "2026-05-25"
+---
+
+## Bellman optimality equation
+
+```
+Q*(s, a) = R(s, a) + γ · E_{s' ~ P(·|s, a)} [ max_{a'} Q*(s', a') ]
+```
+
+The `max` makes this **non-linear** in `Q*`. No closed-form solution. Must iterate.
+
+Optimal policy: `π*(s) = argmax_a Q*(s, a)`. No separate policy network needed.
+
+## Two algorithms
+
+| Algorithm | When | Requires | Sample form |
+|-----------|------|----------|-------------|
+| **Q-iteration** | You know the MDP (P and R) | Full dynamics model | `Q_{k+1}(s,a) ← R(s,a) + γ · Σ_{s'} P(s'│s,a) · max_{a'} Q_k(s', a')` |
+| **Q-learning** | Model-free (only observe transitions) | Just samples `(s, a, r, s')` | `Q(s,a) ← Q(s,a) + α · (r + γ · max_{a'} Q(s', a') - Q(s,a))` |
+
+Q-iteration converges geometrically (γ-contraction in sup-norm): `||Q_k - Q*||_∞ ≤ γ^k · ||Q_0 - Q*||_∞`.
+
+Q-learning converges with probability one in the tabular setting under appropriate step-size schedules (Watkins 1989).
+
+## On-policy vs off-policy
+
+| Property | On-policy (REINFORCE, A2C, PPO) | Off-policy (Q-learning, DQN, SAC) |
+|----------|--------------------------------|-----------------------------------|
+| Data must come from | Current policy `π_θ` | Any policy |
+| Update target uses | Same `π_θ` | Different policy (greedy / max) |
+| Replay buffer | Hard (needs importance sampling) | Natural fit |
+| Exploration | Built into stochastic policy | Add separately (ε-greedy, entropy bonus) |
+| Sample efficiency | Lower (fresh data per update) | Higher (reuse old data) |
+
+Q-learning is off-policy because the **target** uses `max_{a'}`, not the action distribution of whatever policy generated the data.
+
+## The deadly triad (Sutton)
+
+Combine all three → can diverge:
+
+1. **Function approximation:** `Q_θ` generalizes across states; one weight update shifts many `Q` values.
+2. **Bootstrapping:** target is `r + γ · max_{a'} Q_θ(s', a')`, uses the current network.
+3. **Off-policy data:** training distribution differs from greedy-policy distribution.
+
+Any two of the three: safe. All three: trouble.
+
+DQN engineering tames each leg:
+- **Replay buffer** → decorrelates samples (closer to i.i.d.).
+- **Target network** `Q_{θ⁻}` frozen for `N` steps → bootstrapped target stops chasing itself.
+- **Double Q-learning** → action selection and evaluation use different networks → fixes `max` overestimation.
+
+All three covered in Lesson 7.
+
+## Two key biases / variance issues
+
+| Issue | Source | Fix |
+|-------|--------|-----|
+| **`max` overestimation** | `E[max_a X_a] ≥ max_a E[X_a]` by Jensen; noisy `Q_θ` ⇒ targets are systematically too high | Double Q-learning (decouple selection/evaluation) |
+| **Bootstrapped target instability** | Target `r + γ · max_{a'} Q_θ(s', a')` moves as `θ` updates | Target network (freeze `θ⁻` for many steps) |
+
+## Worked example: Q-iteration on the L3 two-state MDP
+
+Setup: `s0 → s1` reward 1, `s1 → s0` reward 0, single action, `γ = 0.9`.
+
+Analytic answer (from Lesson 3): `V*(s0) = 1/(1−γ²) = 5.263`, `V*(s1) ≈ 4.737`. Single action ⇒ `Q* = V*`.
+
+Q-iteration with `Q_0 = 0`:
+
+| k | Q_k(s0) | Q_k(s1) |
+|---|---------|---------|
+| 1 | 1.000 | 0.000 |
+| 2 | 1.000 | 0.900 |
+| 3 | 1.810 | 0.900 |
+| 4 | 1.810 | 1.629 |
+| 5 | 2.466 | 1.629 |
+| ∞ | 5.263 | 4.737 |
+
+Errors shrink by `γ² = 0.81` per pair of iterations (2-step loop). Matches the closed-form geometric sum exactly. Dual-path validation: contraction algorithm ↔ analytic geometric series.
+
+## When to pick the Q branch (decision rubric)
+
+| Use Q-learning when | Use policy-gradient (Phase 1) when |
+|---------------------|------------------------------------|
+| Discrete action space (the `max` is cheap) | Continuous action space |
+| Want deterministic optimal policy | Need stochastic policy (multi-agent, partial obs) |
+| Have a replay buffer or demonstrations | Can afford fresh on-policy data each update |
+| Atari games, board games, gridworlds | Robotics, continuous control, LLM RLHF |
+
+Modern algorithms blend both (SAC = actor-critic + Q-network; PPO = policy gradient + V-critic).
+
+## Common pitfalls
+
+- Bellman optimality ≠ Bellman equation. `Q*` uses `max`; `Q^π` uses `E_{a' ~ π}`.
+- Calling Q-learning on-policy because data uses ε-greedy. ε-greedy is exploration, not the target.
+- Assuming Q-iteration's convergence proof transfers to deep Q-networks. It does not (deadly triad).
+- Forgetting that `argmax` over continuous actions is itself an optimization problem. That's why DDPG introduces a deterministic actor (SAC uses a stochastic max-entropy actor; both avoid the `argmax` by training an actor directly).
+
+## What you should remember
+
+- `Q*` satisfies Bellman optimality: `R + γ E [max Q*]`. Non-linear, iterative.
+- Tabular Q-iteration: contracts at rate `γ`, converges to `Q*`.
+- Q-learning: model-free sample version, off-policy by construction.
+- Deep Q-learning: needs replay buffer + target network + double Q to be stable.
+- Optimal policy is `argmax_a Q*(s, a)`, no separate policy parameterization.

@@ -1,0 +1,108 @@
+---
+title: "Practice: Offline RL, the problem"
+description: Classify five scenarios as online / off-policy / offline; trace Q-value divergence through a worked offline Q-learning update; six flashcards covering the failure mode and the off-policy-vs-offline distinction.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Exercise 1: Setting classification
+
+For each scenario, decide whether it is **online** (new data collected per step), **off-policy with online interaction** (DQN-like, can act with exploration), or **offline** (fixed dataset, no further interaction allowed). Then state the dominant safety concern.
+
+1. A hospital wants to train a sepsis-treatment policy from ten years of ICU records. No randomized trial is allowed; the policy must be validated against historical data before any prospective use.
+2. A robot learning manipulation in a simulator can call the simulator as many times as it wants per training step, with a fresh policy on every rollout.
+3. A self-driving system trains in simulation with the current policy collecting new trajectories, an epsilon-greedy exploration strategy adding noise to the policy's actions, and the trained policy intended for sim-only deployment.
+4. A recommender system has months of production logs from an A/B test on the previous policy, and the team needs to ship a successor policy that the offline-trained version evaluates favorably before any online experiment is allowed.
+5. An industrial-plant controller has access to two years of plant logs and a high-fidelity plant simulator that is known to disagree with the real plant in load-step responses.
+
+### Answers
+
+1. **Offline.** No data collection allowed. The dominant safety concern is extrapolation error: the policy will drift toward out-of-distribution treatment combinations where the learned value function is uninformed, and the deployment cost of a wrong action is patient harm.
+2. **Online.** The simulator IS the environment for training purposes; new data per step is essentially free. Standard online algorithms (PPO, SAC) apply directly. Concern is sim-to-real if the simulator is later deployed.
+3. **Off-policy with online interaction.** New data arrives constantly; exploration noise corrects the policy's drift. DQN, SAC, PPO all work; off-policy methods enjoy sample-efficiency advantages. The data distribution changes but it is not fixed.
+4. **Offline.** The trained policy must demonstrate value against the logged data before any online step. This is the offline-then-online deployment pattern; offline-RL algorithms (BCQ, CQL, IQL of the next lesson) are the typical tools.
+5. **Mixed.** The two-year logs are an offline dataset; the simulator is an online environment that disagrees with the real plant. The right pipeline is offline-RL on the logs to extract a candidate policy, then bounded online refinement in the simulator with explicit disagreement budgets, and then careful staged deployment. The offline phase has all the L14 concerns.
+
+## Exercise 2: Q-value divergence trace
+
+Use the two-state MDP from the lesson body:
+
+```
+At s1, action a1: reward 0, transition to s2 with prob 1
+At s1, action a2: reward 0, transition to s1 with prob 1
+At s2, action a1: reward 1, terminal
+At s2, action a2: reward -10, terminal
+```
+
+The dataset:
+
+```
+(s1, a1, 0, s2): 80 of 100 transitions
+(s1, a2, 0, s1): 20 of 100 transitions
+(s2, a1, 1, terminal): present
+(s2, a2, -10, terminal): never observed
+```
+
+Assume gamma = 0.9. Initial Q-values: Q(s1, a1) = Q(s1, a2) = Q(s2, a1) = 0. The function approximator extrapolates Q(s2, a2) = 5 (an arbitrary high value driven by initialization or inductive bias).
+
+Trace the Q-value at s1 across three Bellman update iterations on the dataset. Then compute the expected return of (a) the behavior policy at s1 and (b) the greedy policy implied by the diverged Q-function at s1.
+
+### Solution
+
+The Bellman target at (s1, a1) sees:
+
+```
+target = 0 + gamma · max( Q(s2, a1), Q(s2, a2) )
+       = 0 + 0.9 · max(0, 5)
+       = 0 + 0.9 · 5
+       = 4.5
+```
+
+So Q(s1, a1) updates from 0 toward 4.5. With a small step size, Q(s1, a1) approaches 4.5 across multiple updates on s1-transitions.
+
+At (s2, a1), the target is the actual transition reward, 1, and there is no further state. So Q(s2, a1) updates toward 1.
+
+At (s2, a2), there are NO transitions in the dataset, so Q(s2, a2) is never directly updated. The function approximator keeps it at its extrapolated value of 5 (or higher, if function-approximation generalization from updates at (s1, a1) and (s2, a1) drifts it upward as the surrounding Q-surface changes).
+
+After convergence on the dataset:
+
+```
+Q(s1, a1) ≈ 4.5    [target uses max over a' which picks a2 with Q=5]
+Q(s1, a2) ≈ 4.05   [target = 0 + 0.9 · max(Q(s1, a1), Q(s1, a2)) = 0.9 · 4.5]
+Q(s2, a1) ≈ 1      [grounded in the dataset]
+Q(s2, a2) ≈ 5      [extrapolated, never corrected]
+```
+
+The greedy policy at s2 picks a2 (Q = 5 > Q = 1). Deploying that policy, the agent at s1 transitions to s2 (per Q(s1, a1) being slightly larger than Q(s1, a2)), then at s2 picks a2 for actual reward of -10. Under γ=0.9 the discounted return from s1 is 0 + 0.9·(-10) = -9.
+
+The behavior policy at s1 takes a1 80% of the time, transitioning to s2 then taking a1 (the behavior policy always picks a1 at s2 per setup), collecting discounted reward 0.9·1 = 0.9. The remaining 20% takes a2 at s1, looping back to s1. Solve recursively under γ=0.9: V_behavior(s1) = 0.8·0.9·1 + 0.2·0.9·V_behavior(s1) → 0.82·V = 0.72 → V_behavior(s1) ≈ 0.878 (just under the optimal 0.9; behavior is near-optimal, slowed only by the 20% self-loop on a2 at s1).
+
+The naive Q-learning policy deploys to expected discounted return -9. The behavior policy deploys to ≈ 0.878. The "learned" policy is worse than the data-generating policy by about 9.878 in expected discounted return, on a problem where the optimal policy achieves 0.9. The gap is entirely the OOD-action problem.
+
+## Flashcards
+
+<FlashcardSet>
+  <Flashcard question="What is the offline RL setting and how is it different from off-policy RL?">
+    Offline RL means the agent learns from a fixed dataset of past interactions with no further environment access. Off-policy RL means the data was generated by a different policy than the one being trained, but new data keeps arriving from some (often the current) policy. Off-policy is about WHICH policy generated the training data; offline is about WHETHER new data ever arrives. DQN is off-policy but online: the policy can keep acting and the buffer keeps refreshing. Offline RL forbids that.
+  </Flashcard>
+  <Flashcard question="Why does running Q-learning on an offline dataset fail catastrophically?">
+    The Bellman target uses max over actions: target = r + gamma · max over a' of Q(s', a'). The max selects the action with the highest Q-value, including out-of-distribution actions where the function approximator extrapolates a value driven by inductive bias rather than data. If the extrapolated value is high (which the max favors structurally), the Bellman update propagates the inflated value backward into prior states. Since no new data arrives to contradict it, the inflation persists and amplifies over training iterations. The greedy policy on the diverged Q-function prefers OOD actions and performs much worse than the behavior policy at deployment.
+  </Flashcard>
+  <Flashcard question="What is extrapolation error in offline RL?">
+    The phenomenon where a learned Q-function assigns inflated values to out-of-distribution actions because the function approximator extrapolates from in-distribution training data to unobserved (state, action) pairs without any signal indicating uncertainty. Each Bellman update with the max operator selects these extrapolated values, propagating them backward and amplifying them. Three sources: function approximation extrapolates silently; the max operator is biased toward overestimates; Bellman propagation amplifies errors across iterations. In online RL the agent can take the inflated-Q action and observe the true reward, correcting the estimate; in offline RL no such correction is available.
+  </Flashcard>
+  <Flashcard question="Why does DQN work online but the same algorithm diverges offline?">
+    Three reasons. First, in DQN the policy explores: epsilon-greedy occasionally takes the inflated-Q-value action and the environment returns the actual reward, which the Bellman update folds in and corrects the estimate. Second, the replay buffer refreshes: old transitions age out, new ones from the current policy distribution arrive, so the training distribution tracks the policy. Third, inflation is bounded in time: a few iterations of error growth get corrected as soon as the policy tries the inflated action. Offline, all three correction channels are closed: the dataset is fixed, the policy cannot act, and inflation runs unchecked.
+  </Flashcard>
+  <Flashcard question="When is behavioral cloning a reasonable baseline for offline RL?">
+    Behavioral cloning trains a policy by supervised learning on (state, expert action) pairs from the dataset. It is safe because it never learns Q-values and never has to reason about out-of-distribution actions: the learned policy stays inside the data distribution by construction. The cost is that BC cannot exceed the behavior policy's performance. BC is the natural baseline because any offline-RL algorithm worth deploying should match or exceed it. An offline-RL algorithm that does not exceed BC on the same dataset is not adding value over the safer choice.
+  </Flashcard>
+  <Flashcard question="What is the agenda for fixing the offline-RL failure?">
+    Three families of approaches, all addressing the out-of-distribution action problem. BCQ (Batch-Constrained Q-learning) constrains the policy to actions the behavior policy would have taken with non-trivial probability, eliminating OOD-action queries. CQL (Conservative Q-Learning) adds a penalty term that pushes down Q-values on out-of-distribution actions, so the max operator no longer selects them. IQL (Implicit Q-Learning) sidesteps the max entirely by using expectile regression on in-distribution actions. The next lesson covers all three.
+  </Flashcard>
+</FlashcardSet>

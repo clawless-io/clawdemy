@@ -1,0 +1,41 @@
+---
+title: "Summary: Offline RL algorithms (BCQ, CQL, IQL)"
+description: Three families that fix the L14 failure. BCQ constrains the action set. CQL penalizes Q on OOD actions. IQL sidesteps the max. Same goal, different mechanisms, different best-use settings.
+artifact: summary
+sidebar:
+  order: 4
+  label: Summary
+---
+
+## The one-paragraph version
+
+Three algorithm families address the offline-RL failure named in L14. **BCQ** (Fujimoto et al. 2019) constrains the policy to actions a learned VAE generates, ensuring the Bellman max never sees out-of-distribution actions. **CQL** (Kumar et al. 2020) adds a conservative penalty to the Q-loss that pushes OOD-action Q-values down and in-distribution Q-values up, so the max naturally avoids OOD actions; the trained Q is a provable lower bound on the true Q. **IQL** (Kostrikov et al. 2021) sidesteps the max entirely: a state-value V(s) is trained via expectile regression on dataset actions only, the Bellman target uses V(s') in place of the max, and the policy is trained as advantage-weighted imitation. All three prevent the Bellman update from querying Q at OOD actions, which is the shared design principle. The three differ in best-use setting: BCQ for single-modal behavior policies, CQL for heterogeneous mixtures, IQL for continuous high-dimensional actions or as the simplest default. All three should be benchmarked against behavioral cloning on the same dataset; an offline-RL algorithm that does not exceed BC is not adding value.
+
+## Five things to remember
+
+1. **One design principle, three mechanisms.** All three families prevent the Bellman update from querying Q at out-of-distribution actions. BCQ constrains the action set. CQL penalizes OOD-action Q. IQL avoids the max.
+2. **BCQ: VAE plus perturbation plus Q.** Generate plausible actions from a learned behavior-policy model, perturb toward better Q, pick the highest. Strong when the behavior policy is single-modal.
+3. **CQL: conservative penalty.** Push OOD-action Q down, push in-distribution Q up. The trained Q is a provable lower bound on the true Q. Best for heterogeneous datasets where a single VAE is the wrong shape.
+4. **IQL: expectile regression sidesteps the max.** V(s) is an expectile of Q over in-distribution actions; the Bellman target uses V(s') instead of max over a' of Q(s', a'). The policy is advantage-weighted imitation. Cleanest tuning surface and often the best default.
+5. **Always benchmark against BC.** BC is the safe baseline. An offline-RL algorithm that does not exceed BC on the same dataset has paid the constraint-or-penalty engineering cost with no return.
+
+## Why this matters
+
+Deployment-realistic settings (healthcare policy improvement, recommender systems, industrial control, robotics demonstration learning, language-model RLHF) all start in the offline regime. The choice of offline-RL algorithm shapes what is deployable and what is not. BCQ-style action constraints are the most transparent safety story for regulated settings (the policy provably stays inside the data distribution); CQL-style conservative bounds give explicit performance lower bounds; IQL is the practical default when constraint or penalty design is not the bottleneck. Understanding the mechanism behind each lets you pick the right tool for the data and the deployment story.
+
+## Worked check (memory anchor)
+
+On the L14 two-state MDP (where naive Q-learning diverged because Q(s2, a2) was extrapolated to 5 with no correction available):
+
+- **BCQ**: VAE puts mass on a1 at s2 (only observed action), so action samples are a1, perturbation cannot push to a2, max trivially picks a1. Q(s2, a1) is grounded at reward 1. Optimal policy recovered.
+- **CQL**: Conservative penalty pushes Q(s2, a2) down. After training Q(s2, a1) greater than Q(s2, a2). Max picks a1. Optimal policy recovered.
+- **IQL**: V(s2) is expectile of Q at dataset actions at s2, approximately 1. Bellman target at s1 uses V(s2) directly, no max anywhere. Policy is advantage-weighted imitation, assigns weight to a1. Optimal policy recovered.
+
+All three prevent the divergence by different mechanisms on the same dataset.
+
+## Where this fits in the broader curriculum
+
+- **L14** named the failure mode; L15 supplies the algorithmic answer.
+- **L13 RLHF** uses an explicit KL regularization to a reference policy, which plays the same structural role as BCQ's action constraint (keep the trained policy near the data distribution where the reward model is trustworthy).
+- **L7 DQN** is the off-policy Q-learning machinery these algorithms build on; the L7 stabilizers (replay buffer, target network) appear in all three offline-RL families.
+- **L16 next** is exploration, which is the offline-RL opposite: the agent CAN act, but reward is sparse and exploring efficiently is the central challenge.

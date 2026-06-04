@@ -1,0 +1,292 @@
+---
+title: "Lesson: Control as inference (the soft Bellman backup and why SAC, RLHF, and MaxEnt RL are the same equation)"
+description: "Reformulate the entire RL problem as variational inference in a graphical model with 'the trajectory was optimal' as evidence. Soft Bellman backup, log-sum-exp value function, and the unification of SAC + RLHF + MaxEnt IRL all fall out."
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+## What you'll be able to do after this lesson
+
+Lesson 11 established the variational language: the ELBO, the reparameterization trick, the two RL applications (latent-state world models, MaxEnt RL). Lesson 11 closed with a promise: the entire RL problem can be cast as variational inference. This lesson redeems that promise.
+
+By the end of this lesson you can:
+
+- Build the **graphical model** that turns the RL trajectory (s_0, a_0, s_1, a_1, ..., s_T) into a Bayesian inference problem by introducing binary **optimality variables** O_t with p(O_t = 1 | s_t, a_t) ∝ exp(r(s_t, a_t) / alpha). The MaxEnt-RL problem is then "infer the posterior over actions given that O_(1:T) = 1."
+- Derive the **soft Bellman backup**:
+
+```
+V_soft(s) = α · log Σ_a exp(Q_soft(s, a) / α)
+Q_soft(s, a) = r(s, a) + γ · E_{s' ~ P(·|s, a)} [V_soft(s')]
+```
+
+- Compute soft Q-values and the resulting policy by hand on a small 2-action terminal example. Verify both limits: alpha → 0 recovers the hard Bellman backup; alpha → ∞ recovers the uniform policy.
+- Recognize **SAC** (Lesson 11) as the practical algorithm that implements this backup. The two networks (soft Q-critic and stochastic actor) are exactly the inference machinery this framework derives.
+- Identify **RLHF** as the same framework with a different prior: replace the uniform action prior with pi_pretrained(z | prompt), and you get the KL-regularized PPO objective from Lesson 8.
+
+**This lesson closes Phase 2.** Lessons 6 through 12 have built the algorithmic core (DQN, PPO, model-based, variational inference, control as inference). Phase 3 (Lesson 13 onward) covers the production applications, with RLHF as the killer example.
+
+## Recap: why this reformulation?
+
+Modern RL has accumulated a zoo of algorithms with seemingly different objectives. DQN minimizes squared TD error. PPO maximizes a clipped surrogate. SAC adds an entropy bonus. RLHF clips against the pretrained model. Each justification reads ad-hoc on its own.
+
+The control-as-inference framing answers a single question: **is there one principled objective from which all these algorithms fall out?** Answer: yes, with appropriate choice of (prior, temperature, evidence). The framework is variational inference in a graphical model engineered specifically for RL.
+
+The Levine (2018) tutorial review is the canonical reference; this lesson follows its construction. Toussaint & Storkey (2006) had the pre-deep-learning version a decade earlier.
+
+## The graphical model
+
+Start with a standard Markov decision process: trajectory tau = (s_0, a_0, s_1, a_1, ..., s_T) with prior p(tau) = p(s_0) · Product_t p(a_t | s_t) · p(s_(t+1) | s_t, a_t). The standard action prior p(a_t | s_t) is uniform (call this the "uninformative" prior).
+
+The clever trick: introduce binary **optimality** variables O_t in (0 or 1) for each timestep. Define:
+
+```
+p(O_t = 1 | s_t, a_t) = exp(r(s_t, a_t) / α)
+```
+
+alpha is a temperature hyperparameter. With this definition, O_t = 1 is more probable when the reward r(s_t, a_t) is high. The trajectory becomes "evidently optimal" if O_(1:T) = 1.
+
+Note: exp(r/alpha) is not normalized as a probability; we can renormalize implicitly later. For now, treat it as an un-normalized likelihood (an "energy" in physics terms).
+
+The full joint distribution is:
+
+```
+p(τ, O_{1:T}) = p(s_0) · Π_t [ p(a_t | s_t) · p(s_{t+1} | s_t, a_t) · p(O_t | s_t, a_t) ]
+```
+
+The RL problem: **find the posterior over actions given that all O_t = 1**, i.e., the trajectory was optimal. By Bayes' rule:
+
+```
+p(τ | O_{1:T} = 1) ∝ p(τ) · Π_t exp(r(s_t, a_t) / α)
+                  = p(τ) · exp(R(τ) / α)
+```
+
+where R(tau) = Sum_t r(s_t, a_t) is the trajectory return. So the posterior distribution over trajectories is proportional to the prior weighted by the soft-Boltzmann distribution exp(R(tau) / alpha). Higher-return trajectories are more probable; the temperature alpha controls how sharply.
+
+This is the same structure as a Boltzmann distribution over physical states with energy -R(tau): low-energy (high-reward) states are more probable. The temperature alpha plays the role of kT in statistical mechanics.
+
+## Backward message passing
+
+The natural inference question: given the optimality evidence at all future timesteps, what's the probability of each action now? Mathematically: compute p(a_t | s_t, O_(t:T) = 1).
+
+By Bayes:
+
+```
+p(a_t | s_t, O_{t:T} = 1) ∝ p(a_t | s_t) · p(O_{t:T} = 1 | s_t, a_t)
+                        = p(a_t | s_t) · β(s_t, a_t)
+```
+
+where beta(s_t, a_t) = p(O_(t:T) = 1 | s_t, a_t) is the **backward message**. It satisfies a backward recursion:
+
+```
+β(s_t, a_t) = p(O_t = 1 | s_t, a_t) · E_{s_{t+1}} [ Σ_{a_{t+1}} p(a_{t+1} | s_{t+1}) · β(s_{t+1}, a_{t+1}) ]
+           = exp(r(s_t, a_t) / α) · E_{s_{t+1}} [ V(s_{t+1}) ]
+```
+
+where V at s at time t+1 is defined as the sum over actions at time t+1 of the action prior at the next state times the backward message at the next state, which is the marginalized backward message at the next state.
+
+Taking logs:
+
+```
+log β(s_t, a_t) = r(s_t, a_t) / α + log E_{s_{t+1}} [V(s_{t+1})]
+```
+
+Define Q_soft(s, a) := alpha · log beta(s, a). Then:
+
+```
+Q_soft(s_t, a_t) = r(s_t, a_t) + α · log E_{s_{t+1}} [V(s_{t+1})]
+```
+
+And V_soft(s) := alpha · log V(s) = alpha · log Sum_a p(a|s) · exp(Q_soft(s, a) / alpha). With uniform p(a|s) = 1/|A|:
+
+```
+V_soft(s) = α · log (1/|A|) + α · log Σ_a exp(Q_soft(s, a) / α)
+         = -α · log|A| + α · log Σ_a exp(Q_soft(s, a) / α)
+```
+
+The constant -alpha · log|A| is the entropy of the uniform prior; it cancels out in the policy improvement step, so most expositions drop it and write the soft value function as:
+
+```
+V_soft(s) = α · log Σ_a exp(Q_soft(s, a) / α)
+```
+
+Two derivation steps got compressed here that are worth surfacing. The exact backward message at line 107 carries a log-E factor over next states; rewriting line 107 with that exact log-E factor gives the naive exact-inference form Q_soft = r + alpha · log E over s-prime of exp(V_soft(s-prime)/alpha). That form treats the dynamics posterior as if the agent controlled it and is **risk-seeking / optimistic** under stochastic transitions (the "optimism problem" of message passing). The **variational correction** fixes the dynamics posterior to the true p(s-prime given s, a), replacing the log-E factor with the plain expectation gamma · E over s-prime of V_soft(s-prime). The discount gamma is the standard RL discount (classic control-as-inference is undiscounted; mixing gamma here is a pedagogical blend so the backup composes with the rest of the track). With those two corrections, the **soft Bellman backup** has its two recursions:
+
+```
+Q_soft(s, a) = r(s, a) + γ · E_{s' ~ P(·|s, a)} [V_soft(s')]
+V_soft(s)    = α · log Σ_a exp(Q_soft(s, a) / α)
+```
+
+(Subtle point: the axis is **exact-inference vs variational**, not deterministic-vs-stochastic. Naive exact-inference message passing under stochastic transitions yields Q_soft = r + alpha · log E over s-prime of exp(V_soft(s-prime)/alpha), a log-sum-exp over next states that is **risk-seeking / optimistic** under uncertainty (the "optimism problem" of naive message passing). The **variational correction** restores the plain expectation r + gamma · E over s-prime of V_soft(s-prime), which is the form SAC actually uses regardless of whether dynamics are deterministic or stochastic. Levine 2018 makes the axis explicit: exact inference is appropriate for deterministic dynamics, variational inference for stochastic.)
+
+### The soft policy
+
+The posterior over actions at state s_t is:
+
+```
+π_soft(a | s) = exp(Q_soft(s, a) / α) / Z(s)
+            = exp((Q_soft(s, a) - V_soft(s)) / α)
+```
+
+(Using V_soft = alpha · log Z from the partition-function definition.) This is a Boltzmann distribution over actions with energies -Q_soft(s, a) and temperature alpha.
+
+## Two limits sanity-check the framework
+
+The temperature alpha interpolates between two known limits.
+
+### Limit alpha → 0 (deterministic / hard Bellman)
+
+alpha · log Sum_a exp(Q/alpha) → max_a Q as alpha → 0 (log-sum-exp converges to max). So:
+
+```
+V_soft(s) → max_a Q(s, a)            (hard value)
+Q_soft(s, a) → r(s, a) + γ · max_{a'} Q(s', a')   (hard Bellman optimality, Lesson 6)
+π_soft(a | s) → δ(a - argmax_a Q(s, a))   (deterministic greedy policy)
+```
+
+The standard RL machinery from Phase 1 and the early-Phase-2 lessons. Hard Bellman is the zero-temperature limit of soft Bellman.
+
+### Limit alpha → ∞ (uniform policy)
+
+As alpha → ∞, the soft-max becomes flat: every action looks roughly equally good. The policy pi_soft → uniform. No information from rewards is being used.
+
+### The sweet spot
+
+Real applications pick alpha in between: SAC tunes alpha automatically (Haarnoja et al., 2018 has the automatic-temperature variant). RLHF uses the analogous beta parameter; current systems pick beta ∈ [0.01, 0.1] typically.
+
+The principled interpretation: alpha (or beta) is the **information rate** at which rewards drive the policy. Small alpha = greedy use of reward signal, low entropy. Large alpha = high entropy, lots of exploration / regularization. The variational view names this trade-off explicitly.
+
+## Worked example: 2-action MDP, terminal after one step
+
+Set up the smallest non-trivial case. Single state s, two actions a_1, a_2. Both terminate immediately after one step.
+
+- r(s, a_1) = 1
+- r(s, a_2) = 0
+- alpha = 1
+
+### Compute soft Q-values
+
+Terminal one-step: there is no continuation. So Q_soft(s, a) = r(s, a):
+
+```
+Q_soft(s, a_1) = 1
+Q_soft(s, a_2) = 0
+```
+
+### Compute soft value
+
+```
+V_soft(s) = α · log(exp(Q_soft(s, a_1) / α) + exp(Q_soft(s, a_2) / α))
+         = 1 · log(exp(1) + exp(0))
+         = log(e + 1)
+         = log(2.7183 + 1)
+         = log(3.7183)
+         ≈ 1.3133
+```
+
+### Compute soft policy
+
+```
+π_soft(a_1 | s) = exp(Q_soft(s, a_1) - V_soft(s)) = exp(1 - 1.3133) = exp(-0.3133) ≈ 0.7311
+π_soft(a_2 | s) = exp(Q_soft(s, a_2) - V_soft(s)) = exp(0 - 1.3133) = exp(-1.3133) ≈ 0.2689
+```
+
+(Check: 0.7311 + 0.2689 = 1.0000 ✓. The two probabilities sum to 1, as a normalized policy must.)
+
+The soft policy is **stochastic**: action 1 with probability ~0.73, action 2 with probability ~0.27. A pure greedy policy would always take action 1 (probability 1.0). The variational view says: the "right" thing to do depends on alpha. At alpha = 1, you take the better action most of the time but not always; the lower-reward action retains 27% probability because the entropy bonus rewards exploration.
+
+### Limit check
+
+- At alpha = 0.01: pi_soft(a_1) = exp(100) / (exp(100) + exp(0)) ≈ 1.0 (greedy).
+- At alpha = 100: pi_soft(a_1) = exp(0.01) / (exp(0.01) + exp(0)) = 1.01 / 2.01 ≈ 0.502 (almost uniform).
+
+The dual-path verification: in the alpha → 0 limit, soft policy reduces to greedy (hard Bellman); in the alpha → ∞ limit, soft policy reduces to uniform. The framework matches the known endpoints exactly.
+
+## SAC implements the soft Bellman backup
+
+Soft Actor-Critic (Lesson 11 mentioned it; here is the connection in full). SAC maintains two networks:
+
+- **Soft Q-critic** Q_phi(s, a): trained to minimize the squared error against the soft Bellman target r + gamma E [V_soft(s')].
+- **Stochastic actor** the policy parameterized by theta(a | s): trained to minimize KL(the policy parameterized by theta(·|s) || exp(Q_phi(s, ·) / alpha) / Z(s)).
+
+The actor objective is "match the soft posterior implied by the current Q." The critic objective is "regress to the soft Bellman target implied by the current actor and Q." Iteratively, both converge to the variational fixed point Q_soft, pi_soft.
+
+The crucial detail SAC adds: the policy is **reparameterized** (Lesson 11). The action is a = mu_theta(s) + sigma_theta(s) · epsilon with epsilon ~ N(0, I). The KL divergence to the Q-Boltzmann posterior has closed-form gradients through this reparameterization. This is what makes SAC trainable end-to-end.
+
+SAC's "soft" qualifier in every term (soft Q-learning, soft policy iteration, soft Bellman backup) is not a stylistic choice. It refers exactly to the log-sum-exp value function and the Boltzmann policy that fall out of this framework.
+
+## RLHF is the same framework with a different prior
+
+Lesson 8 introduced KL-regularized PPO with objective L = L^CLIP - beta · KL(the policy parameterized by theta || pi_pretrained). The control-as-inference framing recovers this exactly:
+
+- The graphical model has the same O_t optimality variables with p(O_t | x, y) ∝ exp(R(x, y) / beta).
+- The prior p(a | s) is **not uniform**; it is pi_pretrained(y | prompt).
+- The variational objective J(the policy parameterized by theta) = E_pi[R(x, y)] - beta · KL(the policy parameterized by theta || pi_pretrained) is the ELBO for the RLHF graphical model.
+
+Two minor caveats:
+
+1. RLHF is **sequence-level** rather than per-timestep: the optimality variable is O = 1 for the whole completion, with R(x, y) the cumulative reward model score. The within-completion structure is simpler than full RL because the reward model only fires once per completion.
+2. The clipped surrogate L^CLIP from PPO is the **practical optimizer** for the surrogate objective, not part of the variational derivation. The variational framework derives the **objective**; PPO is the **gradient-step machinery** for optimizing it.
+
+Pick a different prior, get a different algorithm. Uniform → SAC. Pretrained → RLHF. Demonstrations → imitation-bootstrapped policy improvement. Each algorithm is the variational solution to the same graphical-model template with different prior choice.
+
+## The fleet pattern: training objective determines what the model learns
+
+The variational unification revealed in this lesson is one instance of a broader pattern that has emerged across multiple modern ML/RL sub-fields:
+
+- **MuZero** (Lesson 10): train the model for **planning quality** (policy + value + reward losses), not raw-observation reconstruction. Different loss → different model.
+- **Variational inference (L11)**: the entropy bonus in SAC is the KL regularizer in disguise. Pick the prior, get the algorithm.
+- **This lesson (L12)**: the entire RL framework follows from the choice of evidence (O_t = 1), prior (p(a|s)), and temperature (alpha).
+- **Representation learning** (Track 24, contemporary): JEPA-style algorithms (Assran et al., 2023) skip pixel-reconstruction in favor of predicting masked latent representations. The "surface reproduction tax" of pixel decoding wastes capacity on details that do not matter for downstream tasks.
+
+All four instances share the same insight: **the loss function determines what the model learns to do well**. Changing the loss = changing what you want the model to optimize. Variational inference makes this principle explicit; the other examples are different incarnations of the same idea.
+
+This is the conceptual capstone for Phase 2: the algorithmic zoo from L4-L10, plus the variational reframing in L11-L12, plus the cross-sub-field pattern across model-based RL, MaxEnt RL, RLHF, and representation learning, all reduce to "**pick the right loss for what you want; the right algorithm follows from the right loss**."
+
+## Common pitfalls
+
+- **Conflating the temperature alpha with the discount gamma.** They serve different roles: alpha controls how sharply rewards drive the policy (entropy vs reward trade-off); gamma controls how heavily future rewards count against present ones. They appear in different parts of the recursion.
+- **Confusing the exact-vs-variational axis with the deterministic-vs-stochastic axis.** Under stochastic dynamics, naive exact inference yields Q_soft = r(s, a) + alpha · log E over s-prime of exp(V_soft(s-prime) / alpha), a log-sum-exp over next states that is **risk-seeking / optimistic** under uncertainty. The **variational correction** restores the plain expectation Q_soft = r + gamma · E over s-prime of V_soft(s-prime), which is what SAC actually optimizes regardless of whether the dynamics are deterministic or stochastic. The right framing per Levine 2018: exact inference for deterministic dynamics, variational inference for stochastic. The log-sum-exp / soft-max stays over **actions** (in V_soft), never over next states in the actual backup.
+- **Treating the framework as algorithm-specific.** The framework is **structural**: it says "if you want a stochastic policy, here's the principled objective with that property." The choice of algorithm to optimize the objective (PPO clipped surrogate, natural gradient, off-policy actor-critic) is separate.
+- **Skipping the prior choice.** "Variational" without specifying a prior is incomplete. The prior is the design knob; the framework needs it to be informative.
+- **Treating control-as-inference as just a notational trick.** It is also a generative-modeling trick: the graphical model can be used to sample optimal trajectories. Sampled MuZero (Hubert et al., 2021) and inverse-RL methods exploit this.
+
+## Why this matters when you use AI
+
+The control-as-inference framing is the theoretical bedrock under three commercially important algorithm families:
+
+- **SAC and continuous-control RL.** All modern actor-critic algorithms for continuous control trace back to the soft Bellman derivation. SAC remains the open-source workhorse in 2025.
+- **RLHF (and its successors DPO, IPO, KTO).** The full RLHF objective is variational; the recent direct preference optimization variants (Rafailov et al., 2023; DPO) are alternative samplers from the same variational posterior, skipping the explicit reward-model stage. The KL-regularized objective stays.
+- **Inverse RL and reward learning.** MaxEnt-IRL (Ziebart 2008) is the inverse problem under this framework: given demonstrations, infer the reward function whose posterior they best fit. Underlies several preference-learning and value-alignment systems.
+
+Lesson 13 covers RLHF in depth, as the killer application of this entire phase. The Phase 1-2-3 narrative arc:
+
+- **Phase 1**: name the failure modes and core estimators (REINFORCE → actor-critic). On-policy fundamentals.
+- **Phase 2 (this Phase, closes here)**: the algorithm zoo. DQN (off-policy + engineering), PPO (on-policy + clipping), model-based (learn + plan), variational (ELBO + soft Bellman). Five families, one mathematical thread.
+- **Phase 3**: production applications. RLHF, agentic systems, safety-aligned training. The pieces from Phases 1-2 wired together for real-world deployment.
+
+The Phase 2 → Phase 3 boundary checkpoint after this lesson reviews L6 through L12 as a coherent unit.
+
+## What you should remember from this lesson
+
+- **Control as inference** turns RL into Bayesian inference: introduce optimality variables O_t with p(O_t = 1 | s, a) ∝ exp(r(s, a) / alpha); the posterior over trajectories given O_(1:T) = 1 is the MaxEnt-RL distribution.
+- **The soft Bellman backup** is V_soft(s) = alpha · log Sum_a exp(Q_soft(s, a) / alpha) and Q_soft(s, a) = r(s, a) + gamma · E_(s')[V_soft(s')]. The log-sum-exp is the "soft max."
+- **Two limits**: as alpha → 0, log-sum-exp → max and soft Bellman reduces to hard Bellman (Lesson 6); as alpha → ∞, the policy becomes uniform.
+- **Worked example**: 2-action terminal, alpha = 1, r = (1, 0). V_soft = log(e + 1) ≈ 1.313; soft policy (0.731, 0.269). Limits match.
+- **SAC implements this backup**. **RLHF is the same framework with the pretrained model as the prior**. **MaxEnt-IRL is the inverse problem**. The choice of prior is the design knob; everything else follows from variational inference in the right graphical model.
+- **Fleet pattern**: the loss function determines what the model learns. MuZero, JEPA, SAC, RLHF are all incarnations of "pick the right loss." Variational inference makes this principle explicit.
+
+**Phase 2 closes here.** L6 through L12 covered the algorithmic zoo (DQN, PPO, model-based, variational, control-as-inference) as a coherent unit. Phase 3 opens at L13 with RLHF as the killer production application.
+
+## References
+
+- Levine, S. (2018). Reinforcement Learning and Control as Probabilistic Inference: Tutorial and Review. *arXiv:1805.00909*. https://arxiv.org/abs/1805.00909 The canonical reference for this lesson. Read after L11; reading order matters.
+- Toussaint, M., & Storkey, A. (2006). Probabilistic inference for solving discrete and continuous state Markov Decision Processes. *ICML 2006*. https://dl.acm.org/doi/10.1145/1143844.1143963 Pre-deep-learning predecessor. The original graphical-model construction.
+- Ziebart, B. D., Maas, A., Bagnell, J. A., & Dey, A. K. (2008). Maximum Entropy Inverse Reinforcement Learning. *AAAI 2008*. The original MaxEnt-RL formulation in inverse RL.
+- Haarnoja, T., Tang, H., Abbeel, P., & Levine, S. (2017). Reinforcement Learning with Deep Energy-Based Policies. *ICML 2017*. https://arxiv.org/abs/1702.08165 Soft Q-learning. First deep-learning instantiation of soft Bellman.
+- Haarnoja, T., Zhou, A., Abbeel, P., & Levine, S. (2018). Soft Actor-Critic: Off-Policy Maximum Entropy Deep Reinforcement Learning with a Stochastic Actor. *ICML 2018*. https://arxiv.org/abs/1801.01290 SAC. The practical workhorse implementing the soft Bellman backup.
+- Haarnoja, T., et al. (2018). Soft Actor-Critic Algorithms and Applications. *arXiv:1812.05905*. https://arxiv.org/abs/1812.05905 The follow-up with automatic temperature tuning.
+- Ouyang, L., Wu, J., Jiang, X., et al. (2022). Training language models to follow instructions with human feedback. *NeurIPS 2022*. https://arxiv.org/abs/2203.02155 InstructGPT. RLHF as the special case of this framework with pretrained-model prior.
+- Rafailov, R., Sharma, A., Mitchell, E., et al. (2023). Direct Preference Optimization: Your Language Model is Secretly a Reward Model. *NeurIPS 2023*. https://arxiv.org/abs/2305.18290 DPO. Sampling from the variational posterior without the explicit reward model.
+- Levine, S. (2023). CS285 lecture on Reframing Control as an Inference Problem. UC Berkeley. https://rail.eecs.berkeley.edu/deeprlcourse/

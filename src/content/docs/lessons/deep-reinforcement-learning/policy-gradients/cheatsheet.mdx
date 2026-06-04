@@ -1,0 +1,124 @@
+---
+title: "Cheatsheet: Policy gradients (REINFORCE)"
+description: One-page reference. The log-derivative trick, the REINFORCE estimator, the dynamics-drop-out result, rewards-to-go + baseline refinements, a worked sigmoid bandit with the variance-equals-signal observation, and the bridge to actor-critic.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## The objective
+
+```
+J(θ)  =  E_(τ ~ π_θ) [ R(τ) ]    where R(τ) = Σ over t of γ^t · r_t
+```
+
+Gradient ascent: `θ ← θ + α · ∇_θ J(θ)`. The hard part is computing `∇_θ J(θ)` when the expectation is over trajectories sampled by `π_θ` itself.
+
+## The log-derivative trick (one identity)
+
+```
+∇_θ p(x; θ)  =  p(x; θ) · ∇_θ log p(x; θ)
+=>  ∇_θ E_(x ~ p) [ f(x) ]  =  E_(x ~ p) [ f(x) · ∇_θ log p(x; θ) ]
+```
+
+An expectation of "thing times score" is something you can estimate by sampling.
+
+## Applied to the trajectory distribution
+
+```
+p(τ; θ)  =  ρ(s_0) · ∏_t π_θ(a_t | s_t) · P(s_(t+1) | s_t, a_t)
+log p(τ; θ)  =  log ρ(s_0)  +  Σ_t log π_θ(a_t | s_t)  +  Σ_t log P(s_(t+1) | s_t, a_t)
+∇_θ log p(τ; θ)  =  Σ_t ∇_θ log π_θ(a_t | s_t)
+```
+
+**Only the policy term depends on `θ`.** Dynamics `P` and initial-state `ρ` drop out → **model-free**.
+
+## The policy gradient theorem
+
+```
+∇_θ J(θ)  =  E_(τ ~ π_θ) [ R(τ) · Σ_t ∇_θ log π_θ(a_t | s_t) ]
+```
+
+## REINFORCE (Williams, 1992) in five lines
+
+```
+1. for each iteration:
+2.     sample N trajectories τ_1, ..., τ_N by running π_θ
+3.     g ≈ (1/N) Σ_i [ R(τ_i) · Σ_t ∇_θ log π_θ(a_(i,t) | s_(i,t)) ]
+4.     θ ← θ + α · g
+5. end
+```
+
+**Unbiased**: `E[g] = ∇_θ J(θ)` exactly.
+
+**Intuition.** `∇_θ log π_θ(a | s)` points in the direction that raises the probability of action `a` at state `s`. Multiplying by `R(τ)` says: raise the probability of actions in good trajectories; lower it for bad ones.
+
+## Two variance-reduction refinements
+
+| Refinement | Substitute | Why it helps |
+| --- | --- | --- |
+| Rewards-to-go (causality) | `R(τ) → G_t = Σ_(k≥t) γ^(k-t) r_k` | Action at `t` cannot affect rewards before `t`; drop them |
+| Baseline subtraction | `G_t → G_t - b(s_t)` | Unbiased (`E[b(s)·∇log π(a|s)] = 0`); pick `b(s) ≈ V^π(s)` to cancel the predictable part |
+
+**With `b(s) = V^π(s)`, the bracket becomes the advantage** `A^π(s, a) = Q^π(s, a) - V^π(s)` (from L3):
+
+```
+g ≈ Σ_t A^π(s_t, a_t) · ∇_θ log π_θ(a_t | s_t)
+```
+
+## Worked: sigmoid bandit (state-less, 2 actions)
+
+```
+π_θ(a=1) = σ(θ),  π_θ(a=2) = 1 - σ(θ)
+R(a=1) = 1,  R(a=2) = 0
+∇_θ log σ(θ) = 1 - σ(θ);  ∇_θ log(1 - σ(θ)) = -σ(θ)
+```
+
+REINFORCE update: `θ ← θ + α · R · ∇_θ log π_θ(a)`.
+
+| step | θ | π(a=1) | sampled a | R | gradient | θ_new (α=1) |
+| --- | --- | --- | --- | --- | --- | --- |
+| 0 | 0 | 0.5 | 1 | 1 | `1 - 0.5 = 0.5` | 0.5 |
+| 1 | 0.5 | 0.6225 | 1 | 1 | `1 - 0.6225 = 0.3775` | 0.8775 |
+| 2 | 0.8775 | 0.7064 | ... | | | |
+
+Probability of the rewarding action climbs `0.500 → 0.622 → 0.706` and saturates (the `1-σ` factor shrinks as `σ → 1`).
+
+## Dual-path check: E[g] vs sample
+
+```
+Analytic:  E[g] = σ(θ)·1·(1 - σ(θ)) + (1 - σ(θ))·0·(-σ(θ)) = σ(θ)(1 - σ(θ))
+At θ = 0:  E[g] = 0.5 · 0.5 = 0.25
+
+Variance:  Var(g) = E[g²] - (E[g])² = 0.5·(0.5)² + 0 - 0.0625 = 0.125 - 0.0625 = 0.0625
+At θ = 0:  σ_g = √0.0625 = 0.25
+```
+
+**Standard deviation equals the expectation.** A single sample is a 1-σ guess at the true gradient, even on this trivial problem. `1/√N` averaging brings it down, but for hard tasks the practical variance is far worse than this.
+
+## Why REINFORCE has high variance
+
+- Estimator depends on full trajectory `R(τ)`, a sum of many random rewards.
+- Action sampling at every step is also random.
+- Sparse rewards → mostly zero gradient signal → slow learning.
+
+The track's later policy-gradient methods (actor-critic in L5, TRPO/PPO in L8) layer variance reductions on top of the same `∇_θ J = E[(...)·∇log π]` skeleton.
+
+## Where it shows up in modern AI
+
+- **RLHF post-training** of LLMs uses **PPO** (L8), a clipped trust-region variant of REINFORCE. The reward is a learned reward model; the policy is the LM.
+- **Robot policies trained with PPO** use the same estimator with a learned advantage critic.
+- **A2C / A3C / IMPALA** are all actor-critic refinements of REINFORCE.
+
+## Pitfalls to dodge
+
+- **Treating `∇_θ J` as exactly computable.** It is an expectation; you sample it. REINFORCE is unbiased, not exact.
+- **Dropping the reward factor.** `R(τ) · Σ ∇log π_θ`, not just `Σ ∇log π_θ`. Without `R`, you are imitating your own sampled actions regardless of reward.
+- **Thinking the baseline biases the estimator.** It does not, as long as `b(s_t)` does not depend on the action being taken.
+- **Aggressive learning rate.** Each update changes the policy, which shifts the trajectory distribution; large steps break the on-policy assumption. Trust-region methods (L8) exist to bound this drift.
+
+## The one-line version
+
+REINFORCE estimates the policy gradient as `E_τ [R(τ) · Σ_t ∇_θ log π_θ(a_t | s_t)]` using the log-derivative trick, which makes deep RL model-free (the dynamics drop out) at the cost of high variance that the rest of the policy-gradient family exists to reduce.

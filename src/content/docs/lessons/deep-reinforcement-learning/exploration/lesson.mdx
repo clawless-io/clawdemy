@@ -1,0 +1,124 @@
+---
+title: "Lesson: Exploration (epsilon-greedy, optimism, intrinsic motivation)"
+description: When the agent CAN act in an environment but the reward is sparse or hard to find, exploration becomes the central problem. Three families of strategies (random, optimism-based, intrinsic-motivation) make different trade-offs across simplicity, sample efficiency, and the hardness regime they work in. The hard-exploration regime is the one where random exploration provably fails.
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+The previous two lessons covered the offline setting where the agent cannot interact with the environment at all. Now return to online RL but sharpen one question that the algorithms so far have mostly glossed over: when the agent CAN act, but the reward is sparse or hard to find, how does the agent explore efficiently?
+
+Every algorithm in T18 has needed some answer to this. REINFORCE samples from the policy and accepts whatever the policy stochasticity provides. DQN bolts on epsilon-greedy exploration. PPO relies on policy-entropy regularization to keep the policy stochastic during training. Each of these is a simple answer that works in easy-exploration environments and fails in hard-exploration ones. The exploration literature is about the harder regime and the algorithms that handle it.
+
+This lesson covers three families of exploration strategies, the regime each is suited for, and the decision criteria for picking among them.
+
+- **Random exploration** (epsilon-greedy, Boltzmann or softmax exploration). Simple, has asymptotic guarantees in tabular settings, fails on hard exploration.
+- **Optimism-based exploration** (UCB, Thompson sampling, RLSVI). Principled exploration via upper-confidence-bound estimates of Q-values. Works in tabular and bandit settings; deep-RL extensions exist.
+- **Intrinsic motivation** (curiosity, ICM, RND, count-based). Auxiliary reward for visiting novel states or transitions the agent does not understand. Effective in hard-exploration environments where extrinsic reward is too sparse to drive learning.
+
+The hard distinction between these is not so much technical taste as it is fitness to the environment's exploration hardness. Knowing which regime you are in determines which family to reach for.
+
+## Random exploration
+
+The simplest answer. The agent picks a random action some fraction of the time and the greedy or learned-stochastic action the rest of the time.
+
+**Epsilon-greedy** (the DQN default): with probability epsilon, pick a uniformly random action; otherwise, pick the action with the highest Q-value at the current state. Tune epsilon to start high (more exploration early) and anneal toward a small steady-state value.
+
+**Boltzmann or softmax exploration**: pick action a at state s with probability proportional to exp(Q(s, a) / T), where T is a temperature parameter. Lower T concentrates on the high-Q action; higher T spreads probability across actions. T is annealed similarly.
+
+**Policy-entropy regularization** (PPO, SAC): the training objective adds an entropy bonus to the policy, keeping it stochastic even as it improves. The agent explores via the policy's own residual randomness.
+
+These are the easiest to implement and have asymptotic-coverage guarantees in tabular environments: given enough samples, the agent visits every state-action pair infinitely often. The cost is sample efficiency on hard exploration. In an environment where the reward is reached only by a specific 50-step sequence of actions, the probability that uniform-random exploration takes that sequence is (1 / number-of-actions) raised to the 50th power, which is essentially zero in any reasonable action space. Random exploration in such an environment will not find the reward in any practical amount of time.
+
+The textbook example is the Montezuma's Revenge Atari game, where the reward is reached only by climbing several ladders, retrieving a key, and avoiding skulls; epsilon-greedy DQN achieves near-zero score because the random-action exploration cannot string together the required action sequence.
+
+## Optimism-based exploration
+
+The principled answer. Maintain uncertainty estimates over Q-values, and at each step act as if the uncertain Q-values were at the upper confidence bound. "Optimism in the face of uncertainty": when you do not know whether an action is good or bad, try it.
+
+In the bandit setting (no state, just a choice among actions with unknown means), the classic algorithm is **UCB** (Upper Confidence Bound, Auer 2002). At each step, pick the action that maximizes the empirical mean plus a confidence-interval bonus that shrinks as the action is tried more times. The bonus is proportional to the square root of (log of total steps divided by times this action was tried). Mathematically clean and provably near-optimal regret.
+
+In the full MDP setting, **UCRL** (Upper Confidence RL, Jaksch et al. 2010) extends this idea: maintain confidence intervals over the transition and reward functions, then plan against the optimistic MDP. The agent explores by acting as if the most favorable plausible dynamics were the true dynamics. Has near-optimal regret bounds in tabular MDPs.
+
+The deep-RL adaptation is harder because the Q-function is approximated by a neural network without natural uncertainty estimates. Three deep-RL exploration approaches inspired by optimism:
+
+- **Bootstrapped DQN** (Osband et al. 2016): train an ensemble of Q-networks on different bootstrapped resamples of the replay buffer. At deployment, pick a network at the start of each episode and act greedily with respect to it. Different ensemble members explore different parts of the space.
+- **NoisyNets** (Fortunato et al. 2018): add learnable noise to the network's parameters, making the policy stochastic at the parameter level rather than the action level. Provides exploration with stochastic-policy theoretical properties.
+- **Randomized Least-Squares Value Iteration** (RLSVI, Osband et al. 2014): a posterior-sampling exploration approach, originally developed for tabular and linearly-parameterized value functions and related to Thompson sampling. Deep-RL extensions exist but the foundational result is at smaller representational scales.
+
+Optimism-based methods are theoretically the right answer. In practice their deep-RL incarnations are competitive with intrinsic motivation on easy-to-medium exploration but often lag on the hardest environments.
+
+## Intrinsic motivation
+
+The practical answer for hard exploration. Augment the extrinsic environment reward with an **intrinsic reward** that encourages the agent to visit novel states or take actions whose outcomes the agent's current model does not understand. The total reward optimized becomes:
+
+```
+r_total = r_extrinsic + beta · r_intrinsic
+```
+
+The intrinsic-reward mechanism distinguishes the variants.
+
+**Count-based exploration** (Tang et al. 2017, Bellemare et al. 2016): give bonus reward inversely proportional to the (pseudo) visit count of the current state. New states get high bonuses; visited states get small bonuses. Scales by approximating the count via density models for high-dimensional states.
+
+**Curiosity-driven exploration / ICM** (Pathak et al. 2017, "Intrinsic Curiosity Module"): train a forward model that predicts the next-state **features** (in a feature space learned by a self-supervised inverse-dynamics model that predicts the action given consecutive observations) given the current state and action. Intrinsic reward is the feature-space prediction error: when the forward model is surprised by the actual outcome, the agent is exploring something the model does not understand. The inverse-dynamics objective trains the feature space to be sensitive to what the agent's actions control and insensitive to environment noise the agent cannot control (the "noisy-TV problem"). The forward model is trained on agent-collected data so the surprise diminishes as the agent learns.
+
+**Random Network Distillation** (RND, Burda et al. 2018): use a randomly-initialized network as a "target" and train a predictor network to match it. The intrinsic reward is the distillation error at the current state. Novel states have high prediction error because the predictor was never trained on them. The clever trick is that the target network is FIXED random, so the only way the predictor can match is via training, which only happens at states the agent has visited.
+
+RND was the breakthrough on Montezuma's Revenge. With RND-augmented PPO, the agent achieves super-human scores on the same environment where epsilon-greedy DQN scored near zero. The reason: RND's intrinsic reward drives the agent to climb ladders, retrieve the key, and continue exploring even before any extrinsic reward arrives.
+
+The cost of intrinsic motivation is tuning the beta weight. Too small, and the intrinsic reward does not drive exploration. Too large, and the agent chases novelty even when the extrinsic reward is plentiful, sacrificing exploitation. The right beta is environment-specific.
+
+## Hard-exploration vs easy-exploration distinction
+
+A useful coordinate for picking the right family.
+
+**Easy exploration**: the reward is dense or moderately sparse, and random exploration eventually finds it within a reasonable training budget. Standard Atari games (Pong, Breakout, Space Invaders) are easy exploration: scoring opportunities arise naturally from random action. Cartpole and the standard MuJoCo locomotion benchmarks are easy exploration.
+
+**Hard exploration**: the reward is reached only by long, specific action sequences that random exploration practically cannot stumble into. Montezuma's Revenge, Pitfall, and PrivateEye in Atari. Maze navigation with terminal-only reward. Robot manipulation where the entire task must succeed for any reward.
+
+The two families have different fits:
+
+| Family | Easy exploration | Hard exploration |
+|---|---|---|
+| Random (epsilon-greedy, entropy bonus) | Good enough, simple to implement | Will not find the reward in practical time |
+| Optimism (UCB-derived, NoisyNets, BootstrappedDQN) | Marginal improvement over random | Better than random, often lags intrinsic motivation |
+| Intrinsic motivation (ICM, RND, count-based) | Sometimes hurts (over-explores) | The only family that reliably works |
+
+When picking an exploration approach for a new environment, the binary question to ask first: is the extrinsic reward reachable by random action in the training budget? If yes, start with epsilon-greedy or entropy regularization. If no, jump to intrinsic motivation immediately.
+
+## Where exploration fits in modern RL
+
+In LLM RLHF, exploration is largely handled by the policy distribution itself: the language model is a stochastic policy with a temperature parameter, and the KL regularization to the SFT reference policy keeps the policy from collapsing too quickly. The exploration is at the token level via sampling; the credit assignment is at the sequence level via the reward model. This is closer to entropy-regularized RL than to intrinsic motivation, because the reward signal (a learned preference model) is rich enough that hard-exploration techniques are not the bottleneck.
+
+In robotics, the hard-exploration regime is the norm because real-robot reward is almost always sparse (the task succeeded or it did not). Intrinsic motivation and pre-trained-skill priors are the dominant approaches. Demonstration data is often used to bootstrap past the hard-exploration phase entirely (an expert demonstrates the rough behavior, exploration refines it).
+
+In recommender systems and online ads, exploration is dominated by contextual bandit algorithms (UCB-style or Thompson sampling) because the state space is per-impression-feature-vector and the action space is small. The hardness regime is closer to bandit than to deep RL.
+
+## Why this matters when you use AI
+
+If you are building or evaluating an RL-trained system, the exploration choice constrains what the system can learn. A system trained on a hard-exploration task with only epsilon-greedy exploration will have visited a tiny fraction of the state space and will have learned nothing about the unexplored regions; it will look competent on the training distribution and fail catastrophically on edge cases.
+
+The exploration story also explains a class of LLM behaviors. The high-temperature sampling at inference is, in part, exploration left over from training; lower temperatures concentrate on the policy's high-probability outputs. The "stuck in a local minimum" behavior of RLHF-fine-tuned models on hard prompts is often an exploration-bottleneck story: the policy is already concentrated on a particular response shape and the RLHF training did not push it out.
+
+## Common pitfalls
+
+**Treating epsilon-greedy as automatic.** It is the default in DQN but not a universal exploration strategy. In hard-exploration environments it provably fails.
+
+**Conflating exploration regimes.** Random and intrinsic-motivation methods are not interchangeable. Using random exploration on Montezuma's Revenge produces near-zero score while RND-augmented PPO reaches super-human; using intrinsic motivation on a dense-reward environment can over-explore.
+
+**Under-tuning the intrinsic-reward weight.** beta in r_total = r_extrinsic + beta · r_intrinsic needs to balance the two. Both extremes fail.
+
+**Forgetting that intrinsic motivation diminishes.** ICM's prediction error decreases as the agent learns; RND's distillation error decreases as the predictor catches up. Intrinsic motivation as designed is a transient exploration drive, not a permanent reward signal.
+
+**Treating entropy regularization as exploration.** Entropy regularization in PPO and SAC keeps the policy stochastic but does not push the policy toward unseen states. It is mild exploration at best; for hard exploration it is insufficient.
+
+## What you should remember
+
+- **Three exploration families:** random (epsilon-greedy, entropy regularization), optimism-based (UCB, Bootstrapped DQN, RLSVI), intrinsic motivation (ICM, RND, count-based).
+- **The hard-exploration vs easy-exploration distinction is the dominant decision criterion.** Easy environments are well-served by random or optimism; hard environments require intrinsic motivation.
+- **RND was the breakthrough on hard exploration.** Montezuma's Revenge went from near-zero with epsilon-greedy to super-human with RND-augmented PPO.
+- **Intrinsic motivation diminishes as the agent learns.** The forward-model prediction error decays; this is by design, not a failure.
+- **Exploration choice constrains what the trained system has seen.** A system trained with weak exploration on a complex task has not visited the regions it did not explore, and its behavior on those regions is unpredictable.
+
+The next lesson takes a different angle on data efficiency: when the agent has to learn many related tasks, can the structure across tasks accelerate learning? Multi-task RL and meta-RL.

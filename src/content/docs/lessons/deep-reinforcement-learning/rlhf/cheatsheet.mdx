@@ -1,0 +1,133 @@
+---
+title: "Cheatsheet: RLHF (the InstructGPT pipeline)"
+description: "One-page reference: the three stages, the Bradley-Terry reward objective, the variational optimal policy, β decision table, operational instruments."
+phase: "rl-frontiers"
+phase_order: 1
+order: 13
+last_reviewed: "2026-06-04"
+---
+
+## The three stages
+
+| Stage | Loss | Output |
+|-------|------|--------|
+| **0. Pretrained** | next-token cross-entropy on internet text | `π_pretrained` |
+| **1. SFT** | `L_SFT = -E[log π_θ(y* | x)]` on demonstrations | `π_SFT` |
+| **2. Reward model** | Bradley-Terry: `L_RM = -E[log σ(R_φ(x, y_w) - R_φ(x, y_l))]` | `R_φ` |
+| **3. PPO + KL** | `L_RLHF = L^CLIP - β · KL(π_θ || π_SFT)` | `π_θ` (deployable) |
+
+Stage 1 is necessary anchor; Stage 2 reward model is fit on preference pairs; Stage 3 optimizes with PPO machinery + KL constraint.
+
+## The full RLHF objective
+
+```
+J(π_θ) = E_{x ~ D, y ~ π_θ} [ R_φ(x, y) ] - β · KL(π_θ(·|x) || π_SFT(·|x))
+```
+
+= variational ELBO for the optimality-conditioned graphical model with:
+- Latent: response `y`
+- Prior: `π_SFT(y | x)`
+- Likelihood: `exp(R_φ(x, y) / β)`
+- Temperature: `β`
+
+## The optimal policy (closed form)
+
+```
+π*(y | x) = (1 / Z(x)) · π_SFT(y | x) · exp(R_φ(x, y) / β)
+Z(x)     = Σ_y π_SFT(y | x) · exp(R_φ(x, y) / β)
+```
+
+This is the soft Bellman posterior from L12 at the sequence level. PPO optimizes a tractable surrogate for it.
+
+## Worked example (lesson body)
+
+Single prompt `x`, two responses. `π_SFT = (0.6, 0.4)`, `R = (1, 0)`, `β = 0.5`.
+
+| Response | `π_SFT · exp(R / β)` | Numerator |
+|----------|----------------------|-----------|
+| y_1 | `0.6 · exp(2)` | `4.434` |
+| y_2 | `0.4 · exp(0)` | `0.400` |
+
+`Z = 4.834`. `π* = (0.917, 0.083)`. RLHF concentrated more mass on `y_1` than SFT did, less than reward-maximizer would.
+
+| β | `π*(y_1)` | Behavior |
+|---|-----------|----------|
+| → 0 | → 1.0 | Pure reward maximization, ignores SFT |
+| 0.01 | ≈ 1.0 | Risk of reward hacking |
+| 0.1 | ≈ 0.99 | Typical strong-signal regime |
+| 0.5 | 0.917 | Worked example |
+| 1.0 | ≈ 0.80 | Weak signal |
+| → ∞ | → 0.6 (SFT) | No RL value extracted |
+
+## β decision table
+
+| β too low | β too high | Right `β` |
+|-----------|------------|-----------|
+| Reward hacking; adversarial RM exploits | No improvement over SFT | Empirical sweet spot 0.01-0.1 |
+| Measured KL very high | Measured KL near zero | Calibrate per RM quality |
+| Win-rate against base may drop | Win-rate ≈ 50% (no improvement) | Win-rate > 50%, KL bounded |
+
+Always measure achieved KL and win-rate; do not pick `β` by feel.
+
+## Variants
+
+| Variant | Key change | When |
+|---------|------------|------|
+| **InstructGPT/PPO** (baseline) | SFT + RM + PPO + KL | Default; needs PPO compute |
+| **Constitutional AI** (Bai 2022) | RLAIF preferences from a constitution | Scalable preferences, principled |
+| **DPO** (Rafailov 2023) | Skip RM + PPO; direct max-likelihood on prefs | Simpler; smaller scale; RM-accuracy is bottleneck |
+| **GRPO** (DeepSeekMath, Shao 2024; popularized by DeepSeek-R1, 2025) | Drop critic, group-normalized rewards (subtract group mean, divide group std) | Reasoning tasks; sparse rewards |
+| **IPO** (Azar 2024) | Theoretical generalization of DPO | Overconfidence-mitigated DPO |
+
+## Operational instruments
+
+| Instrument | What it measures | Heuristic pass |
+|------------|------------------|----------------|
+| Reward-model test accuracy | RM held-out preference accuracy | > 65% (chance 50%) |
+| Measured KL-from-base | `KL(π_θ || π_SFT)` | 5 to 50 nats typically |
+| Win-rate against base | Human/LLM-judge preference | > 50% |
+| HarmBench | Adversarial refusal evaluation | Higher refusal on harmful prompts |
+| Sycophancy benchmarks | Answer-change rate under user opinion | Lower is better |
+| Capability evals (MMLU, GSM8K, HumanEval) | General capability retention | Should not drop materially from SFT |
+
+These operationalize "is RLHF working?" into specific empirical measurements. Empirical questions are distinct in kind from broader value-alignment questions which the instruments inform but do not settle.
+
+## Reward hacking failure modes
+
+| Symptom | Mechanism |
+|---------|-----------|
+| Repetitive output | RM has weakness on confidence; repetition scores high |
+| Sycophancy | Agreeing with user always scores high under some RMs |
+| Length hacking | Length-bias in human-rater preferences |
+| Refusal hacking | Over-cautious responses score higher than risky ones |
+| Adversarial JSON / formatting | RM has format-bias from training data |
+
+All defended by raising `β` (the KL penalty) to keep `π_θ` near `π_SFT`. Always run gradient-ascent reward-hacking analyses periodically.
+
+## Bradley-Terry preference model
+
+For preference pair `(y_w preferred over y_l | x)`:
+
+```
+P(y_w | x) = σ(R(x, y_w) - R(x, y_l))
+```
+
+The reward is well-defined **up to an additive constant per prompt**. Only differences matter. This is why `β` cannot be picked by literal scale; always calibrate to achieved KL.
+
+## Common pitfalls
+
+- Setting `β` by feel without measuring KL
+- Believing the reward model (always run reward-hacking analyses)
+- Skipping SFT (RLHF directly on pretrained is unstable)
+- Comparing across reward-model normalizations (only differences matter)
+- Treating DPO as "RLHF without the reward model" (it has its own failure modes)
+- Using human-rater agreement as proxy for truth (raters disagree systematically)
+
+## What you should remember
+
+- 3-stage pipeline: SFT → RM → PPO+KL.
+- Full objective: `L^CLIP - β · KL(π_θ || π_SFT)`.
+- Optimal policy: `π* ∝ π_SFT · exp(R / β)` (soft Bellman posterior from L12).
+- Reward hacking is the dominant failure mode; KL penalty is the structural defense.
+- DPO, GRPO, IPO, Constitutional AI: variants of the same variational construction.
+- Operational instruments operationalize "is RLHF working" empirically.

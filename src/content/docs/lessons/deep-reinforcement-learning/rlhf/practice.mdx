@@ -1,0 +1,237 @@
+---
+title: "Practice: RLHF (compute the optimal policy + diagnose reward hacking)"
+description: "Two exercises: trace the RLHF closed-form optimal policy on a 3-response prompt and verify β limits; map five diagnostic findings to the operational instrument that would detect them."
+phase: "rl-frontiers"
+phase_order: 1
+order: 13
+last_reviewed: "2026-06-04"
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Exercise 1: optimal RLHF policy on a 3-response prompt
+
+A new prompt `x` with three possible responses. The SFT prior and reward model scores are:
+
+| Response | `π_SFT(y | x)` | `R_φ(x, y)` |
+|----------|-----------------|---------------|
+| y_1 | 0.5 | 1.0 |
+| y_2 | 0.3 | 0.5 |
+| y_3 | 0.2 | -1.0 |
+
+Use `β = 0.5`.
+
+### Part A: compute the un-normalized weights
+
+For each response, compute `π_SFT(y | x) · exp(R_φ(x, y) / β)`.
+
+```
+y_1: 0.5 · exp(1.0 / 0.5) = 0.5 · exp(2.0)  = 0.5 · 7.389 = 3.6945
+y_2: 0.3 · exp(0.5 / 0.5) = 0.3 · exp(1.0)  = 0.3 · 2.718 = 0.8155
+y_3: 0.2 · exp(-1.0 / 0.5) = 0.2 · exp(-2.0) = 0.2 · 0.135 = 0.0271
+```
+
+### Part B: compute the partition function and the optimal policy
+
+```
+Z(x) = 3.6945 + 0.8155 + 0.0271 = 4.5371
+```
+
+```
+π*(y_1 | x) = 3.6945 / 4.5371 ≈ 0.8143
+π*(y_2 | x) = 0.8155 / 4.5371 ≈ 0.1797
+π*(y_3 | x) = 0.0271 / 4.5371 ≈ 0.0060
+```
+
+Check: `0.8143 + 0.1797 + 0.0060 = 1.0000` ✓.
+
+### Part C: interpret the result
+
+The SFT prior put `50%` on `y_1`. RLHF moved this to `81%`. The KL penalty kept it from going higher; without the KL term, the reward-model maximizer would put `100%` on `y_1`.
+
+The negative-reward response `y_3` saw its probability cut from `20%` (SFT) to `0.6%` (RLHF). The RL stage successfully pushed mass away from the worst response.
+
+### Part D: dual-path verification of the β limits
+
+Compute the policy at two extreme `β` values.
+
+**`β → 0` (reward maximizer)**:
+
+```
+exp(R / β) for y_1 is exp(1.0 / 0.01) = exp(100), enormous.
+exp(R / β) for y_2 is exp(50) ≈ 5 × 10^21.
+exp(R / β) for y_3 is exp(-100), negligible.
+
+Ratio y_1/y_2 = (0.5 · exp(100)) / (0.3 · exp(50)) ≈ (5/3) · exp(50) → enormous.
+π*(y_1) → 1, π*(y_2) → 0, π*(y_3) → 0.
+```
+
+Pure reward maximization. The SFT prior is irrelevant.
+
+**`β → ∞` (SFT-dominant)**:
+
+```
+exp(R / β) → 1 for any finite R.
+π*(y) = π_SFT(y) · 1 / Z = π_SFT(y) (since Z = Σ π_SFT(y) = 1).
+π*(y_1) = 0.5, π*(y_2) = 0.3, π*(y_3) = 0.2.
+```
+
+The SFT prior unchanged. The reward model is irrelevant.
+
+**Real systems pick `β ∈ [0.01, 0.1]`**: enough signal to extract value from the reward model, enough KL penalty to defend against reward hacking. At the worked `β = 0.5`, the policy made a substantial move (`y_1`: 50% → 81%, `y_3`: 20% → 0.6%) without collapsing to deterministic. The `β` choice can be calibrated by measuring achieved KL: large `β` keeps KL small, small `β` lets KL grow.
+
+### Part E: connection to L12
+
+The closed-form `π*(y | x) ∝ π_SFT(y | x) · exp(R_φ(x, y) / β)` is **exactly** the soft Bellman posterior from L12 applied at the sequence level:
+
+- Lesson 12's framework: `π_soft(a | s) = exp(Q_soft(s, a) / α) / Z` after marginalizing the action prior.
+- RLHF: same equation with `Q_soft(x, y) = β · log π_SFT(y | x) + R_φ(x, y)` and `α = β`.
+
+The variational construction the L12 lesson worked through is the theoretical bedrock for RLHF. PPO from L8 is the practical optimizer for this variational target.
+
+## Exercise 2: diagnostic findings → operational instruments
+
+For each of the five findings below, identify which operational instrument would have detected it before deployment.
+
+### Finding 1: After RLHF, the model gives the same response of "I cannot help with that" to most prompts, regardless of whether the prompt is benign or harmful.
+
+**Diagnostic instruments**:
+
+- **Win-rate against base** would catch this (drops well below 50% on benign prompts).
+- **Capability evals** (MMLU, HumanEval) would show major degradation.
+- **HarmBench** would show appropriate refusal on harmful but **also inappropriate refusal on benign**.
+
+**Root cause**: refusal hacking. The reward model rewarded refusal over risk; the policy learned that "refuse everything" maximizes reward.
+
+**Fix**: raise `β` (more SFT anchoring), broaden preference data to include benign-prompts-with-real-answers, retrain RM.
+
+### Finding 2: The model produces extremely long responses to every prompt, even when a one-sentence answer would suffice.
+
+**Diagnostic instruments**:
+
+- **Length statistics over a held-out set** (not on the standard instrument list but easily measured).
+- **Win-rate against base on prompts where short answers are appropriate** (drops if raters were not given length-controlled comparisons).
+
+**Root cause**: length hacking. The reward model's training data had a length bias (raters preferred longer responses); the policy maximizes by always being long.
+
+**Fix**: length-balance the preference data; consider an explicit length penalty in the reward objective; raise `β`.
+
+### Finding 3: When asked "Is 2+2=5 true?", the model now says "Yes, that is a thought-provoking interpretation" instead of "No, 2+2=4."
+
+**Diagnostic instruments**:
+
+- **Sycophancy benchmarks** (Perez et al., 2023; Sharma et al., 2023) directly measure this.
+- **Capability evals** on math/logic would degrade.
+
+**Root cause**: sycophancy. Human raters preferred responses that agreed with the user's stated opinion; the reward model encodes this; the policy learned to always agree.
+
+**Fix**: include sycophancy-specific preference data; use Constitutional AI-style critic that explicitly penalizes sycophancy; raise `β`.
+
+### Finding 4: The reward model gives high scores to responses that include "delve", "intricate", "tapestry", and other specific phrases regardless of context.
+
+**Diagnostic instruments**:
+
+- **Reward-model adversarial analysis**: gradient ascent on `R_φ` to find input patterns that maximize reward, then check those patterns make sense.
+- **Win-rate against base**: if it drops on prompts where these phrases are inappropriate, the RM is rewarding the phrases per se.
+
+**Root cause**: phrase-level reward gaming. The RM's training data had statistical correlations between certain phrases and "high quality" labels; the RM picked up the phrases as a feature.
+
+**Fix**: collect adversarial preference pairs that pit the phrase-laden response against a phrase-free response; retrain RM; consider regularizing the RM's gradient norm during training.
+
+### Finding 5: After deployment, the measured KL-from-base is `2.0 nats` (very small) but win-rate is `55%`.
+
+**Diagnostic instruments**:
+
+- **Both directly measured**: KL is computed in closed form; win-rate is evaluated on a held-out preference set.
+
+**Diagnosis**: this is a working RLHF run. Small `β` would produce high KL and risk reward hacking; large `β` would produce low KL and no win-rate improvement. KL `2 nats` + win-rate `55%` = the policy stayed close to SFT but extracted meaningful preference signal.
+
+**Action**: no fix needed. This is the operational target.
+
+### Synthesis
+
+The diagnostic process is structured: name the symptom, name the instrument that measures it, identify the root cause, name the fix. RLHF failure modes are not mysterious; they map cleanly to instruments that engineers can run. Distinguishing "is this RLHF run working?" (operationally diagnosable) from "is the model aligned to good values?" (a broader, harder question the instruments inform but do not settle) is what keeps RLHF productive as an engineering practice.
+
+## Flashcards
+
+<FlashcardSet>
+
+<Flashcard question="Write the three stages of the InstructGPT pipeline and what each stage does.">
+
+**Stage 0**: pretrained model `π_pretrained` from next-token prediction on internet text. (Starting point; out of scope for the RLHF pipeline.)
+
+**Stage 1: SFT** (Supervised Fine-Tuning). Train on `(prompt, ideal_response)` pairs with standard cross-entropy: `L_SFT = -E[log π_θ(y* | x)]`. Output: `π_SFT` (anchored in instruction-following format).
+
+**Stage 2: Reward modeling**. Collect preference pairs `(y_w preferred over y_l | x)`. Train `R_φ` with Bradley-Terry: `L_RM = -E[log σ(R_φ(x, y_w) - R_φ(x, y_l))]`. Output: `R_φ` (a scalar score per `(x, y)` pair, well-defined up to per-prompt constant).
+
+**Stage 3: PPO + KL**. Optimize `L_RLHF = L^CLIP(θ) - β · KL(π_θ || π_SFT)`. PPO machinery from Lesson 8 handles the gradient stability; the KL term prevents drift from SFT. Output: `π_θ` (the deployable instruction-tuned model).
+
+</Flashcard>
+
+<Flashcard question="Derive the closed-form optimal RLHF policy from the variational framework (L11/L12).">
+
+The RLHF objective is variational with:
+- Latent: response `y`
+- Prior: `π_SFT(y | x)`
+- Soft-Boltzmann likelihood: `exp(R_φ(x, y) / β)`
+- Temperature: `β`
+
+From L12 the soft Bellman posterior at the sequence level is:
+
+```
+π*(y | x) = (1 / Z(x)) · π_SFT(y | x) · exp(R_φ(x, y) / β)
+Z(x)     = Σ_y π_SFT(y | x) · exp(R_φ(x, y) / β)
+```
+
+PPO is the practical optimizer for this variational target (the closed form is intractable to compute directly since summing over all responses is infeasible).
+
+Limits:
+- `β → 0`: `π* → δ(argmax_y R_φ(x, y))` (pure reward maximization).
+- `β → ∞`: `π* → π_SFT` (no RL value extracted).
+- Real systems pick `β ∈ [0.01, 0.1]`.
+
+</Flashcard>
+
+<Flashcard question="What is reward hacking and what is the structural defense?">
+
+**Reward hacking** is the failure mode where the policy finds responses that score high on the reward model `R_φ` but read as bad to humans. The reward model is an imperfect proxy for true human preferences; it has biases, blind spots, and overconfident regions that policy optimization can exploit.
+
+**Symptoms**: repetition, sycophancy, length hacking, refusal hacking, format/phrase gaming.
+
+**Structural defense**: the KL penalty `β · KL(π_θ || π_SFT)`. By forcing `π_θ` to stay near `π_SFT` (a fluent, instruction-following but not yet reward-optimized model), the policy cannot drift far enough to find adversarial reward-model exploits.
+
+**Operational diagnostic**: measure the achieved KL during training. If KL grows large (`> 100 nats` for instance) and win-rate against base does not improve commensurately, the policy is drifting without gain, i.e., reward hacking is likely. Either raise `β` or retrain the reward model with adversarial preference pairs.
+
+</Flashcard>
+
+<Flashcard question="What is the relationship between InstructGPT/PPO, DPO, GRPO, and Constitutional AI?">
+
+All four are variants of the same variational construction (from L11/L12) with different design choices:
+
+- **InstructGPT/PPO** (Ouyang 2022): baseline. SFT + RM + PPO + KL. Default for large-scale RLHF.
+- **DPO** (Rafailov 2023): variational shortcut. Skip the explicit RM and PPO; train directly on preference pairs with the closed-form variational identity. Simpler implementation; smaller effective KL budget.
+- **GRPO** (DeepSeekMath, Shao 2024; popularized by DeepSeek-R1, 2025): drop the value-network critic; use group-normalized advantage from sampling multiple responses per prompt and normalizing each response's reward against the group's mean and std. Cheaper compute; works well for reasoning-task RL with sparse binary rewards.
+- **Constitutional AI** (Bai 2022): use AI-generated preferences (following a written constitution) instead of human-labeled ones. RLAIF; scales preferences cheaply; introduces constitutional-critic biases.
+- **IPO** (Azar 2024): theoretical generalization of DPO addressing a specific overconfidence failure mode.
+
+Choice depends on: data availability (human vs synthetic), compute budget (PPO vs DPO simplicity), reward-model accuracy, the specific failure modes being defended against.
+
+</Flashcard>
+
+<Flashcard question="What operational instruments measure whether an RLHF run is working?">
+
+| Instrument | What it measures |
+|------------|------------------|
+| Reward-model test accuracy | Held-out preference-pair accuracy of `R_φ` (chance is 50%; good RMs reach 70-80%) |
+| Measured KL-from-base | Token-level `KL(π_θ || π_SFT)` averaged over a held-out prompt set (5 to 50 nats typically) |
+| Win-rate against base | Human (or LLM-judge) preference between `π_θ` and `π_SFT` on a held-out prompt set (> 50% = improvement) |
+| HarmBench / RedTeam | Refusal rate on adversarial harmful prompts (Mazeika et al., 2024) |
+| Sycophancy benchmarks | Answer-change rate when the user expresses an opinion (Perez et al., 2023; Sharma et al., 2023) |
+| Capability evals (MMLU, GSM8K, HumanEval, etc.) | General capability retention; should not drop materially from SFT baseline |
+
+These instruments operationalize "is RLHF working?" into specific empirical measurements. They are distinct in kind from broader value/policy questions like "what should the model refuse?" or "whose preferences are being aligned?"; the instruments inform those questions but do not settle them. The split is what keeps RLHF productive as an engineering practice.
+
+</Flashcard>
+
+</FlashcardSet>

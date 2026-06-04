@@ -1,0 +1,141 @@
+---
+title: "Cheatsheet: Control as inference"
+description: "One-page reference: the optimality-conditioned graphical model, soft Bellman backup, soft policy, and the unification of SAC + RLHF + MaxEnt IRL."
+phase: "core-deep-rl-algorithms"
+phase_order: 7
+order: 12
+last_reviewed: "2026-05-25"
+---
+
+## The graphical model
+
+Introduce binary optimality variables `O_t ∈ {0, 1}`:
+
+```
+p(O_t = 1 | s_t, a_t) = exp(r(s_t, a_t) / α)
+```
+
+(Un-normalized "likelihood"; absorbed by partition function later.)
+
+Joint:
+
+```
+p(τ, O_{1:T}) = p(s_0) · Π_t [ p(a_t | s_t) · p(s_{t+1} | s_t, a_t) · p(O_t | s_t, a_t) ]
+```
+
+RL problem: infer `p(a_t | s_t, O_{t:T} = 1)`.
+
+## The soft Bellman backup (derivation outcome)
+
+```
+Q_soft(s, a) = r(s, a) + γ · E_{s' ~ P(·|s, a)} [V_soft(s')]
+V_soft(s)    = α · log Σ_a exp(Q_soft(s, a) / α)
+π_soft(a|s)  = exp((Q_soft(s, a) - V_soft(s)) / α)
+```
+
+`V_soft` is the log-partition function over actions. `α` is the temperature.
+
+## The two limits
+
+| Limit | Behavior | Recovers |
+|-------|----------|----------|
+| `α → 0` | log-sum-exp → max | Hard Bellman (Lesson 6); deterministic greedy policy |
+| `α → ∞` | log-sum-exp uniform | Uniform random policy; no use of rewards |
+| Real systems | `α ∈ [0.01, 1.0]` typically | Soft policy with controlled entropy |
+
+`α` is the **information rate**: how sharply rewards drive the policy.
+
+## Worked example (lesson body)
+
+Single state, two actions, terminal after 1 step, `α = 1`, `r = (1, 0)`.
+
+| Action | `Q_soft` | `exp(Q_soft / α)` |
+|--------|----------|--------------------|
+| a_1 | 1 | e = 2.7183 |
+| a_2 | 0 | 1.0000 |
+
+```
+V_soft = log(e + 1) = log(3.7183) ≈ 1.3133
+π_soft(a_1) = exp(1 - 1.3133) ≈ 0.7311
+π_soft(a_2) = exp(0 - 1.3133) ≈ 0.2689
+```
+
+Sum: 1.0000 ✓. At `α → 0`: π → (1, 0). At `α → ∞`: π → (0.5, 0.5). Limits verified.
+
+## SAC = practical implementation of soft Bellman
+
+| Component | What it does |
+|-----------|--------------|
+| **Soft Q-critic** `Q_φ(s, a)` | Regress to `r + γ · E[V_soft(s')]` |
+| **Stochastic actor** `π_θ(a | s)` | Minimize `KL(π_θ || exp(Q_φ / α) / Z)` |
+| **Reparameterization** `a = μ_θ(s) + σ_θ(s) · ε` | Differentiable sampling |
+| **Auto temperature `α`** | Tune to target entropy (Haarnoja 2018b) |
+
+## Prior choice = algorithm choice
+
+| Prior `p(a | s)` | Algorithm | KL term in objective |
+|------------------|-----------|---------------------|
+| Uniform | SAC, MaxEnt RL | `KL(π_θ || uniform)` = -H(π_θ) up to constant |
+| `π_pretrained` | KL-regularized PPO (RLHF) | `KL(π_θ || π_pretrained)` |
+| Demonstration policy | Imitation-bootstrapped RL | `KL(π_θ || π_demo)` |
+| Reward model implicit | DPO (skip explicit RL) | Same KL, different sampler |
+
+Same variational framework. Different prior = different algorithm.
+
+## Exact-vs-variational axis (NOT deterministic-vs-stochastic)
+
+Naive exact-inference message passing under stochastic transitions yields:
+
+```
+Q_soft(s, a) = r(s, a) + α · log E_{s'} [exp(V_soft(s') / α)]   [naive exact]
+```
+
+This log-sum-exp over next states is **risk-seeking / optimistic** under uncertainty (the "optimism problem"). The **variational correction** restores the plain expectation:
+
+```
+Q_soft(s, a) = r(s, a) + γ · E_{s'} [V_soft(s')]   [variational; what SAC uses]
+```
+
+Levine 2018: exact inference is appropriate for deterministic dynamics; variational inference for stochastic. SAC uses the variational form regardless of dynamics. The log-sum-exp / soft-max stays over **actions** (in V_soft), never over next states in the actual backup.
+
+## RLHF as special case
+
+Full RLHF objective:
+
+```
+L = E_π [R(prompt, response)] - β · KL(π_θ || π_pretrained)
+```
+
+= variational ELBO for the optimality-conditioned graphical model with:
+
+- Latent: response
+- Prior: pretrained model
+- Likelihood: `exp(R / β)`
+- Temperature: `β`
+
+L8 derived the practical surrogate `L^CLIP - β · KL`. Variational framework derives the OBJECTIVE; PPO is the optimizer.
+
+## Common pitfalls
+
+- Conflating temperature `α` and discount `γ` (different roles)
+- Confusing the exact-vs-variational axis with deterministic-vs-stochastic (SAC uses the variational form r + γ · E[V_soft] regardless of dynamics; naive exact-inference message passing is the risk-seeking version)
+- Treating the framework as algorithm-specific (it's structural)
+- Skipping the prior choice (the design knob)
+- Treating control-as-inference as just notational
+
+## Fleet pattern
+
+The variational unification is one instance of a broader pattern: **the loss function determines what the model learns**. Other instances:
+
+- MuZero (L10): train for planning quality, not raw-observation reconstruction
+- JEPA (T24): predict latent representations, not pixels
+- DPO: skip reward model, sample directly from preference posterior
+
+Same insight: pick the loss for what you want; the algorithm follows.
+
+## What you should remember
+
+- Soft Bellman backup: `V_soft = α · log Σ_a exp(Q/α)`; `π_soft = exp(Q/α) / Z`.
+- α → 0: hard Bellman; α → ∞: uniform policy.
+- SAC implements this. RLHF is the same framework with pretrained prior.
+- Phase 2 closes here. Phase 3 opens with RLHF in L13.

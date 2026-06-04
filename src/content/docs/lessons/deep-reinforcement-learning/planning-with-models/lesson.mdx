@@ -1,0 +1,221 @@
+---
+title: "Lesson: Planning with a learned model (MPC, cross-entropy method, MuZero)"
+description: "Now you have a dynamics model. How do you use it? Three layers of planning algorithm: random shooting, cross-entropy method, and learned-model Monte Carlo tree search. MPC ties them together by re-planning every step."
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+## What you'll be able to do after this lesson
+
+Lesson 9 ended with a model: a learned P̂(s' | s, a) (and a learned R̂(s, a) if rewards aren't observed directly). The lesson also flagged two ways to use a model: **plan** with it (Model Predictive Control: roll forward, find a good action sequence, execute the first action, re-plan) or **imagine** with it (Dyna: generate synthetic transitions, train a model-free policy). Lesson 9 covered "imagine." This lesson covers "plan."
+
+By the end of this lesson you can:
+
+- Formulate the planning problem: given a learned model P̂ and reward R̂, find an action sequence (a_0, a_1, ..., a_(H-1)) maximizing predicted discounted return.
+- Trace **random shooting**: sample N action sequences uniformly, score each by rolling the model forward, pick the best. Embarrassingly parallel; works as a baseline.
+- Trace the **cross-entropy method (CEM)** by hand for one iteration: sample, score, refit the action distribution to the elite samples, repeat. The workhorse for learned-model planning.
+- Explain **Model Predictive Control (MPC)**: plan to horizon H, execute only the first action, observe the real next state, re-plan from there. Sets the practical horizon and limits compounding error.
+- Sketch **MuZero**, the breakthrough that learns a dynamics model end-to-end inside a Monte Carlo Tree Search planning loop, and explain why training the model jointly with the planner produces a better model for control than training it for one-step prediction accuracy.
+
+This lesson closes the P-branch of the Lesson 3 dispatch table and completes the Phase 2 tour of all five algorithmic families (pi, V, Q, A, P).
+
+## The planning problem, made concrete
+
+You have a learned dynamics model P̂(s' | s, a) and (either learned or given) reward R̂(s, a). You are currently at state s_t. You want to choose an action a_t that maximizes expected discounted return:
+
+```
+a_t* = argmax_{a_t} E [ R̂(s_t, a_t) + γ · R̂(s_{t+1}, a_{t+1}*) + γ² · R̂(s_{t+2}, a_{t+2}*) + ... ]
+```
+
+The infinite-horizon version is the same problem the Bellman optimality equation (Lesson 6) tried to solve, but now you have a learned model so you cannot rely on tabular value iteration. You also cannot trust the model past some horizon (Lesson 9 showed how compounding error makes long-rollout predictions useless).
+
+The practical fix: **truncate the horizon to H steps** and find the best action sequence over the next H decisions:
+
+```
+(a_0, ..., a_{H-1})* = argmax_{a_{0:H-1}} E [ Σ_{t=0}^{H-1} γ^t · R̂(s_t, a_t) + γ^H · V̂(s_H) ]
+```
+
+The terminal V̂(s_H) is an estimate of the value beyond the horizon, optionally from a learned critic. If you trust the model only out to H ≈ 5 steps, set H = 5; the terminal value patches what the truncation misses.
+
+The space of action sequences (a_0, ..., a_(H-1)) is (dim_a)^H continuous in size (or discrete to the (num_actions)^H power for finite action sets). Brute-force search is infeasible. You need an optimizer.
+
+## Random shooting (the baseline)
+
+The simplest planner is sample-and-score:
+
+```
+1. Sample N action sequences uniformly from the action space.
+   For continuous actions in [low, high]^dim_a, sample i.i.d. uniform.
+2. For each sequence:
+   Roll the model P̂ forward for H steps.
+   Sum the predicted rewards (discounted).
+3. Pick the sequence with the highest score.
+4. Return the first action of the best sequence.
+```
+
+That's it. Embarrassingly parallel; N forward rollouts can happen on a GPU batch. No gradient computation, no inner optimizer. The cost is N inversely proportional to performance: doubling N halves the variance of the "best sample" estimator.
+
+For continuous control with H = 30 and dim_a = 6 (a humanoid robot), N = 10000 is a reasonable budget per planning step. Most candidate sequences are awful, a handful are decent, and the best of 10000 is usually good enough.
+
+Random shooting works as a baseline but wastes most of its samples. The cross-entropy method is the standard upgrade.
+
+## Cross-entropy method (CEM)
+
+CEM is iterative random shooting with **distribution refitting**:
+
+```
+1. Initialize a sampling distribution q_0 over action sequences.
+   Typically a Gaussian: q_0 = N(μ_0, Σ_0) where μ_0 is the mean
+   sequence (often zero) and Σ_0 is the initial covariance (large).
+2. For each iteration j = 1, ..., J (typically J = 5 to 10):
+   a. Sample N action sequences from q_{j-1}.
+   b. Roll the model forward; score each sequence.
+   c. Sort by score; take the top K (the "elites", typically K = 0.1 · N).
+   d. Refit q_j to the elites: μ_j = mean(elites), Σ_j = cov(elites).
+3. Return μ_J (the final mean) as the planned action sequence.
+```
+
+The intuition: the elite distribution concentrates around high-scoring action sequences each iteration. The Gaussian shrinks toward the high-reward region. After J iterations, the distribution is tight around a near-optimal sequence.
+
+CEM is reliable across a wide range of problems and easy to implement (the inner loop is sampling, scoring, sorting, computing two moments). It is the default planner in PETS and many modern model-based RL implementations.
+
+### Worked example: one iteration of CEM by hand
+
+Take a 1D problem: state s ∈ R, action a ∈ [-1, 1], dynamics s' = s + a, reward R(s, a) = -(s - 1)² (target: reach s = 1). Initial state s_0 = 0, horizon H = 1 (just one action). Initial distribution q_0 = N(0, sigma² = 1) for the single-action "sequence."
+
+Sample N = 4 candidate actions. For the exercise, the four samples are (after clipping to [-1, 1]):
+
+```
+a^(1) = -0.5,   a^(2) = 0.0,   a^(3) = +0.5,   a^(4) = +0.8
+```
+
+Score each by rolling the model forward one step and computing the reward at the resulting state:
+
+| candidate | a | s_1 = 0 + a | R(s_1, a) = -(s_1 - 1)² |
+|-----------|-----|---------------|---------------------------|
+| 1 | -0.5 | -0.5 | -(-0.5 - 1)² = -2.25 |
+| 2 | 0.0 | 0.0 | -(0 - 1)² = -1.00 |
+| 3 | +0.5 | +0.5 | -(0.5 - 1)² = -0.25 |
+| 4 | +0.8 | +0.8 | -(0.8 - 1)² = -0.04 |
+
+Pick the top K = 2 elites: candidates 3 (a = 0.5) and 4 (a = 0.8).
+
+Refit the Gaussian to the elites:
+
+```
+μ_1 = (0.5 + 0.8) / 2 = 0.65
+Σ_1 = ((0.5 - 0.65)² + (0.8 - 0.65)²) / 2 = (0.0225 + 0.0225) / 2 = 0.0225
+σ_1 = √0.0225 = 0.15
+```
+
+So q_1 = N(0.65, 0.15²). Iteration 2 samples from this much tighter Gaussian, concentrated near the optimum a* = 1.0. After 5 iterations, CEM converges to within 0.01 of a* = 1.
+
+The arithmetic above is a single iteration of the full algorithm. Practice exercise 1 walks through a fresh problem with N = 5 samples and the reader works out mu_1 and Sum_1.
+
+### Why CEM works
+
+The refitting step is a maximum-likelihood Gaussian fit to the elite samples. Each iteration, the Gaussian becomes a better importance distribution over high-reward action sequences. The procedure is equivalent to minimizing the KL divergence between a target distribution (concentrated on high-reward sequences) and the sampling distribution, restricted to the Gaussian family.
+
+The two main knobs:
+
+- **N (samples per iteration)**: larger = better coverage, more compute.
+- **K / N (elite fraction)**: smaller = aggressive refitting, may collapse too fast; larger = conservative refitting, may not converge. Typical 0.1.
+
+Variants like **CMA-ES** (Hansen, 2016) use more sophisticated covariance updates (rank-1 and rank-µ updates) to scale better to high dimensions. **MPPI** (Williams et al., 2017) uses a softmax-weighted average over samples instead of a hard elite cutoff. Both are mature continuous-optimization algorithms; CEM is the simplest worth knowing.
+
+## Model Predictive Control (MPC)
+
+A planner returns an action sequence of length H. **MPC executes only the first action**, then observes the real next state and re-plans from there.
+
+```
+For each timestep t:
+  1. Plan an H-step action sequence (a_t, a_{t+1}, ..., a_{t+H-1}) using CEM (or random shooting, or MPPI).
+  2. Execute a_t in the real environment. Observe s_{t+1}, r_t.
+  3. Discard a_{t+1}, ..., a_{t+H-1}. Re-plan from s_{t+1} with a new H-step horizon.
+```
+
+The receding-horizon discipline is a standard control-theory trick (model predictive control predates RL by decades; see Garcia, Prett & Morari, 1989). The reason it pairs naturally with **learned** models: the model only needs to be accurate over the H-step planning horizon, not over the full episode. If your validation error stays bounded out to H = 5 steps, plan to horizon 5 and re-plan often.
+
+The choice of H is a trade-off:
+
+| H too small | H too large |
+|---------------|---------------|
+| Greedy; misses opportunities that pay off over more than H steps | Model error compounds; planner trusts unreliable predictions |
+| Faster per planning step | Slower per planning step |
+| Insensitive to model bias | Sensitive to model bias |
+
+In practice, H = 5 to 30 for continuous control; small enough that compounding error stays bounded, large enough to capture multi-step dependencies. The terminal gamma^H · V̂(s_H) term bridges the gap between planning horizon and full discounted return.
+
+## MuZero: learning a model end-to-end inside MCTS
+
+MuZero (Schrittwieser et al., 2020) is the most ambitious learned-model algorithm to date. It learns three networks jointly:
+
+- **Representation network** h_theta: maps an observation to a hidden state.
+- **Dynamics network** g_theta: hidden state + action → next hidden state, reward.
+- **Prediction network** f_theta: hidden state → policy, value.
+
+The "model" lives entirely in hidden-state space; the algorithm never tries to predict raw next observations. This is the key insight: a model that predicts raw next observations spends most of its capacity on visual or sensor details that do not matter for control. A model trained to support good MCTS planning learns only what matters for the policy and value.
+
+Training is end-to-end on three losses:
+
+1. Reward prediction at each MCTS expansion step.
+2. Value prediction at the root.
+3. Policy prediction at the root.
+
+MCTS uses the dynamics and prediction networks for rollouts. Backpropagation through the planner improves the model representation specifically for planning quality.
+
+### What MuZero achieved
+
+The same algorithm and hyperparameters mastered Go, chess, shogi, and Atari without being told the rules of any of them. AlphaZero (a similar algorithm) had needed the rules as a perfect simulator; MuZero learned them. Matched AlphaZero's strength on board games and matched or exceeded DQN's on Atari at the time of publication.
+
+The lesson: a learned model is a viable substitute for a perfect simulator if you train it for the right loss. Predicting raw next states is the wrong loss; predicting rewards, values, and policy targets is the right loss. The 2020 paper is the clearest demonstration of this in deep RL.
+
+### Variants and successors
+
+- **EfficientZero** (Ye et al., 2021): MuZero with self-supervised consistency losses, achieves Atari median human performance from only two hours of real-time game experience (the Atari 100k data budget; wall-clock training time depends on hardware). https://arxiv.org/abs/2111.00210
+- **Sampled MuZero** (Hubert et al., 2021): handles continuous action spaces by sampling actions during MCTS.
+- **MuZero Unplugged** (Schrittwieser et al., 2021): the offline-RL variant; trains entirely from logged data.
+
+Modern model-based RL has split into two camps: the MuZero-style end-to-end-with-MCTS family (handles discrete actions, very strong on board games), and the Dreamer-style world-model-with-policy family (handles continuous actions, strong on robotics and Atari).
+
+## Common pitfalls
+
+- **Planning past the model's reliable horizon.** Lesson 9's compounding-error analysis applies. If validation error blows up past H = 5, do not plan to H = 30.
+- **Using random shooting where CEM would obviously win.** Random shooting is fine for very low-dimensional action spaces (dim_a · H \< 10). For higher dimensions, CEM cuts compute by 10× to 100×.
+- **Forgetting the terminal value V̂(s_H).** Truncating at finite H loses the tail of the return. The terminal value bridges this; a learned critic provides it.
+- **Treating MPC's horizon as fixed.** Re-plan after every action, so the effective horizon shifts forward each step. Sometimes called "receding horizon."
+- **Trying to train MuZero from scratch on a single GPU.** The original paper used many TPUs for many days. EfficientZero is the more accessible variant for learning at home.
+- **Conflating MCTS with random rollouts.** MCTS uses learned policy and value priors to guide the search (the PUCT formula in AlphaGo / AlphaZero / MuZero). Random rollouts are a pre-deep-RL fallback.
+
+## Why this matters when you use AI
+
+Planning with a learned model is the engine behind several systems that "feel" intelligent in the planning sense:
+
+- **AlphaGo / AlphaZero** (Silver et al., 2016, 2018): MCTS with a known simulator and learned policy and value networks. Defeated top humans at Go, generalized to chess and shogi from self-play alone.
+- **MuZero** (Schrittwieser et al., 2020): the same recipe with a learned simulator. Did not require the rules of the game.
+- **Trajectory-diffusion planners** (Janner et al., 2022, "Diffuser"): a denoising diffusion model over trajectories functions as a model-based planner; the planning step is iterative denoising. (Chi et al., 2023, "Diffusion Policy" is a different idea: imitation-learning a diffusion policy from demonstrations, not denoising-as-planning.)
+- **LLM-as-planner** approaches: explicit planning structures inside language model agents (ReAct, Tree of Thoughts, agentic loops) use the language model itself as both the dynamics model and the planner. The dispatch table from Lesson 3 puts this in a different family entirely (the action space is text tokens, the dynamics is the world plus tool feedback), but the planning-vs-imagining distinction from Lesson 9 still applies.
+
+For straight RL: pick MPC + CEM for continuous control with a learned model and a short horizon; pick MuZero or AlphaZero for discrete board / Atari games where end-to-end model learning pays back; pick model-free PPO for everything else (most of robotics, all of language).
+
+## What you should remember from this lesson
+
+- **Random shooting** is the embarrassingly-parallel baseline: sample N action sequences, score them with the model, pick the best. Works as a default; wasteful but cheap.
+- **CEM** is iterative random shooting: each iteration, refit a Gaussian over action sequences to the elite samples. Converges in 5 to 10 iterations on most problems. The lesson worked through one iteration: starting q_0 = N(0, 1), four samples \{-0.5, 0, 0.5, 0.8\} for a target-s = 1 reward, top-2 elites give mu_1 = 0.65, sigma_1 = 0.15. After several iterations, converges to a* = 1 (the clipped optimum).
+- **MPC** wraps any planner in a receding-horizon loop: plan H steps, execute one, observe, re-plan. The model only needs to be accurate over the planning horizon; compounding error past that horizon does not matter.
+- **MuZero** trains a dynamics network jointly with policy and value networks inside an MCTS loop. The model lives in hidden-state space and is optimized for planning quality, not raw-observation prediction accuracy.
+- **Choice of family**: MPC + CEM for continuous control with a learned model; MuZero / AlphaZero for discrete games; model-free PPO for most everything else (language, large-action-space robotics).
+
+This closes the **P-branch** of the Lesson 3 dispatch table and the Phase 2 tour of all five algorithmic families (pi, V, Q, A, P). Lessons 11 and 12 zoom out to a complementary angle: control as inference, where the entire RL problem is reformulated as a probabilistic-inference problem in a graphical model. Different mathematical scaffolding, same underlying control problem.
+
+## References
+
+- Schrittwieser, J., Antonoglou, I., Hubert, T., et al. (2020). Mastering Atari, Go, chess and shogi by planning with a learned model. *Nature*, 588, 604-609. https://www.nature.com/articles/s41586-020-03051-4 MuZero. The end-to-end learned-model MCTS recipe.
+- Silver, D., Hubert, T., Schrittwieser, J., et al. (2018). A general reinforcement learning algorithm that masters chess, shogi, and Go through self-play. *Science*, 362(6419), 1140-1144. https://www.science.org/doi/10.1126/science.aar6404 AlphaZero (the MuZero precursor with known dynamics).
+- Williams, G., Wagener, N., Goldfain, B., et al. (2017). Information theoretic MPC for model-based reinforcement learning. *ICRA 2017*. https://arxiv.org/abs/1707.02342 MPPI: soft elite weighting via softmax instead of CEM's hard cutoff.
+- Hansen, N. (2016). The CMA Evolution Strategy: A Tutorial. *arXiv:1604.00772*. https://arxiv.org/abs/1604.00772 CMA-ES; the canonical continuous-optimization evolution strategy that generalizes CEM with rank-1 and rank-µ covariance updates.
+- Garcia, C. E., Prett, D. M., & Morari, M. (1989). Model predictive control: theory and practice (a survey). *Automatica*, 25(3), 335-348. The classical MPC reference that predates RL.
+- de Boer, P.-T., Kroese, D. P., Mannor, S., & Rubinstein, R. Y. (2005). A Tutorial on the Cross-Entropy Method. *Annals of Operations Research*, 134, 19-67. https://link.springer.com/article/10.1007/s10479-005-5724-z The canonical CEM tutorial.
+- Levine, S. (2023). CS285 lecture on Model-Based Reinforcement Learning with Function Approximation. UC Berkeley. https://rail.eecs.berkeley.edu/deeprlcourse/

@@ -1,0 +1,200 @@
+---
+title: "Lesson: DQN (replay buffer, target network, double Q-learning)"
+description: "Each DQN engineering trick patches a specific leg of the deadly triad. Replay buffer weakens off-policy harm, target network weakens bootstrapping, double Q-learning fixes the max-overestimation bias. The Atari benchmark made deep RL real."
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+## What you'll be able to do after this lesson
+
+Lesson 6 named the **deadly triad**: function approximation + bootstrapping + off-policy data can diverge when all three combine, even though any two are safe. DQN is the engineering recipe that turned deep Q-learning from "diverges on Atari" into "human-level play across 49 games" (Mnih et al., *Nature* 2015). The recipe has three patches, one per triad leg.
+
+By the end of this lesson you can:
+
+- Name each DQN patch and the triad leg it weakens.
+- Explain why the **replay buffer** lets a non-i.i.d. data stream behave closer to i.i.d. for the gradient update.
+- Explain why the **target network** stops the bootstrapped TD target from chasing itself.
+- Compute the **max-overestimation bias** on a small example (three actions, unit-variance noise, true Q = 0) and verify the closed-form result E[max] = 3/(2√π) ≈ 0.846.
+- Show how **double Q-learning** decouples action selection from action evaluation and eliminates the bias when the two networks are independent.
+- Recognize when a value-based system needs each patch (and when one is enough).
+
+## Recap: the three legs of the deadly triad
+
+From Lesson 6, the three things that combine into divergence are:
+
+1. **Function approximation (FA).** A neural network Q_theta(s, a) generalizes. One gradient update for (s, a) shifts Q_theta at many other (s', a') pairs.
+2. **Bootstrapping (BS).** The target r + gamma · max_(a') Q_theta(s', a') uses Q_theta itself. The target moves as theta updates.
+3. **Off-policy data (OP).** Transitions come from a different distribution than the greedy policy's distribution. In Q-learning this is unavoidable: the target uses max_(a') regardless of how the data was collected.
+
+The three DQN engineering tricks attack one leg each. Look at them in order.
+
+## DQN, the algorithm
+
+The architecture from Mnih et al. (2015): input is a stack of four consecutive 84 × 84 grayscale Atari frames (the four-frame stack makes the input Markov, per the discussion in Lesson 3). Three convolution layers (32 filters 8 × 8 stride 4; 64 filters 4 × 4 stride 2; 64 filters 3 × 3 stride 1), then a fully connected layer of 512 units, then a linear output layer with one Q-value per discrete action (typically 4 to 18 actions per game).
+
+The objective is the squared TD error from Lesson 6:
+
+```
+L(θ) = E_{(s, a, r, s') ~ D} [ ( r + γ · max_{a'} Q_{θ⁻}(s', a')  -  Q_θ(s, a) )² ]
+```
+
+with two annotations that turn this into a working algorithm:
+
+- D is a **replay buffer** of past transitions, not the most recent episode.
+- The target uses Q_(theta⁻), a **target network**, with theta⁻ periodically copied from theta but otherwise frozen.
+
+Take each in turn.
+
+## Trick 1: replay buffer (patches the OP leg)
+
+When you collect transitions from one episode, consecutive samples are wildly correlated: the agent is in similar states, taking similar actions, seeing similar rewards. Gradient updates on highly correlated mini-batches are unstable for the same reason batch SGD on a tiny sorted dataset is unstable. You overfit the recent slice and forget the rest.
+
+The replay buffer is a large circular buffer (the 2015 DQN used D = 1,000,000 transitions). At each training step:
+
+1. Take one environment step. Push the new transition (s_t, a_t, r_t, s_(t+1)) into D.
+2. Sample a mini-batch of B = 32 transitions uniformly from D.
+3. Compute the TD-error loss on the mini-batch and take one gradient step.
+
+Why it helps the off-policy leg: the buffer holds transitions from many past policies (the network's theta at the time was different). Sampling uniformly from this mixture is closer to sampling from a stationary distribution than sampling from the most recent on-policy trajectory. The transitions are also approximately decorrelated, because a uniform draw from a million transitions is unlikely to pick two consecutive frames.
+
+Two costs: memory (a million transitions of 84 × 84 × 4 byte arrays is roughly 7 GB at byte precision) and sample efficiency (early transitions are stale, the policy that generated them no longer matches the policy being learned).
+
+Later refinements: **prioritized replay** (Schaul et al., 2016) samples high-TD-error transitions more often; **n-step replay** stores (s_t, a_t, r_t, ..., r_(t+n), s_(t+n)) for lower-bias bootstrapping. Both are in the "Rainbow" combined-improvements paper.
+
+## Trick 2: target network (patches the BS leg)
+
+If the target r + gamma · max_(a') Q_theta(s', a') uses the same theta you are updating, the loss surface itself moves under your feet. Imagine the cartoon failure mode: you nudge Q_theta(s, a) up by a bit; that nudge increases Q_theta(s', a') at neighboring states because the network generalizes; the new target for the next batch is higher, so the next update pushes Q_theta(s, a) higher still; and so on, into divergence.
+
+The fix is to evaluate the target with a **separate, frozen copy** of the network. Maintain theta⁻, a snapshot of theta taken at the most recent **target update step**. Compute the target with theta⁻. Update theta against this target. Every C gradient steps (DQN 2015 used C = 10,000), copy theta⁻ ← theta.
+
+For C steps the target is fixed, so the regression is back to a standard supervised problem (constant targets). Then the target shifts in one discrete update. The bootstrapping is still there, but the runaway feedback loop is broken.
+
+Later refinements: **Polyak averaging** (theta⁻ ← τ theta + (1 − τ) theta⁻ with small τ, used in DDPG and SAC) updates the target network gradually instead of in jumps. Both work; the discrete-copy version was DQN's choice.
+
+## Trick 3: double Q-learning (patches the max overestimation bias)
+
+The third trick fixes a different problem that the first two do not. The max operator in the TD target is biased upward when the Q estimate is noisy. Even if Q_theta is **unbiased** for each individual (s, a), taking the max over actions systematically overestimates Q*.
+
+### Worked example: how big is the bias?
+
+Consider a single state s with three actions and true Q*(s, a) = 0 for all three. The network estimate is noisy: Q̂(s, a) = 0 + epsilon_a with epsilon_a ~ N(0, 1) independent across actions.
+
+The single-network max target is:
+
+```
+max_{a} Q̂(s, a) = max(ε_1, ε_2, ε_3)
+```
+
+This is the maximum of three independent standard normals, an order statistic with a known closed form:
+
+```
+E[max_{a} Q̂(s, a)] = E[max of 3 iid N(0,1)] = 3 / (2√π) ≈ 0.8463
+```
+
+So even with zero true value and zero-mean noise, the max returns about +0.85 in expectation. With gamma = 0.99 this bias propagates: the next target is also too high, the next-next target is too high, and Q_theta drifts up. The 2015 DQN saw this empirically; van Hasselt et al. (2016) measured it on Atari and showed many games where DQN's learned Q values exceed the maximum possible discounted return for the game.
+
+### The double Q-learning fix
+
+Use **two** value functions, Q_theta (online network) and Q_(theta⁻) (target network). Decouple action **selection** from action **evaluation**:
+
+- Original DQN target: r + gamma · Q_(theta⁻)(s', argmax_(a') Q_(theta⁻)(s', a')) (target net picks and evaluates)
+- **Double DQN** target: r + gamma · Q_(theta⁻)(s', argmax_(a') Q_theta(s', a')) (online net picks, target net evaluates)
+
+In the idealized case where the two networks have **independent** noise (call the noise epsilon_theta and epsilon_(theta⁻)):
+
+```
+a* = argmax_a Q̂_θ(s', a) = argmax_a ε_{θ,a}
+```
+
+This a* is determined by epsilon_theta alone, independent of epsilon_(theta⁻). So the evaluated value is:
+
+```
+Q̂_{θ⁻}(s', a*) = 0 + ε_{θ⁻, a*}
+```
+
+Because a* is chosen independently of epsilon_(theta⁻), the expectation is E[epsilon_(theta⁻, a*)] = 0. The bias is gone.
+
+In practice the two networks share weights (target is a lagged copy), so independence is an idealization, not reality. The bias is reduced, not zeroed. Van Hasselt et al. (2016) showed this improvement is substantial on Atari: the same network architecture and training procedure as DQN, only the target rule changes, and the median normalized score across the 49-game benchmark goes up materially. (The paper's claim is "approximately 17% improvement" by their normalization; the exact number depends on the metric.)
+
+## Putting the three together
+
+The DQN training loop:
+
+```
+Initialize Q_θ (random), target network Q_{θ⁻} ← Q_θ, replay buffer D (empty)
+For each episode:
+  s ← environment.reset()
+  For each step:
+    With probability ε, a ← random action; else a ← argmax_a Q_θ(s, a)
+    s', r, done ← environment.step(a)
+    Push (s, a, r, s', done) into D
+    Sample mini-batch of B transitions from D
+    Compute target:
+      y = r + γ · (1 - done) · Q_{θ⁻}(s', argmax_{a'} Q_θ(s', a'))   [double DQN]
+    Compute loss: L(θ) = (Q_θ(s, a) - y)²
+    Take one gradient step on L(θ)
+    Every C steps: θ⁻ ← θ
+    s ← s'
+```
+
+Each line of the inner loop has a job. The replay buffer mixes old and new transitions to approximate i.i.d. (weakens OP harm). The target network freezes the bootstrapped target so the regression has a fixed objective for C steps (patches BS). The split between online-network argmax and target-network evaluation removes the max overestimation (patches the related bias).
+
+Function approximation (the FA leg of the triad) is the one ingredient you cannot patch away; it is the whole point of using a neural network. The other two patches are what make FA safe in this setting.
+
+## The Atari benchmark made deep RL real
+
+Before DQN, deep RL was a research curiosity that worked on toy problems. The 2015 DQN paper trained a **single neural-network architecture** (no per-game tuning) on 49 Atari 2600 games from raw pixels using the Atari Learning Environment (Bellemare et al., 2013). The result: median performance across the 49 games at roughly the level of a professional human game tester, with super-human performance on several games (Breakout, Pong, Boxing).
+
+The hyperparameters were the same across all 49 games:
+
+- 1M-transition replay buffer
+- Target network copy every 10,000 steps
+- Mini-batch 32, RMSProp optimizer
+- Discount gamma = 0.99
+- epsilon linearly annealed from 1.0 to 0.1 over the first 1M frames, then fixed
+- 4-frame stack as input; 4-frame action repeat (decisions every 4 frames)
+- Reward clipping to [-1, +1] (the same network output range works across games with vastly different reward scales)
+- 50M frames of training per game (about 38 days of game time, hours of wall-clock on a GPU)
+
+The reward-clipping detail matters and is often skipped in summaries: it forces all games into a common scale so the value function does not have to learn 1000-fold magnitude differences between, say, Pong (±1 per point) and Q*bert (+25, +100, +200 per kill). A real production system would not clip; you would scale rewards adaptively or use a distributional Q-network (the C51 / IQN family).
+
+Rainbow (Hessel et al., 2018) combined six refinements on top of DQN (double Q, dueling networks, prioritized replay, multi-step returns, distributional Q, noisy nets) and produced the strongest single-agent Atari numbers from a value-based method for several years.
+
+## Common pitfalls
+
+- **Skipping the target network and expecting it to "just work."** The runaway feedback loop in the bootstrapped target is the second-most-common cause of DQN divergence (after forgetting the replay buffer). Modern open-source implementations include both by default; if you write your own from scratch, do not omit them.
+- **Setting C too small.** A target update frequency of C = 100 is too aggressive on most problems; the target hardly stays fixed long enough to provide a stable regression objective. The 2015 DQN's C = 10,000 is in the right ballpark for Atari; on simpler problems you can drop to a few hundred, but always profile.
+- **Confusing double Q-learning with double DQN.** Hado van Hasselt's original "double Q-learning" (NeurIPS 2010) used two independent online networks updated on alternating batches. **Double DQN** (van Hasselt, Guez, Silver, 2016) is the practical variant for DQN that reuses the existing target network (online net picks the action, target net evaluates). Most modern systems mean double DQN when they say "double Q-learning."
+- **Believing the max overestimation is small.** With 18 actions (Atari max) and unit-variance noise, the max-of-18 bias is roughly E[max of 18 iid N(0,1)] ≈ 1.82. That is a large bias that compounds across bootstrapping. The closed-form numbers explain why double DQN matters even when individual estimates look "close to right."
+- **Assuming DQN's tricks transfer to all off-policy actor-critic methods.** They mostly do (DDPG uses replay buffer + target network; SAC adds entropy regularization on top). But the specific Atari hyperparameters do not transfer: continuous-control DDPG typically uses a smaller buffer and a softer target update (Polyak averaging instead of discrete copies).
+
+## Why this matters when you use AI
+
+DQN was the existence proof. Before 2015, the dominant view was that deep neural networks and reinforcement learning could not be combined safely at scale. Mnih et al. shipped a recipe (replay + target + double-Q, plus the engineering details around frame stacking and reward clipping) that worked. AlphaGo's value network (2016) used the same DQN engineering ethos: replay buffer, target network, off-policy training from games against earlier versions of itself. AlphaZero (2017) and AlphaStar (2019) inherited the engineering, even though their algorithm was different (Monte Carlo tree search plus learned policy/value).
+
+Modern policy-gradient methods like PPO (Lesson 8) do not need DQN's full stack because they keep their data near on-policy: the on-policy constraint weakens the OP leg of the triad enough that you do not need a replay buffer or a target network. The trade-off is sample efficiency: PPO needs to keep collecting fresh trajectories, while DQN can re-train on a buffer for many gradient steps per environment step.
+
+The recipe also explains why **off-policy methods dominate when data is precious**. RLHF training of large language models (Lesson 13) draws on the off-policy lineage: the reward model is trained on labeled comparisons collected once; the policy is then optimized against that fixed reward model, which is a form of off-policy improvement (the reward model came from comparisons of past policies). The DQN engineering does not apply directly to RLHF (the action space is the entire vocabulary, the argmax is infeasible), but the off-policy mindset is the same.
+
+## What you should remember from this lesson
+
+- **DQN = Q-learning + three engineering patches**, one per problem identified in Lesson 6.
+- **Replay buffer**: a circular buffer of past transitions. Sampling uniformly approximates i.i.d. data and decorrelates consecutive frames. Patches the OP leg of the triad.
+- **Target network**: a frozen copy Q_(theta⁻) of the online network, used only for computing TD targets, refreshed every C steps. Patches the BS leg by giving the regression a fixed objective for C steps.
+- **Double Q-learning**: action selection uses online network Q_theta; action evaluation uses target network Q_(theta⁻). Eliminates the max overestimation bias in the idealized independent case; reduces it substantially in practice. On the three-action toy example with unit-variance noise, the bias drops from ≈ 0.85 to 0.
+- **The Atari benchmark**: 49 games, one architecture, one hyperparameter set, median performance at professional human-tester level. This was the deep-RL existence proof.
+- **What you cannot patch away**: function approximation. That is the whole point of using a neural network. The other two patches are what make FA safe.
+
+Next lesson: **PPO**, the workhorse of modern RL. Same goals (stable updates with function approximation) achieved by staying near-on-policy and clipping how much the policy can change per step. The contrast with DQN is the right way to understand why both algorithms exist.
+
+## References
+
+- Mnih, V., Kavukcuoglu, K., Silver, D., et al. (2015). Human-level control through deep reinforcement learning. *Nature*, 518, 529-533. https://www.nature.com/articles/nature14236 The DQN paper.
+- van Hasselt, H., Guez, A., & Silver, D. (2016). Deep Reinforcement Learning with Double Q-learning. *AAAI 2016*. https://arxiv.org/abs/1509.06461
+- van Hasselt, H. (2010). Double Q-learning. *NeurIPS 2010*. https://papers.nips.cc/paper/2010/hash/091d584fced301b442654dd8c23b3fc9-Abstract.html The original "two independent online networks" version.
+- Schaul, T., Quan, J., Antonoglou, I., & Silver, D. (2016). Prioritized Experience Replay. *ICLR 2016*. https://arxiv.org/abs/1511.05952
+- Hessel, M., Modayil, J., van Hasselt, H., et al. (2018). Rainbow: Combining Improvements in Deep Reinforcement Learning. *AAAI 2018*. https://arxiv.org/abs/1710.02298
+- Bellemare, M. G., Naddaf, Y., Veness, J., & Bowling, M. (2013). The Arcade Learning Environment: An evaluation platform for general agents. *Journal of Artificial Intelligence Research*, 47, 253-279. https://arxiv.org/abs/1207.4708
+- Levine, S. (2023). CS285 lecture on Deep RL with Q-Functions. UC Berkeley. https://rail.eecs.berkeley.edu/deeprlcourse/

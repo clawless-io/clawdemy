@@ -1,0 +1,192 @@
+---
+title: "Practice: Planning with a learned model (CEM by hand + MPC horizon decision)"
+description: "Two exercises: trace one full CEM iteration on a fresh problem and refit the Gaussian, then pick an MPC horizon given a model-bias profile."
+phase: "core-deep-rl-algorithms"
+phase_order: 5
+order: 10
+last_reviewed: "2026-05-25"
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Exercise 1: trace one iteration of CEM by hand
+
+Setup: 1D state `s ∈ R`, scalar action `a ∈ [-2, 2]`, deterministic dynamics `s' = 0.8 · s + a`, reward `R(s, a) = -(s - 2)²` (reach target `s = 2`). Initial state `s_0 = 0`, planning horizon `H = 1` (single-action planning for arithmetic clarity).
+
+Initial CEM distribution: `q_0 = N(0, σ_0² = 4)` so `σ_0 = 2`.
+
+You drew the following `N = 5` samples (after clipping to `[-2, 2]`):
+
+```
+a^(1) = -1.5,   a^(2) = +0.5,   a^(3) = +1.0,   a^(4) = +1.8,   a^(5) = +2.0
+```
+
+### Part A: score each sample
+
+For each `a^(i)`, compute `s_1 = 0.8 · 0 + a^(i) = a^(i)` and `R^(i) = -(s_1 - 2)² = -(a^(i) - 2)²`.
+
+| `i` | `a^(i)` | `s_1` | `R^(i) = -(s_1 - 2)²` |
+|-----|---------|-------|------------------------|
+| 1 | -1.5 | -1.5 | ? |
+| 2 | +0.5 | +0.5 | ? |
+| 3 | +1.0 | +1.0 | ? |
+| 4 | +1.8 | +1.8 | ? |
+| 5 | +2.0 | +2.0 | ? |
+
+**Answers:**
+
+| `i` | `a^(i)` | `s_1` | `R^(i)` |
+|-----|---------|-------|---------|
+| 1 | -1.5 | -1.5 | -(-1.5 - 2)² = -12.25 |
+| 2 | +0.5 | +0.5 | -(0.5 - 2)² = -2.25 |
+| 3 | +1.0 | +1.0 | -(1.0 - 2)² = -1.00 |
+| 4 | +1.8 | +1.8 | -(1.8 - 2)² = -0.04 |
+| 5 | +2.0 | +2.0 | -(2.0 - 2)² = 0.00 |
+
+### Part B: pick the top `K = 2` elites
+
+The two highest scores are `R^(5) = 0` and `R^(4) = -0.04`. Elites: `{2.0, 1.8}`.
+
+### Part C: refit `q_1`
+
+Compute the new Gaussian's mean and variance from the elite samples.
+
+```
+μ_1 = (2.0 + 1.8) / 2 = 1.9
+Σ_1 = ((2.0 - 1.9)² + (1.8 - 1.9)²) / 2 = (0.01 + 0.01) / 2 = 0.01
+σ_1 = √0.01 = 0.1
+```
+
+So `q_1 = N(1.9, 0.1²)`. The Gaussian has moved from `μ_0 = 0` (with `σ_0 = 2`) to `μ_1 = 1.9` (with `σ_1 = 0.1`) in a single iteration. The optimum is `a* = 2`, and after one iteration the distribution is concentrated within `0.1` of it.
+
+### Part D: what would iteration 2 look like?
+
+Sampling from `N(1.9, 0.01)`, the typical sample is in `[1.7, 2.1]`. After clipping to `[-2, 2]`, samples land in `[1.7, 2.0]`. The top-K elites are all near `2.0`. The refit gives `μ_2 ≈ 1.95, σ_2 ≈ 0.05`. After a few more iterations the Gaussian collapses around `a* = 2`.
+
+### Part E: dual-path verification of the optimum
+
+Analytically: reward `-(a - 2)²` is maximized at `a* = 2` (since `s_0 = 0` and dynamics `s' = a` for this `s_0`). The optimum reward is `0` (zero gap between achieved state and target).
+
+CEM converged numerically to `μ_J ≈ 2.0`. Both paths (closed-form maximum of the reward function vs CEM iterations) arrive at `a* = 2`. The optimization is doing the right thing.
+
+## Exercise 2: pick an MPC horizon given a model-bias profile
+
+You have a learned dynamics model. You measured its **per-step relative validation error** on held-out data, summarized in the following table:
+
+| Horizon `H` (steps ahead predicted) | Mean validation error |
+|-------------------------------------|------------------------|
+| 1 | 2% |
+| 5 | 12% |
+| 10 | 35% |
+| 20 | 75% |
+| 30 | 110% |
+
+You also have a task with a typical good action sequence of length `~50` steps (e.g., reach a goal via a 50-step trajectory in continuous control).
+
+### Part A: pick an MPC horizon
+
+The conventional rule of thumb is to plan only out to where the **model's H-step error is below ~30%**. Going further means the planner is optimizing against unreliable predictions.
+
+Reading from the table: `H = 5` gives 12% (safe), `H = 10` gives 35% (borderline). Pick `H = 5` or `H = 10` depending on risk tolerance. `H = 30` is clearly too far (110% error, the model predicts the wrong sign of state changes on average).
+
+Most production model-based RL systems aim for `H = 5` to `15`. PETS uses `H = 25` to `30` with ensemble-based uncertainty rejection, which is more aggressive but the uncertainty estimate acts as a guard.
+
+### Part B: how does the receding horizon make this work?
+
+The task is 50 steps long, but MPC re-plans every step. So even with `H = 10`, the planner is solving 50 sequential 10-step planning problems, each from the freshly observed state. The model only needs to be accurate over **10 steps from the current state**, not 50 steps from the initial state.
+
+The discipline:
+
+- Plan to `H = 10` from `s_t`. Get action sequence `(a_t, ..., a_{t+9})`.
+- Execute `a_t`. Observe `s_{t+1}` (real-world observation).
+- Discard `a_{t+1}, ..., a_{t+9}`. Re-plan from `s_{t+1}` with `H = 10`.
+- Repeat.
+
+The receding-horizon discipline lets a short-horizon planner solve long-horizon tasks: each planning step makes near-term progress, and the loop accumulates 50 such steps. The terminal `γ^H · V̂(s_H)` patches the "I cannot see past H" gap by providing a learned-critic estimate of the value beyond the horizon.
+
+### Part C: what if the model error stayed flat at 5% per step?
+
+Then `H = 50` would only have 5% × 50 = 250% additive error if errors were uncorrelated, but in practice they compound multiplicatively as in Lesson 9. A flat-per-step 5% error compounds to roughly `1.05^50 - 1 ≈ 10.47` (a ~1050% deviation factor), not a 250% additive sum.
+
+The lesson: even a "small per-step" error becomes ruinous over a long horizon. There is no escaping the compounding-error analysis; it dictates the practical horizon for any planner.
+
+## Flashcards
+
+<FlashcardSet>
+
+<Flashcard question="What's the difference between random shooting and CEM as model-based planners?">
+
+**Random shooting**: sample `N` action sequences from a fixed distribution (typically uniform over the action space), score each by rolling the model forward, pick the best. One pass; embarrassingly parallel; wasteful.
+
+**CEM (cross-entropy method)**: sample `N` from a Gaussian over action sequences; pick the top `K` elites; refit the Gaussian to the elites; repeat for `J` iterations. Each iteration concentrates the distribution around high-reward sequences.
+
+When to use which:
+- Random shooting: low-dim actions (`dim_a · H < 10`), or as a baseline.
+- CEM: higher-dim continuous control, the workhorse default.
+
+CEM achieves better solutions with fewer total samples by iteratively focusing the search.
+
+</Flashcard>
+
+<Flashcard question="Trace one CEM iteration: starting q_0 = N(0, 1), four samples {-0.5, 0, 0.5, 0.8}, target s = 1, dynamics s' = s + a, s_0 = 0, top-K = 2. Compute μ_1 and σ_1.">
+
+Step 1: score each sample with `R = -(s_1 - 1)² = -(a - 1)²`.
+
+- `a = -0.5` → R = -2.25
+- `a = 0.0` → R = -1.00
+- `a = +0.5` → R = -0.25
+- `a = +0.8` → R = -0.04
+
+Step 2: top-K = 2 elites are the highest-reward samples: `{0.5, 0.8}`.
+
+Step 3: refit Gaussian to elites.
+
+- `μ_1 = (0.5 + 0.8) / 2 = 0.65`
+- `Σ_1 = ((0.5 - 0.65)² + (0.8 - 0.65)²) / 2 = (0.0225 + 0.0225) / 2 = 0.0225`
+- `σ_1 = √0.0225 = 0.15`
+
+`q_1 = N(0.65, 0.15²)`. One iteration moved the mean from `0` to `0.65` (toward the optimum `a* = 1`) and shrank the standard deviation from `1.0` to `0.15`. After 5 iterations, CEM converges to within `0.01` of `a* = 1`.
+
+</Flashcard>
+
+<Flashcard question="Why does Model Predictive Control work even when the learned model has compounding error over long horizons?">
+
+MPC plans only `H` steps ahead, executes the first action, then **re-plans from the new real-world state**. The model only needs to be accurate over the `H`-step horizon, not over the full episode.
+
+Concretely: if your model's validation error stays bounded out to `H = 5` steps, you plan to horizon 5, execute one action, observe the real next state, and re-plan another 5-step lookahead. The compounding-error past `H = 5` doesn't matter because you never use those predictions.
+
+The terminal value `γ^H · V̂(s_H)` patches the "what about beyond H" question by providing a learned-critic estimate of the rest of the discounted return.
+
+The receding-horizon structure is from classical control theory (Garcia, Prett, Morari 1989), inherited cleanly into model-based RL. It pairs naturally with learned models because the planning horizon is exactly where the model needs to be trusted.
+
+</Flashcard>
+
+<Flashcard question="What's the key innovation in MuZero compared to AlphaZero?">
+
+**AlphaZero** requires a **perfect simulator** of the environment (the rules of Go, chess, or shogi). The MCTS search uses the simulator to expand the tree.
+
+**MuZero** **learns the simulator** end-to-end inside the MCTS loop. It maintains three networks:
+- Representation: observation → hidden state
+- Dynamics: (hidden state, action) → (next hidden state, reward)
+- Prediction: hidden state → (policy, value)
+
+Key insight: the model lives entirely in **hidden-state space**, never predicting raw observations. Trained for planning quality (policy + value + reward prediction losses), not for raw-observation reconstruction accuracy. This means the model focuses its capacity on what matters for control.
+
+Result: MuZero mastered Go, chess, shogi, and Atari **without being told the rules of any of them**. It learns the rules implicitly inside the planning loop.
+
+</Flashcard>
+
+<Flashcard question="When should you pick MuZero/AlphaZero vs MPC+CEM vs model-free PPO?">
+
+**MuZero / AlphaZero**: discrete actions, deep tree search pays back, lots of training compute. Board games (Go, chess), Atari, similar discrete-action domains where end-to-end model learning is worth the engineering and compute.
+
+**MPC + CEM** (PETS-style): continuous control, sample efficiency is the binding constraint, short planning horizons (5 to 30 steps). Robotics, continuous-control benchmarks (MuJoCo, real-world manipulation).
+
+**Model-free PPO** (L8): everything else. Specifically, when the dynamics are intractable to model (language tokens, raw pixels, multi-agent strategy), the action space is huge (vocabulary, large discrete sets), or samples are cheap enough that the sample-efficiency win of model-based does not pay back its model-bias risk.
+
+Hybrid approaches (Dreamer for continuous control via world models; SAC for off-policy actor-critic with replay) blur these lines, but the decision rubric holds: pick the family whose strength matches the dominant constraint of your problem.
+
+</Flashcard>
+
+</FlashcardSet>

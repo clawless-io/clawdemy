@@ -1,0 +1,176 @@
+---
+title: "Practice: DQN (derive the max-overestimation bias + trace a target-network update)"
+description: "Two exercises: derive E[max of 2 iid N(0,1)] from first principles with dual-path validation, then trace a target-network update cycle through one full DQN period."
+phase: "core-deep-rl-algorithms"
+phase_order: 2
+order: 7
+last_reviewed: "2026-05-25"
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Exercise 1: derive the max-overestimation bias from first principles (with dual-path check)
+
+The lesson stated the closed-form result: with three actions, true `Q*(s, a) = 0`, and noisy estimates `Q̂(s, a) = ε_a` with `ε_a ~ N(0, 1)` iid, the single-network max target satisfies `E[max] = 3 / (2√π) ≈ 0.8463`. Derive the `n = 2` version yourself and check it two ways.
+
+### Part A: the trick (`max(X, Y) = (X + Y)/2 + |X - Y|/2`)
+
+For any two real numbers:
+
+```
+max(X, Y) = (X + Y)/2 + |X - Y|/2
+min(X, Y) = (X + Y)/2 - |X - Y|/2
+```
+
+(Sum them and you get `X + Y`; subtract them and you get `|X - Y|`.)
+
+Apply with `X, Y ~ N(0, 1)` iid. The expectation splits:
+
+```
+E[max(X, Y)] = E[(X + Y)/2] + E[|X - Y|/2]
+            = 0 + (1/2) · E[|X - Y|]
+```
+
+So you need `E[|X - Y|]`. The difference `X - Y` is the sum of two independent zero-mean Gaussians, so `X - Y ~ N(0, 2)` (means add to 0, variances add to `1 + 1 = 2`).
+
+The absolute value of a `N(0, σ²)` Gaussian has a known mean (half-normal distribution): `E[|Z|] = σ · √(2/π)`. With `σ² = 2`, `σ = √2`:
+
+```
+E[|X - Y|] = √2 · √(2/π) = √(4/π) = 2/√π
+```
+
+Therefore:
+
+```
+E[max(X, Y)] = (1/2) · 2/√π = 1/√π ≈ 0.5642
+```
+
+### Part B: dual-path check via simulation arithmetic
+
+Simulate `N = 100` pairs of standard normals by hand (or trust the law of large numbers; the point is the closed-form derivation, which you can check).
+
+Equivalently, use the formula `E[|X - Y|] = 2 σ / √π` with `σ = √2`, plug in once, and you should get the same `1/√π`. Either route lands at the same number.
+
+Sanity check by comparing to the n=3 result given in the lesson: `1/√π ≈ 0.5642` (n=2) versus `3/(2√π) ≈ 0.8463` (n=3). The bias grows with `n`, as expected (more chances for an outlier to be the max). For large `n` the growth is roughly `√(2 ln n)`, and the approximation always lies **above** the true value for finite `n` (convergence is from above as `n → ∞`). Check: `√(2 ln 18) ≈ 2.404`, while the actual `E[max of 18 iid N(0,1)] ≈ 1.82`. The asymptotic overestimates for moderate `n`, but it's the right order of magnitude.
+
+### Part C: what double Q-learning does to this number
+
+Pair the **action-selection** stage with **independent** noise from the **action-evaluation** stage. With two actions:
+
+- `Q̂_θ(a) = ε_θ(a)` for action selection
+- `Q̂_{θ'}(a) = ε_{θ'}(a)` for action evaluation
+- `ε_θ` and `ε_{θ'}` are **independent** N(0,1)
+
+Then:
+
+```
+a* = argmax_a Q̂_θ(a) = argmax_a ε_θ(a)
+double-Q estimate = Q̂_{θ'}(a*) = ε_{θ'}(a*)
+```
+
+Because `a*` depends only on `ε_θ` (independent of `ε_{θ'}`), the expectation `E[ε_{θ'}(a*)] = 0` (regardless of which action was selected). Bias eliminated.
+
+Compare:
+- Single-net max with n=2: bias `1/√π ≈ 0.5642`.
+- Double-Q with two independent nets, n=2: bias `0`.
+
+This is the idealized case. In real DQN, `θ⁻` is a lagged copy of `θ`, so the noise is correlated. The bias drop is partial but still substantial. Van Hasselt et al. (2016) demonstrated this empirically on Atari.
+
+## Exercise 2: trace one target-network update period
+
+DQN's training loop refreshes the target network `Q_{θ⁻}` every `C` steps by copying `θ⁻ ← θ`. Between updates, `θ⁻` is frozen. Trace through one period explicitly.
+
+### Setup
+
+- Online net `Q_θ` and target net `Q_{θ⁻}` start identical (call the shared weights `θ_0`).
+- `C = 4` (small for the exercise; DQN 2015 used 10,000).
+- Each step: take one environment step, compute target with `Q_{θ⁻}`, take one gradient step on `θ`.
+- After every 4 gradient steps, refresh `θ⁻ ← θ`.
+
+### Trace 12 steps and fill in the table
+
+| Step | θ at start | θ⁻ at start | Target uses | θ at end (assumed updated) | θ⁻ at end |
+|------|-----------|-------------|-------------|---------------------------|----------|
+| 1 | θ_0 | θ_0 | Q_(θ_0)(s', ·) | θ_1 | θ_0 |
+| 2 | θ_1 | θ_0 | Q_(θ_0)(s', ·) | θ_2 | θ_0 |
+| 3 | θ_2 | θ_0 | Q_(θ_0)(s', ·) | θ_3 | θ_0 |
+| 4 | θ_3 | θ_0 | Q_(θ_0)(s', ·) | θ_4 | **θ_4** (refresh!) |
+| 5 | θ_4 | θ_4 | Q_(θ_4)(s', ·) | θ_5 | θ_4 |
+| 6 | θ_5 | θ_4 | Q_(θ_4)(s', ·) | θ_6 | θ_4 |
+| 7 | θ_6 | θ_4 | Q_(θ_4)(s', ·) | θ_7 | θ_4 |
+| 8 | θ_7 | θ_4 | Q_(θ_4)(s', ·) | θ_8 | **θ_8** (refresh!) |
+| 9 | θ_8 | θ_8 | Q_(θ_8)(s', ·) | θ_9 | θ_8 |
+| 10 | θ_9 | θ_8 | Q_(θ_8)(s', ·) | θ_10 | θ_8 |
+| 11 | θ_10 | θ_8 | Q_(θ_8)(s', ·) | θ_11 | θ_8 |
+| 12 | θ_11 | θ_8 | Q_(θ_8)(s', ·) | θ_12 | **θ_12** (refresh!) |
+
+### Why this matters
+
+Inside each 4-step window (e.g., steps 1-4), the target is computed from a **fixed** function `Q_{θ_0}`. Loss minimization is back to standard supervised regression: the target labels are not changing, so `Q_θ` is moving toward a fixed set of values. After 4 steps the target jumps once (a "discrete shock"); then the next regression window begins.
+
+Without the target network, the target would be `Q_θ(s', ·)` computed with the **current** weights, which change every step. The loss surface would shift every step in a direction correlated with your own update. This is the runaway feedback loop that drives divergence.
+
+### Variation: what if `C = 1`?
+
+Then `θ⁻` is refreshed every step, and the target is always `Q_θ(s', ·)` with the current weights. You are back to the no-target-network setup. So `C = 1` is the degenerate case that recovers the unstable algorithm. `C = ∞` (never refresh) is the other degenerate case: the target stays frozen at `θ_0` forever, so `Q_θ` learns toward `Q_{θ_0}` and never improves. Real DQN sits between (`C = 10,000`).
+
+## Flashcards
+
+<FlashcardSet>
+
+<Flashcard question="Which leg of the deadly triad does each DQN engineering trick patch?">
+
+- **Replay buffer** → patches **off-policy data (OP)**. Uniform sampling from a large buffer decorrelates consecutive frames and mixes transitions from many past policies, approximating i.i.d.
+- **Target network** → patches **bootstrapping (BS)**. Freezing `Q_{θ⁻}` for `C` steps gives the TD regression a fixed objective, breaking the runaway feedback loop.
+- **Double Q-learning** → patches the related **`max` overestimation bias**. Online net selects action, target net evaluates it.
+
+Function approximation (FA) is the leg you cannot patch; it is the whole point of using a neural network. The other two patches are what make FA safe.
+
+</Flashcard>
+
+<Flashcard question="What is the closed-form expected value of max(X, Y) when X and Y are iid N(0, 1)?">
+
+`E[max(X, Y)] = 1 / √π ≈ 0.5642`
+
+Derivation: `max(X, Y) = (X+Y)/2 + |X-Y|/2`. With X, Y iid N(0, 1), `X - Y ~ N(0, 2)` and `E[|X-Y|] = √2 · √(2/π) = 2/√π`. So `E[max] = 1/√π`.
+
+This is the max-overestimation bias for an action space of size 2. For n = 3 it's `3/(2√π) ≈ 0.8463`; for n = 18 (Atari max) it's ~1.82.
+
+</Flashcard>
+
+<Flashcard question="How does double Q-learning eliminate the max overestimation bias in the idealized independent case?">
+
+The bias arises because `a* = argmax_a Q̂(a)` is **correlated** with the noise in `Q̂(a*)` itself: if `a*` was picked because its noise was high, then evaluating with the same noisy estimate inflates the value.
+
+Double Q decouples this: action selection uses `Q̂_θ`, action evaluation uses `Q̂_{θ'}`. If the noises in the two networks are independent, `E[Q̂_{θ'}(a*)] = 0` because the choice of `a*` provides no information about the evaluation noise.
+
+In practice the two networks share weights (target is a lagged copy of online), so they are correlated, not independent. The bias drops substantially but not to zero. The empirical improvement on Atari was material (van Hasselt et al., 2016).
+
+</Flashcard>
+
+<Flashcard question="Why does the target network use a discrete `C`-step refresh instead of updating every step?">
+
+If `Q_{θ⁻}` updates every step, you are back to `Q_θ` computing its own target, which is the runaway feedback loop the target network was designed to prevent.
+
+With `C = 10,000`, each 10,000-step window is a stable regression: `Q_θ` minimizes squared error against fixed labels `Q_{θ⁻}(s', ·)`. After the window the target updates discretely; the next regression window begins. The system is sequential supervised learning with periodic target shifts, rather than a non-stationary moving target.
+
+Polyak averaging (`θ⁻ ← τ θ + (1-τ) θ⁻` with small `τ`, used in DDPG/SAC) is the smooth alternative that does the same job.
+
+</Flashcard>
+
+<Flashcard question="What hyperparameters from DQN 2015 transfer to continuous-control settings like DDPG/SAC, and which don't?">
+
+**Transfer:** the off-policy mindset (replay buffer, target network, separate online vs target). DDPG and SAC both use replay buffers and target networks.
+
+**Don't transfer:**
+- Buffer size: typically smaller for continuous control (DDPG uses 100K; SAC uses 1M but on lower-dim observations).
+- Target update mechanism: DDPG/SAC use Polyak averaging (`τ = 0.005` typically) instead of discrete `C`-step copies.
+- Reward clipping `[-1, +1]`: Atari-specific; continuous control rewards are scaled differently per task.
+- Frame stack of 4: Atari-specific (the original input is non-Markov on its own).
+
+Plus continuous control adds a separate actor network (because `argmax` over continuous actions is its own optimization problem), making the algorithm structurally actor-critic rather than pure value-based.
+
+</Flashcard>
+
+</FlashcardSet>

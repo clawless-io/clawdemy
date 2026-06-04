@@ -1,0 +1,193 @@
+---
+title: "Practice: Actor-critic methods"
+description: A self-check on the actor-critic skeleton and bias-variance tradeoff, a pen-and-paper variance computation showing actor-critic vs REINFORCE on a stochastic-reward bandit, a valid-baseline classification drill, and flashcards built for retrieval.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Six short questions. Answer each one in your head (or on paper) before opening the collapsible. Trying to retrieve the answer is where the learning sticks; rereading feels productive but does much less.
+
+**1. What does an actor-critic algorithm train, and how do the pieces interact?**
+
+<details>
+<summary>Show answer</summary>
+
+Two networks, jointly. **Actor** `π_θ(a | s)`: the policy. **Critic** `V_φ(s)` (or `Q_φ(s, a)`): a learned value-function estimate. The actor uses the critic's value estimates to compute lower-variance gradient updates (via the advantage `A(s, a) = G_t - V_φ(s_t)` or its bootstrapped variants). The critic regresses to observed returns from rollouts collected by the actor. Two networks, two losses, two gradient flows; they co-evolve.
+
+</details>
+
+**2. Name three advantage estimators by increasing bias and decreasing variance.**
+
+<details>
+<summary>Show answer</summary>
+
+**MC actor-critic** `A = G_t - V_φ(s_t)`: **unbiased** (for any state-only V_φ; the baseline identity holds regardless of critic error), highest variance. **n-step** `A = Σ_(k=0)^(n-1) γ^k r_(t+k) + γ^n V_φ(s_(t+n)) - V_φ(s_t)`: interpolates; bias enters via the bootstrapped V_φ(s_(t+n)) term. **TD(0)** `A = r_t + γ V_φ(s_(t+1)) - V_φ(s_t)`: highest bias (V_φ appears on both sides of the bootstrapped target), lowest variance. **GAE(λ)** is a geometric `λ`-weighted blend of all n-step advantages, with `λ = 0` → TD and `λ = 1` → MC. PPO's default is `λ ≈ 0.95`.
+
+</details>
+
+**3. On the L4 sigmoid bandit at `θ = 0`, what was the quantified variance reduction with the optimal baseline?**
+
+<details>
+<summary>Show answer</summary>
+
+REINFORCE: `Var(g) = 0.0625`, `std = 0.25`, SNR = 1 (standard deviation equals the signal). Actor-critic with the optimal baseline `V*(s) = E_π[R] = 0.5`: **both** single-sample gradients (for `a = 1` and `a = 2`) work out to exactly `0.25`, so `Var(g) = 0`, `std = 0`, SNR = ∞. The optimal baseline subtracts out the action-conditional mean reward, leaving only the action-conditional signal, which on a deterministic-reward problem is constant.
+
+</details>
+
+**4. Why is `V_φ(s)` a valid baseline but `Q_φ(s, a)` is not?**
+
+<details>
+<summary>Show answer</summary>
+
+A baseline is unbiased only if `E_(a ~ π)[b(s) · ∇_θ log π_θ(a | s)] = 0`. For `b(s) = V_φ(s)` (state-only), the expectation factors: `V_φ(s) · E_(a ~ π)[∇_θ log π_θ(a|s)] = V_φ(s) · 0 = 0`. For `Q_φ(s, a)` (action-dependent), it does **not** factor: `E_(a ~ π)[Q_φ(s, a) · ∇_θ log π_θ(a|s)] ≠ 0` in general, so subtracting it would bias the gradient. State-only baselines are safe; action-dependent ones are not. ( `Q_φ` can replace `G_t` in some variants like DDPG and SAC, but those are different algorithms, not "use `Q` as a baseline.")
+
+</details>
+
+**5. What is the bias-variance trade in actor-critic, and what does PPO's `λ ≈ 0.95` represent?**
+
+<details>
+<summary>Show answer</summary>
+
+MC is **unbiased** for any state-only V_φ (the baseline identity holds regardless of critic error); it pays in variance because the full-trajectory return `G_t` is itself a Monte-Carlo estimate. TD has high bias and low variance: the bootstrap puts `V_φ` on both sides of the equation, and the critic's error propagates as bias. GAE blends them with a `λ` parameter: `λ = 0` is pure TD, `λ = 1` is pure MC. PPO's default `λ ≈ 0.95` is **closer to MC than to TD**, meaning most of the variance reduction comes from value-function targets, with very little of the bias TD would introduce. The choice reflects the practical finding that aggressive TD bootstrapping with a wrong `V_φ` is more harmful than the variance it saves.
+
+</details>
+
+**6. What is the cost of the variance reduction in actor-critic, in one sentence?**
+
+<details>
+<summary>Show answer</summary>
+
+Bias **once you bootstrap**. The critic `V_φ` is a learned approximation, not the true `V^π`; its error enters the advantage estimate only when V_φ appears inside the **target** (the bootstrap step). With MC actor-critic the V_φ term is only the baseline, and the baseline identity makes the update **unbiased** for any state-only V_φ. With TD the bootstrap puts V_φ on both sides of the equation, and the critic's error propagates as bias. The right `λ` in GAE is the dial that picks the bias-variance trade you want, and the entire actor-critic family lives or dies on that choice.
+
+</details>
+
+## Try it yourself, part 1: variance reduction with stochastic rewards
+
+Pen and paper, about 8 minutes. Extend the L4 bandit so that the reward for action 1 is **stochastic**: `R(a=1) ~ Bernoulli(0.6)` (returns 1 with probability 0.6 and 0 with probability 0.4), `R(a=2) = 0` (deterministic). Sigmoid policy `π_θ(a=1) = σ(θ)`. Evaluate REINFORCE and actor-critic (with the optimal baseline) at `θ = 0`.
+
+**Steps.** (1) Compute the optimal baseline `V*` at `θ = 0` (the policy's expected reward). (2) For REINFORCE, enumerate the three possible (action, reward) outcomes, their probabilities, and the single-sample gradient `g_REINFORCE` for each. (3) Compute `E[g_REINFORCE]` and `Var(g_REINFORCE)`. (4) Repeat for actor-critic with `b = V*`: compute the three possible `g_AC` values, then `E[g_AC]` and `Var(g_AC)`. (5) Compare the two variances.
+
+(Hints. `σ(0) = 0.5`; `∇_θ log σ(0) = 0.5`; `∇_θ log(1 - σ(0)) = -0.5`. The three (a, R) outcomes have probabilities `(a=1, R=1)`: `0.5·0.6 = 0.3`; `(a=1, R=0)`: `0.5·0.4 = 0.2`; `(a=2, R=0)`: `0.5·1 = 0.5`.)
+
+<details>
+<summary>Show answer</summary>
+
+**Step 1.** `V* = E_(a ~ π)[R] = 0.5·E[R | a=1] + 0.5·E[R | a=2] = 0.5·0.6 + 0.5·0 = 0.3`.
+
+**Step 2.** Three outcomes with their `g_REINFORCE = R · ∇_θ log π_θ(a)`:
+
+```
+(a=1, R=1)  prob 0.3:  g = 1 · 0.5 = 0.5
+(a=1, R=0)  prob 0.2:  g = 0 · 0.5 = 0
+(a=2, R=0)  prob 0.5:  g = 0 · (-0.5) = 0
+```
+
+**Step 3.** `E[g_REINFORCE] = 0.3·0.5 + 0.2·0 + 0.5·0 = 0.15`. `E[g²] = 0.3·0.25 + 0.2·0 + 0.5·0 = 0.075`. `Var(g_REINFORCE) = 0.075 - 0.15² = 0.075 - 0.0225 = 0.0525`. `std = √0.0525 ≈ 0.229`. SNR `≈ 0.15 / 0.229 ≈ 0.65` (worse than the deterministic L4 case because the reward noise adds variance).
+
+**Step 4.** Actor-critic with `b = V* = 0.3`. `g_AC = (R - 0.3) · ∇_θ log π_θ(a)`:
+
+```
+(a=1, R=1)  prob 0.3:  g = (1 - 0.3) · 0.5 = 0.7 · 0.5 = 0.35
+(a=1, R=0)  prob 0.2:  g = (0 - 0.3) · 0.5 = -0.15
+(a=2, R=0)  prob 0.5:  g = (0 - 0.3) · (-0.5) = 0.15
+```
+
+**Step 5.** `E[g_AC] = 0.3·0.35 + 0.2·(-0.15) + 0.5·0.15 = 0.105 - 0.03 + 0.075 = 0.15`. **Same as REINFORCE** (unbiased ✓). `E[g²] = 0.3·0.1225 + 0.2·0.0225 + 0.5·0.0225 = 0.03675 + 0.0045 + 0.01125 = 0.0525`. `Var(g_AC) = 0.0525 - 0.0225 = 0.0300`. `std = √0.0300 ≈ 0.173`. SNR `≈ 0.15 / 0.173 ≈ 0.87`.
+
+**Comparison:** `Var` dropped from `0.0525` to `0.0300`, a **43% reduction**. Standard deviation from `0.229` to `0.173`. SNR from `0.65` to `0.87`. The critic still helps even with reward noise, just not as much as in the deterministic case (where the variance reduction was 100%). The reduction is exactly the variance contribution that was "predictable from the state" (the policy's expected reward); the remaining variance is the part driven by the reward distribution itself, which no baseline can subtract out.
+
+</details>
+
+## Try it yourself, part 2: valid baseline or not?
+
+About 4 minutes. For each candidate baseline `b` in a policy-gradient estimator `(G_t - b) · ∇_θ log π_θ(a | s)`, decide whether subtracting `b` is **unbiased** (leaves `E[g]` unchanged) or **biased** (changes `E[g]`), and give a one-line reason.
+
+1. `b = V_φ(s_t)`, a state-only learned value function.
+2. `b = 0` (no baseline; standard REINFORCE).
+3. `b = c`, a constant independent of state and action.
+4. `b = Q_φ(s_t, a_t)`, a state-action value function.
+5. `b = A_φ(s_t, a_t) = Q_φ(s_t, a_t) - V_φ(s_t)`, a learned advantage function.
+6. `b = average reward observed so far across all states`, a running scalar updated each step.
+
+<details>
+<summary>Show answer</summary>
+
+1. **Unbiased.** `V_φ(s_t)` depends only on the state, not the action, so `E_(a ~ π)[V_φ(s) · ∇log π(a|s)] = V_φ(s) · 0 = 0`. This is the standard actor-critic baseline.
+2. **Unbiased.** No baseline is the bare REINFORCE estimator. Unbiased by construction, just high-variance.
+3. **Unbiased.** A constant is a degenerate state-only baseline, so the same argument applies. Useless for variance reduction (does not cancel any state-dependent signal) but unbiased.
+4. **Biased.** `Q_φ` depends on the action `a_t`, so `E_(a)[Q_φ(s, a) · ∇log π(a|s)]` does not factor cleanly. Subtracting it would bias the gradient. (`Q_φ` can replace `G_t` entirely in other algorithm variants like DDPG and SAC, but it is not a valid baseline.)
+5. **Biased**, same reason as 4: `A_φ(s, a)` is action-dependent.
+6. **Unbiased (in the limit), but a poor choice in practice.** A scalar baseline depending only on past observations (not on `a_t`) is technically unbiased, but the variance reduction is minimal because it does not cancel the state-dependent part of the reward. A state-dependent learned `V_φ(s)` does much better.
+
+The rule of thumb: **state-only baselines are always unbiased; action-dependent ones are biased.**
+
+</details>
+
+## Flashcards
+
+Nine cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay out the full set as one card per page, ready to print or save as a PDF for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="What does actor-critic train, and how do actor and critic interact?">
+
+Two networks jointly: actor `π_θ(a|s)` (the policy) and critic `V_φ(s)` or `Q_φ(s,a)` (learned value estimate). Actor uses critic's value to compute lower-variance gradient updates; critic regresses to observed returns from actor's rollouts. They co-evolve.
+
+</Flashcard>
+
+<Flashcard question="What is the MC advantage estimator, and what is the TD(0) version?">
+
+MC: `A = G_t - V_φ(s_t)` (unbiased for any state-only V_φ; high variance). TD(0): `A = r_t + γ V_φ(s_(t+1)) - V_φ(s_t)` (high bias because V_φ is bootstrapped on both sides, low variance because the trajectory tail is replaced). n-step interpolates; GAE(λ) blends them all with geometric weights.
+
+</Flashcard>
+
+<Flashcard question="On the L4 sigmoid bandit at θ=0, what variance reduction does the optimal baseline give?">
+
+REINFORCE Var(g) = 0.0625, std = 0.25, SNR = 1. With optimal baseline V* = 0.5: both single-sample gradients (for a=1 and a=2) are exactly 0.25, so Var(g) = 0, std = 0, SNR = ∞. The baseline subtracts the action-conditional mean reward; on a deterministic problem the remainder is constant.
+
+</Flashcard>
+
+<Flashcard question="Why is V_φ(s) a valid baseline but Q_φ(s,a) is not?">
+
+For baseline `b(s)` to be unbiased: `E_(a~π)[b · ∇log π(a|s)] = 0`. With state-only `b(s)`, this factors to `b(s) · E[∇log π] = b(s) · 0 = 0`. With action-dependent `Q_φ(s,a)`, it does not factor; subtracting biases the gradient. State-only is safe; action-dependent is not.
+
+</Flashcard>
+
+<Flashcard question="What is the bias-variance trade in actor-critic?">
+
+MC: unbiased (for any state-only V_φ; the baseline identity holds regardless of critic error), high variance because G_t is a Monte-Carlo estimate. TD: high bias (V_φ wrong → bootstrap error propagates), low variance. n-step and GAE(λ) interpolate. PPO's default λ ≈ 0.95 is closer to MC than TD: most of the variance reduction comes from value-function targets, with very little of the bias TD would add.
+
+</Flashcard>
+
+<Flashcard question="What is the standard actor-critic training loop?">
+
+Collect rollouts with π_θ. Critic update: minimize MSE between `V_φ(s_t)` and target (`G_t` for MC, `r + γV_φ(s')` for TD). Actor update: policy gradient with advantage `θ ← θ + α · A(s_t, a_t) · ∇_θ log π_θ(a_t | s_t)`. Two networks, two losses, two gradient flows.
+
+</Flashcard>
+
+<Flashcard question="Name three actor-critic algorithms and what each is used for.">
+
+A2C / A3C (Mnih et al. 2016): the original deep-RL actor-critic, synchronous and asynchronous. SAC (Haarnoja 2018): Q-critic + entropy regularization, the continuous-control workhorse. PPO (Schulman 2017): GAE + clipped trust-region, the RLHF backbone for LLMs (covered in L8 + L13).
+
+</Flashcard>
+
+<Flashcard question="What is the cost of variance reduction in actor-critic?">
+
+Bias, once you bootstrap. The critic V_φ is learned and not equal to V^π. With MC actor-critic, V_φ only enters as a baseline and the baseline identity makes the update unbiased for any state-only V_φ; the critic's error costs un-cancelled variance, not bias. Bias enters only when V_φ shows up inside the bootstrapped target (TD, n-step, GAE with λ\<1). The right λ in GAE is the design dial that picks the bias-variance trade. The whole actor-critic family lives or dies on this choice.
+
+</Flashcard>
+
+<Flashcard question="How does actor-critic relate to RLHF for LLMs?">
+
+The PPO used in the canonical RLHF post-training pipeline for LLMs (ChatGPT, Claude, Gemini) is an actor-critic algorithm. The actor is the LM itself; the critic is a value-network head added during fine-tuning. Advantage is computed with GAE. The actor-critic skeleton in this lesson is what PPO (covered in L8 + L13) builds on. Variants: Constitutional AI / RLAIF use AI-generated preferences; DPO-style methods skip the explicit PPO step entirely.
+
+</Flashcard>
+
+</FlashcardSet>

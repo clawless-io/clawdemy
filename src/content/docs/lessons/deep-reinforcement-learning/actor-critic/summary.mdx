@@ -1,0 +1,22 @@
+---
+title: "Summary: Actor-critic methods"
+description: The 5-minute scan version. The two-network split, advantage estimators (MC, TD, n-step, GAE), the quantified variance reduction on the L4 bandit (0.0625 → 0), the bias-variance tradeoff, and the actor-critic family that includes PPO, SAC, A2C, and the RLHF post-training step.
+artifact: summary
+sidebar:
+  order: 4
+  label: Summary
+---
+
+REINFORCE's central problem is variance. Actor-critic methods reduce it by training a second network alongside the policy, a **critic** that estimates the value function and supplies a baseline (or a bootstrapped target) for the policy update. On the same sigmoid bandit from the last lesson, the variance drops from `0.0625` to **zero** with the optimal baseline. In practice the critic is learned; the MC actor-critic update is **still unbiased** for any state-only critic, and the critic's error costs un-cancelled variance. Bias enters only once you bootstrap (TD, n-step, GAE with `λ<1`). The actor-critic template is what nearly every modern deep-RL algorithm uses, from A2C and SAC to PPO and the RLHF post-training of language models. This is the scan-it-in-five-minutes version.
+
+## Core ideas
+
+- **The two networks.** Actor `π_θ(a | s)` (the policy) and critic `V_φ(s)` or `Q_φ(s, a)` (learned value-function estimate), trained jointly. Actor uses the critic for lower-variance gradient updates; critic regresses to observed returns from the actor's rollouts.
+- **Two ways to use the critic.** **MC actor-critic**: replace REINFORCE's bare `G_t` (or `G_t - b(s)`) with the advantage `A = G_t - V_φ(s_t)`. **TD actor-critic**: go further, replace `G_t` itself with the bootstrapped one-step target `r_t + γ V_φ(s_(t+1))`, giving advantage `A = r_t + γ V_φ(s_(t+1)) - V_φ(s_t)`. **n-step** and **GAE(λ)** interpolate between them; PPO defaults to `GAE(λ ≈ 0.95)`.
+- **Quantified variance reduction on the L4 sigmoid bandit.** At `θ = 0` with the optimal baseline `V* = 0.5`: both single-sample gradients (for `a = 1` and `a = 2`) are exactly `0.25`, so `Var(g_AC) = 0` while `E[g_AC] = 0.25` is unchanged. REINFORCE had `Var = 0.0625`, `std = 0.25`, `SNR = 1`. Actor-critic: `Var = 0`, `std = 0`, `SNR = ∞`. The baseline subtracts the action-conditional mean reward, leaving only the action-conditional signal, which on a deterministic-reward problem is constant.
+- **The cost is bias, once you bootstrap.** In practice `V_φ` is learned and not equal to `V^π`. With **MC actor-critic** the V_φ term is only a baseline, and the baseline identity makes the update **unbiased** for any state-only V_φ; the critic's error costs un-cancelled variance, not bias. Bias enters once V_φ appears inside the **target**: TD, n-step, and GAE(λ\<1) all bootstrap, and the critic's error then propagates. Right `λ` in GAE is the dial the whole family lives on. The practical winning choice is "moderate `λ` close to MC."
+- **Valid baselines are state-only.** `b(s) = V_φ(s)` is unbiased because `E_(a ~ π)[V_φ(s) · ∇_θ log π(a|s)] = V_φ(s) · 0 = 0`. Action-dependent quantities like `Q_φ(s, a)` are not valid baselines; subtracting them biases the gradient. `Q_φ` can replace `G_t` in other algorithm variants (DDPG, SAC), but those are different algorithms, not "use `Q` as a baseline."
+
+## What changes for you
+
+Actor-critic is the template behind nearly every modern deep-RL algorithm. **PPO** (lesson 8) is actor-critic with GAE and a clipped trust-region objective; it is the algorithm used in the canonical RLHF post-training step for LLMs (ChatGPT, Claude, Gemini are typically post-trained with RLHF or related preference-based methods; Constitutional AI / RLAIF use AI-generated preferences; DPO methods skip the explicit PPO step). **SAC** (Soft Actor-Critic) is actor-critic with a Q-critic and entropy regularization; the standard for continuous-control robotics. **A2C and A3C** are the original deep-RL actor-critic algorithms. When you read an RL paper, the first decomposition to look for is "what is the actor, what is the critic, and how do they trade bias for variance?" The answer is the algorithm. The next lesson opens Phase 2 and turns to the **other branch** of the L3 dispatch table: **value-based RL** (lesson 6 and 7), which learns `Q_θ(s, a)` directly from the Bellman optimality equation and acts greedily, with no explicit policy network at all. The actor-critic family will return in lesson 8 (PPO) and lesson 13 (RLHF), each layering refinements on the skeleton built here.

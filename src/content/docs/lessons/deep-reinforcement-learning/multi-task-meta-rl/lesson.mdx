@@ -1,0 +1,126 @@
+---
+title: "Lesson: Multi-task RL and meta-RL"
+description: When an agent has to learn many related tasks, the structure across tasks is usable. Multi-task RL trains one policy on many tasks at once, sharing parameters. Meta-RL trains so the agent can rapidly adapt to a new task with few samples. Three meta-RL families (gradient-based, recurrent, Bayesian) make different design choices about what adaptation looks like.
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+Every algorithm in T18 has assumed a single task: one MDP, one reward, train until the policy is good on this task and then deploy. The trained policy is specialized to its training task, and transferring to a related-but-different task requires retraining from scratch.
+
+That is wasteful when the agent will face many related tasks. A robot that learns to pick up a red cube should not have to relearn the entire pick-up motion when handed a blue cube. A language model that learned to solve grade-school arithmetic should be able to apply most of what it knows to grade-school algebra without full re-fine-tuning. A driving policy that learned to navigate one city should transfer to another city without erasing the trained motor skills.
+
+The structure that lets training-on-one-task help training-on-another is the focus of **multi-task RL** and **meta-RL**. The two are related but solve subtly different problems.
+
+- **Multi-task RL**: train one policy on many tasks simultaneously, sharing parameters. The trained policy can perform any of the training tasks, ideally with positive transfer across tasks.
+- **Meta-RL**: train so the agent can rapidly adapt to a new task at test time, using only a few samples from the new task. The trained "meta-policy" is not specialized to any one task; it is specialized to the adaptation process.
+
+This lesson covers both.
+
+## Multi-task RL
+
+The setup. A distribution over tasks, each task being a different MDP that shares some structure with the others (same state and action spaces; rewards differ; transition dynamics may differ). At training time the agent sees data from many tasks; at test time it must perform any of the trained tasks.
+
+The standard architecture: a single policy network parameterized by theta, with the task identity (or a task embedding) provided as additional input. The training objective is the expected return averaged over all training tasks:
+
+```
+maximize over theta of  E over task t of  E over trajectory of  return(trajectory) under policy_theta(. | s, t)
+```
+
+The hope is **positive transfer**: training on task A produces shared representations that also help task B. Empirically this works when the tasks share enough structure (the same physics, similar reward shapes, related action sequences). It fails when the tasks are too different, producing **negative transfer**: training on a wider task distribution makes the policy worse on any individual task than dedicated training would.
+
+Three practical concerns:
+
+- **Task imbalance**: if some tasks are harder or have less data, the easy tasks dominate the gradient. Practical solutions: per-task weighting, gradient-normalization across tasks (Chen et al. 2018), task-specific learning rates.
+- **Interference**: gradients from different tasks may point in conflicting directions. Solutions: gradient-surgery techniques (project task gradients onto a non-conflicting subspace), separate task-specific heads on a shared backbone.
+- **Capacity**: a single network may not have enough parameters to do all tasks well. Solutions: task-conditional architectures (a "mixture of experts" where different tasks route to different sub-networks), or scaling up the network.
+
+Multi-task RL is the practical answer when you have a known set of training tasks and need the agent to perform any of them at test time. The training cost is more or less proportional to the number of tasks (multi-task training is roughly N times single-task training cost for N tasks), but the deployment policy handles all of them.
+
+## Meta-RL
+
+The setup is different. The agent must adapt to a **new** task at test time, with only a few samples from the new task. The training tasks are not the test task; they are a representative sample from a task distribution that the test task also comes from.
+
+The agent is trained to be good at the adaptation process itself, not at any particular task.
+
+Three families of meta-RL algorithms.
+
+### Gradient-based meta-RL: MAML
+
+MAML (Model-Agnostic Meta-Learning, Finn et al. 2017) trains an initial parameter setting that is one or a few gradient steps away from a good solution on any task drawn from the task distribution.
+
+The meta-training loop:
+
+1. Sample a task from the task distribution.
+2. From the current parameters theta, do K gradient steps on a small sample of this task's data to get task-adapted parameters theta_task.
+3. Evaluate theta_task on a held-out sample of this task's data; compute the loss.
+4. Backpropagate this loss through the inner adaptation steps to update theta.
+
+After meta-training, theta is a "good starting point" for fast adaptation. At test time, given a new task with a small sample, do a few inner-loop gradient steps (the same K as in meta-training, each at inner learning rate alpha) from theta and the adapted policy is competent.
+
+MAML's appeal: explicit gradient adaptation matches the standard RL training mechanism, so test-time adaptation is just continued training. Its difficulty: the meta-gradient (gradient through gradient steps) is computationally expensive and sometimes unstable.
+
+### Recurrent / context-based meta-RL: RL squared
+
+RL² (Duan et al. 2016, Wang et al. 2016) treats the meta-RL problem as a partially-observed MDP at the meta level. The meta-policy is a recurrent neural network whose hidden state encodes "what task am I currently on, based on recent experience." At each meta-step the network sees the current state, the previous action, the previous reward, and updates its hidden state; the action is conditioned on the entire history.
+
+There is no explicit gradient step at test time. Adaptation is implicit in the recurrent network's hidden-state update. Given a few transitions from a new task, the RNN's hidden state updates to encode the task, and the policy adapts via the hidden state.
+
+RL²'s appeal: no test-time gradient computation, fast adaptation. Its difficulty: the recurrent network must learn to do meta-RL implicitly, which can be unstable to train and hard to debug.
+
+### Bayesian meta-RL: PEARL
+
+PEARL (Probabilistic Embeddings for Actor-critic RL, Rakelly et al. 2019) treats the task identity as a latent variable and learns a probabilistic embedding. At meta-test time the agent maintains a posterior over the task embedding from observed transitions. The policy is conditioned on the posterior embedding.
+
+The posterior is updated as new transitions arrive (Bayes-style). The adaptation is the posterior update, not a gradient step or RNN state update. Has theoretical appeal (explicit uncertainty over the task) and is competitive on standard benchmarks.
+
+## Decision rubric
+
+| Setting | Recommended | Why |
+|---|---|---|
+| Known set of training tasks, test on any of them | Multi-task RL | Direct training matches the test setting |
+| Test on new tasks from a known distribution, with no test-time training budget | Recurrent meta-RL (RL²) | Fast implicit adaptation |
+| Test on new tasks with a small test-time training budget | Gradient meta-RL (MAML) | Explicit gradient adaptation is fast and interpretable |
+| Test tasks with task-identity uncertainty | Bayesian meta-RL (PEARL) | Explicit task posterior matches the uncertainty structure |
+| Test distribution shifts heavily from training | None reliably; expect failure or need to extend the training distribution | Meta-RL assumes test tasks are drawn from the training task distribution |
+
+The recurrent and gradient families dominate in practice. Bayesian methods are theoretically appealing but trickier to scale.
+
+## Concrete examples and where this is in modern AI
+
+**Robotic manipulation**: multi-task RL trains a policy to pick up many different objects; meta-RL trains a policy that adapts to a new object shape in a few trials. The QT-Opt pipeline (Kalashnikov et al. 2018) is the canonical large-scale single-skill grasping pipeline (one task at scale, not multi-task per se) and demonstrated the offline-then-online structure that multi-task and meta-RL extensions then built on.
+
+**Language model fine-tuning**: large language models, after pretraining, are effectively meta-learners in the in-context-learning sense (Brown et al. 2020 GPT-3): given a few examples in the prompt, the model adapts its outputs to the task without any gradient update. This is implicit meta-learning at scale. The "meta-training" is the pretraining itself, on a massive distribution of internet text that contains many task-like patterns.
+
+**Video games**: AlphaStar (Vinyals et al. 2019) was trained via multi-agent self-play across a population of StarCraft II races and matchups, with league-style training driving generalization across opponents. Strictly a multi-agent self-play setup rather than canonical multi-task RL, but related in the structure-sharing-across-distributions sense.
+
+**Recommender systems**: production-scale recommenders are multi-task by design (different verticals, different audiences). The transfer learning literature in recommender systems is essentially the multi-task RL story applied at industrial scale.
+
+## Why this matters when you use AI
+
+Modern foundation models are, in many senses, the multi-task and meta-RL agenda taken to the scale where it just works. Pretraining on a huge distribution of tasks produces models that adapt to new tasks via in-context learning (no gradient step at test time) and via fine-tuning (a few-step gradient adaptation, MAML-style). The structure that the multi-task and meta-RL literature isolated in clean academic settings is recognizable in how foundation models are described and deployed at production scale.
+
+Understanding the multi-task and meta-RL framings helps you read claims about "few-shot learning" or "rapid adaptation" in modern systems with calibrated skepticism. Few-shot learning is meta-learning at scale; the test-task distribution has to overlap with the training task distribution for it to work; and the failure mode (test tasks too far from training) is the same.
+
+## Common pitfalls
+
+**Conflating multi-task and meta-RL.** Multi-task: train on many tasks, test on the same tasks. Meta-RL: train so the agent adapts to NEW tasks at test time. Different settings, different algorithms.
+
+**Expecting positive transfer automatically.** Multi-task training can be worse than single-task training if the tasks are too different. Negative transfer is a real failure mode.
+
+**Underestimating task-distribution shift.** Meta-RL assumes the test task is from the training task distribution. A test task outside that distribution is not in the meta-trained agent's adaptation budget.
+
+**Treating MAML as the default.** It is theoretically appealing but the meta-gradient is computationally costly and unstable. RL² is often the practical choice.
+
+**Believing in-context learning replaces fine-tuning.** In-context learning works for tasks similar to the pretraining distribution; for tasks outside it, fine-tuning still wins.
+
+## What you should remember
+
+- **Multi-task RL trains one policy on many tasks simultaneously.** Best when the agent will face any of the training tasks at test time. Positive transfer is the hope; negative transfer is the failure mode.
+- **Meta-RL trains the agent to adapt to NEW tasks at test time.** The training signal is the adaptation process itself, not any single task.
+- **Three meta-RL families: gradient (MAML), recurrent (RL²), Bayesian (PEARL).** Each makes different design choices about what adaptation looks like at test time.
+- **Foundation models are meta-learning at scale.** In-context learning is implicit meta-RL; few-shot fine-tuning is explicit MAML-like meta-RL. The structure isolated by the academic literature is recognizable in production AI systems.
+- **All meta-RL approaches assume the test task comes from the training task distribution.** Test tasks outside the training distribution are out-of-scope for what the meta-trained agent has learned to adapt to.
+
+The next and final lesson takes a step back: across the entire track, what does the field's current research frontier look like, and what are the open problems? L18 closes Phase 3 and Track 18.

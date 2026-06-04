@@ -1,0 +1,104 @@
+---
+title: "Cheatsheet: Multi-task RL and meta-RL"
+description: One-page reference. Multi-task vs meta-RL distinction, three meta-RL families, decision rubric, foundation-model connection.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+---
+
+## Multi-task vs meta-RL
+
+| Property | Multi-task RL | Meta-RL |
+|---|---|---|
+| Training tasks | Known set of N tasks | Sample from task distribution |
+| Test tasks | Same as training set | New tasks from same distribution |
+| Goal | One policy that handles any training task | Agent that adapts rapidly to new tasks |
+| Adaptation at test? | No (policy is already trained) | Yes (few samples, then adapted policy) |
+| Failure mode | Negative transfer between dissimilar tasks | Test task outside training distribution |
+
+## Three meta-RL families
+
+| Family | Algorithm | Test-time adaptation | Best for |
+|---|---|---|---|
+| **Gradient** | MAML (Finn et al. 2017) | Few explicit gradient steps from meta-trained initialization | Test-time gradient budget available; explicit adaptation |
+| **Recurrent** | RL² (Duan, Wang et al. 2016) | RNN hidden state updates implicitly with each new transition | No test-time training; real-time adaptation |
+| **Bayesian** | PEARL (Rakelly et al. 2019) | Posterior over task latent updates with new transitions | Explicit task-identity uncertainty needed |
+
+## MAML training loop
+
+```
+meta-train:
+  for each meta-iteration:
+    sample task t from task distribution
+    sample task-train and task-test batches
+    theta_t = theta
+    repeat K times: theta_t = theta_t - alpha · gradient of task-train loss
+    meta-loss += task-test loss at theta_t
+  theta -= eta · gradient of meta-loss with respect to theta
+```
+
+The meta-gradient is the gradient through the inner gradient steps.
+
+## RL² architecture
+
+```
+hidden_t = RNN(state_t, action_(t-1), reward_(t-1), hidden_(t-1))
+action_t = policy(hidden_t)
+```
+
+The RNN must learn to do meta-RL implicitly; the hidden state encodes "what task am I on, given recent experience."
+
+## PEARL inference
+
+```
+context (s, a, r, s') -> probabilistic encoder -> q(z | context)
+sample z ~ q
+action = policy(state, z)
+```
+
+The latent z encodes the task; the encoder updates the posterior as transitions arrive.
+
+## Decision rubric
+
+| Setting | Recommended |
+|---|---|
+| Known training task set, test on same | Multi-task RL |
+| Test on new tasks; gradient budget at adapt | MAML |
+| Test on new tasks; no gradient at adapt | RL² |
+| Test tasks have explicit identity uncertainty | PEARL |
+| Test distribution shifted from training | None reliably; extend training distribution |
+
+## Foundation models as meta-learners
+
+| Academic meta-RL | Foundation-model parallel |
+|---|---|
+| Train on task distribution | Pretrain on internet-scale text |
+| Test-task adaptation budget | In-context examples + few-shot fine-tuning |
+| RL² (recurrent adaptation) | In-context learning (no gradient updates) |
+| MAML (gradient adaptation) | Few-shot fine-tuning |
+| Test-task-out-of-distribution failure | Prompt-distribution-shift failure |
+
+## Multi-task RL practical concerns
+
+| Concern | Mitigation |
+|---|---|
+| Task imbalance | Per-task weighting, gradient normalization across tasks |
+| Gradient interference | Gradient surgery, separate task-specific heads on shared backbone |
+| Capacity limits | Task-conditional architectures (mixture of experts), scaling network |
+| Catastrophic interference | Continual-learning techniques, experience replay across tasks |
+
+## Common pitfalls
+
+- Conflating multi-task with meta-RL (different settings, different algorithms)
+- Expecting positive transfer automatically (negative transfer is real)
+- Underestimating task-distribution shift (meta-RL has to extrapolate from training distribution)
+- Treating MAML as the default (the meta-gradient is unstable and costly)
+- Believing in-context learning replaces fine-tuning (for distribution-shifted tasks it does not)
+
+## What you should remember
+
+- Multi-task RL: known tasks, shared policy. Goal positive transfer; failure negative transfer.
+- Meta-RL: new tasks at test time. Three families: MAML (gradient), RL² (recurrent), PEARL (Bayesian).
+- Foundation models are meta-learning at scale.
+- Test-task distribution must overlap with training task distribution.
