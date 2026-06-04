@@ -1,0 +1,198 @@
+---
+title: "Cheatsheet: Shipping a Claude application"
+description: One-page reference. Five production disciplines, the rollout checklist that pulls L1-L11 together, Usage + Cost Admin API endpoints + auth, deprecation policy + lifecycle states + 60-day notice, common pitfalls.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## The five production disciplines
+
+| # | Discipline | Pulls from |
+| --- | --- | --- |
+| 1 | **Cost monitoring** | L2 + L7 *usage* fields; Usage and Cost Admin API |
+| 2 | **Latency budgets** | L2 streaming; L3 effort; L7 caching; L9.2 routing; L11 Subagent parallelization; L2 batches |
+| 3 | **Eval-set discipline** | L9 pattern 5; T21 L7 LLMOps |
+| 4 | **Rollout** | L2 *request_id*; feature flags + canary + A/B + rollback |
+| 5 | **Lifecycle handling** | L3 date-pinning; Anthropic deprecation policy + Console Export |
+
+## Per-call logging shape (every Claude response)
+
+| Field | Source |
+| --- | --- |
+| *request_id* | L2 (required for Anthropic Support) |
+| *model* | Request echo |
+| *stop_reason* | L1 + L2 + L5 + L7 + L8 |
+| *usage.input_tokens* | L1 |
+| *usage.output_tokens* | L1 |
+| *usage.cache_creation_input_tokens* | L7 |
+| *usage.cache_read_input_tokens* | L7 |
+| *usage.iterations* (when compaction enabled) | L7 |
+| Request latency | Application |
+
+Pair with *user_id*, *session_id*, *feature_flag_state*.
+
+## Cache-hit ratio (the headline cost metric)
+
+**Identity:** *total_input_tokens = cache_read_input_tokens + cache_creation_input_tokens + input_tokens*.
+
+**Headline:** *cache_read_input_tokens / total_input_tokens*. On a well-cached production stack with stable prefixes, often above 90 percent. If below 70 percent, fix cache placement BEFORE any further optimization.
+
+## Usage and Cost Admin API
+
+**Verbatim:** *The Usage & Cost Admin API provides programmatic and granular access to historical API usage and cost data for your organization*.
+
+| Endpoint | Returns | Granularity |
+| --- | --- | --- |
+| *GET /v1/organizations/usage_report/messages* | Token counts | *1m* / *1h* / *1d* |
+| *GET /v1/organizations/cost_report* | USD (cents, decimal strings) | *1d* only |
+
+**Admin API key required** (*sk-ant-admin...*). Distinct from regular API keys. Only org admins can provision via Console.
+
+### Minimal Usage call
+
+```bash
+curl "https://api.anthropic.com/v1/organizations/usage_report/messages?\
+starting_at=2025-01-08T00:00:00Z&\
+ending_at=2025-01-15T00:00:00Z&\
+group_by[]=model&\
+bucket_width=1d" \
+  --header "anthropic-version: 2023-06-01" \
+  --header "x-api-key: $ANTHROPIC_ADMIN_KEY"
+```
+
+### Time-granularity limits
+
+| *bucket_width* | Default | Max | Use case |
+| --- | --- | --- | --- |
+| *1m* | 60 | 1440 | Real-time monitoring |
+| *1h* | 24 | 168 | Daily patterns |
+| *1d* | 7 | 31 | Weekly / monthly reports |
+
+### Group-by + filter dimensions
+
+| Dimension | Usage | Cost |
+| --- | --- | --- |
+| *model* | Yes | Via *description* |
+| *workspace_id* | Yes | Yes |
+| *api_key_id* | Yes | No |
+| *service_tier* | Yes (filter) | No (Priority Tier excluded) |
+| *context_window* | Yes | Via *description* |
+| *inference_geo* | Yes | Via *description* |
+| *speed* (beta) | Yes (with *fast-mode-2026-02-01* header) | No |
+
+### Operational caveats (verbatim)
+
+- **Data freshness:** *typically appears within 5 minutes of API request completion*.
+- **Polling cadence:** once per minute sustained. Cache results for dashboards.
+- **Priority Tier costs use a different billing model and never appear in the Cost endpoint.** Track Priority Tier usage via Usage endpoint (*service_tier* = *priority*).
+- **NOT available on Claude Platform on AWS** (use Console). **NOT available on individual accounts** (set up an organization first).
+- **Pagination via *has_more* + *next_page***.
+
+## Four cost levers from earlier lessons
+
+| Lever | Lesson | Savings |
+| --- | --- | --- |
+| Model selection (Sonnet default; Haiku for volume) | L3 | Up to 5x cheaper per token |
+| Effort dial (*medium* on Sonnet) | L3 | Per-call token spend |
+| Prompt caching (cache_control on stable prefixes) | L7 | ~90 percent off hits (0.1x multiplier) |
+| Batches API (bulk non-interactive) | L2 | 50 percent off, async, under 1 hour |
+| Per-subagent model | L11 | Per-step instance of the mix-and-match |
+
+## Latency budgets per surface
+
+| Surface | Budget shape | Primary lever |
+| --- | --- | --- |
+| Chat UI | TTFT (200ms to 2s) | Streaming (L2) |
+| Long generation | Full-response (per length) | Streaming + Effort *low* (L3) |
+| Agent loop | Steps × per-step latency | *max_iterations* + per-subagent parallelization |
+| Bulk / non-interactive | Throughput (under 1 hour) | Batches API (L2) |
+| Long-running automation | Wall-clock (minutes to hours) | Managed Agents (L11) |
+
+**Never tune latency without a budget.** Treat budget breaches as incidents.
+
+## Eval-set discipline
+
+| Step | What |
+| --- | --- |
+| Build | 5-10 prompts (start) → 50+ as discipline matures |
+| Score | Per-prompt rubric (LLM judge OR human-labeled) |
+| Run on every change | Model swap, prompt edit, tool add, cache placement |
+| Promote only on pass | Eval pass rate is the deploy gate |
+
+Cross-ref: T21 L7 LLMOps (provider-agnostic playbook). L9 pattern 5 (evaluator-optimizer) is the loop.
+
+## Rollout four moves
+
+| Move | What |
+| --- | --- |
+| **Feature flags** | Model + system prompt + tool list + *cache_control* placement + MCP servers + Subagent configs behind flags. A swap is a config change, not a deploy. |
+| **Canary** | 1 percent → 10 percent → 100 percent. Each stage gated by eval-set + dashboards + alerts staying green for 24-72h. |
+| **A/B vs current production** | Run both for a fixed window; score live responses; pick cheapest that passes. |
+| **Rollback (rehearsed)** | Flag toggles back in one motion. Drill it. |
+
+***request_id* on every call** (L2): the handle for incident response (Anthropic Support + your own logs).
+
+## Anthropic deprecation policy
+
+| State | Meaning (verbatim) |
+| --- | --- |
+| **Active** | *Fully supported and recommended for use* |
+| **Legacy** | *Will no longer receive updates and may be deprecated in the future* |
+| **Deprecated** | *Still functional but no longer recommended; replacement and retirement date assigned* |
+| **Retired** | *No longer available; requests fail* |
+
+**Notice window (verbatim):** *Anthropic notifies customers with active deployments for models with upcoming retirements, providing at least 60 days notice before model retirement for publicly released models*.
+
+**Audit path:** Console Usage page → Export → CSV by API key and model → migrate before retirement date.
+
+### Date-pinning discipline (L3)
+
+| Generation | Form | Use in production? |
+| --- | --- | --- |
+| 4.6 and later (4.8 / 4.7 / 4.6 / Sonnet 4.6) | Dateless | YES (already pinned) |
+| Pre-4.6 (Haiku 4.5 / Sonnet 4.5 / Opus 4.5 / etc.) | Date-suffixed | YES |
+| Pre-4.6 dateless alias | Convenience pointer | NO in production (use date-suffixed) |
+
+### Smaller deprecation worth knowing
+
+***temperature* / *top_p* / *top_k*** deprecated on Opus 4.7+ (including Opus 4.8). **Return 400** on non-default values. Omit; use prompting to guide behavior.
+
+## The rollout checklist (deploy gate)
+
+- [ ] **L1** smallest primitive solid (iterate *content* array; never index)
+- [ ] **L2** production patterns (streaming + batches + *stop_reason* + *request_id*)
+- [ ] **L3** model + effort chosen by eval (Sonnet default; effort per workload)
+- [ ] **L4-L6** tools deliberate (custom + server + MCP; denylist destructive; sandbox computer-use)
+- [ ] **L7** caching live (*cache_control* on system + tool stack); cache-hit ratio dashboard
+- [ ] **L7** context-management posture chosen (compaction for long sessions; tool result clearing for heavy loops)
+- [ ] **L8** agent loop disciplines (hard *max_iterations*; explicit *stop_reason* dispatch; tool inventory as safety surface)
+- [ ] **L9** pattern by decision tree (simplest pattern that fits)
+- [ ] **L10** Skills + harness chosen (*.claude/skills/* + *CLAUDE.md*; security audit on third-party Skills)
+- [ ] **L11** right primitive per workload (self-built loop / Subagents / Managed Agents)
+- [ ] **L12** cost dashboards live (Usage + Cost Admin API; cache-hit ratio; per-model + per-workspace)
+- [ ] **L12** latency budget defined + tracked
+- [ ] **L12** eval set as deploy gate
+- [ ] **L12** feature flags + canary + rollback (rehearsed)
+- [ ] **L12** deprecation watch (Console Export reviewed quarterly)
+
+## Common pitfalls
+
+| Failure | Recognize by | Fix |
+| --- | --- | --- |
+| No *request_id* in logs | Anthropic Support cannot find the failed call | Log *response._request_id* on EVERY response from day one |
+| Cache placement wrong | *cache_read_input_tokens* always 0 on stable workload | Verify *cache_control* placement; check minimum-cacheable-size (L7); check workspace isolation |
+| Latency tuning without a budget | "Feels slow" or "feels fine" arguments | Define per-surface TTFT + full-response budgets; treat breaches as incidents |
+| Shipping without eval | Silent quality regression discovered weeks later | Build 5-10 prompt eval set BEFORE the next change |
+| No feature flag | Model swap requires a deploy | Put model + prompt + tool list behind flags; a swap is a config change |
+| Rollback never rehearsed | Incident response includes "how do we rollback?" | Drill rollback at low-traffic time; flag toggles back in one motion |
+| Missing deprecation notice | Production fails when retirement lands | Subscribe to Anthropic notifications; Console Usage Export quarterly; date-pin pre-4.6 models |
+| *temperature* on Opus 4.7+ | 400 errors | Omit; use prompting to guide behavior |
+| Admin key in regular code path | Security gap (Admin keys can read org-wide usage) | Admin keys live in a separate vault, used only by the dashboard/finance service |
+
+## Source
+
+- Anthropic public Claude docs: **Usage and Cost API**, **Admin API**, **Model deprecations**, **Pricing**, **Rate limits**, at `https://platform.claude.com/docs/`. See references for the full anchor list.
+- **Migration guide** at `https://platform.claude.com/docs/en/about-claude/models/migration-guide`.

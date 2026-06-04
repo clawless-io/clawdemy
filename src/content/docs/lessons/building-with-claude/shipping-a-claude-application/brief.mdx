@@ -1,0 +1,76 @@
+---
+title: "Shipping a Claude application"
+description: "Lesson 12 of Track 22 (Building with Claude), the track closer. The five production disciplines (cost monitoring with the Usage and Cost Admin API; latency budgets per surface; eval-set discipline; rollout via feature flags + canary + A/B + rehearsed rollback; lifecycle handling per Anthropic's deprecation policy). The Usage and Cost Admin API endpoints (GET /v1/organizations/usage_report/messages and GET /v1/organizations/cost_report; Admin API key sk-ant-admin... required, distinct from regular API keys; bucket widths 1m/1h/1d; group by model + workspace_id + api_key_id + service_tier + context_window + inference_geo + speed; data appears within about 5 minutes; Priority Tier costs use a different billing model and never appear in the Cost endpoint; NOT available on Claude Platform on AWS or individual accounts). Anthropic's deprecation policy (Active → Legacy → Deprecated → Retired; at least 60 days notice for publicly released models; Console Usage Export for audit; temperature/top_p/top_k return 400 on Opus 4.7+ at non-default values). The rollout checklist that pulls L1-L11 plus the five disciplines into a single deploy gate."
+track: building-with-claude
+order: 12
+phase: production
+phase_order: 1
+difficulty: standard
+estimated_read_minutes: 16
+estimated_practice_minutes: 20
+prerequisites:
+  - "lessons/building-with-claude/lesson-11-subagents-and-managed-agents"
+learning_outcomes:
+  - Integrate the Anthropic Usage and Cost Admin API (the two endpoints /v1/organizations/usage_report/messages and /v1/organizations/cost_report; the Admin API key requirement; the bucket_width 1m/1h/1d options; the group_by + filter dimensions by model + workspace_id + api_key_id + service_tier + context_window + inference_geo + speed; the about-5-minute data-freshness and once-per-minute polling cadence; the Priority Tier and Claude Platform on AWS caveats) and integrate per-call usage logging (request_id + model + stop_reason + usage.input_tokens + usage.output_tokens + cache_creation_input_tokens + cache_read_input_tokens + usage.iterations) so the cache-hit ratio is the headline cost-monitoring metric
+  - Configure per-surface latency budgets (TTFT for chat; full-response for long generations; throughput for batches) and pick the right latency levers from earlier lessons (streaming L2; effort dial L3; prompt caching L7; routing L9.2; Subagent parallelization L9.3 + L11; Batches API L2)
+  - Apply eval-set discipline as the deploy gate (build a held-out test set; run every model swap + prompt edit + tool addition + cache placement change against it before traffic shifts; cross-ref T21 L7 LLMOps as the provider-agnostic playbook)
+  - Run a four-move rollout (feature flags for model + system prompt + tool list + cache_control + MCP servers + Subagent configs behind flags; canary at 1 percent then 10 percent then 100 percent gated by eval-set + dashboards + alerts; A/B against current production with cheapest-that-passes selection; rehearsed rollback; request_id logging from L2 for incident response)
+  - Apply lifecycle handling per Anthropic's deprecation policy (Active → Legacy → Deprecated → Retired; at least 60 days notice for publicly released models; Console Usage Export for audit; date-pinned IDs in production per L3; recognize the temperature/top_p/top_k deprecation on Opus 4.7+) and execute the rollout checklist that pulls L1-L11 into a single deploy gate
+authors:
+  - clawdemy
+published_at: 2026-06-04
+last_reviewed: 2026-06-04
+status: published
+artifact: brief
+sidebar:
+  order: 1
+  label: Brief
+tableOfContents: false
+---
+
+import LessonFreshness from "../../../../../components/LessonFreshness.astro";
+import SourceLecture from "../../../../../components/SourceLecture.astro";
+
+<LessonFreshness lastReviewed={frontmatter.last_reviewed} />
+
+<SourceLecture url="https://platform.claude.com/docs/en/manage-claude/usage-cost-api" title="Anthropic public Claude docs (Usage and Cost Admin API + Model deprecations + Pricing + Rate limits)" instructor="Anthropic" />
+
+## What you'll learn
+
+The track closer. Lessons 1 to 11 gave you the substrate (single call → production patterns → model selection → three tool layers → caching and context → agent loop → patterns → Skills and Claude Code → Subagents and Managed Agents). This lesson is what changes when the result runs for real users behind a deploy. The single capability this lesson builds: **execute the five production disciplines (cost monitoring, latency budgets, eval-set discipline, rollout, lifecycle handling) and apply the rollout checklist that pulls L1-L11 plus the five disciplines into a single deploy gate**.
+
+Concretely, you will know the per-call telemetry on the *usage* object (log *request_id* / *model* / *stop_reason* / *usage.input_tokens* / *usage.output_tokens* / *usage.cache_creation_input_tokens* / *usage.cache_read_input_tokens* / *usage.iterations* / latency on every response; cache-hit ratio = *cache_read_input_tokens* / total input tokens is the headline metric, often 90 percent+ on well-cached production), the **Usage and Cost Admin API** (Anthropic verbatim: *programmatic and granular access to historical API usage and cost data for your organization*) with its two endpoints (*GET /v1/organizations/usage_report/messages* for token counts grouped by *model* / *workspace_id* / *api_key_id* / *service_tier* / *context_window* / *inference_geo* / *speed* with bucket widths *1m* / *1h* / *1d*; and *GET /v1/organizations/cost_report* for USD costs grouped by *workspace_id* or *description* at daily granularity), the Admin API key requirement (starts with *sk-ant-admin...*; distinct from regular API keys; provisionable only by organization-role admins via Console), the operational caveats (data appears within about 5 minutes; once-per-minute polling sustained; **Priority Tier costs use a different billing model and never appear in the Cost endpoint**; **NOT available on Claude Platform on AWS**; **NOT available on individual accounts**), the four cost levers (model selection from L3, effort dial from L3, prompt caching from L7, batches from L2) plus the per-subagent model from L11, latency budgets per surface (TTFT for chat; full-response for long generations; throughput for batches) with their levers, eval-set discipline as the deploy gate (build held-out test set; run every change through it before shipping; cross-ref T21 L7 LLMOps), the four rollout moves (feature flags for model + system prompt + tool list + *cache_control* + MCP + Subagent configs; canary at 1 percent → 10 percent → 100 percent gated by eval-set + dashboards + alerts; A/B against current production; rehearsed rollback; *request_id* logging from L2 for incident response), and Anthropic's deprecation policy (four states **Active → Legacy → Deprecated → Retired** verbatim; **at least 60 days notice** for publicly released models verbatim; Console Usage Export for audit; date-pinned IDs in production per L3; *temperature* / *top_p* / *top_k* deprecated on Opus 4.7+ including 4.8 return a 400 error at non-default values).
+
+Finally, you will be able to execute the rollout checklist that pulls L1-L11 plus the five disciplines into a single deploy gate.
+
+Every substantive claim verifies against the public Anthropic Claude documentation at [platform.claude.com/docs/en/manage-claude/usage-cost-api](https://platform.claude.com/docs/en/manage-claude/usage-cost-api) and [platform.claude.com/docs/en/about-claude/model-deprecations](https://platform.claude.com/docs/en/about-claude/model-deprecations).
+
+## Where this fits
+
+This is lesson 12 of 12 of Track 22, the **first and only lesson of Phase 4** (production), and the **track closer**. Lessons 1-11 built every primitive the track needed; this lesson is what changes when the result becomes a shipped production application. The natural next destinations are **Track 21 (LLM Ops and Production), lesson 7 "LLMOps"** for the deeper provider-agnostic operational playbook, and **Track 20 (AI Agents and Tool Use)** for the deeper agent-design treatment.
+
+## Before you start
+
+**Prerequisites:** lessons 1-11 of this track. This lesson is the closer; every prior lesson is in the rollout checklist. The cross-track companion is Track 21 lesson 7 "LLMOps" as the deeper provider-agnostic instance of the disciplines here.
+
+**Soft recommended:** an Anthropic Console account at `https://platform.claude.com/` with an organization (the Admin API is not available on individual accounts) and an Admin API key (provisionable only by organization-role admins via the Console). For the try-it-yourself (a written rollout plan, not coding), no setup required. To actually call the Usage and Cost API, you need a workload that has already produced usage data plus the Admin API key.
+
+## About the math
+
+A small amount, all arithmetic from earlier lessons. The cost-monitoring math is the *usage* field identity from L7 (*total_input_tokens = cache_read_input_tokens + cache_creation_input_tokens + input_tokens*) and the cache-hit-ratio headline (often 90 percent+ on well-cached production). Latency budgets are per-surface numbers (200 ms to 2 seconds TTFT for chat; minutes-to-hours wall-clock for Managed Agents) not derived. No new formulas.
+
+## By the end, you'll be able to
+
+The single capability this lesson builds: **execute the five production disciplines and apply the rollout checklist that pulls L1-L11 plus the five disciplines into a single deploy gate** (per the Phase 0 lesson 12 capability mapping). Concretely, you will be able to:
+
+- Integrate the Anthropic Usage and Cost Admin API (the two endpoints */v1/organizations/usage_report/messages* and */v1/organizations/cost_report*; the Admin API key requirement; the *bucket_width* options; the *group_by* + filter dimensions; the operational caveats) and integrate per-call *usage* logging so the cache-hit ratio is the headline cost-monitoring metric
+- Configure per-surface latency budgets (TTFT for chat; full-response for long generations; throughput for batches) and pick the right latency levers from earlier lessons (streaming L2; effort dial L3; prompt caching L7; routing L9.2; Subagent parallelization L9.3 + L11; Batches API L2)
+- Apply eval-set discipline as the deploy gate (build a held-out test set; run every change against it; cross-ref T21 L7 LLMOps)
+- Run a four-move rollout (feature flags; canary at 1 percent → 10 percent → 100 percent; A/B against current production; rehearsed rollback; *request_id* logging from L2 for incident response)
+- Apply lifecycle handling per Anthropic's deprecation policy (Active → Legacy → Deprecated → Retired; at least 60 days notice; Console Usage Export for audit; date-pinned IDs in production per L3; recognize the *temperature* / *top_p* / *top_k* deprecation on Opus 4.7+) and execute the rollout checklist that pulls L1-L11 into a single deploy gate
+
+## Time and difficulty
+
+- **Read time:** about 16 minutes
+- **Practice time:** about 20 minutes (the try-it-yourself walks a complete rollout plan for one Claude-powered feature, from pre-flight through canary through full ramp through deprecation watch, plus flashcards for retrieval)
+- **Difficulty:** standard. The five disciplines are individually small (Anthropic publishes a clean Usage and Cost API; the deprecation policy is short; the rollout pattern is industry-standard); the discipline is writing the rollout plan BEFORE shipping rather than improvising during incident response. Most production failures of Claude integrations are not the model failing; they are the rollout discipline failing.

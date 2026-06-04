@@ -1,0 +1,218 @@
+---
+title: "Lesson: Server-side tools and built-ins"
+description: "Lesson 5 of Track 22 (Building with Claude). The other half of L4's client-vs-server distinction. Three categories of Anthropic-provided tools: server tools that Anthropic executes (web_search at $0.01 per search, code_execution that is free when used with web_search_20260209 or web_fetch_20260209, web_fetch), Anthropic-schema client tools you still execute but do not have to author the schema for (bash, computer use as a beta, memory, text_editor), and tool_search (the scale tool that dynamically loads tools from a catalog of up to ten thousand). The server_tool_use response shape that differs from L4's tool_use, the pause_turn stop reason for server-side multi-iteration loops, and the per-tool pricing layer that sits on top of standard tokens."
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+{/* COMPONENT PLACEHOLDER (Lead wires at promotion): <LessonFreshness lastReviewed={frontmatter.last_reviewed} /> */}
+
+{/* COMPONENT PLACEHOLDER (Lead wires at promotion): <SourceLecture url="https://platform.claude.com/docs/en/agents-and-tools/tool-use/server-tools" title="Anthropic Academy 'Building with the Claude API' (server-tools sections) + Anthropic public Web search, Code execution, Web fetch, Computer use, Tool search docs" instructor="Anthropic" /> */}
+
+## Why this lesson
+
+Lesson 4 walked the client-tool loop end to end: you define a tool, the model returns *tool_use*, your code executes, you send *tool_result* back. That whole loop ran in your code. There is a parallel family where the loop runs somewhere else.
+
+Anthropic provides a set of tools where the platform itself does the work. You declare *web_search* in your *tools* array, the model decides to use it, Anthropic runs the search, and the results come back in the same response without your code seeing the round-trip. There is a second family where Anthropic publishes the canonical schema for a tool (the *bash* tool, the *computer use* tool, the *memory* tool, the *text_editor* tool) so your application can use it without having to invent the schema each time, but your code still executes. And there is a third family that solves a scale problem: *tool_search* lets you keep thousands of tools in a catalog and have only the relevant ones loaded into context per call.
+
+This lesson covers all three. Same *tools* array shape from lesson 4; different round-trip patterns and different decisions about when each is right.
+
+## Three categories
+
+The taxonomy that matters in practice:
+
+| Category | Who executes | Schema you author | Examples |
+| --- | --- | --- | --- |
+| **Server tools** | Anthropic | Just the type identifier | web_search, web_fetch, code_execution |
+| **Anthropic-schema client tools** | You | Anthropic publishes the schema | bash, computer use, memory, text_editor |
+| **Tool infrastructure** | Anthropic | Mixed (declare + use) | tool_search, MCP connector (lesson 6) |
+
+The pattern from lesson 4 (you author the *name* + *description* + *input_schema*, execute the tool in your code) is the **custom client tool** path. Most production applications will mix custom client tools (lesson 4) with one or two server tools and possibly one Anthropic-schema client tool. The decision per tool is "who owns this capability." Web search is Anthropic's; your domain logic is yours.
+
+## Server tools
+
+The three server tools you will reach for most.
+
+### web_search
+
+Real-time web search from inside a Claude call. Declare it in *tools* and the model can decide to search; Anthropic executes the search and returns results inline.
+
+```python
+response = client.messages.create(
+    model="claude-opus-4-8",
+    max_tokens=4096,
+    messages=[{"role": "user", "content": "What's the latest on the Mars rover?"}],
+    tools=[{"type": "web_search_20260209", "name": "web_search"}],
+)
+```
+
+Two version strings to know. *web_search_20260209* is the current version with **dynamic filtering** (the model writes code to post-process results before they hit the context window, cutting token spend by often more than half). *web_search_20250305* is the previous version without dynamic filtering. Dynamic filtering uses code execution as the internal substrate; you do not need to declare *code_execution_20260120* separately to get it.
+
+**Pricing: $10 per 1,000 searches** ($0.01 each), plus standard token costs for the search-generated content. Each web search counts as one use regardless of how many results come back. Errors do not bill.
+
+**Optional parameters worth knowing.** *max_uses* caps the number of searches per request (limits cost when the model gets enthusiastic). *allowed_domains* and *blocked_domains* filter the result set. *user_location* localizes results.
+
+**Citations are always on.** Each cited claim in the response includes a *web_search_result_location* block with *url*, *title*, *encrypted_index*, and up to 150 characters of *cited_text*. The docs are explicit: when you display API outputs directly to end users, include the citations.
+
+### code_execution
+
+Run Python and bash in a sandboxed container. The model decides when to execute, writes the code, the platform runs it, results come back in the response. Use for data analysis, calculations, file generation, anything the model needs to actually run rather than reason about.
+
+**Pricing is the key fact.** **Code execution is free when used with *web_search_20260209* or *web_fetch_20260209* in the same request.** When either of those is declared, code-execution tool calls do not carry the per-execution charge beyond standard input and output tokens. Standalone *code_execution_20260120* (without web_search or web_fetch in the request) carries the standard per-execution pricing layer.
+
+There are three shapes to recognize:
+
+**Search plus computation, one tool declared.** This is the canonical case from the docs. Declare only *web_search_20260209*; dynamic filtering runs code internally to filter search results and perform the computation:
+
+```python
+response = client.messages.create(
+    model="claude-opus-4-8",
+    max_tokens=4096,
+    messages=[{"role": "user", "content": "Search for the current prices of AAPL and GOOGL, then calculate which has a better P/E ratio."}],
+    tools=[{"type": "web_search_20260209", "name": "web_search"}],
+)
+```
+
+**Search plus top-level code execution.** If you also want the model to call *code_execution* as a top-level tool for tasks unrelated to filtering search results (plotting, file generation, a calculation that does not flow from search), declare both. The per-execution charge stays waived because *web_search_20260209* is in the request:
+
+```python
+tools=[
+    {"type": "web_search_20260209", "name": "web_search"},
+    {"type": "code_execution_20260120", "name": "code_execution"},
+]
+```
+
+**Computation only, no search.** Declare *code_execution_20260120* alone; standard per-execution pricing applies.
+
+**Not ZDR eligible** (data is retained per the feature's standard retention policy). If your organization has Zero Data Retention requirements, code_execution is the wrong tool. Most applications can use it freely.
+
+### web_fetch
+
+Retrieve the full content of a specific URL (web page or PDF). Different from *web_search* (which finds pages) in that you give it a URL and it pulls the content. Useful when the model already knows the source (a documentation URL the user shared, a PDF you uploaded).
+
+Two versions: *web_fetch_20260209* is the current version with dynamic filtering; *web_fetch_20250910* is the previous version without. The same pricing rule as web_search applies: code execution is free when *web_fetch_20260209* is in the request (dynamic filtering uses code execution internally; declare *code_execution_20260120* alongside only if your task also needs top-level code execution).
+
+## Anthropic-schema client tools
+
+The second family. You execute the tool in your code (the L4 loop applies), but Anthropic publishes the canonical schema so you do not have to author it.
+
+| Tool | What it does |
+| --- | --- |
+| **bash** | Execute shell commands and scripts |
+| **text_editor** | Create and edit text files |
+| **memory** | Persist knowledge across conversations |
+| **computer use** (beta) | Screenshots, mouse, keyboard |
+
+You declare them in *tools* with their canonical type identifier, the model calls them as if they were client tools (with *tool_use* / *tool_result* round-trip), and your code is responsible for the actual execution. The advantage over a fully-custom client tool is that the model already knows what these tools do (the schema is standard across all Anthropic users), so your descriptions can be brief.
+
+The standard ones (*bash*, *text_editor*, *memory*) are straightforward: you wire each up to your environment (a shell process, a file system, a key-value store), the model calls, you execute, you return. The decisions are mostly about isolation and safety: a *bash* tool wired to the production shell is one mistake away from a real problem; a *bash* tool wired to a sandboxed container is fine.
+
+### Computer use (the careful section)
+
+Computer use is the highest-stakes tool. It gives the model the ability to see a screen (screenshots), move a cursor (mouse), and type (keyboard). On benchmarks like WebArena, Claude achieves state-of-the-art results among single-agent systems. In production, computer use lets an agent operate any desktop application or website that a person could.
+
+**Beta status.** Computer use requires a beta header (*computer-use-2025-11-24* for Opus 4.8, Opus 4.7, Opus 4.6, Sonnet 4.6, Opus 4.5; earlier header for older models). It is ZDR eligible.
+
+**Where it runs.** This is a client tool: your code runs the screenshots, executes the cursor moves, types into the application. The model decides what to do; your environment is what acts. That distinction is what makes computer use both powerful and high-stakes: anything your environment can reach, the agent can affect.
+
+**The discipline this lesson recommends.** Run computer use in a sandboxed environment, not against your real desktop or any environment that can reach production systems, user data, or services that cost money. A VM, a container, an isolated profile with limited credentials. Treat the agent the way you would treat a contractor who is given access only to what they need to complete the task and nothing more. This is general agent-security discipline, not Anthropic-specific guidance.
+
+Track 20 ("AI Agents and Tool Use") goes deeper on tool-using agent design at a track-level depth. For the building-with-Claude scope: know the tool exists, know the beta posture, know to isolate the environment.
+
+## Tool search
+
+The third family, distinct from the first two. *tool_search* solves a problem that compounds when you have many tools: a multi-server setup with GitHub, Slack, Sentry, Grafana, and Splunk integrations can consume around 55,000 tokens in tool definitions alone before the model has done any work, and the model's selection accuracy degrades meaningfully past 30 to 50 available tools.
+
+The mechanic: you mark tools with *defer_loading: true* in their definition. The model sees only the *tool_search* tool and any non-deferred tools at the start. When it needs more, it calls *tool_search* with a query (regex or BM25 variant), gets back 3-5 most relevant *tool_reference* blocks, the API expands those to full definitions inline, and the model calls the right one.
+
+```python
+tools = [
+    {"type": "tool_search_tool_regex_20251119", "name": "tool_search_tool_regex"},
+    {"name": "get_weather", "description": "...", "input_schema": {...}, "defer_loading": True},
+    {"name": "search_files", "description": "...", "input_schema": {...}, "defer_loading": True},
+    # ...many more deferred tools
+]
+```
+
+**Two variants:** *tool_search_tool_regex_20251119* (Python *re.search* patterns, max 200 characters) and *tool_search_tool_bm25_20251119* (natural-language queries). The regex form is precise; the BM25 form is forgiving.
+
+**When to reach for it.** The docs are explicit: good use cases are 10+ tools, tool definitions over 10k tokens, selection accuracy issues with large sets, or MCP-powered systems with 200+ tools. Bad use cases are fewer than 10 tools, all of them used frequently, or very small total definitions. The crossover is around 10 tools; below that, standard tool calling is cleaner.
+
+**Limits.** Maximum 10,000 tools in the catalog. The tool_search tool itself can never have *defer_loading: true*. Keep 3-5 most-used tools non-deferred.
+
+**It also preserves prompt caching.** Deferred tools are not in the system-prompt prefix, so caching the prefix still works. Lesson 7 covers prompt caching directly; the interaction matters in production.
+
+## The server-tool response shape
+
+Server tools return a different content-block type than client tools. Where a client tool produces *tool_use*, a server tool produces *server_tool_use* (the model's call) followed by *web_search_tool_result* (or *code_execution_tool_result* or *tool_search_tool_result*) with the inline result. You do not handle a round-trip; everything is already in the response.
+
+```json
+{
+  "role": "assistant",
+  "content": [
+    { "type": "text", "text": "I'll search for that." },
+    { "type": "server_tool_use", "id": "srvtoolu_...", "name": "web_search",
+      "input": { "query": "..." } },
+    { "type": "web_search_tool_result", "tool_use_id": "srvtoolu_...",
+      "content": [ /* search results */ ] },
+    { "type": "text", "text": "Based on the results...", "citations": [...] }
+  ],
+  "stop_reason": "end_turn"
+}
+```
+
+Same iterate-the-content-array discipline from lesson 1 applies: your code walks the blocks, displays text, surfaces citations, and (for server tools) does not have to handle the result round-trip.
+
+## pause_turn: the server-side loop
+
+Server tools sometimes loop: the model searches, reads results, decides to search again, then formulates an answer. When the API needs to yield control mid-loop (for example, because results are still streaming or the loop has run long), you may see *stop_reason: pause_turn* instead of *end_turn*. The pattern is documented in the server-tools docs; the practical move is to send the response message back in *messages* (as an assistant turn) and re-call the API to let the loop continue.
+
+## Pricing implications
+
+Server tools sit on top of standard token costs. The pieces:
+
+- **Standard tokens**: input + output, billed per model (lesson 3).
+- **Per-tool fee**: web_search at $0.01 per search; code_execution free when used with web_search_20260209 or web_fetch_20260209, standard per-execution pricing otherwise.
+- **Server tool results in context**: search results, code outputs, and fetched pages all count as input tokens on subsequent turns.
+
+The dial: declare *web_search_20260209* and code execution is free (dynamic filtering uses it internally); declare *code_execution_20260120* alongside only when your task also needs top-level code execution; use *max_uses* to cap web_search runaway cost; cache stable tool definitions per lesson 7. The same eval-set discipline from lesson 3 applies: measure whether the server tool actually improves your application's output enough to justify its cost.
+
+## Common pitfalls
+
+**Reaching for a custom client tool when a server tool exists.** Building a web-search wrapper around your own search backend when *web_search* is one declaration away is wasted work for most applications. Use server tools for general capabilities, custom client tools for your domain.
+
+**Reaching for standalone code_execution when web_search_20260209 or web_fetch_20260209 would also be in the request.** The per-execution code-execution charge is waived whenever either is declared. If your task already needs current-information search or page fetch, you get computation for free under the dynamic-filtering substrate; declare *code_execution_20260120* alongside only when the task needs top-level code execution beyond filtering. Pure-computation tasks with no search or fetch declare *code_execution* alone and pay standard pricing.
+
+**Running computer use against a real environment.** Computer use is powerful and unsupervised; in beta, isolated environments are the default discipline. A VM or sandbox, not your desktop or any system with production reach.
+
+**Using tool_search below the threshold.** Below 10 tools, tool_search adds complexity for no benefit. The crossover is around 10 tools or 10k tokens in definitions; below it, standard tool calling is cleaner.
+
+**Treating server tools as ZDR-equivalent to client tools.** ZDR eligibility varies. *web_search* and *web_fetch* are ZDR-eligible (except with dynamic filtering enabled); *code_execution* is **not** ZDR-eligible. If your organization has data-retention requirements, check per-tool before declaring.
+
+**Ignoring citations from web_search.** Citations are always on; the docs say when you display API outputs to end users, include the source citations. Skipping this is both a UX miss and a docs-recommended discipline.
+
+## What you do not need yet
+
+- **Model Context Protocol** (declare tools that work across providers, or connect to an external MCP server). Lesson 6.
+- **Prompt caching on tool definitions** (cut the repeated tools-overhead cost; combine with tool_search). Lesson 7.
+- **Advanced agent loops** (the model + tools converging on a task across many turns; *pause_turn* in production). Lesson 8 onward.
+- **Subagents and Claude Managed Agents** (one orchestrator + many specialist subagents). Lesson 11.
+- **The Anthropic Advisor server tool** (research preview; pair faster executor with higher-intelligence advisor for long-horizon work). Mentioned only; lesson 11 territory.
+
+## What you should remember
+
+- **Three categories of Anthropic-provided tools.** Server tools (Anthropic executes: web_search, web_fetch, code_execution); Anthropic-schema client tools (you execute, schema is standard: bash, computer use, memory, text_editor); tool_search (the scale tool for large catalogs).
+- **web_search:** $0.01 per search, real-time results with always-on citations, two versions (20260209 with dynamic filtering, 20250305 without). Optional *max_uses*, *allowed_domains*, *blocked_domains*, *user_location*.
+- **code_execution is free when used with *web_search_20260209* or *web_fetch_20260209*.** Standalone *code_execution_20260120* otherwise. Not ZDR-eligible.
+- **web_fetch** retrieves full content of a specific URL; two versions (*web_fetch_20260209* with dynamic filtering, *web_fetch_20250910* basic); same pricing rule for code_execution applies.
+- **Anthropic-schema client tools** (bash, computer use, memory, text_editor) follow the L4 client-tool loop; the schema is standard. Treat them like contractors: minimum access, isolated environment.
+- **Computer use is beta + powerful + high-stakes.** Beta header required. Run in a sandboxed environment, not against real desktop or production.
+- **tool_search** keeps up to 10,000 tools in a catalog; mark each with *defer_loading: true*; the model finds and loads 3-5 per call. Two variants (regex, BM25). Right above ~10 tools; wrong below.
+- **Server response shape:** *server_tool_use* + the matching tool-specific result block (*web_search_tool_result*, *code_execution_tool_result*, *web_fetch_tool_result*, *tool_search_tool_result*) inline, no round-trip in your code. *pause_turn* stop reason for mid-loop yields.
+- **Pricing:** per-tool fees stack on top of standard tokens; cache definitions per lesson 7; eval whether the tool earns its cost.
+
+## Where this fits
+
+Lesson 5 completes the tools layer at the Anthropic-platform level. Lesson 6 (Model Context Protocol) extends the same pattern to tools that live outside Anthropic's catalog and need to speak across providers. Lesson 7 (prompt caching + context management) makes the tools cost (custom + server + Anthropic-schema) sustainable across long sessions. Phase 3 (lessons 8-11) is where tools and the model converge on the agent loop; lessons 4, 5, and 6 are the three flavors of tool the agent has access to.

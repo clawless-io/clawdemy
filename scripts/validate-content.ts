@@ -146,6 +146,13 @@ const BLOOM_VERBS = [
 	'formulate',
 	'construct',
 	'sketch',
+	// Track 22 (Building with Claude) ops-track action verbs, added 2026-06-04 at promotion
+	'verify',
+	'enable',
+	'handle',
+	'dispatch',
+	'submit',
+	'log',
 	// Track 4 (Visual Math: Linear Algebra) domain verbs, added 2026-05-30
 	'translate', // Understand: move a vector between arrow and coordinate forms
 	'represent', // Understand: represent a polynomial as a coordinate vector
@@ -296,6 +303,13 @@ const TRACK_18_PHASE_SLUGS = [
 	'rl-frontiers',
 ] as const;
 
+const TRACK_22_PHASE_SLUGS = [
+	'api-foundations',
+	'augmentation-patterns',
+	'agent-patterns',
+	'production',
+] as const;
+
 const PHASE_SLUGS = [
 	...TRACK_5_PHASE_SLUGS,
 	...TRACK_6_PHASE_SLUGS,
@@ -315,6 +329,7 @@ const PHASE_SLUGS = [
 	...TRACK_10_PHASE_SLUGS,
 	...TRACK_19_PHASE_SLUGS,
 	...TRACK_18_PHASE_SLUGS,
+	...TRACK_22_PHASE_SLUGS,
 ] as const;
 
 const BriefSchema = z.object({
@@ -347,6 +362,7 @@ const BriefSchema = z.object({
 		'classical-machine-learning',
 		'generative-models-and-diffusion',
 		'deep-reinforcement-learning',
+		'building-with-claude',
 	]),
 	difficulty: z.enum(['intro', 'standard', 'deep']),
 	estimated_read_minutes: z.number().int().positive(),

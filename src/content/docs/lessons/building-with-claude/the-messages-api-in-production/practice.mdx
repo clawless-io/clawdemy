@@ -1,0 +1,180 @@
+---
+title: "Practice: The Messages API in production"
+description: Self-check on streaming, error classification, retry policy, batches, and the request_id, plus a hands-on try-it and flashcards for retrieval.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Seven short questions. Answer each before opening the collapsible.
+
+**1. Name two situations where streaming is the right choice instead of a non-streaming call, and one situation where it is not.**
+
+<details>
+<summary>Show answer</summary>
+
+**Right:** (a) **interactive UIs** where a user is watching the response appear (a chat window, a code-editor inline suggestion); a thirty-second wait for a long response feels broken, the same wait with text appearing as the model writes it feels alive. (b) **Long generations** (the Anthropic docs explicitly recommend streaming or batches for any request expected to take more than ten minutes, because some networks drop idle connections after a variable wait, which fails a non-streaming long call with a timeout).
+
+**Not right:** non-interactive bulk work (running a test set, summarizing a thousand documents overnight). That is the Message Batches API; batches are 50 percent cheaper and most finish in under an hour.
+
+</details>
+
+**2. The Python SDK exposes streaming as a context manager. What is the canonical iteration pattern, and what does *stream.get_final_message()* do?**
+
+<details>
+<summary>Show answer</summary>
+
+Canonical pattern: open the stream with `with client.messages.stream(...) as stream:` and iterate `stream.text_stream` to consume text deltas as they arrive. *stream.get_final_message()* waits for the stream to complete and returns the full *Message* object the non-streaming call would have returned. Use it when you want streaming under the hood for the timeout protection (long generation, ten-minute boundary) but the rest of your application code expects a complete message, not chunks.
+
+</details>
+
+**3. Classify each of these HTTP error codes by whether you should retry: 400, 401, 429, 500, 504, 529.**
+
+<details>
+<summary>Show answer</summary>
+
+- **400** *invalid_request_error*: do **not** retry. Your bug; the request shape is wrong (missing field, prefill on a model that does not support it). Fix and resend.
+- **401** *authentication_error*: do **not** retry. Your bug; the API key is missing, wrong, or revoked.
+- **429** *rate_limit_error*: **retry** with backoff. Temporary; you hit a per-organization or per-key rate limit.
+- **500** *api_error*: **retry** with backoff. Platform-side temporary error.
+- **504** *timeout_error*: switch to streaming or batches for long requests; do not retry the same blocking call.
+- **529** *overloaded_error*: **retry** with backoff. Temporary platform overload across all users; bursts of usage can also trigger this.
+
+The simplest correct rule: 4xx is your bug, 5xx is the platform's bug, 429 and 529 are temporary.
+
+</details>
+
+**4. The official SDKs retry on connection errors, 408, 409, 429, and any 5xx status code by default. What is the one thing the SDK cannot decide for you, and what is your fix?**
+
+<details>
+<summary>Show answer</summary>
+
+The SDK cannot decide **whether your specific request is safe to retry.** For an idempotent request like "summarize this document," a retry is fine. For a request whose downstream effect is a side effect ("send this email," "post this row to the database"), a retry can do the side effect twice. The fix lives on **your tool side**, not the API call side: make the tool the model calls idempotent (a *send-email* tool with a deduplication key, a database write with a unique transaction id). The API retry policy assumes you have handled the safety question at the tool layer.
+
+</details>
+
+**5. The Message Batches API: state the two numbers worth remembering, and one use case where batches are right, one where they are wrong.**
+
+<details>
+<summary>Show answer</summary>
+
+Two numbers: batches cost **50 percent less per token** than the equivalent standard call, and **most batches finish in less than one hour** (per the public docs). Per-batch size limit 256 MB; per-request limit 32 MB (same as the standard Messages API).
+
+**Right:** large-scale evaluations (running a test set through the model the way you would a regression test), content moderation passes over user-generated content, generating summaries for a dataset overnight. The pattern: bulk, non-interactive, latency does not matter.
+
+**Wrong:** anything a user is waiting for. Batches are not a substitute for streaming on user-facing work, even if the answer is long. The decision is about **who is waiting**, not how long the work takes.
+
+</details>
+
+**6. Why must your code log the *request_id* from every response, and where do you find it in the official SDKs?**
+
+<details>
+<summary>Show answer</summary>
+
+Because **without the *request_id*, debugging at Anthropic Support's level is impossible**. Every API response includes a *request-id* HTTP header containing a value like *req_018EeWyXxfu5pfWkrYcMdjWG*. When you contact Anthropic Support about a specific failure, the *request_id* is the handle that lets them find the exact call out of millions. Without it, the only thing you can give Support is "the call we made yesterday afternoon," which is not enough.
+
+In the official SDKs the field is exposed as *response._request_id* on the response object (both Python and TypeScript). A reasonable production logging shape pairs *request_id* with timestamp, *model*, *stop_reason*, *usage.input_tokens*, *usage.output_tokens*, and call latency.
+
+</details>
+
+**7. What happens when a streaming call fails mid-stream, and how does your handler need to be shaped?**
+
+<details>
+<summary>Show answer</summary>
+
+A streaming response can return a 200 OK and then fail mid-stream (the SSE event stream emits an error event after the HTTP response has already succeeded). Standard request-level error handling does not catch this, because at the HTTP layer the response was successful. The handler has to read errors **off the event stream too**, not only at request initiation. The Python and TypeScript SDKs surface mid-stream errors by raising on the stream iterator; wrap the *for* loop (Python) or the *.on("error", ...)* handler (TypeScript) the same way you wrap an *await*. Missing this is a common pitfall: mid-stream failures get logged as "succeeded" because the HTTP status was 200.
+
+</details>
+
+## Try it yourself: two production patterns
+
+About 15 minutes. You will need an Anthropic API key and the SDK from lesson 1. Costs are a fraction of a cent.
+
+**Part A: streaming a long answer.** Make a streaming call asking for a 500-word explanation of any topic. Use the Python *client.messages.stream(...)* context manager (or the TypeScript *.stream(...).on("text", ...)* form). Write each text chunk to stdout with *flush=True* so you see the text appear as the model writes it. Note how perceived latency feels different from a non-streaming call returning all 500 words at once.
+
+**Part B: error and request_id logging.** Make any call (success case). After the call returns, print the *request_id* (Python: *message._request_id*; TypeScript: *message._request_id*). Then *deliberately* break a call: change *ANTHROPIC_API_KEY* to a wrong value and re-run; observe the 401 *authentication_error* response shape (type, error.type, error.message, request_id). Confirm the JSON matches the table in the lesson. Then break a different way: send a *max_tokens* of zero or a malformed *messages* array; observe the 400 *invalid_request_error*.
+
+<details>
+<summary>What you'll get (an example, not the canonical answer)</summary>
+
+For Part A you will see the streaming UX directly: the text appears as the model writes it, not all at once. This is what makes a chat product feel alive rather than frozen. The Python SDK abstracts the underlying SSE event stream (*message_start*, *content_block_delta*, *message_stop*); you iterate text deltas without writing event-routing code.
+
+For Part B you will see the structured error shape live: a JSON body with *type* equal to *error*, an *error* object containing *type* and *message*, and a *request_id* at the top level. The *error.type* values map cleanly to the table in the lesson (*authentication_error*, *invalid_request_error*, etc.). The exercise is the value, not the specific error wording: get the response shape into your shell history, and you will recognize every production error class the API can throw.
+
+</details>
+
+## Flashcards
+
+Nine cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay the set out one card per page for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="When do you reach for streaming instead of a non-streaming call?">
+
+Interactive UIs (a user is watching the response appear; thirty-second wait feels broken, same wait with text streaming feels alive) and long generations (Anthropic recommends streaming or batches for anything expected to take more than ten minutes, because some networks drop idle connections).
+
+</Flashcard>
+
+<Flashcard question="The canonical Python streaming pattern?">
+
+`with client.messages.stream(model=..., max_tokens=..., messages=...) as stream:` then `for text in stream.text_stream: print(text, end="", flush=True)`. Context manager + text-delta iteration. For "stream under the hood but want the full message," use *stream.get_final_message()*.
+
+</Flashcard>
+
+<Flashcard question="HTTP error codes you should retry?">
+
+429 (rate limit), 500 (api_error), 504 (timeout, though switch to streaming or batches for long requests), 529 (overloaded). Official SDKs handle the canonical retryable set (connection errors, 408, 409, 429, and any 5xx code) automatically with exponential backoff and jitter, about two retries by default. 4xx codes other than 408 / 409 / 429 are your bug; do not retry.
+
+</Flashcard>
+
+<Flashcard question="The one thing the SDK retry policy cannot decide for you?">
+
+Whether your specific request is **safe to retry**. Idempotent requests (summarize) are fine. Side-effect requests (send email, post to database) can do the side effect twice on retry. Fix on your tool side: deduplication keys, unique transaction ids, idempotent tool definitions, not on the API call.
+
+</Flashcard>
+
+<Flashcard question="Batches API: the two numbers worth remembering?">
+
+50 percent less per token than equivalent standard calls. Most batches finish in under one hour. Per-batch size limit 256 MB. Use for bulk non-interactive work (evaluations, content moderation, data analysis). NOT for user-facing work; that is streaming.
+
+</Flashcard>
+
+<Flashcard question="The error response body shape?">
+
+```
+{
+  "type": "error",
+  "error": { "type": "...", "message": "..." },
+  "request_id": "req_..."
+}
+```
+
+*error.type* is the class to act on. *error.message* is human-readable. *request_id* is the handle for Anthropic Support.
+
+</Flashcard>
+
+<Flashcard question="Why must you log request_id from every response?">
+
+Without it, debugging at Anthropic Support's level is impossible. They cannot find one specific call out of millions without the unique id. SDKs expose it as *response._request_id*. A reasonable production log line: timestamp, request_id, model, stop_reason, input_tokens, output_tokens, latency.
+
+</Flashcard>
+
+<Flashcard question="What is a mid-stream error and how do you catch it?">
+
+A streaming call can return 200 OK and then fail mid-stream (the SSE event stream emits an error after the HTTP response was successful). Standard request-level error handling misses it. Wrap the streaming iterator (Python *for* loop) or the *.on("error", ...)* handler (TypeScript) just like you wrap an *await*.
+
+</Flashcard>
+
+<Flashcard question="Streaming vs batches vs standard, decision rule?">
+
+Standard for short interactive calls. Streaming when a user is waiting (interactive UI) or the request is expected to take more than ten minutes (timeout protection; combine with *get_final_message* if you want the full Message object). Batches when nobody is waiting and you want 50 percent off (bulk evals, moderation, summarization).
+
+</Flashcard>
+
+</FlashcardSet>

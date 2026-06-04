@@ -1,0 +1,76 @@
+---
+title: "Server-side tools and built-ins"
+description: "Lesson 5 of Track 22 (Building with Claude). The other half of L4's client-vs-server distinction. Three categories of Anthropic-provided tools: server tools that Anthropic executes (web_search at $0.01 per search with always-on citations, code_execution that is free when web_search_20260209 or web_fetch_20260209 is in the same request, web_fetch for retrieving a specific URL); Anthropic-schema client tools you still execute but do not have to author the schema for (bash, computer use as a beta with sandbox-the-environment discipline, memory, text_editor); and tool_search (the scale tool that dynamically loads tools from a catalog of up to 10,000 with two variants, regex and BM25). The server_tool_use response shape that differs from L4's tool_use (results inline, no round-trip in your code), the pause_turn stop reason for server-side multi-iteration loops, and the pricing stack (standard tokens + per-tool fees + server-tool results in context)."
+track: building-with-claude
+order: 5
+phase: augmentation-patterns
+phase_order: 2
+difficulty: standard
+estimated_read_minutes: 14
+estimated_practice_minutes: 15
+prerequisites:
+  - "lessons/building-with-claude/lesson-04-tool-use-the-foundation"
+learning_outcomes:
+  - Distinguish the three categories of Anthropic-provided tools (server / Anthropic-schema client / tool infrastructure) and pick the right one per capability
+  - Use the server-tool response shape (server_tool_use + the tool-specific result block like web_search_tool_result or code_execution_tool_result inline; no round-trip in your code) and handle the pause_turn stop reason
+  - Apply the free-when-used-with pricing rule (web_search_20260209 or web_fetch_20260209 in the same request waives the code_execution per-execution charge)
+  - Run computer use in a sandboxed environment (VM / container / isolated profile) with the appropriate beta header, treating the agent like a contractor with minimum credentials
+  - Use tool_search at the right threshold (10+ tools or >10k definition tokens), pick the right variant (regex vs BM25), and combine with defer_loading on each catalog tool
+authors:
+  - clawdemy
+published_at: 2026-05-27
+last_reviewed: 2026-05-27
+status: published
+artifact: brief
+sidebar:
+  order: 1
+  label: Brief
+tableOfContents: false
+---
+
+import LessonFreshness from "../../../../../components/LessonFreshness.astro";
+import SourceLecture from "../../../../../components/SourceLecture.astro";
+
+<LessonFreshness lastReviewed={frontmatter.last_reviewed} />
+
+<SourceLecture url="https://platform.claude.com/docs/en/agents-and-tools/tool-use/server-tools" title="Anthropic Academy 'Building with the Claude API' (server-tools sections) + Anthropic public Web search, Web fetch, Code execution, Computer use, Tool search, Server tools docs" instructor="Anthropic" />
+
+## What you'll learn
+
+Phase 2 continues. Lesson 4 walked the client-tool loop end to end; this lesson covers the parallel family where Anthropic provides the tool. The single capability this lesson builds: **pick the right Anthropic-provided tool for a given capability, handle the server-tool response shape, and reason about the pricing layer that sits on top of standard tokens**.
+
+Concretely, you will know the three categories (server tools where Anthropic executes; Anthropic-schema client tools where you execute but the schema is canonical; tool infrastructure like *tool_search* for scale), the headline server tools (*web_search* at $0.01 per search with always-on citations, the two version strings *web_search_20260209* with dynamic filtering and *web_search_20250305* without; *code_execution* sandboxed Python and bash; *web_fetch* for specific URL content), the free-when-used-with pricing rule (declaring *web_search_20260209* or *web_fetch_20260209* waives the *code_execution* per-execution charge; dynamic filtering uses code execution internally, so the canonical case declares only the search or fetch tool; declare *code_execution_20260120* alongside only when the task needs top-level code execution), the Anthropic-schema client tools (*bash*, *computer use* in beta, *memory*, *text_editor*) and the sandbox-the-environment discipline for computer use (run in a VM or container or isolated profile, never against real desktop or production-reachable systems), *tool_search* for catalogs up to 10,000 with two variants (regex with Python *re.search* patterns up to 200 characters, BM25 with natural-language queries), and the server-tool response shape (*server_tool_use* + the matching tool-specific result block like *web_search_tool_result*, *code_execution_tool_result*, *web_fetch_tool_result*, or *tool_search_tool_result* inline in the same response with no round-trip in your code; *stop_reason* typically *end_turn* or *pause_turn* mid-loop).
+
+Every substantive claim verifies against the public Anthropic Claude documentation at [platform.claude.com/docs/en/agents-and-tools/tool-use/](https://platform.claude.com/docs/en/agents-and-tools/tool-use/) (Web search, Web fetch, Code execution, Computer use, Tool search, Server tools, Tool reference pages).
+
+## Where this fits
+
+This is lesson 5 of 12 of Track 22, the **second lesson of Phase 2** (augmentation patterns). Lesson 4 walked the custom-client-tool foundation; this lesson covers the Anthropic-provided-tool layer parallel to it. Lesson 6 (Model Context Protocol) extends the *tools* declaration pattern to cross-provider tool definitions; lesson 7 (prompt caching and context management) makes the tool-definition overhead sustainable across long sessions; lessons 8-11 of Phase 3 turn the per-step tool capability set into multi-turn agent loops.
+
+The cross-track companion is **Track 20 (AI Agents and Tool Use)**, especially relevant for the computer-use sandboxing discipline this lesson sketches at primer depth.
+
+## Before you start
+
+**Prerequisites:** lessons 1-4 of this track. Lesson 4 specifically is load-bearing: this lesson assumes you understand the client-tool loop (request → *tool_use* → execute → *tool_result*), since Anthropic-schema client tools (bash, computer use, memory, text_editor) reuse that loop, and the server-tool response shape is a deliberate contrast with it.
+
+**Soft recommended:** an Anthropic Console account at `https://platform.claude.com/` and an API key (lesson 1). Web search must be enabled by your organization administrator in the Console at `https://platform.claude.com/settings/privacy` before first use; the try-it-yourself exercise requires this. Cost for the exercise is a few cents (one web search at $0.01 plus token costs).
+
+## About the math
+
+Pricing arithmetic only, and the arithmetic is one example (web_search at $0.01 per search; code_execution free when used with web_search_20260209 or web_fetch_20260209). The lesson keeps the cost-model framing to "standard tokens + per-tool fees + server-tool results in context" without deriving it. Lesson 12 turns this framing into production cost monitoring.
+
+## By the end, you'll be able to
+
+The single capability this lesson builds: **pick the right Anthropic-provided tool for a given capability, handle the server-tool response shape, and reason about the pricing layer that sits on top of standard tokens** (per the Phase 0 lesson 5 capability mapping). Concretely, you will be able to:
+
+- Distinguish the three categories of Anthropic-provided tools (server / Anthropic-schema client / tool infrastructure) and pick the right one per capability
+- Use the server-tool response shape (*server_tool_use* + the matching tool-specific result block like *web_search_tool_result* or *code_execution_tool_result* inline; no round-trip in your code) and handle the *pause_turn* stop reason
+- Apply the free-when-used-with pricing rule (*web_search_20260209* or *web_fetch_20260209* in the same request waives the *code_execution* per-execution charge)
+- Run computer use in a sandboxed environment (VM, container, isolated profile) with the appropriate beta header, treating the agent like a contractor with minimum credentials
+- Use *tool_search* at the right threshold (10+ tools or >10k definition tokens), pick the right variant (regex vs BM25), and combine with *defer_loading* on each catalog tool
+
+## Time and difficulty
+
+- **Read time:** about 14 minutes
+- **Practice time:** about 15 minutes (the try-it-yourself runs a basic web search, the free-when-used-with pricing rule, and a *max_uses* defense, plus flashcards for retrieval)
+- **Difficulty:** standard. The taxonomy is small (three categories, a half-dozen tools per the first two); the discipline is matching capability to category and handling the response-shape difference. Computer use gets a careful section because the stakes are high; the rest is straightforward declaration + use.

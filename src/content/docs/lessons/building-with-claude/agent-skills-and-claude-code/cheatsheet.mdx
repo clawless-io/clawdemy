@@ -1,0 +1,181 @@
+---
+title: "Cheatsheet: Agent Skills and Claude Code"
+description: One-page reference. Skill on-disk shape, frontmatter rules, progressive disclosure, the three surfaces, Claude Code essentials, Skills + Claude Code composition for the L9 patterns.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## Agent Skills at a glance
+
+**Verbatim:** *Agent Skills are modular capabilities that extend Claude's functionality. Each Skill packages instructions, metadata, and optional resources (scripts, templates) that Claude uses automatically when relevant.*
+
+**vs prompt:** *Skills load on-demand and eliminate the need to repeatedly provide the same guidance across multiple conversations*. Prompt = type once. Skill = save once, reuse forever.
+
+## On-disk shape
+
+```text
+my-skill/
+├── SKILL.md           (required; YAML frontmatter + markdown body)
+├── FORMS.md           (optional; referenced from SKILL.md)
+├── REFERENCE.md       (optional; loaded on demand)
+└── scripts/
+    └── fill_form.py   (optional; run via bash, only output enters context)
+```
+
+**Minimal SKILL.md:**
+
+```yaml
+---
+name: pdf-processing
+description: Extract text and tables from PDF files, fill forms, merge documents. Use when working with PDF files or when the user mentions PDFs, forms, or document extraction.
+---
+
+# PDF Processing
+
+## Instructions
+[Clear, step-by-step guidance for Claude to follow]
+
+## Examples
+[Concrete examples of using this Skill]
+```
+
+## Frontmatter rules
+
+| Field | Required | Rules |
+| --- | --- | --- |
+| `name` | Yes | Max 64 chars; lowercase letters + numbers + hyphens only; no XML; **cannot be "anthropic" or "claude"** |
+| `description` | Yes | Non-empty; max 1024 chars; no XML; must describe BOTH what the Skill does AND when Claude should use it |
+
+The description is the router. Tight description triggers reliably; vague description never triggers.
+
+## Progressive disclosure (the architecture)
+
+| Level | When loaded | Token cost | Content |
+| --- | --- | --- | --- |
+| **1: Metadata** | Always (startup) | ~100 tokens / Skill | *name* + *description* in system prompt |
+| **2: Instructions** | When triggered | Under 5K tokens | *SKILL.md* body (read via bash) |
+| **3+: Resources** | As needed | Effectively unlimited | Bundled files via bash; scripts run with only output entering context |
+
+**Operational consequences:**
+- **Install many Skills without context penalty** (L1 is small).
+- **Bundled content has zero context cost until accessed** (L3 stays on filesystem).
+- **Script code never loads** (only output). Scripts are far more efficient than asking the model to generate equivalent code on the fly.
+
+## Three surfaces
+
+| Surface | How to install | Sharing | Key constraint |
+| --- | --- | --- | --- |
+| **Claude API** | Upload via */v1/skills* OR use pre-built *skill_id* (*pptx*, *xlsx*, *docx*, *pdf*) in *container* | Workspace-wide | 3 beta headers required: *code-execution-2025-08-25* + *skills-2025-10-02* + *files-api-2025-04-14*. NOT ZDR eligible. No network access. No runtime package installation. |
+| **Claude Code** | Filesystem: *~/.claude/skills/* (personal) or *.claude/skills/* (project) | Personal or project (via Git) | Full network access. Install packages locally not globally. |
+| **claude.ai** | Zip upload via Settings > Features | Per-user only | Pro / Max / Team / Enterprise plans. No central admin management. |
+
+**Custom Skills do NOT sync across surfaces.** Plan per surface.
+
+## How Claude finds + invokes a Skill
+
+1. **Discovery:** *name* + *description* in system prompt (L1 metadata, ~100 tokens). Claude matches user request against descriptions.
+2. **Invocation:** Claude reads *SKILL.md* via *bash* (L5 Anthropic-schema client tool). L2 loads.
+3. **Resource access:** *SKILL.md* references other files → Claude reads via further bash calls. Scripts → run via bash; only output enters context.
+
+This is the L9 routing pattern in concrete terms: the classifier is the model's description-matching judgment; the specialized followup is the *SKILL.md* body; the resources the followup uses are the bundled files.
+
+## Claude Code at a glance
+
+**Verbatim:** *Claude Code is an agentic coding tool that reads your codebase, edits files, runs commands, and integrates with your development tools. Available in your terminal, IDE, desktop app, and browser.*
+
+**Surfaces:** terminal CLI (`claude`), VS Code, JetBrains, desktop, web, iOS.
+
+**Install (terminal):**
+
+```bash
+# macOS / Linux / WSL
+curl -fsSL https://claude.ai/install.sh | bash
+# Homebrew
+brew install --cask claude-code
+# Windows PowerShell
+irm https://claude.ai/install.ps1 | iex
+# WinGet
+winget install Anthropic.ClaudeCode
+```
+
+**Launch:** `claude` in a project directory (interactive) or `claude "prompt"` or `claude -p "prompt"` (piped).
+
+## Claude Code features map to T22
+
+| Feature | T22 layer |
+| --- | --- |
+| Custom tools via Agent SDK + hooks | L4 custom client tools |
+| Built-in *bash*, *text_editor*, web search | L5 Anthropic-provided |
+| MCP server config | L6 MCP connector |
+| *CLAUDE.md* at project root (cached system prompt) | L7 prompt caching |
+| Auto memory across sessions | L7 (durable context distinct from Skills) |
+| The loop itself | L8 agent loop, productionized |
+| Sub-agents + Agent SDK | L11 Subagents + Managed Agents |
+
+## Skills + Claude Code = L9 patterns made durable
+
+| L9 pattern | Skills + Claude Code shape |
+| --- | --- |
+| L9.1 Prompt chaining | Chain of Skills; bundled scripts hand off between steps |
+| L9.2 Routing | Directory of branch Skills; description-as-router |
+| L9.3 Parallelization | Per-section or per-voter Skills; aggregated by orchestrator Skill or your code |
+| L9.4 Orchestrator-workers | Orchestrator Skill names worker Skills |
+| L9.5 Evaluator-optimizer | Generator Skill + evaluator Skill in alternation |
+| L9.6 Autonomous agent | Claude Code + domain Skills |
+
+**What changes:** Git history, code review, team-shareability, surface portability, auto-discovery by description.
+
+## Pre-built Anthropic Skills
+
+| skill_id | Use for |
+| --- | --- |
+| `pptx` | PowerPoint: create / edit / analyze presentations |
+| `xlsx` | Excel: spreadsheets / data analysis / charts |
+| `docx` | Word: documents / formatted text |
+| `pdf` | PDF: generate formatted documents and reports |
+
+Also: open-source Skills at **github.com/anthropics/skills** (including the Claude API skill bundled with Claude Code).
+
+## Security discipline
+
+**Verbatim:** *Use Skills only from trusted sources: those you created yourself or obtained from Anthropic.*
+
+**Four risks the docs name:**
+1. **Tool misuse** (Skill directs Claude to invoke tools harmfully)
+2. **Data exposure** (Skill leaks sensitive data)
+3. **External-source compromise** (third-party Skill changes maintainers)
+4. **Skills that fetch external URLs** (fetched content may carry instructions)
+
+**Posture:** audit before installing. Prefer Anthropic-published + team-authored. Project-committed *.claude/skills/* go through code review like any other code.
+
+## Common pitfalls
+
+| Failure | Recognize by | Fix |
+| --- | --- | --- |
+| Description too vague | Skill never triggers when it should | Describe BOTH what + when, with concrete trigger phrasing |
+| Skill name reserved | API rejects upload | Rename: cannot be "anthropic" or "claude"; lowercase + alphanumeric + hyphens only |
+| Skills not syncing across surfaces | Skill works in Claude Code but not API | They never sync; upload per surface |
+| Forgetting beta headers (API) | 400 errors on requests using Skills | Add all 3: *code-execution-2025-08-25* + *skills-2025-10-02* + *files-api-2025-04-14* |
+| Bundled script too large | Script output flooding context | Trim output before returning; keep script idempotent |
+| Trusting an untrusted Skill | Tool misuse / data exfiltration | Audit before installing; prefer Anthropic-published + team-authored |
+| ZDR workload using API Skills | Compliance gap | Skills NOT ZDR eligible; use Claude Code or skip |
+
+## What this lesson does NOT cover (and where to find it)
+
+| Topic | Lands at |
+| --- | --- |
+| Subagents + Claude Managed Agents | Lesson 11 |
+| Shipping to production (cost monitoring, eval-set) | Lesson 12 |
+| Agent SDK in depth | code.claude.com/docs/en/agent-sdk |
+| MCP integration in Claude Code | code.claude.com/docs/en/mcp |
+
+## Source
+
+- Anthropic public Claude docs: **Agent Skills overview** at `https://platform.claude.com/docs/en/agents-and-tools/agent-skills/overview`
+- Anthropic engineering blog: *Equipping agents for the real world with Agent Skills*
+- Claude Code overview: `https://code.claude.com/docs/en/overview`
+- Open-source Skills: `https://github.com/anthropics/skills`
+- See references for the full anchor list.

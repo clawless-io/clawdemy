@@ -1,0 +1,247 @@
+---
+title: "Practice: Shipping a Claude application"
+description: Self-check on the five production disciplines (cost monitoring with Usage + Cost Admin API, latency budgets, eval-set discipline, rollout, lifecycle handling), the rollout checklist that pulls L1-L11 together, and the deprecation policy plus a hands-on rollout exercise and flashcards.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Seven short questions. Answer each before opening the collapsible.
+
+**1. Name the five production disciplines this lesson covers, and what each ties to from L1-L11.**
+
+<details>
+<summary>Show answer</summary>
+
+- **Cost monitoring.** Per-call *usage* fields (L2 + L7) plus the organization-level Usage and Cost Admin API. Cache-hit ratio is the headline metric.
+- **Latency budgets.** Per-surface targets (TTFT for chat; full-response for long generations; throughput for batches). Levers: streaming (L2), effort (L3), caching (L7), routing (L9.2), Subagent parallelization (L9.3 + L11), batches (L2).
+- **Eval-set discipline.** Held-out test set as the deploy gate. Cross-ref T21 L7 LLMOps; lesson 9 pattern 5 (evaluator-optimizer) is the loop.
+- **Rollout.** Feature flags + canary (1 percent → 10 percent → 100 percent) + A/B + rehearsed rollback. *request_id* logging (L2) makes incident response tractable.
+- **Lifecycle handling.** Anthropic's at-least-60-days deprecation notice; Active → Legacy → Deprecated → Retired; date-pinned IDs in production (L3); the Models overview as canonical source.
+
+</details>
+
+**2. State the Usage and Cost Admin API positioning, the two endpoints, the Admin API key requirement, and the time-bucket options.**
+
+<details>
+<summary>Show answer</summary>
+
+**Verbatim positioning:** *The Usage & Cost Admin API provides programmatic and granular access to historical API usage and cost data for your organization*.
+
+**Two endpoints:**
+- ***GET /v1/organizations/usage_report/messages***: token counts; group by *model*, *workspace_id*, *api_key_id*, *service_tier*, *context_window*, *inference_geo*, *speed*.
+- ***GET /v1/organizations/cost_report***: USD costs; group by *workspace_id* or *description*.
+
+**Admin API key required:** starts with *sk-ant-admin...*, distinct from regular API keys, provisionable only by organization admins via the Console.
+
+**Time buckets** (*bucket_width*):
+- *1m* (real-time monitoring; default 60 buckets, max 1440)
+- *1h* (daily patterns; default 24, max 168)
+- *1d* (weekly / monthly reports; default 7, max 31)
+
+**Cost endpoint:** daily granularity only.
+
+</details>
+
+**3. The two operational caveats from the docs: data freshness, and which workloads do NOT appear in the Cost endpoint.**
+
+<details>
+<summary>Show answer</summary>
+
+- **Data freshness:** verbatim from the docs, *usage and cost data typically appears within 5 minutes of API request completion, though delays may occasionally be longer*. Polling: once per minute sustained is supported; cache results for dashboards.
+- **Priority Tier costs use a different billing model and never appear in the Cost endpoint.** Track Priority Tier usage in the Usage endpoint (filter or group by *service_tier* = *priority*). For per-user breakdowns in Claude Code, use the separate Claude Code Analytics API.
+
+**Also:** the programmatic Usage and Cost API endpoints are NOT currently available on Claude Platform on AWS (use Console pages there). The Admin API as a whole is NOT available on individual accounts (set up an organization first).
+
+</details>
+
+**4. What does the production *usage* logging shape look like per call, and what is the cache-hit-ratio identity that matters most?**
+
+<details>
+<summary>Show answer</summary>
+
+**Per-call logging shape** (the minimum):
+- *request_id* (L2; required for Anthropic Support incident response)
+- *model*
+- *stop_reason*
+- *usage.input_tokens* (uncached after the last cache breakpoint)
+- *usage.output_tokens*
+- *usage.cache_creation_input_tokens*
+- *usage.cache_read_input_tokens*
+- *usage.iterations* (when compaction is enabled per L7)
+- Request latency
+
+Pair with your application's *user_id* / *session_id* and any *feature_flag_state*.
+
+**Cache-hit ratio identity** (L7): *total_input_tokens = cache_read_input_tokens + cache_creation_input_tokens + input_tokens*.
+
+**The headline metric:** *cache_read_input_tokens / total_input_tokens*. On a well-cached production stack with stable prefixes, this commonly runs above 90 percent. Tracking it per workload is the single highest-leverage production cost-monitoring habit.
+
+</details>
+
+**5. The five-move rollout discipline + the canary cadence.**
+
+<details>
+<summary>Show answer</summary>
+
+**Five moves:**
+- **Feature flags.** Model name + system prompt + tool list + *cache_control* placement + MCP servers (L6) + Subagent configs (L11) sit behind flags. A model swap is a config change, not a deploy.
+- **Canary:** route 1 percent of traffic to the new config; watch the eval set live; promote to 10 percent; then 100 percent. Regressions caught at 1 percent are infinitely cheaper than at 100 percent.
+- **A/B against current production.** Run both for a fixed window; score live responses on your held-out eval set; pick the cheapest that passes.
+- **Rollback plan documented and rehearsed.** The flag toggles back in one motion.
+- ***request_id* logging from L2** is what makes incident response tractable; Anthropic Support needs the *request_id* to find a specific failed call; your own logs need it to correlate with your application's request.
+
+**Canary cadence:** 1 percent → 10 percent → 100 percent. Each promotion gated by the eval set + dashboards + alerts staying green for a fixed window (typically 24-72 hours per stage).
+
+</details>
+
+**6. Anthropic's deprecation policy: the four lifecycle states, the notice window, and the audit path.**
+
+<details>
+<summary>Show answer</summary>
+
+**Four states** (verbatim):
+- **Active:** *The model is fully supported and recommended for use.*
+- **Legacy:** *The model will no longer receive updates and may be deprecated in the future.*
+- **Deprecated:** *The model is still functional but no longer recommended. Anthropic provides a recommended replacement and assigns a retirement date.*
+- **Retired:** *The model is no longer available for use. Requests to retired models will fail.*
+
+**Notice window** (verbatim): *Anthropic notifies customers with active deployments for models with upcoming retirements, providing at least 60 days notice before model retirement for publicly released models*.
+
+**Audit path:** in the Claude Console Usage page, click the **Export** button; review the CSV for usage by API key and model; locate any deprecated model in use; migrate before the retirement date.
+
+**Pinning discipline (L3):** the 4.6 generation and later are dateless and already pinned (*claude-opus-4-8*, *claude-opus-4-7*, *claude-sonnet-4-6*; use directly). Pre-4.6 models use the date-suffixed canonical (*claude-haiku-4-5-20251001*) for production stability; the dateless alias is for development. The Models overview at *platform.claude.com/docs/en/about-claude/models/overview* is the canonical source for current status.
+
+**One smaller deprecation:** *temperature* / *top_p* / *top_k* are deprecated on Claude Opus 4.7+ (including Opus 4.8) and return a 400 error on non-default values. Omit; use prompting to guide behavior.
+
+</details>
+
+**7. State the rollout checklist (the deploy-gate version, in 10-12 bullets, that pulls L1 to L11 together).**
+
+<details>
+<summary>Show answer</summary>
+
+- **Smallest primitive solid** (L1): every code path constructs the Messages API request correctly; iterate the *content* array, never index it.
+- **Production-side patterns** (L2): streaming on user-facing surfaces; batches for bulk non-interactive; full *stop_reason* dispatch; *request_id* logged on every call.
+- **Model + effort chosen by eval** (L3): default Sonnet; reach for Opus or Haiku where the eval data supports it; effort dial set per workload.
+- **Tools deliberate** (L4-L6): custom for your logic; server for general capabilities; MCP for third-party catalogs; denylist destructive ops; sandbox computer-use; tight tool descriptions.
+- **Caching live** (L7): *cache_control* on system + stable tool defs; cache-hit ratio in the dashboard.
+- **Context-management posture chosen** (L7): compaction for long sessions; tool result clearing for tool-heavy loops; cache the system prompt end so it survives compaction.
+- **Agent loop disciplines** (L8): hard *max_iterations* cap; explicit *stop_reason* dispatch; tool inventory as the safety surface area.
+- **Pattern by decision tree** (L9): simplest pattern that fits, not most sophisticated.
+- **Skills + harness chosen** (L10): durable instructions; *CLAUDE.md* where appropriate; security audit on any third-party Skill.
+- **Right primitive per workload** (L11): self-built loop for control or ZDR; Subagents for orchestrator-workers / parallelization; Managed Agents for long-running async when ZDR is not a constraint.
+- **Cost dashboards live** (this lesson): Usage and Cost Admin API integrated; cache-hit ratio + per-model spend + per-workspace allocation visible.
+- **Latency budget defined + tracked** (this lesson).
+- **Eval set as deploy gate** (this lesson + T21 L7).
+- **Feature flags + canary + rollback** (this lesson).
+- **Deprecation watch** (this lesson).
+
+</details>
+
+## Try it yourself: walk a rollout
+
+About 20 minutes. No code required; the exercise is a written rollout plan.
+
+**Setup:** pick one Claude-powered feature from your current or planned application. Walk a complete rollout from "configuration ready" to "100 percent of traffic" using this lesson's discipline. Write out:
+
+**Part A: pre-flight (before any traffic shifts).**
+- Which model + effort + caching configuration are you shipping?
+- What is the held-out eval set (5-10 prompts; per-prompt scoring rubric)?
+- What is the per-surface latency budget (TTFT for chat; full-response for non-streamed; throughput for batches)?
+- Which dashboards must be live before flagging on (cache-hit ratio; per-model spend; per-workspace allocation)?
+- What is the rollback flag, and where does it toggle from?
+
+**Part B: canary (1 percent).**
+- Which traffic-routing layer carries the 1-percent canary?
+- What metrics gate promotion to 10 percent? (eval-set pass rate; latency budget; cost-per-call; error rate)
+- What is the watch window (24h / 48h / 72h)?
+- Who has on-call for the canary?
+
+**Part C: full ramp (10 percent → 100 percent).**
+- What changes at each stage?
+- What is the rollback trigger (specific metric thresholds, not "if it looks bad")?
+- After 100 percent, what is the steady-state monitoring posture?
+
+**Part D: deprecation watch.**
+- Which model IDs is your production traffic currently running on?
+- For each, what is the retirement date per the Models overview?
+- What is your migration runway if a 60-day notice lands tomorrow?
+- Are you using *temperature* / *top_p* / *top_k* anywhere on Opus 4.7+? If yes, fix or expect 400 errors.
+
+<details>
+<summary>What you'll get (an example, not the canonical answer)</summary>
+
+A real rollout plan for a customer-support summarizer might shape up as: model *claude-sonnet-4-6* at *medium* effort; *cache_control* on system prompt + tool stack; 10-prompt eval set scored by an LLM-judge with a 4-of-5-required rubric; TTFT budget 1.5 seconds streamed, full-response budget 8 seconds; canary at 1 percent for 24 hours gated by eval-pass-rate ≥ 90 percent and TTFT p95 ≤ 1.5 seconds; ramp to 10 percent for 48 hours, then 100 percent. Rollback flag in the configuration service; toggling it routes all traffic back to the prior config in under 30 seconds. Steady-state monitoring: cache-hit ratio (alert below 70 percent), per-call cost (alert above $0.05 average), error rate (alert above 1 percent). Deprecation watch: production on *claude-sonnet-4-6* (Active, retirement not sooner than February 17, 2027); 60-day migration runway is comfortable; no *temperature* parameters in use.
+
+The exercise's value is the muscle memory of WRITING the plan before shipping, not improvising it during incident response. Most production failures of Claude integrations are not the model failing; they are the rollout discipline failing.
+
+</details>
+
+## Flashcards
+
+Nine cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay the set out one card per page for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="The five production disciplines?">
+
+**(1) Cost monitoring** (per-call *usage* fields + Usage and Cost Admin API). **(2) Latency budgets** (per-surface targets; levers from L2/L3/L7/L9/L11). **(3) Eval-set discipline** (held-out test set as deploy gate; T21 L7 LLMOps playbook). **(4) Rollout** (feature flags + canary 1→10→100 percent + A/B + rehearsed rollback; *request_id* logging from L2). **(5) Lifecycle handling** (Anthropic 60-day deprecation notice; Active→Legacy→Deprecated→Retired; date-pinned IDs).
+
+</Flashcard>
+
+<Flashcard question="Usage and Cost Admin API: positioning + endpoints + key requirement?">
+
+**Verbatim:** *The Usage & Cost Admin API provides programmatic and granular access to historical API usage and cost data for your organization*. **Endpoints:** *GET /v1/organizations/usage_report/messages* (token counts) + *GET /v1/organizations/cost_report* (USD costs). **Key:** Admin API key (*sk-ant-admin...*; distinct from regular API keys; only org admins can provision via Console).
+
+</Flashcard>
+
+<Flashcard question="Bucket widths + grouping + filter dimensions?">
+
+**Bucket widths** (*bucket_width* on Usage endpoint): *1m* (60-1440 buckets), *1h* (24-168), *1d* (7-31). Cost endpoint: *1d* only. **Group by** Usage: *model*, *workspace_id*, *api_key_id*, *service_tier*, *context_window*, *inference_geo*, *speed* (beta). Cost: *workspace_id* or *description*. **Filter** by same dimensions; arrays like *models[]=claude-opus-4-8*.
+
+</Flashcard>
+
+<Flashcard question="Two operational caveats from the docs?">
+
+**(1) Data freshness:** *typically appears within 5 minutes of API request completion*. Polling: once per minute sustained. **(2) Priority Tier costs use a different billing model and never appear in the Cost endpoint.** Track Priority Tier usage in the Usage endpoint (*service_tier* = *priority*). **Plus:** NOT available on Claude Platform on AWS (use Console); NOT available on individual accounts (set up organization first).
+
+</Flashcard>
+
+<Flashcard question="Per-call production logging shape?">
+
+Log on every call: *request_id*, *model*, *stop_reason*, *usage.input_tokens*, *usage.output_tokens*, *usage.cache_creation_input_tokens*, *usage.cache_read_input_tokens*, *usage.iterations* (when compaction enabled), request latency. Pair with *user_id*, *session_id*, *feature_flag_state*. **Headline metric:** *cache_read_input_tokens / total_input_tokens* (often 90 percent+ on well-cached production).
+
+</Flashcard>
+
+<Flashcard question="Five-move rollout discipline?">
+
+**(1)** Feature flags (model + prompt + tool list + cache placement + MCP + Subagent configs behind flags). **(2)** Canary at 1 percent then 10 percent then 100 percent, each gated by eval-set + dashboards + alerts staying green for a watch window. **(3)** A/B against current production; pick cheapest that passes. **(4)** Rehearsed rollback (flag toggles back in one motion). **(5)** *request_id* logging on every call for incident response.
+
+</Flashcard>
+
+<Flashcard question="Anthropic deprecation policy: four states + notice window?">
+
+**Four states:** **Active** (fully supported), **Legacy** (no more updates; may deprecate later), **Deprecated** (functional but a retirement date set), **Retired** (requests fail). **Notice window (verbatim):** *Anthropic notifies customers with active deployments for models with upcoming retirements, providing at least 60 days notice before model retirement for publicly released models*. **Audit:** Console Usage page → Export CSV → review by API key + model.
+
+</Flashcard>
+
+<Flashcard question="Date-pinning discipline + the temperature/top_p/top_k deprecation?">
+
+**Pinning (L3):** 4.6 generation and later are dateless and already pinned (*claude-opus-4-8*, *claude-opus-4-7*, *claude-sonnet-4-6*). Pre-4.6 models use the date-suffixed form for production stability (*claude-haiku-4-5-20251001*); the dateless alias is for development. **Parameter deprecation:** *temperature*, *top_p*, *top_k* are deprecated on Opus 4.7+ (including 4.8); return a 400 error on non-default values. Omit; use prompting to guide behavior.
+
+</Flashcard>
+
+<Flashcard question="The four cost levers from earlier lessons?">
+
+**(1) Model selection (L3):** cheapest model that passes eval. **(2) Effort dial (L3):** per-call token spend; *medium* on Sonnet is the canonical production default. **(3) Prompt caching (L7):** about 90 percent off on hits; cache system + tool stack at minimum. **(4) Batches (L2):** 50 percent off, async, finishes in under an hour for bulk non-interactive. **Plus per-subagent model (L11)** for orchestrator-workers.
+
+</Flashcard>
+
+</FlashcardSet>

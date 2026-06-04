@@ -1,0 +1,136 @@
+---
+title: "Lesson: Agent Skills and Claude Code"
+description: "Lesson 10 of Track 22 (Building with Claude). The durable-instructions layer for the patterns in L9, and a worked agent harness that uses it. Agent Skills are filesystem-resident packages (a SKILL.md with YAML frontmatter plus optional additional .md files and scripts) that Claude reads on-demand. The progressive-disclosure architecture: Level 1 metadata always loaded (around 100 tokens per Skill in the system prompt), Level 2 SKILL.md body loaded when triggered (under 5K tokens), Level 3 bundled resources loaded as needed (effectively unlimited). Three surfaces (Claude API with skill_id in container plus three beta headers; Claude Code via filesystem at ~/.claude/skills/ or .claude/skills/; claude.ai via upload). Claude Code as the worked agent: an agentic coding tool available in terminal, IDE, desktop, and browser; reads CLAUDE.md for project context; uses MCP from L6 natively; hooks for before/after actions; sub-agents and the Agent SDK for custom workflows. How Skills + Claude Code together let any of the L9 patterns become durable, shareable, version-controlled team artifacts."
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+{/* COMPONENT PLACEHOLDER (Lead wires at promotion): <LessonFreshness lastReviewed={frontmatter.last_reviewed} /> */}
+
+{/* COMPONENT PLACEHOLDER (Lead wires at promotion): <SourceLecture url="https://platform.claude.com/docs/en/agents-and-tools/agent-skills/overview" title="Anthropic public Claude docs (Agent Skills overview + Claude Code overview at code.claude.com/docs)" instructor="Anthropic" /> */}
+
+## Why this lesson
+
+Lesson 9 catalogued the six canonical patterns. Each pattern lives or dies by the **instructions** you put in front of each LLM call: a router's classification prompt, a chain's per-step prompt, an orchestrator's task-decomposition prompt, an autonomous agent's overall guidance. Until now those instructions have lived in your application code as strings. This lesson is what happens when they become **durable artifacts on disk**: reusable, shareable, version-controllable, and auto-discovered by an agent harness when relevant. The capability the lesson builds: **explain what Agent Skills are, how Claude Code reads them, and the durable-instructions pattern they enable**.
+
+Two specific Anthropic products land here. **Agent Skills** are the on-disk format. **Claude Code** is the worked agent harness that reads them; it is also useful in its own right as a complete agentic coding tool. Both are Anthropic-built. Both fit on top of the L8 loop substrate and any of the L9 patterns.
+
+## Agent Skills (the durable-instructions layer)
+
+The Anthropic docs frame Skills this way verbatim: *Agent Skills are modular capabilities that extend Claude's functionality. Each Skill packages instructions, metadata, and optional resources (scripts, templates) that Claude uses automatically when relevant*. The contrast with prompts is the point: *Unlike prompts (conversation-level instructions for one-off tasks), Skills load on-demand and eliminate the need to repeatedly provide the same guidance across multiple conversations*. A prompt is a thing you type; a Skill is a thing you save once and reuse forever.
+
+The on-disk shape is small. A Skill is a directory with a *SKILL.md* file at the root. The file has YAML frontmatter with two required fields:
+
+```yaml
+---
+name: pdf-processing
+description: Extract text and tables from PDF files, fill forms, merge documents. Use when working with PDF files or when the user mentions PDFs, forms, or document extraction.
+---
+
+# PDF Processing
+
+## Quick start
+
+Use pdfplumber to extract text from PDFs:
+
+```python
+import pdfplumber
+
+with pdfplumber.open("document.pdf") as pdf:
+    text = pdf.pages[0].extract_text()
+```
+
+For advanced form filling, see [FORMS.md](FORMS.md).
+```
+
+The frontmatter rules: *name* maxes at 64 characters, lowercase letters / numbers / hyphens only, no XML tags, cannot be the words "anthropic" or "claude"; *description* is non-empty, capped at 1024 characters, no XML tags. The body of *SKILL.md* is the instructions Claude reads after the description matches; additional files in the Skill's directory (FORMS.md, REFERENCE.md, a *scripts/* folder with Python or other code) are referenced from *SKILL.md* and loaded only when needed.
+
+## Progressive disclosure (the architecture trick)
+
+Skills work because they do not all sit in the context window at once. The docs name the pattern **progressive disclosure**, and the load order maps cleanly onto three levels:
+
+| Level | When loaded | Token cost | Content |
+| --- | --- | --- | --- |
+| **1: Metadata** | Always (startup) | Around 100 tokens per Skill | *name* + *description* from YAML frontmatter; included in system prompt |
+| **2: Instructions** | When the Skill is triggered | Under 5K tokens | *SKILL.md* body |
+| **3+: Resources** | As needed | Effectively unlimited | Bundled files; scripts executed via bash where only the output enters context |
+
+The metadata is what lets Claude find the Skill. The full instructions only load when the description matches the user's request. The bundled resources only load when *SKILL.md* references them. The post that goes deeper on Skills calls this *the same way Claude navigates files on your computer*: read SKILL.md via bash, then read FORMS.md if the task needs it, run a script if the Skill names one, take only the output back into context.
+
+Two operational consequences. **You can install many Skills without context penalty**, because Level 1 is small. **Bundled content has effectively no context cost** until accessed, because Level 3 stays on the filesystem. This is why a Skill can include comprehensive API documentation, large datasets, or extensive reference materials without bloating every request that does not need them.
+
+## How Claude finds and uses a Skill
+
+The description field is the router. At startup, Claude sees the names and descriptions of all installed Skills in its system prompt. When a user request comes in that matches a Skill's *when-to-use* clause in its description ("use when working with PDF files"), Claude invokes the Skill by reading *SKILL.md* via the *bash* tool (lesson 5's Anthropic-schema client tool). That brings the instructions into context. If the instructions reference additional files, Claude reads those too via bash. If the instructions reference scripts, Claude runs the scripts and takes only their output.
+
+This is the L9 routing pattern (lesson 9, pattern 2) realized in concrete terms: the classifier is the model's own description-matching judgment; the specialized followup is the Skill's *SKILL.md* body; the resources the followup uses are the bundled files. A Skill is not a tool in the L4 / L5 / L6 sense; it is a durable, on-disk package of guidance that the agent can route to.
+
+The Anthropic docs are explicit that the description is load-bearing: it should describe both **what the Skill does** and **when Claude should use it**. A vague description means the Skill never triggers; a precise one means it triggers reliably.
+
+## Where Skills live
+
+Three surfaces support Agent Skills, with different sharing models and small differences in mechanics:
+
+- **Claude API.** Custom Skills upload through the *POST /v1/skills* endpoints. Pre-built Anthropic Skills (PowerPoint, Excel, Word, PDF) are available by *skill_id* (e.g., *pptx*, *xlsx*, *docx*, *pdf*) in the *container* parameter alongside the code execution tool. Three beta headers required: *code-execution-2025-08-25*, *skills-2025-10-02*, *files-api-2025-04-14*. Skills are shared workspace-wide; all workspace members access them. **Not ZDR eligible.**
+- **Claude Code.** Filesystem-only, no upload step. Personal Skills live at *~/.claude/skills/*; project-shared Skills live at *.claude/skills/* (committed to the repo). Claude Code discovers them automatically. This is the simplest surface for team Skills under version control.
+- **claude.ai.** Custom Skills upload as zip files through Settings > Features (Pro / Max / Team / Enterprise plans). Individual to each user; no org-wide distribution. Pre-built Skills work behind the scenes for document tasks.
+
+Custom Skills **do not sync across surfaces**. A Skill uploaded to the API is not visible in claude.ai; a Claude Code filesystem Skill is not visible on the API. Plan per surface.
+
+## Claude Code (the worked agent harness)
+
+Skills are the durable-instructions layer; Claude Code is one of the canonical agents that reads them. The docs' verbatim positioning: *Claude Code is an agentic coding tool that reads your codebase, edits files, runs commands, and integrates with your development tools. Available in your terminal, IDE, desktop app, and browser*.
+
+For T22's purposes, Claude Code is the worked example of an L8-style loop in production. It runs in the terminal (the claude command in a project directory), or as a VS Code / JetBrains extension, or as a desktop app, or on the web at claude.ai/code, or through the iOS app. All surfaces share the same underlying engine and the same configuration: a *CLAUDE.md* file at the project root that Claude Code reads at the start of every session for project context, your installed Skills at *~/.claude/skills/* or *.claude/skills/*, your MCP server configuration (the L6 connector), and your hooks (shell commands before or after Claude Code actions like auto-formatting after every file edit).
+
+The features worth mapping back to the rest of T22:
+
+- **The loop is the L8 loop.** Claude Code makes Messages API calls, dispatches on *tool_use*, runs its tools, sees *tool_result*, iterates. It is your 30-line loop, scaled, productionized, with a polished UI and a much larger built-in tool inventory (file editing, bash, web fetch, git operations).
+- **The tools span L4 + L5 + L6.** Built-in tools (Anthropic-schema *bash*, *text_editor*) are L5. Custom tools you define for it (via the Agent SDK or hooks) are L4. MCP servers you register (in the configuration) are L6, with the same *mcp_servers* + *mcp_toolset* shape under the hood. Everything T22 taught about tools applies here.
+- **CLAUDE.md is the cached system prompt.** Per L7, a stable project-context document at the top of every session is a clear *cache_control* candidate; Claude Code does this for you.
+- **Auto memory builds across sessions.** Claude Code saves learnings (build commands, debugging insights, project conventions) across sessions without explicit prompting. This is durable context distinct from Skills (Skills are pre-authored guidance; auto memory accumulates from observed work).
+- **Sub-agents and the Agent SDK** are how patterns 4 (orchestrator-workers) and 6 (autonomous agent) get implemented inside Claude Code. Sub-agents are spawned focused inner loops (lesson 11 covers them directly). The Agent SDK lets you build custom agents powered by Claude Code's tools and capabilities, with full control over orchestration, tool access, and permissions.
+
+A representative install + launch on macOS, Linux, or WSL is one line, a curl-pipe-to-bash from the install script URL (literal below), then the claude command in any project directory:
+
+```bash
+curl -fsSL https://claude.ai/install.sh | bash
+```
+
+Windows has PowerShell, CMD, and WinGet installers; Homebrew supports it too. The full surface map and install paths are at code.claude.com/docs.
+
+## Skills + Claude Code together (the L9 patterns, durable)
+
+The composition is where the lesson pays off. Take the L9 routing pattern: a customer-service application that dispatches queries by category. In the in-code version, the classifier prompt and each specialized prompt are strings in your application. In the Skills + Claude Code version, each specialized branch is its own Skill on disk: *billing-questions/SKILL.md*, *technical-support/SKILL.md*, *feature-requests/SKILL.md*. The descriptions are precise enough that Claude's own routing judgment picks the right one. The bundled resources (escalation runbooks, FAQ snippets, response templates) sit beside each *SKILL.md* and load only when that branch triggers. The whole routing layer becomes a versioned, reviewable repository of guidance rather than scattered strings.
+
+The same is true for the other patterns. Prompt chaining (L9 pattern 1) becomes a chain of Skills where each step's *SKILL.md* hands off to the next via the bundled scripts. Orchestrator-workers (pattern 4) becomes an orchestrator Skill that names worker Skills, with each worker as a focused independent Skill. Autonomous agents (pattern 6) become Claude Code itself plus the Skills you authored for the domain. The patterns are unchanged; the **durability and team-shareability** of the instructions behind them is what Skills + Claude Code add.
+
+## Security and trust
+
+The Skills docs are direct about the trust model: *Use Skills only from trusted sources: those you created yourself or obtained from Anthropic*. Skills bring code and instructions into your agent's environment; a malicious Skill can direct Claude to invoke tools in ways that do not match the Skill's stated purpose, leak data, or execute harmful code. The docs name four specific risks worth keeping in mind: tool misuse, data exposure, external-source compromise, and Skills that fetch data from external URLs (whose content may contain instructions the agent picks up).
+
+The discipline carries over from L6's denylist guidance and L8's tool-inventory-is-surface-area rule. Audit every Skill before installing. Prefer Anthropic-published Skills (the *pptx*, *xlsx*, *docx*, *pdf* set; the open-source repository at github.com/anthropics/skills) and team-authored ones over third-party drops. In Claude Code specifically, project-committed *.claude/skills/* go through code review like any other code, which is the right default posture.
+
+## Why this matters when you use Claude
+
+Before this lesson, every pattern you implemented from L9 lived in your application code as strings. Those strings did not have version history, did not get code-reviewed, did not get reused across applications, and did not auto-discover when the model needed them. After this lesson, the same patterns live as Skills on disk: Git-tracked, code-reviewable, auto-discovered by description, surface-portable (with the caveat that you upload per surface). Claude Code is one Anthropic-built agent harness that reads them; the same on-disk format works on the Claude API for any agent harness you build.
+
+The two highest-leverage takeaways for the week. **For any in-application agent you have today, identify the three or four prompts that get edited most and convert them to Skills**; you will get version history, the ability to A/B them, and team review for free. **If you are coding professionally, install Claude Code, write a project *CLAUDE.md* with your conventions, and add a *.claude/skills/* directory under version control**; the auto-discovered Skills become how your team's coding norms travel with the repository.
+
+Lesson 11 picks up directly on the sub-agents and Agent SDK mentions in this lesson: how patterns 4 and 6 spawn focused inner loops using Subagents (the Anthropic-managed primitive) and Claude Managed Agents (the cloud-hosted version). Lesson 12 closes the track with what changes when any of this goes to production.
+
+## What you should remember
+
+- **Agent Skills (verbatim):** *modular capabilities that extend Claude's functionality. Each Skill packages instructions, metadata, and optional resources (scripts, templates) that Claude uses automatically when relevant*. They are the on-disk durable-instructions layer for the L9 patterns.
+- **On-disk shape:** a directory with *SKILL.md* at the root. YAML frontmatter requires *name* (max 64 chars, lowercase-alphanumeric-hyphens, no XML, not "anthropic"/"claude") and *description* (non-empty, max 1024 chars, no XML). Body is markdown instructions. Optional bundled files (*FORMS.md*, *REFERENCE.md*, *scripts/*) load on demand.
+- **Progressive disclosure (the load order):** Level 1 metadata always loaded in system prompt (around 100 tokens per Skill); Level 2 *SKILL.md* body loaded when triggered (under 5K tokens); Level 3 bundled resources loaded as needed via bash (effectively unlimited). The description is the router; precise descriptions trigger reliably.
+- **Three surfaces, no sync:** Claude API (uploaded via */v1/skills*; pre-built by *skill_id* in *container*; three beta headers *code-execution-2025-08-25* / *skills-2025-10-02* / *files-api-2025-04-14*; workspace-shared; **NOT ZDR eligible**). Claude Code (filesystem at *~/.claude/skills/* or *.claude/skills/*; no upload; auto-discovery). claude.ai (upload as zip; per-user). Custom Skills do not sync across surfaces.
+- **Claude Code (verbatim):** *an agentic coding tool that reads your codebase, edits files, runs commands, and integrates with your development tools. Available in your terminal, IDE, desktop app, and browser*. Worked example of the L8 loop in production; built-in tools span L4 (custom via Agent SDK) + L5 (Anthropic-schema bash + text_editor) + L6 (MCP servers via configuration).
+- **Project configuration in Claude Code:** *CLAUDE.md* at the project root is the cached system prompt Claude Code reads at the start of every session (auto-cached per L7). Auto memory accumulates learnings across sessions. *.claude/skills/* committed to the repo is how Skills travel with the project.
+- **Sub-agents + Agent SDK** are how patterns 4 (orchestrator-workers) and 6 (autonomous agent) get realized; Lesson 11 covers them directly.
+- **Security:** *Use Skills only from trusted sources: those you created yourself or obtained from Anthropic*. Audit before installing; prefer Anthropic-published or team-authored Skills.
+- **Composition:** Skills + Claude Code = the L9 patterns as durable team artifacts. Routing becomes a directory of branch Skills; chaining becomes a chain of Skills; orchestrator-workers becomes an orchestrator Skill calling worker Skills; autonomous agent becomes Claude Code reading your domain Skills.
+
+A loop in lesson 8. A catalog of patterns in lesson 9. The durable-instructions layer in this lesson, plus one Anthropic-built agent harness that reads it. Lesson 11 takes the orchestrator and autonomous patterns deeper with Subagents and Claude Managed Agents. Lesson 12 ships the result.

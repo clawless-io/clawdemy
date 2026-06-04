@@ -1,0 +1,76 @@
+---
+title: "Tool use, the foundation"
+description: "Lesson 4 of Track 22 (Building with Claude), opens Phase 2. The jump from one-shot calls to letting Claude reach beyond its training corpus through function calls. Three-field tool definition (name + description + input_schema as JSON Schema), the four-step request-response loop (app sends tools → model returns tool_use block with stop_reason:tool_use → app executes → app sends tool_result back), the two ordering rules the API enforces with 400 on violation (tool_result must immediately follow tool_use; tool_result blocks come FIRST in the user message's content array, text comes AFTER), tool_choice options (auto / any / tool / none), parallel tool use (multiple tool_use blocks fan out, one user message with N tool_result blocks fans in), error handling with is_error and the docs' instructive-error rule, the token cost overhead (a few hundred system-prompt tokens per the Tool use overview's per-model table; any and specific-tool modes slightly higher than auto and none), the client-vs-server distinction (this lesson is client tools; lesson 5 is server tools and Anthropic-schema client tools like bash and computer use), and the structured-outputs feature (separate from tool use, sometimes confused with it). The primitive every Phase 2 and Phase 3 lesson extends."
+track: building-with-claude
+order: 4
+phase: augmentation-patterns
+phase_order: 1
+difficulty: standard
+estimated_read_minutes: 13
+estimated_practice_minutes: 20
+prerequisites:
+  - "lessons/building-with-claude/lesson-03-choosing-your-model-and-the-effort-dial"
+learning_outcomes:
+  - Write a tool definition with name, description, and input_schema (JSON Schema) that produces correct tool calls from the model
+  - Walk the four-step tool-use loop (request with tools → tool_use response → execute → tool_result message → continued response) end to end
+  - Apply the two ordering rules the API enforces (tool_result immediately after tool_use; tool_result blocks first in content array)
+  - Choose tool_choice values (auto / any / tool / none) for a given use case and handle parallel tool calls in a single fan-in user message
+  - Apply error handling with is_error and instructive error content, and distinguish tool use from the separate structured outputs feature
+authors:
+  - clawdemy
+published_at: 2026-05-27
+last_reviewed: 2026-05-27
+status: published
+artifact: brief
+sidebar:
+  order: 1
+  label: Brief
+tableOfContents: false
+---
+
+import LessonFreshness from "../../../../../components/LessonFreshness.astro";
+import SourceLecture from "../../../../../components/SourceLecture.astro";
+
+<LessonFreshness lastReviewed={frontmatter.last_reviewed} />
+
+<SourceLecture url="https://platform.claude.com/docs/en/agents-and-tools/tool-use/overview" title="Anthropic Academy 'Building with the Claude API' (tools sections) + Anthropic public Tool use, Define tools, Handle tool calls, Strict tool use, Structured outputs docs" instructor="Anthropic" />
+
+## What you'll learn
+
+Opens Phase 2 of Track 22. Lessons 1-3 gave you the smallest primitive, the production patterns, and the model-selection decision; nothing in those let the model **act** beyond its training corpus. This lesson is the foundation that closes that gap. The single capability this lesson builds: **define a tool, handle the four-step request-response loop end to end, and reason about the rules and patterns the API enforces around tool use**.
+
+Concretely, you will know how to write a tool definition (three fields: *name* / *description* / *input_schema* as JSON Schema; the description is the model's instruction manual and vague descriptions produce wrong calls), the four-step loop (your app sends a request with *tools* → the model returns *stop_reason: tool_use* with one or more *tool_use* content blocks carrying *id* / *name* / *input* → your code executes the tool and assembles a *tool_result* block with *tool_use_id* / *content* / optional *is_error* → you send a new request with the original messages, the assistant turn, and a user message containing the *tool_result*), the two ordering rules the API enforces with 400 on violation (*tool_result* must immediately follow *tool_use*; *tool_result* blocks come FIRST in the user message's content array, text comes AFTER), the *tool_choice* values (*auto* / *any* / *tool* / *none*), the parallel-tool-call pattern, the error-handling convention with *is_error* and the docs' instructive-error rule, the token-cost overhead (a few hundred system-prompt tokens per the per-model table in the Tool use overview, with the *any* and specific-*tool* modes slightly higher than *auto* and *none*, plus the *tools* array tokens), the client-vs-server tool distinction (this lesson is client; lesson 5 is server tools and Anthropic-schema client tools), and how the separate structured-outputs feature differs from tool use even though both produce JSON.
+
+Every substantive claim verifies against the public Anthropic Claude documentation at [platform.claude.com/docs/en/agents-and-tools/tool-use/](https://platform.claude.com/docs/en/agents-and-tools/tool-use/) (Tool use overview, Handle tool calls, Define tools pages).
+
+## Where this fits
+
+This is lesson 4 of 12 of Track 22, the **first lesson of Phase 2** (augmentation patterns), and **opens Phase 2**. Phase 1 (lessons 1-3) gave you the API surface and the production patterns around it. Phase 2 (lessons 4-7) augments what one call can do: tools (this lesson + lesson 5), Model Context Protocol (lesson 6), prompt caching and context management (lesson 7). Phase 3 (lessons 8-11) turns this lesson's four-step loop into a multi-turn agent loop. Phase 4 (lesson 12) is shipping. The primitive established here threads through every subsequent T22 lesson.
+
+The cross-track companion is **Track 21 (LLM Ops and Production), lesson 4 "Augmented LLMs,"** which covers the same concept at the provider-agnostic level. T22 L4 here is the Anthropic-specific instance. **Track 20 (AI Agents and Tool Use)** is the deeper full-track treatment of tools and agents end to end.
+
+## Before you start
+
+**Prerequisites:** lessons 1-3 of this track (the API surface, the production patterns, the model-selection decision). You should have made working API calls (lesson 1), seen the *content* array and *stop_reason* in responses (lessons 1-2), and reasoned about model and effort choices (lesson 3). The try-it-yourself exercise extends lesson 1's environment with a real tool.
+
+**Soft recommended:** familiarity with JSON Schema. The *input_schema* field is plain JSON Schema; if you have written one before, the tool-definition shape is immediate. If not, the lesson includes a complete example and the try-it-yourself is forgiving (a tool with one or two parameters works fine).
+
+## About the math
+
+None. The lesson is conceptual + practical (a four-step protocol, two ordering rules, four parameter values, an error pattern). The arithmetic that appears is per-call token overhead (a few hundred system-prompt tokens per the per-model table in the Tool use overview), which is a fact to look up per model, not a derivation.
+
+## By the end, you'll be able to
+
+The single capability this lesson builds: **define a tool, handle the four-step request-response loop end to end, and reason about the rules and patterns the API enforces around tool use** (the lesson's fourth-end-state capability, per the Phase 0 lesson 4 capability mapping). Concretely, you will be able to:
+
+- Write a tool definition with *name*, *description*, and *input_schema* (JSON Schema) that produces correct tool calls from the model
+- Walk the four-step tool-use loop (request with *tools* → *tool_use* response → execute → *tool_result* message → continued response) end to end
+- Apply the two ordering rules the API enforces (*tool_result* immediately after *tool_use*; *tool_result* blocks first in content array)
+- Choose *tool_choice* values (*auto* / *any* / *tool* / *none*) for a given use case and handle parallel tool calls in a single fan-in user message
+- Apply error handling with *is_error* and instructive error content, and distinguish tool use from the separate structured outputs feature
+
+## Time and difficulty
+
+- **Read time:** about 13 minutes
+- **Practice time:** about 20 minutes (the try-it-yourself defines one tool, completes one round-trip, then a parallel two-tool call; plus flashcards for retrieval)
+- **Difficulty:** standard. The protocol is small (four steps, two rules); the complexity is the discipline of getting the ordering right and writing tool descriptions specific enough to produce correct calls. Opens Phase 2, so the lesson assumes lessons 1-3 are in your head.

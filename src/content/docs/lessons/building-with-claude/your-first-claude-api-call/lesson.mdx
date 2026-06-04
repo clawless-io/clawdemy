@@ -1,0 +1,193 @@
+---
+title: "Lesson: Your first Claude API call"
+description: "Lesson 1 of Track 22 (Building with Claude). The jump from chatting with Claude in a browser to building with Claude from your own code. A working first API call (one cURL, one Python), the shape of the response object, how multi-turn conversations actually work (the API is stateless, you send the full history), and the system parameter that separates instructions from messages. The smallest end-to-end pattern every later lesson in this track extends."
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+{/* COMPONENT PLACEHOLDER (Lead wires at promotion): <LessonFreshness lastReviewed={frontmatter.last_reviewed} /> */}
+
+{/* COMPONENT PLACEHOLDER (Lead wires at promotion): <SourceLecture url="https://platform.claude.com/docs/en/get-started" title="Claude API quickstart (anthropic.skilljar.com / platform.claude.com/docs)" instructor="Anthropic" /> */}
+
+## Why this lesson
+
+You have used Claude through a chat interface and watched it reason, refuse, write code, summarize a document, answer follow-up questions in context. The chat interface is one application of the model. Behind it is an HTTP endpoint, an API, that you can call from your own code. The moment you make that first call, the model becomes a component your application controls, not a product you visit.
+
+The gap between chatting with Claude and building with Claude is smaller than most developers expect. It is one HTTP POST. The lesson is making that call confidently and understanding the shape of what comes back, because every later lesson in this track is a more interesting variation on the same primitive.
+
+## The simplest possible call
+
+There is one endpoint that matters today, the Messages create endpoint at [api.anthropic.com/v1/messages](https://api.anthropic.com/v1/messages). You send a JSON request describing the model you want, how many tokens you will let it produce, and the conversation so far. You get a JSON response describing what the model said and why it stopped.
+
+Here is the smallest meaningful request, with cURL:
+
+```bash
+curl https://api.anthropic.com/v1/messages \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: $ANTHROPIC_API_KEY" \
+  -H "anthropic-version: 2023-06-01" \
+  -d '{
+    "model": "claude-opus-4-8",
+    "max_tokens": 1000,
+    "messages": [
+      {"role": "user", "content": "Hello, Claude."}
+    ]
+  }'
+```
+
+Three things are worth naming. The header *anthropic-version* pins the API contract date; you can ignore it for now beyond knowing it must be there. The header *x-api-key* carries your API key from the environment variable *ANTHROPIC_API_KEY*; the Anthropic Console at [platform.claude.com/settings/keys](https://platform.claude.com/settings/keys) is where you create one. The body has three fields: which model to call, how many tokens of output you will allow, and a list of messages representing the conversation.
+
+Now the same call in Python, using the official SDK:
+
+```python
+import anthropic
+
+client = anthropic.Anthropic()
+
+message = client.messages.create(
+    model="claude-opus-4-8",
+    max_tokens=1000,
+    messages=[
+        {"role": "user", "content": "Hello, Claude."}
+    ],
+)
+print(message.content)
+```
+
+The Python client reads *ANTHROPIC_API_KEY* from the environment automatically; you do not pass it in code. Install the Python SDK from pip, or the TypeScript SDK from npm:
+
+```bash
+pip install anthropic
+npm install @anthropic-ai/sdk
+```
+
+The TypeScript shape is parallel to Python: construct a new Anthropic client, then call *anthropic.messages.create*. Java, Go, C-sharp, PHP, and Ruby SDKs exist and follow the same shape; the lesson sticks to cURL and Python for concreteness.
+
+The model name in both examples is *claude-opus-4-8*, the current flagship Opus and among Anthropic's most capable current models. Lesson 3 of this track is the proper model-selection lesson; for now it is enough to know Opus, Sonnet, and Haiku are the three families, ordered loosely by capability and inversely by cost and latency. Use Opus for this lesson because the call you are making is small and the cost is rounding error.
+
+## What comes back
+
+The response is a JSON object with a predictable shape. Here is what the public quickstart's example call returns (the prompt there is longer than the *Hello, Claude* call above, but the response shape is the same regardless of prompt):
+
+```json
+{
+  "id": "msg_01HCDu5LRGeP2o7s2xGmxyx8",
+  "type": "message",
+  "role": "assistant",
+  "content": [
+    {
+      "type": "text",
+      "text": "Here are some effective search strategies..."
+    }
+  ],
+  "model": "claude-opus-4-8",
+  "stop_reason": "end_turn",
+  "usage": {
+    "input_tokens": 21,
+    "output_tokens": 305
+  }
+}
+```
+
+Five fields carry meaning your application will rely on.
+
+**id** is a unique identifier for this specific generation. Log it. When something goes wrong in production and you need to ask Anthropic Support what happened to one call, this is the handle.
+
+**content** is an array of blocks, not a single string. For a plain text response you get one block of type *text*. Later in the track, when the model uses a tool or returns an image description, the same array will hold multiple blocks of different types. Code that reads *response.content* expecting a string will break the first time the model returns two blocks; the right pattern is to iterate the array and handle each block by its type. The Python SDK shows the same shape: *message.content* is a list of *TextBlock* objects (and other block types later), not a flat string.
+
+**stop_reason** tells you why the model stopped generating. The four values you will see most are *end_turn* (the model finished its thought naturally and yielded the turn back to you, the normal case), *max_tokens* (you set a limit and it hit it before finishing, so the response is truncated), *stop_sequence* (you supplied a custom stop string and it was generated), and *tool_use* (the model is requesting a tool call; lesson 4 picks this up). Application code should check this on every response. If you see *max_tokens* you got a truncated answer; rerun with a higher cap or break the request into smaller turns.
+
+**usage** is *input_tokens* and *output_tokens*. This is the unit Anthropic bills on (different rates for input and output, different rates per model). Log it from day one. Lesson 12 covers production cost monitoring; the data you need begins here.
+
+**role** on the response is always *assistant*. The model speaks as the assistant; you spoke as the user. That role distinction is what makes multi-turn possible.
+
+## Multi-turn is stateless
+
+This is the conceptual jump that catches most developers new to LLM APIs. The Messages API does not remember your previous calls. It is stateless. Each call is independent of every other call. To have a conversation that the model can follow, you send the entire conversation history with every request.
+
+Here is a three-message conversation:
+
+```python
+message = client.messages.create(
+    model="claude-opus-4-8",
+    max_tokens=1024,
+    messages=[
+        {"role": "user", "content": "Hello, Claude"},
+        {"role": "assistant", "content": "Hello!"},
+        {"role": "user", "content": "Can you describe LLMs to me?"},
+    ],
+)
+```
+
+The messages list alternates *user* and *assistant*, ending with *user*. The model reads the whole list and generates the next assistant turn. The first two entries do not have to be a real prior call: you can synthesize an assistant message to seed context the model will then continue from. The API does not check, and does not care.
+
+This pattern has a practical consequence. Your application is the one that has to maintain conversation state. Some applications keep state in memory and rebuild the list per call. Some serialize it to a database between turns. Some compress old turns into summaries to fit longer conversations into the context window. Whatever you choose, the API itself holds nothing for you between calls. That is a feature, not a limitation: it makes the API simple, debuggable, and trivially horizontal-scaled (any worker can handle any request).
+
+The second consequence is cost. Every turn pays for the full prior history as input tokens. A long conversation gets expensive on input even if the latest turn is short. Lesson 7 of this track covers prompt caching, which directly addresses this; for now, know that the cost shape is "you pay for the whole history on every turn."
+
+## The system parameter
+
+Instructions to the model (a persona, a constraint, a format requirement) belong in the *system* parameter, separate from the messages list. The messages list is the conversation; the system parameter is the standing instruction the model carries into every turn.
+
+```python
+message = client.messages.create(
+    model="claude-opus-4-8",
+    max_tokens=1024,
+    system="You are a terse code reviewer. Return only the changes you would make, in unified diff format. No prose.",
+    messages=[
+        {"role": "user", "content": "<diff omitted for the lesson>"},
+    ],
+)
+```
+
+The system text is not a message. It does not get a role. It is not part of the alternating user-assistant sequence. It is a separate channel that tells the model how to behave for the whole call. Conceptually it sits above the conversation, not in it.
+
+Common confusion: developers used to other LLM APIs sometimes put the system instruction as the first message with role *system* or push the instruction into the first user message. With Claude, the dedicated *system* parameter exists for exactly this and is the right home for instructions. Lesson 2 of this track covers the production patterns around it (long system prompts, when to split system from per-turn context, when to push instruction into a tool description instead).
+
+## Common pitfalls
+
+A handful of failures will happen on the way to your first working call. Name them so you recognize them.
+
+**The API key is not set.** The client reads *ANTHROPIC_API_KEY* from the environment; if it is not there, the call fails immediately with an authentication error. Set the variable for the shell session with an export statement, or persist it in your shell profile (.zshrc, .bashrc, .config/fish/config.fish):
+
+```bash
+export ANTHROPIC_API_KEY='your-key-here'
+```
+
+In production, treat the key like any other secret: do not commit it, do not log it, rotate it on suspected exposure. The Console has a button to revoke a leaked key and issue a new one.
+
+**The model name is wrong.** Anthropic publishes a precise model identifier (for example *claude-opus-4-8*, *claude-sonnet-4-6*, *claude-haiku-4-5*); colloquial names like "Claude" or "Opus" do not work. The current canonical names are on the Models overview at [platform.claude.com/docs/en/about-claude/models/overview](https://platform.claude.com/docs/en/about-claude/models/overview). Lesson 3 covers selection and version conventions.
+
+**max_tokens is too small.** *max_tokens* is the hard ceiling on the model's output for one call. Too small and you get a truncated response with *stop_reason* equal to *max_tokens*. Too generous costs more only when the model uses more (you pay for actual output, not the cap). A reasonable default for short answers is 1024; for long-form output, push to 4000 or higher.
+
+**Reading content as a string.** The *content* field is an array of blocks. Code that does *response.content[0]* (or in Python, *message.content[0].text*) works for a plain text response but breaks the first time the model returns two blocks. Iterate the array.
+
+**Treating the API as stateful.** Sending only the latest user message and expecting the model to remember the earlier conversation is the most common mistake. The model can only see what you send in this call. If your code rebuilds the messages list each turn and forgets to include the prior turns, you get a fresh model with no memory of the conversation it just had.
+
+## What you do not need yet
+
+This lesson stays on the smallest possible primitive. Several things you will hear about are deliberately not in this lesson; the track gets to each one in turn.
+
+- **Streaming.** Receiving the response token-by-token as the model generates it (rather than waiting for the whole response). Lesson 2.
+- **Tools.** Letting the model call functions you define (read a file, query a database, hit a third-party API). Lessons 4 and 5.
+- **Model Context Protocol.** A protocol that lets one tool definition work across many model providers. Lesson 6.
+- **Prompt caching.** A discount on tokens you reuse across calls (long system prompts, stable context blocks). Lesson 7.
+- **Agents and the agent loop.** Letting the model decide its own next step in a loop, not just respond to one turn. Lesson 8 onward.
+
+Knowing the names and that the track reaches them lets you suppress the impulse to learn everything at once. Get the simplest call working first.
+
+## Where this fits
+
+Lesson 1 is the smallest unit. Lesson 2 is "the Messages API in production" (streaming, error handling, retries, batches). Lesson 3 is the model-selection conversation (Opus vs Sonnet vs Haiku, extended thinking, the effort parameter). Together they are the foundations phase, what you need before any later lesson is worth reading. Phase 2 picks up the augmentation patterns (tools, MCP, caching, context management) that extend what one call can do. Phase 3 is the agent patterns. Phase 4 is what it takes to ship.
+
+## What you should remember
+
+- One endpoint, the Messages create endpoint at [api.anthropic.com/v1/messages](https://api.anthropic.com/v1/messages), with one canonical request shape: *model*, *max-tokens*, *messages*. Optional *system* for standing instructions.
+- The response is structured. **id** for logging, **content** as an array of blocks (iterate, do not index), **stop_reason** as control flow (check on every response), **usage** for cost.
+- The Messages API is **stateless**. To have a conversation, your code sends the full message history on every call. The API remembers nothing between calls.
+- The **system parameter** is where instructions live, separate from the messages list. Use it for persona, format, constraint; not as the first message.
+- The current canonical model names are *claude-opus-4-8*, *claude-sonnet-4-6*, *claude-haiku-4-5*. Use the precise identifier the docs publish, not a colloquial name.
+
+You now have the smallest end-to-end pattern. Every other lesson in Track 22 is a more interesting variation on the same primitive.

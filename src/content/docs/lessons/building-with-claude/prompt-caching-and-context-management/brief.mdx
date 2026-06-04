@@ -1,0 +1,76 @@
+---
+title: "Prompt caching and context management"
+description: "Lesson 7 of Track 22 (Building with Claude). Phase 2 closer. The cost-and-staleness levers for a tool-heavy session. Prompt caching (cache_control on the system prompt, tool definitions across L4 + L5 + L6, and stable message content; 5-minute and 1-hour TTLs; 1.25x / 2.0x write multipliers and the 0.1x cache-hit price; minimum 4,096 token floor on Opus 4.7 and Haiku 4.5; the four-breakpoint maximum). The context-window picture (1M tokens on current Opus and Sonnet 4.x, 200K elsewhere; context rot as a real ceiling; the model_context_window_exceeded stop reason). Server-side compaction (compact_20260112; default trigger 150K input tokens; the recommended default for long-running sessions; cache the system prompt separately so it survives). Context editing (clear_tool_uses_20250919 for tool-result clearing in agentic workflows; clear_thinking_20251015 for extended-thinking sessions). The unifying frame: cache the stable parts, compact the long parts, clear the heavy parts, reach for each deliberately."
+track: building-with-claude
+order: 7
+phase: augmentation-patterns
+phase_order: 4
+difficulty: standard
+estimated_read_minutes: 15
+estimated_practice_minutes: 15
+prerequisites:
+  - "lessons/building-with-claude/lesson-06-model-context-protocol"
+learning_outcomes:
+  - Place cache_control breakpoints correctly across the system prompt, tool definitions (L4 custom + L5 server / Anthropic-schema + L6 mcp_toolset), and stable message content, respecting the four-breakpoint maximum and the tools-then-system-then-messages order
+  - Use the pricing multipliers (1.25x for the 5-minute cache write, 2.0x for the 1-hour write, 0.1x for cache hits) to choose the TTL that matches your session shape and read whether your prefix is actually hitting via the cache_creation_input_tokens / cache_read_input_tokens / input_tokens identity
+  - Describe the context-window picture (1M on current Opus and Sonnet 4.x, 200K on Sonnet 4.5 and older) and the meaning of "context rot," and recognize the model_context_window_exceeded stop reason on Claude 4.5+ models
+  - Enable server-side compaction (beta compact-2026-01-12 + compact_20260112 edit; default 150K trigger; pause_after_compaction for selective preservation) and place a cache_control breakpoint at the end of the system prompt so the system survives compaction
+  - Apply the two context-editing strategies appropriately (clear_tool_uses_20250919 for agentic workflows with heavy tool use, using clear_at_least so cache invalidation pays back; clear_thinking_20251015 for extended-thinking sessions, tuning the keep parameter against the per-model defaults)
+authors:
+  - clawdemy
+published_at: 2026-06-03
+last_reviewed: 2026-06-03
+status: published
+artifact: brief
+sidebar:
+  order: 1
+  label: Brief
+tableOfContents: false
+---
+
+import LessonFreshness from "../../../../../components/LessonFreshness.astro";
+import SourceLecture from "../../../../../components/SourceLecture.astro";
+
+<LessonFreshness lastReviewed={frontmatter.last_reviewed} />
+
+<SourceLecture url="https://platform.claude.com/docs/en/build-with-claude/prompt-caching" title="Anthropic public Claude docs (Prompt caching + Context windows + Compaction + Context editing)" instructor="Anthropic" />
+
+## What you'll learn
+
+Phase 2 closes here. After lessons 4 (custom client tools), 5 (server tools + Anthropic-schema clients + *tool_search*), and 6 (MCP connector), a real session has a system prompt, tool definitions across three layers, and accumulating *tool_use* / *tool_result* / *server_tool_use* / *mcp_tool_use* round-trips, all counted as input tokens on every subsequent turn. Two problems compound: **cost** (the stable prefix gets billed once per turn rather than once) and **staleness** (the context window is finite, and context rot degrades accuracy well before the ceiling). The single capability this lesson builds: **cache long system prompts and stable context blocks; reason about what compaction and context editing do to a long-running session; trade cost against staleness deliberately**.
+
+Concretely, you will know the verbatim docs framing for caching (*Prompt caching optimizes your API usage by allowing resuming from specific prefixes in your prompts*), the *cache_control* mechanism (the field's *type* is *ephemeral* with an optional *ttl* of *1h*; attached to the *system* array, the *tools* array including *mcp_toolset* entries, and *messages* content blocks; placement order *tools* → *system* → *messages*; up to four explicit breakpoints; 4,096 / 1,024 token minimums depending on model; exact-match invalidation; workspace-isolated on Claude API + AWS + Foundry), the published pricing multipliers (1.25x for the 5-minute cache write, 2.0x for the 1-hour write, 0.1x for cache hits and refreshes), the usage-field identity that tells you whether your prefix is actually hitting (*total_input_tokens = cache_read_input_tokens + cache_creation_input_tokens + input_tokens*), the context-window picture (1M tokens on Opus 4.8 / Mythos / 4.7 / 4.6 / Sonnet 4.6; 200K on Sonnet 4.5 and older; context rot quoted verbatim; context awareness; the *model_context_window_exceeded* stop reason on Claude 4.5+ models), server-side compaction (beta *compact-2026-01-12*, edit *compact_20260112*, default trigger 150K input tokens, *pause_after_compaction* for selective preservation, the cache-the-system-prompt-end recommendation so the system survives, the *usage.iterations* billing breakdown, the same-model-summarization caveat), and context editing (*context-management-2025-06-27* beta; *clear_tool_uses_20250919* for tool result clearing with *clear_at_least* to make cache invalidation pay back; *clear_thinking_20251015* for extended-thinking sessions with the *keep* parameter; the asymmetry where tool-result clearing invalidates cache and thinking-block clearing preserves it when blocks are kept).
+
+Every substantive claim verifies against the public Anthropic Claude documentation at [platform.claude.com/docs/en/build-with-claude/](https://platform.claude.com/docs/en/build-with-claude/) (Prompt caching, Context windows, Compaction, Context editing pages).
+
+## Where this fits
+
+This is lesson 7 of 12 of Track 22, the **fourth lesson of Phase 2** (augmentation patterns) and the closer of that phase. Phase 2 introduced three tool layers (L4 custom, L5 Anthropic-provided, L6 MCP); this lesson keeps the resulting tool-heavy stack affordable and focused over long sessions. Phase 3 opens at lesson 8 by turning the per-step capability set into a multi-turn agent loop; everything cached and pruned here is what keeps that loop affordable across many iterations.
+
+The cross-track companions are **Track 20 (AI Agents and Tool Use)** for the full context-engineering depth (including the Anthropic effective-context-engineering essay this lesson cites), and **Track 21 (LLM Ops and Production)** for the production cost-and-latency monitoring discipline the cache-hit-ratio telemetry feeds into.
+
+## Before you start
+
+**Prerequisites:** lessons 1-6 of this track. Lessons 4-5-6 are load-bearing for the tool-stack examples (custom tools, server tools, *mcp_toolset* entries all attach *cache_control* the same way). Lesson 3 (model selection) supplies the per-model base input prices that the cache multipliers stack onto.
+
+**Soft recommended:** an Anthropic Console account at `https://platform.claude.com/` and an API key (lesson 1). For the try-it-yourself, a system prompt of at least 4,096 tokens (or 1,024 on Opus 4.8 / Sonnet 4.6 / Sonnet 4.5) so the cache actually engages. Cost is a few cents.
+
+## About the math
+
+A small amount, all arithmetic, all from one set of published multipliers. The cache pricing math is three multipliers off the model's base input-token price (1.25x for 5-minute write, 2.0x for 1-hour write, 0.1x for hits and refreshes), one identity for total input tokens (*total = cache_read + cache_creation + input*), and a break-even rule (5-minute write pays back at one hit; 1-hour pays back at roughly two to four). The context-window numbers are straight from the model-comparison table. No derivations.
+
+## By the end, you'll be able to
+
+The single capability this lesson builds: **cache long system prompts and stable context blocks; reason about what compaction and context editing do to a long-running session; trade cost against staleness deliberately** (per the Phase 0 lesson 7 capability mapping). Concretely, you will be able to:
+
+- Place *cache_control* breakpoints correctly across the system prompt, tool definitions (L4 custom + L5 server / Anthropic-schema + L6 *mcp_toolset*), and stable message content, respecting the four-breakpoint maximum and the *tools* → *system* → *messages* order
+- Use the pricing multipliers (1.25x for the 5-minute cache write, 2.0x for the 1-hour write, 0.1x for cache hits) to choose the TTL that matches your session shape and read whether your prefix is actually hitting via the *cache_creation_input_tokens* / *cache_read_input_tokens* / *input_tokens* identity
+- Describe the context-window picture (1M on current Opus and Sonnet 4.x, 200K on Sonnet 4.5 and older) and the meaning of "context rot," and recognize the *model_context_window_exceeded* stop reason on Claude 4.5+ models
+- Enable server-side compaction (beta *compact-2026-01-12* + *compact_20260112* edit; default 150K trigger; *pause_after_compaction* for selective preservation) and place a *cache_control* breakpoint at the end of the system prompt so the system survives compaction
+- Apply the two context-editing strategies appropriately (*clear_tool_uses_20250919* for agentic workflows with heavy tool use, using *clear_at_least* so cache invalidation pays back; *clear_thinking_20251015* for extended-thinking sessions, tuning the *keep* parameter against the per-model defaults)
+
+## Time and difficulty
+
+- **Read time:** about 15 minutes
+- **Practice time:** about 15 minutes (the try-it-yourself caches a long system prompt, compares 5-minute vs 1-hour TTL on the write turn, and adds *cache_control* to a tool definition, plus flashcards for retrieval)
+- **Difficulty:** standard. The mechanism (one *cache_control* field, three placement layers) is small; the discipline is matching the TTL and the breakpoint placement to the session shape, and recognizing when compaction or context editing is appropriate (and which one). The math is arithmetic on three published multipliers.

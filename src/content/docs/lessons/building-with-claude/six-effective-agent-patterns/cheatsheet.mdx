@@ -1,0 +1,169 @@
+---
+title: "Cheatsheet: Six effective-agent patterns"
+description: One-page reference. The taxonomy, per-pattern verbatim definitions and when-to-use, the parallelization sub-types, the orchestrator-vs-parallelization distinction, the four-question decision tree, and the cross-pattern principle.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## The taxonomy
+
+| # | Pattern | Type | Who decides the path |
+| --- | --- | --- | --- |
+| 1 | **Prompt chaining** | Workflow | Your code (fixed sequence) |
+| 2 | **Routing** | Workflow | Classifier picks branch; your code runs it |
+| 3 | **Parallelization** (sectioning + voting) | Workflow | Your code (fan out + aggregate) |
+| 4 | **Orchestrator-workers** | Workflow | Central LLM (delegates dynamically) |
+| 5 | **Evaluator-optimizer** | Workflow | Two LLMs (generate + critique loop) |
+| 6 | **Autonomous agent** | Agent | The agent (plans + operates independently) |
+
+## Pattern 1: Prompt chaining
+
+**Verbatim:** *Decomposes a task into a sequence of steps, where each LLM call processes the output of the previous one.*
+
+**Trade-off:** *Trade off latency for higher accuracy, by making each LLM call an easier task.*
+
+**Use when:** subtasks knowable in advance. **Add:** programmatic gates between steps.
+
+**Examples:** marketing copy → translation; outline → check → write document.
+
+## Pattern 2: Routing
+
+**Verbatim:** *Classifies an input and directs it to a specialized followup task.*
+
+**Benefit:** *Separation of concerns, and building more specialized prompts.*
+
+**Use when:** distinct categories + classification handles cleanly.
+
+**Examples:** customer-service triage; **easy queries to Haiku 4.5, hard ones to Sonnet 4.5** (cost optimization).
+
+## Pattern 3: Parallelization
+
+**Verbatim:** *LLMs can sometimes work simultaneously on a task and have their outputs aggregated programmatically.*
+
+| Sub-type | Definition | Example |
+| --- | --- | --- |
+| **Sectioning** | *Breaking a task into independent subtasks run in parallel* | Content moderation (one screens, one responds) |
+| **Voting** | *Running the same task multiple times to get diverse outputs* | Multiple prompts review code for vulnerabilities |
+
+**Principle:** *For complex tasks with multiple considerations, LLMs generally perform better when each consideration is handled by a separate LLM call.*
+
+**Operational tip:** cache the shared prefix per lesson 7 so fan-out does not re-pay it N times.
+
+## Pattern 4: Orchestrator-workers
+
+**Verbatim:** *A central LLM dynamically breaks down tasks, delegates them to worker LLMs, and synthesizes their results.*
+
+**Key distinction from parallelization:** *Subtasks aren't pre-defined, but determined by the orchestrator based on the specific input.*
+
+**Use when:** complex tasks where you can't predict the subtasks.
+
+**Examples:** multi-file code changes; multi-source research synthesis.
+
+## Pattern 5: Evaluator-optimizer
+
+**Verbatim:** *One LLM call generates a response while another provides evaluation and feedback in a loop.*
+
+**Two success indicators to check BEFORE adopting:**
+1. *LLM responses can be demonstrably improved when a human articulates their feedback*
+2. *The LLM can provide such feedback*
+
+**Analogy:** *Iterative writing process a human writer might go through.*
+
+**Cap:** three to four rounds. Subjective criteria can produce noisy oscillators.
+
+**Examples:** literary translation; complex multi-round search.
+
+## Pattern 6: Autonomous agent
+
+**Verbatim:** *Agents begin their work with either a command from, or interactive discussion with, the human user. Once the task is clear, agents plan and operate independently.*
+
+**Use when:** *Open-ended problems where it's difficult or impossible to predict the required number of steps, and where you can't hardcode a fixed path.*
+
+**Three explicit warnings:**
+- *Higher costs and compounding errors*
+- *Extensive testing in sandboxed environments, along with the appropriate guardrails*
+- *Design toolsets and their documentation clearly and thoughtfully. You must have some level of trust in its decision-making.*
+
+**Examples:** SWE-bench coding agent; computer-use reference agent; customer-support agent.
+
+## The four-question decision tree
+
+```
+1. Steps knowable in advance and identical for every input?
+       YES → prompt chaining (1)
+        NO ↓
+
+2. Distinct categories needing different prompts/tools?
+       YES → routing (2)
+        NO ↓
+
+3. Splits into independent pieces / repeats for confidence?
+       YES → parallelization (3) [sectioning OR voting]
+        NO ↓
+
+4. Subtasks needed, shape depends on input?
+       YES → orchestrator-workers (4)
+        NO ↓
+
+5. Iterative refinement against clear criteria measurably helps?
+       YES → evaluator-optimizer (5)
+        NO ↓
+
+6. Open-ended, no fixed path, model deciding is the point?
+       YES → autonomous agent (6)
+```
+
+## Cross-pattern principle
+
+**Verbatim (the post's summary thesis):** *Success in the LLM space isn't about building the most sophisticated system. It's about building the right system for your needs.*
+
+**Three implications:**
+- **Start simpler.** Single augmented LLM > clumsy workflow > sloppy agent.
+- **Make ground truth available.** Each step gets clear environmental feedback (test passed, search returned, schema validated).
+- **Cap and observe.** Hard *max_iterations* + *usage* telemetry on every pattern.
+
+## Composition patterns
+
+Most production stacks combine 2-3:
+
+- **Route → chain.** Customer-service router dispatches a query to a knowledge-base branch that itself is a retrieve → answer → cite chain.
+- **Orchestrator → workers (where workers are chains).** Multi-file refactor orchestrator dispatches per-file workers; each worker is a read → modify → test chain.
+- **Workflow → vote at end.** A code change goes through a routed-then-orchestrated edit, then a voting safety review aggregates verdicts from N reviewers before merging.
+
+No single pattern covers a whole product. Compose.
+
+## Operational disciplines that carry over from L8
+
+| Discipline | Applies to |
+| --- | --- |
+| Hard *max_iterations* cap | Every pattern (especially 4-6) |
+| Tool inventory is the surface area | Every pattern that gives the model tools |
+| L7 levers (cache prefix, compact, tool-result clearing) | Every pattern; non-optional for 4-6 |
+| Explicit *stop_reason* dispatch | Every pattern |
+
+## Common pitfalls
+
+| Failure | Recognize by | Fix |
+| --- | --- | --- |
+| Reaching for pattern 6 when 1-3 fits | Costs higher than expected; agent oscillates | Walk the decision tree; pick simplest fit |
+| Routing without a fallback | Misroutes drop on the floor | Add a default branch + classifier-confidence threshold |
+| Voting without enough diversity | All N calls agree because temperature is 0 | Raise temperature; vary the prompt slightly per voter |
+| Orchestrator delegates to too-narrow workers | Orchestrator does the real work; workers are thin | Move logic into workers; orchestrator is router + synthesizer |
+| Evaluator-optimizer on subjective criteria | Loop oscillates without convergence | Use clear-criteria tasks; cap rounds at 3-4; surface partial |
+| Autonomous agent with no ground truth | Compounding errors; no way to detect them | Give the agent tools that return verifiable signals (test results, schema validation, sandbox exit codes) |
+
+## What this lesson does NOT cover (and where to find it)
+
+| Topic | Lands at |
+| --- | --- |
+| Agent Skills + Claude Code (durable instructions + a worked agent harness) | Lesson 10 |
+| Subagents + Claude Managed Agents (focused inner loops for patterns 4 + 6) | Lesson 11 |
+| Production deployment of any of these patterns | Lesson 12 |
+
+## Source
+
+- Anthropic, *Building Effective AI Agents* (Erik S. and Barry Zhang, 2024-12-19): https://www.anthropic.com/engineering/building-effective-agents
+- See references for the full anchor list.

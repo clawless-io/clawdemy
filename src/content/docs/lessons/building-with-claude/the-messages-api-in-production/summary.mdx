@@ -1,0 +1,25 @@
+---
+title: "Summary: The Messages API in production"
+description: The 5-minute scan version. Streaming, the error-code map, retries, batches, and the request_id every call must log.
+sidebar:
+  order: 4
+  label: Summary
+artifact: summary
+---
+
+Lesson 1's one-shot script meets production. Five patterns make code you can put behind real users: **streaming** (for interactive UIs and long generations; Python *client.messages.stream(...)* as a context manager, TypeScript *.stream(...).on("text", ...)* as an event-emitter, both with *get_final_message()* / *finalMessage()* if you want the full Message object), **stop_reason dispatch** (the values you handle on a non-tool-using call are *end_turn* / *max_tokens* / *stop_sequence* / *tool_use* / *refusal* for safety declines with *stop_details.category* (surface, do not blind-retry), with forward-refs to lesson 5's *pause_turn* and lesson 7's *model_context_window_exceeded* + *"compaction"*; lesson 8 unifies the full dispatch table), **error handling** (a small map of HTTP status codes; 4xx is your bug, 5xx is the platform's bug, 429 rate limits and 529 overloads are temporary, JSON body shape is *type* + *error.type* + *error.message* + *request_id*), **retries** (the official SDKs do automatic exponential-backoff retries on the canonical retryable set: connection errors, 408, 409, 429, and any 5xx status code, about two retries by default; what you still own is whether your specific request is **safe** to retry, fix idempotency on the tool side, not on the API call), and the **Message Batches API** (50 percent cheaper, most batches finish in under one hour, 256 MB per-batch limit; right for bulk non-interactive work like evaluations and content moderation, wrong for anything a user is waiting on). The one small habit that pays back outsized: **log the *request_id* from every response** (the SDKs expose *response._request_id*; without it, debugging at Anthropic Support's level is impossible). This is the foundation Phase 2 (lessons 4 to 7) extends; nothing about tools, MCP, or caching matters if the production-side floor is not there.
+
+## Core ideas
+
+- **Streaming is for interactive UIs and long generations.** Python: *client.messages.stream(...)* as a context manager, iterate *stream.text_stream*. TypeScript: *.stream(...).on("text", ...)*. Use *.get_final_message()* (Python) or *.finalMessage()* (TypeScript) if you want streaming under the hood but the full Message object.
+- **The error map is small.** 400 (your bug, do not retry), 401 (your bug), 402 (billing), 403 (permission), 413 (request too large; 32 MB Messages, 256 MB Batches, 500 MB Files), 429 (rate limit; retry with backoff), 500 (api_error; retry), 504 (timeout; switch to streaming or batches), 529 (overloaded; retry).
+- **Response body for errors:** JSON with *type*, *error.type*, *error.message*, *request_id*. Three fields to log: type, message, request_id.
+- **SDK retries are automatic on connection errors, 408, 409, 429, and any 5xx status code** with exponential backoff and jitter, about two retries by default. What you still own: idempotency. Fix on the tool side (deduplication keys, unique transaction ids), not the API call.
+- **Mid-stream errors are real.** A streaming call can return 200 OK and then fail mid-stream. Wrap the streaming iterator (Python *for*) or *.on("error", ...)* (TypeScript) the same way you wrap *await*; otherwise mid-stream failures get logged as "succeeded."
+- **Batches: 50 percent off, most finish in under one hour, 256 MB per-batch limit.** Use for evaluations, content moderation, data analysis, nightly summarization. Wrong for user-facing work; that is streaming.
+- **request_id is the production-debug habit.** Log it on every response (SDKs expose *response._request_id*). Pair with timestamp, model, stop_reason, input_tokens, output_tokens, latency.
+- **Streaming, errors, retries, batches, *request_id*** are the production floor. Phase 2 augmentation patterns (tools, MCP, caching) sit on top.
+
+## What changes for you
+
+Before this lesson, you had a script that calls the API and prints. After this lesson, you have the four patterns code in production has to handle: a UI that streams instead of freezes, an error handler that distinguishes "your bug" from "the platform's temporary bug" from "the platform's permanent bug," retries that the SDK already does for you so you do not write a backoff loop, and a batches path for any non-interactive workload at any volume (the cheapest dial in the API). The single highest-leverage change this week: add *request_id* logging to every API call you currently make, paired with input and output token counts. That data is what lesson 12 turns into cost-per-feature dashboards; without it, every later production conversation is a guess. Tools, MCP, caching, agents (Phase 2 and 3) all sit on top of these production-side fundamentals; lesson 3 finishes Phase 1 by going up the model-selection layer.

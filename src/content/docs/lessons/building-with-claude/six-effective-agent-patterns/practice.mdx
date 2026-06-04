@@ -1,0 +1,236 @@
+---
+title: "Practice: Six effective-agent patterns"
+description: Self-check on the taxonomy (five workflows plus one agent), per-pattern verbatim definitions and when-to-use, the parallelization sub-types, the orchestrator-vs-parallelization distinction, the evaluator-optimizer success indicators, and the cross-pattern principle, plus a hands-on try-it and flashcards.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Seven short questions. Answer each before opening the collapsible.
+
+**1. State the taxonomy (the six patterns), and which are workflows vs which is an agent.**
+
+<details>
+<summary>Show answer</summary>
+
+**Five workflows plus one agent**, in order of increasing model autonomy:
+
+| # | Pattern | Type | Who decides the path |
+| --- | --- | --- | --- |
+| 1 | **Prompt chaining** | Workflow | Your code (fixed sequence) |
+| 2 | **Routing** | Workflow | Classifier picks the branch; your code runs it |
+| 3 | **Parallelization** (sectioning + voting) | Workflow | Your code (fan out + aggregate) |
+| 4 | **Orchestrator-workers** | Workflow | A central LLM (delegates dynamically) |
+| 5 | **Evaluator-optimizer** | Workflow | Two LLMs in generate-and-critique loop |
+| 6 | **Autonomous agent** | Agent | The agent (plans + operates independently) |
+
+Patterns 1-5 are workflows by lesson 8's definition (predefined code paths). Pattern 6 is an agent (the model directs its own process).
+
+</details>
+
+**2. Prompt chaining: definition verbatim, the trade-off, when to use, and the design feature that keeps it on track.**
+
+<details>
+<summary>Show answer</summary>
+
+**Verbatim:** *Prompt chaining decomposes a task into a sequence of steps, where each LLM call processes the output of the previous one*.
+
+**Trade-off (verbatim):** *The main goal is to trade off latency for higher accuracy, by making each LLM call an easier task*. Two or three sequential calls cost more wall-clock but each is an easier task and the final answer is cleaner.
+
+**When to use (verbatim):** *Ideal for situations where the task can be easily and cleanly decomposed into fixed subtasks*.
+
+**Design feature:** **programmatic gates on intermediate steps**, so a bad intermediate result halts the chain rather than propagating downstream. Use *tool_choice* set to *none* on intermediate steps to guarantee text output, then re-enable tools on the final step if needed.
+
+**Named examples:** generating marketing copy then translating it; writing a document outline, checking it meets criteria, then writing the document based on that outline.
+
+</details>
+
+**3. Routing: definition verbatim, when to use, the benefit, and the cost-optimization example worth remembering.**
+
+<details>
+<summary>Show answer</summary>
+
+**Verbatim:** *Routing classifies an input and directs it to a specialized followup task*.
+
+**When to use (verbatim):** *Complex tasks where there are distinct categories that are better handled separately, and where classification can be handled accurately*.
+
+**Benefit (verbatim):** *Separation of concerns, and building more specialized prompts*.
+
+**Cost-optimization example worth remembering:** routing easy questions to a smaller model (Haiku 4.5) and difficult ones to a larger model (Sonnet 4.5). This is one of the cleanest places in this lesson to apply lesson 3's effort-and-model dial deliberately: cheap and fast for the simple branch, larger and slower for the hard branch.
+
+**Other named example:** directing customer service queries (general questions, refunds, technical support) into separate downstream processes.
+
+</details>
+
+**4. Parallelization: two sub-types with verbatim definitions, the post's principle, and the cross-section example.**
+
+<details>
+<summary>Show answer</summary>
+
+**Top-line verbatim:** *LLMs can sometimes work simultaneously on a task and have their outputs aggregated programmatically*.
+
+**Two sub-types:**
+
+- **Sectioning (verbatim):** *Breaking a task into independent subtasks run in parallel*. Different slice per subtask. Named example: content moderation where one model screens the query while another generates the response.
+- **Voting (verbatim):** *Running the same task multiple times to get diverse outputs*. Same prompt N times, aggregate the answers (majority, unanimous, threshold). Named example: multiple prompts review code for vulnerabilities.
+
+**The post's principle (verbatim):** *For complex tasks with multiple considerations, LLMs generally perform better when each consideration is handled by a separate LLM call*. One model thinking about one thing tends to beat one model thinking about ten.
+
+**When to use (verbatim):** *Effective when the divided subtasks can be parallelized for speed, or when multiple perspectives or attempts are needed for higher confidence results*.
+
+**Operational tip:** cache the shared prefix (system + tools) per lesson 7 so the parallel fan-out does not re-pay the prefix N times.
+
+</details>
+
+**5. Orchestrator-workers vs parallelization: state the key distinction and name two example use cases for orchestrator-workers.**
+
+<details>
+<summary>Show answer</summary>
+
+**Orchestrator-workers verbatim:** *A central LLM dynamically breaks down tasks, delegates them to worker LLMs, and synthesizes their results*.
+
+**Key distinction from parallelization (verbatim):** *The key difference from parallelization is its flexibility ... subtasks aren't pre-defined, but determined by the orchestrator based on the specific input*.
+
+In parallelization, you know the subtasks at code-write time (split content for N reviewers; run the safety check K times). In orchestrator-workers, the orchestrator decides at runtime what subtasks to spawn based on the actual input. Both fan out; only orchestrator-workers fans out **dynamically**.
+
+**When to use (verbatim):** *Well-suited for complex tasks where you can't predict the subtasks needed*.
+
+**Named examples:**
+- Coding products making complex changes across multiple files (the orchestrator decides which files to touch and dispatches per-file workers).
+- Search tasks gathering and analyzing information from multiple sources (the orchestrator decides which sources to query).
+
+</details>
+
+**6. Evaluator-optimizer: the two success indicators, the analogy, and the cap that keeps it from oscillating.**
+
+<details>
+<summary>Show answer</summary>
+
+**Verbatim:** *One LLM call generates a response while another provides evaluation and feedback in a loop*.
+
+**Two success indicators (verbatim) you check BEFORE adopting this pattern:**
+- *LLM responses can be demonstrably improved when a human articulates their feedback*.
+- *The LLM can provide such feedback*.
+
+If feedback does not move the quality needle, OR the evaluator cannot reliably critique, this pattern is overkill and will spend tokens without improving output.
+
+**Analogy (verbatim):** *This is analogous to the iterative writing process a human writer might go through when producing a polished document*.
+
+**Cap that prevents oscillation:** three or four rounds of generate-evaluate is typically the maximum useful depth. After that, either the evaluator accepts or you accept the current generation and surface it; the pattern can produce a noisy oscillator on subjective criteria. The L8 *max_iterations* discipline applies directly: hard cap, then surface partial.
+
+**When to use (verbatim):** *Particularly effective when we have clear evaluation criteria, and when iterative refinement provides measurable value*.
+
+</details>
+
+**7. Autonomous agent: definition verbatim, when to use, the post's three explicit warnings, and the cross-pattern principle that closes the post.**
+
+<details>
+<summary>Show answer</summary>
+
+**Verbatim:** *Agents begin their work with either a command from, or interactive discussion with, the human user. Once the task is clear, agents plan and operate independently*.
+
+**When to use (verbatim):** *Open-ended problems where it's difficult or impossible to predict the required number of steps, and where you can't hardcode a fixed path*. If you can hardcode a path, one of patterns 1-5 is a better fit.
+
+**Three explicit warnings:**
+- ***Higher costs and compounding errors* are real.** Autonomy multiplies cost and error.
+- ***Extensive testing in sandboxed environments, along with the appropriate guardrails* is required**, not optional.
+- ***Design toolsets and their documentation clearly and thoughtfully. You must have some level of trust in its decision-making*.** The tool inventory is the surface area.
+
+**Named examples:** Anthropic's coding agent solving SWE-bench tasks; Anthropic's *computer use* reference implementation; customer support agents with conversation flows + tool integration.
+
+**Cross-pattern principle (verbatim, the post's summary thesis):** *Success in the LLM space isn't about building the most sophisticated system. It's about building the right system for your needs*.
+
+</details>
+
+## Try it yourself: pick the right pattern for three tasks
+
+About 15 minutes. No SDK code in this exercise; the work is reasoning and dispatch.
+
+**Setup:** for each of the three tasks below, walk the four-question decision tree from the lesson and identify which of the six patterns is the simplest fit. Justify your pick in one sentence, then sketch the minimal implementation on the L8 loop substrate (one call? two? a router + branches? a fan-out + aggregate? a generate-and-critique?). For at least one task, force yourself to pick the simplest pattern that works rather than the most sophisticated one.
+
+**Task A:** Translate a marketing landing page from English into Japanese, German, and Brazilian Portuguese; verify each translation does not lose the call-to-action's emotional weight; deliver three localized pages.
+
+**Task B:** A new inbound customer message arrives. It might be a billing question, a technical bug report, a feature request, or general feedback. Route it to the right team and produce a structured ticket.
+
+**Task C:** Given a vague research question ("how did the company's revenue mix shift from 2023 to 2026, and what drove the shift?"), gather and analyze information from internal docs, public filings, and competitor benchmarks, then produce a written brief.
+
+<details>
+<summary>What you'll get (example answers, not the canonical ones)</summary>
+
+**Task A:** **Parallelization, sectioning sub-type** with a final per-language **chain** of translate-then-quality-check. The three languages are independent subtasks (sectioning); within each, the work decomposes into a fixed two-step chain (translate, then check that the call-to-action's emotional weight is preserved). Steps are knowable, subtasks are independent: sectioning is the fit. Implementation: three concurrent calls (one per language), each is a two-call chain. Cache the source page in the shared prefix.
+
+**Task B:** **Routing**. Distinct categories (billing / bug / feature / feedback), classifier can handle the call, each branch wants a specialized prompt. Implementation: one short classification call (*tool_choice* set to *none*; structured output), then dispatch to one of four specialized loops. The bug-report branch may itself use a small chain (extract repro steps, then file the ticket). The cost-optimization angle from the lesson applies: route classification to a smaller model.
+
+**Task C:** **Orchestrator-workers** (with an autonomous-agent fallback if the research goes very open-ended). Subtasks are needed (per-source research), but their shape depends on the input (which sources, which filings, which competitors). The orchestrator decides at runtime what to query and synthesizes the results. Implementation: one orchestrator loop with tools like "search internal docs," "fetch public filing," "summarize source"; per-source workers as sub-loops or simple tool calls. If the orchestrator finds the question demands an open-ended exploration (no clear stop condition), graduate to a full agent with a higher *max_iterations* cap and tool result clearing enabled per lesson 7.
+
+The exercise's value is the muscle memory of starting at the decision tree, not at the most-sophisticated pattern. Most production tasks land at patterns 1-3 with the occasional pattern 4; pattern 6 is rarer than the autonomy-hype suggests.
+
+</details>
+
+## Flashcards
+
+Nine cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay the set out one card per page for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="The six effective-agent patterns?">
+
+Five workflows plus one agent: **(1) Prompt chaining**, **(2) Routing**, **(3) Parallelization** (sectioning + voting sub-types), **(4) Orchestrator-workers**, **(5) Evaluator-optimizer**, **(6) Autonomous agent**. Workflows (1-5): your code drives the path. Agent (6): the model drives the path. Source: Anthropic, *Building Effective AI Agents* (Schluntz + Zhang, 2024-12-19).
+
+</Flashcard>
+
+<Flashcard question="Prompt chaining (definition + trade-off)?">
+
+**Verbatim:** *Decomposes a task into a sequence of steps, where each LLM call processes the output of the previous one*. **Trade-off (verbatim):** *Trade off latency for higher accuracy, by making each LLM call an easier task*. **Use when:** subtasks are knowable in advance. **Design feature:** programmatic gates between steps so bad intermediates halt the chain rather than propagating.
+
+</Flashcard>
+
+<Flashcard question="Routing (definition + the cost-optimization example)?">
+
+**Verbatim:** *Routing classifies an input and directs it to a specialized followup task*. **Benefit:** separation of concerns + more specialized prompts. **Cost-optimization example:** route easy questions to a smaller model (Haiku 4.5) and difficult ones to a larger model (Sonnet 4.5). The cleanest place in the catalog to apply lesson 3's effort-and-model dial deliberately.
+
+</Flashcard>
+
+<Flashcard question="Parallelization: two sub-types + the post's principle?">
+
+**Sectioning:** *Breaking a task into independent subtasks run in parallel* (different slice per subtask; content-moderation example). **Voting:** *Running the same task multiple times to get diverse outputs* (same prompt N times, aggregate; vulnerability-review example). **Principle:** *For complex tasks with multiple considerations, LLMs generally perform better when each consideration is handled by a separate LLM call*. One model on one thing beats one model on ten.
+
+</Flashcard>
+
+<Flashcard question="Orchestrator-workers vs parallelization (key distinction)?">
+
+**Both fan out.** **Parallelization:** subtasks pre-defined at code-write time. **Orchestrator-workers:** *Subtasks aren't pre-defined, but determined by the orchestrator based on the specific input* (verbatim). Orchestrator picks at runtime what to spawn. **Orchestrator examples:** multi-file code changes; multi-source research synthesis. **Use orchestrator when** subtask shape depends on the input you cannot know ahead.
+
+</Flashcard>
+
+<Flashcard question="Evaluator-optimizer: two success indicators + cap?">
+
+**Verbatim:** *One LLM call generates a response while another provides evaluation and feedback in a loop*. **Two success indicators (check BEFORE adopting):** *LLM responses can be demonstrably improved when a human articulates their feedback*; *the LLM can provide such feedback*. **Analogy:** *iterative writing process a human writer might go through*. **Cap:** three to four rounds. Subjective criteria produce noisy oscillators; hard *max_iterations* cap + surface partial is the discipline.
+
+</Flashcard>
+
+<Flashcard question="Autonomous agent: definition + three warnings?">
+
+**Verbatim:** *Agents begin their work with either a command from, or interactive discussion with, the human user. Once the task is clear, agents plan and operate independently*. **Use when** steps cannot be hardcoded. **Three warnings:** *higher costs and compounding errors* are real; *extensive testing in sandboxed environments and appropriate guardrails* required; *design toolsets and their documentation clearly and thoughtfully. You must have some level of trust in its decision-making*.
+
+</Flashcard>
+
+<Flashcard question="The cross-pattern principle (the post's summary thesis)?">
+
+**Verbatim:** *Success in the LLM space isn't about building the most sophisticated system. It's about building the right system for your needs*. **Three implications:** start simpler (single augmented LLM > clumsy workflow > sloppy agent); make ground truth available (each step gets clear environmental feedback); cap and observe (hard *max_iterations* + telemetry on *usage*). Most production stacks compose 2-3 patterns, not just one.
+
+</Flashcard>
+
+<Flashcard question="The four-question decision tree?">
+
+**(1)** Steps knowable in advance and identical for every input? → **prompt chaining**. **(2)** Distinct categories needing different prompts/tools? → **routing**. **(3)** Work splits into independent pieces (or repeats for confidence)? → **parallelization** (sectioning if pieces; voting if repetitions). **(4)** Subtasks needed but shape depends on input? → **orchestrator-workers**. **(5)** Iterative refinement against clear criteria measurably helps? → **evaluator-optimizer**. **(6)** None of the above (open-ended, model deciding is the point)? → **autonomous agent**.
+
+</Flashcard>
+
+</FlashcardSet>

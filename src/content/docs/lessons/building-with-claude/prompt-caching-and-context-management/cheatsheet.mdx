@@ -1,0 +1,195 @@
+---
+title: "Cheatsheet: Prompt caching and context management"
+description: One-page reference. cache_control mechanics, pricing multipliers, usage fields, the context-window picture, compaction, context editing, and the cost-vs-staleness frame.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## Prompt caching at a glance
+
+**Verbatim from docs:** *Prompt caching optimizes your API usage by allowing resuming from specific prefixes in your prompts.*
+
+```json
+"cache_control": { "type": "ephemeral" }
+// or with the longer TTL:
+"cache_control": { "type": "ephemeral", "ttl": "1h" }
+```
+
+**Placement layers** (and the order they are honored): *tools* → *system* → *messages*. Attaches to: *system* text blocks; *tools* entries (custom client from L4, server + Anthropic-schema client from L5, *mcp_toolset* from L6); *messages* content blocks (user content and assistant *tool_use* / *tool_result*).
+
+**Limits:**
+- Maximum **4 explicit cache breakpoints per request** (5th returns 400).
+- 20-block lookback from each breakpoint.
+- Exact-match: one character change invalidates the prefix.
+
+## Pricing multipliers
+
+| Token kind | Multiplier | Example (Opus 4.7 base $5/MTok) |
+| --- | --- | --- |
+| Standard (uncached) input | 1.0x | $5 / MTok |
+| 5-minute cache write | 1.25x | $6.25 / MTok |
+| 1-hour cache write | 2.0x | $10 / MTok |
+| Cache hit or refresh | 0.1x | $0.50 / MTok |
+
+**Break-even:** 5-minute pays back at one hit; 1-hour pays back at roughly two to four hits depending on prefix size.
+
+## Minimum cacheable size (token floor)
+
+| Model | Minimum tokens |
+| --- | --- |
+| Opus 4.7 / Opus 4.6 / Opus 4.5 / Haiku 4.5 / Mythos Preview | 4,096 |
+| Opus 4.8 / Opus 4.1 / Sonnet 4.6 / Sonnet 4.5 | 1,024 |
+| Haiku 3.5 (Vertex AI only) | 2,048 |
+
+Shorter prompts marked with *cache_control* process without caching (no error).
+
+## Reading the *usage* object
+
+```json
+{
+  "usage": {
+    "input_tokens": 50,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 100000,
+    "output_tokens": 503
+  }
+}
+```
+
+**Identity:** *total_input_tokens = cache_read_input_tokens + cache_creation_input_tokens + input_tokens*. *input_tokens* here means "tokens after the last breakpoint." Production telemetry: watch *cache_read_input_tokens* / total (often 90 percent+ on stable-prefix workloads).
+
+## Cache isolation
+
+| Platform | Isolation |
+| --- | --- |
+| Claude API | Workspace-level |
+| Claude Platform on AWS | Workspace-level |
+| Microsoft Foundry (beta) | Workspace-level |
+| Amazon Bedrock | Organization-level |
+| Vertex AI | Organization-level |
+
+## Context window sizes
+
+| Window | Models |
+| --- | --- |
+| 1M tokens | Opus 4.8 / Mythos Preview / Opus 4.7 / Opus 4.6 / Sonnet 4.6 (on Claude API + Bedrock + Vertex AI) |
+| 200K tokens | Sonnet 4.5 (and deprecated older models); Opus 4.8 on Microsoft Foundry |
+
+**Image / PDF caps:** up to 600 pages on 1M-window models; 100 on 200K-window models.
+
+**Context awareness** (Sonnet 4.6 / Sonnet 4.5 / Haiku 4.5): explicit token budget at session start (`<budget:token_budget>1000000</budget:token_budget>`) and a remaining-tokens warning after each tool call.
+
+**Overflow stop reason** (Claude 4.5+ models): *stop_reason: model_context_window_exceeded*. On older models, opt in via *model-context-window-exceeded-2025-08-26* beta header.
+
+## Context rot
+
+The docs name it directly: *as token count grows, accuracy and recall degrade, a phenomenon known as context rot. This makes curating what's in context just as important as how much space is available.*
+
+## Compaction (the recommended long-session lever)
+
+**Verbatim purpose:** *server-side context compaction for managing long conversations that approach context window limits*.
+
+```python
+context_management={
+    "edits": [
+        {"type": "compact_20260112",
+         "trigger": {"type": "input_tokens", "value": 150000},
+         "pause_after_compaction": False}
+    ]
+}
+# beta: betas=["compact-2026-01-12"]
+```
+
+- **Default trigger:** 150,000 input tokens (min 50,000).
+- **Models** (beta): Opus 4.8 / Mythos Preview / Opus 4.7 / Opus 4.6 / Sonnet 4.6.
+- **ZDR eligible.**
+- Replaces older history with a *compaction* block; on subsequent requests, prior messages are auto-dropped.
+- *pause_after_compaction*: stops with *stop_reason: "compaction"* after writing the summary; lets you manually preserve recent N turns verbatim.
+- **Costs an extra sampling step.** Billed under *usage.iterations* (top-level *input_tokens* / *output_tokens* exclude it).
+- **Same model writes the summary** (no cheaper-model option).
+- **Tool-call-during-summary trap:** if *tools* are defined, set custom *instructions* explicitly forbidding tool calls in the summary.
+
+**Cache interaction:** put a *cache_control* breakpoint at the **end of the system prompt** so the system survives compaction.
+
+## Context editing (the surgical lever)
+
+**Verbatim purpose:** *context editing allows you to selectively clear specific content from conversation history as it grows.*
+
+Beta header: *context-management-2025-06-27*. Two strategies:
+
+### Tool result clearing: *clear_tool_uses_20250919*
+
+```python
+context_management={"edits": [{"type": "clear_tool_uses_20250919"}]}
+```
+
+Clears oldest *tool_result* + *mcp_tool_result* blocks chronologically; placeholder text substituted. Optional *clear_tool_inputs* also clears the *tool_use* parameters. *clear_at_least* sets a minimum tokens-cleared floor.
+
+**Use for:** agentic workflows with heavy tool use (web search results, file dumps, MCP retrievals).
+
+### Thinking block clearing: *clear_thinking_20251015*
+
+```python
+context_management={"edits": [{"type": "clear_thinking_20251015"}]}
+```
+
+Clears *thinking* blocks from extended-thinking sessions. *keep* parameter controls how many recent thinking blocks survive.
+
+**Default *keep* by model class:**
+
+| Model class | Default behavior |
+| --- | --- |
+| Opus 4.5 and later | Keep all prior thinking |
+| Opus 4.1 and earlier | Keep only the last turn's thinking |
+| Sonnet 4.6 and later | Keep all prior thinking |
+| Sonnet 4.5 and earlier | Keep only the last turn's thinking |
+| All Haiku (through 4.5) | Keep only the last turn's thinking |
+
+**Use for:** long extended-thinking sessions where you want to override the per-model default.
+
+## Cache-interaction asymmetry (editing vs caching)
+
+| Strategy | Cache interaction |
+| --- | --- |
+| Tool result clearing | **Invalidates** cache at the clear point; pair with *clear_at_least* to make the write worthwhile |
+| Thinking-block clearing (blocks kept) | **Preserves** cache (the modern-model default behavior) |
+| Thinking-block clearing (blocks cleared) | Invalidates at the clear point |
+| Compaction | Invalidates older history; system survives only if cached at end of system prompt |
+
+## The cost-vs-staleness frame
+
+| Lever | What it costs | When to use |
+| --- | --- | --- |
+| **Cache the stable parts** | 1.25x or 2.0x on the write turn; 0.1x on hits | Anything whose text does not change for the session (system prompt, tool stack across L4/L5/L6, stable reference passages) |
+| **Compact the long parts** | Extra sampling step per crossing (under *usage.iterations*) | Sessions that will exceed 100K input tokens or where context rot is hurting focus |
+| **Clear the heavy parts** | Cache invalidation on each clear (tool result clearing); preserved on kept thinking blocks | Agentic workflows with old tool results; extended-thinking sessions with tunable depth |
+
+**Default posture:** cache the system + tool stack; opt in to compaction once sessions go long; add tool result clearing only for agentic loops with heavy retrieval. Do not turn all three on by default.
+
+## Common pitfalls
+
+| Failure | Recognize by | Fix |
+| --- | --- | --- |
+| Cache marked but not hitting | *cache_creation_input_tokens* every turn, *cache_read_input_tokens* always 0 | Confirm prefix is byte-identical; check minimum-token floor; check workspace isolation |
+| Prefix too short to cache | *cache_control* set but no usage change | Push prefix past the floor (4,096 or 1,024 depending on model); merge breakpoints |
+| Compaction loses cached system | First post-compaction request shows full cache write again | Put a *cache_control* breakpoint at the **end** of the system prompt |
+| Compaction summary returns *content: null* | Tools defined, model called a tool inside the summary | Add explicit *instructions* on the compaction edit forbidding tool calls during the summary |
+| Tool result clearing eating cache cost | Cache write costs spike around every clear | Set *clear_at_least* high enough that the saved tokens exceed the write premium |
+| Forgetting compaction is an extra sampling step | Production bills exceed expected | Sum *usage.iterations* in monitoring, not top-level *input_tokens* / *output_tokens* |
+
+## What this lesson does NOT cover (and where to find it)
+
+| Topic | Lands at |
+| --- | --- |
+| The agent loop and multi-turn iteration | Lesson 8 onward |
+| The six effective-agent patterns | Lesson 9 |
+| Agent Skills and Claude Code | Lesson 10 |
+| Subagents and Claude Managed Agents | Lesson 11 |
+| Production cost monitoring (Admin / Usage / Cost APIs) | Lesson 12 |
+
+## Source
+
+- Anthropic public Claude docs: **Prompt caching**, **Context windows**, **Compaction**, **Context editing** under `https://platform.claude.com/docs/en/build-with-claude/`. See references for the full anchor list.

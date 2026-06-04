@@ -1,0 +1,139 @@
+---
+title: "Cheatsheet: Your first Claude API call"
+description: One-page reference. Endpoint, headers, body, response shape, stop reasons, pitfalls, and what lands later in T22.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## The call, at a glance
+
+```
+POST https://api.anthropic.com/v1/messages
+
+Headers
+  x-api-key: $ANTHROPIC_API_KEY
+  anthropic-version: 2023-06-01
+  Content-Type: application/json
+
+Body (required)
+  model        precise identifier, e.g. claude-opus-4-8
+  max_tokens   output ceiling, integer
+  messages     [{role: user | assistant, content: "..."}, ...]
+                ends with role: user (model generates next assistant)
+
+Body (optional)
+  system       standing instructions (persona, format, constraint)
+```
+
+## SDKs
+
+| Language | Install |
+| --- | --- |
+| Python | `pip install anthropic` |
+| TypeScript | `npm install @anthropic-ai/sdk` |
+| Java | `com.anthropic:anthropic-java` (Maven Central) |
+| Go | `github.com/anthropics/anthropic-sdk-go` |
+| C-sharp, PHP, Ruby | official SDKs published |
+| CLI | `brew install anthropics/tap/ant` |
+
+All SDKs auto-read *ANTHROPIC_API_KEY* from the environment.
+
+## Current canonical model names
+
+| Family | Identifier | When to reach for it |
+| --- | --- | --- |
+| Opus | *claude-opus-4-8* | Flagship Opus; complex reasoning, agentic coding |
+| Sonnet | *claude-sonnet-4-6* | Frontier intelligence at scale |
+| Haiku | *claude-haiku-4-5* | Fastest; near-frontier intelligence |
+
+Lesson 3 of this track is the proper selection lesson.
+
+## Response shape
+
+```
+{
+  "id": "msg_01HCDu5LRGeP2o7s2xGmxyx8",
+  "type": "message",
+  "role": "assistant",
+  "content": [{ "type": "text", "text": "..." }],
+  "model": "claude-opus-4-8",
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "usage": { "input_tokens": 21, "output_tokens": 305 }
+}
+```
+
+## Stop reasons (check on every response)
+
+| Value | Meaning |
+| --- | --- |
+| *end_turn* | Model finished naturally (the normal case) |
+| *max_tokens* | Truncated; raise the cap or split the request |
+| *stop_sequence* | Your custom stop string was generated |
+| *tool_use* | Model is requesting a tool call (lesson 4) |
+
+## Multi-turn pattern (the API is stateless)
+
+```
+messages = [
+  { role: "user",      content: "Hello, Claude" },
+  { role: "assistant", content: "Hello!" },
+  { role: "user",      content: "Can you describe LLMs to me?" }
+]
+```
+
+- API holds NOTHING between calls.
+- Your application owns conversation state.
+- Roles alternate *user* / *assistant*, ending with *user*.
+- Synthesized prior turns are OK (the API does not check).
+- Every turn pays for the full prior history as input tokens.
+
+## System parameter (where instructions live)
+
+```
+client.messages.create(
+    model="claude-opus-4-8",
+    max_tokens=1024,
+    system="You are a terse code reviewer. Return only the changes...",
+    messages=[{ "role": "user", "content": "<diff>" }],
+)
+```
+
+System text is NOT a message. No role. No alternation. Standing instruction for the whole call.
+
+## Five common pitfalls
+
+| Failure | Recognize by | Fix |
+| --- | --- | --- |
+| API key not set | Auth error on first call | `export ANTHROPIC_API_KEY='...'`; persist in shell profile |
+| Wrong model name | Unknown-model error | Use precise identifier (*claude-opus-4-8*), not "Claude" or "Opus" |
+| max-tokens too small | Successful response, *stop_reason: max_tokens* | Raise the cap or split into smaller turns |
+| Content read as a string | Works once, breaks on tool use / vision | Iterate *response.content* and dispatch on each block's *type* |
+| Treating API as stateful | Model "forgets" earlier turns | Send the entire conversation history every call |
+
+## What this lesson does NOT cover (and where to find it)
+
+| Topic | Lands at |
+| --- | --- |
+| Streaming, batches, error handling | Lesson 2 |
+| Model selection + extended thinking | Lesson 3 |
+| Tool use (define + handle) | Lesson 4 |
+| Server-side tools (web search, web fetch, code execution) | Lesson 5 |
+| Model Context Protocol | Lesson 6 |
+| Prompt caching + context management | Lesson 7 |
+| Agent loop, agent patterns | Lessons 8-11 |
+| Shipping a Claude application | Lesson 12 |
+
+## Words to use precisely
+
+- **Endpoint:** the URL the request goes to (`https://api.anthropic.com/v1/messages`).
+- **Stateless:** the API holds no state between calls; conversation state lives in your application.
+- **System parameter:** standing instructions, separate from the *messages* list.
+- **Stop reason:** the field telling you why generation ended; check on every response.
+
+## Source
+
+- Anthropic public Claude docs, Get Started + Working with the Messages API, at `https://platform.claude.com/docs/en/get-started` and `https://platform.claude.com/docs/en/build-with-claude/working-with-messages`. Structural-mirror citation; see references.

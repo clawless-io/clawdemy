@@ -1,0 +1,169 @@
+---
+title: "Practice: Choosing your model and the effort dial"
+description: Self-check on family selection, the model-ID convention, the effort dial, adaptive vs extended thinking, and a worked cost-arithmetic exercise plus flashcards for retrieval.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Seven short questions. Answer each before opening the collapsible.
+
+**1. Name the three current Claude families, their headline positioning, and the per-MTok pricing pair (input / output).**
+
+<details>
+<summary>Show answer</summary>
+
+- **Opus 4.8** (`claude-opus-4-8`): the current flagship, "Anthropic's most capable model for complex reasoning and agentic coding" (verbatim). **$5 input / $25 output** per million tokens.
+- **Sonnet 4.6** (`claude-sonnet-4-6`): best speed-and-intelligence balance. **$3 / $15**.
+- **Haiku 4.5** (`claude-haiku-4-5`): fastest, near-frontier intelligence. **$1 / $5**.
+
+**Opus 4.7** (`claude-opus-4-7`) remains supported as a legacy model with the same pricing, context window, and posture as Opus 4.8. Pricing ratio mental model: Sonnet is about 1.7x cheaper per output token than Opus; Haiku is 5x cheaper than Opus.
+
+</details>
+
+**2. State the default-pick rule and when you reach for Opus or Haiku instead.**
+
+<details>
+<summary>Show answer</summary>
+
+**Default to Sonnet** for most production workloads (sixty percent of Opus cost, faster, intelligence good enough for the bulk of what user-facing applications need). **Reach for Opus** when the task is genuinely hard (complex multi-step reasoning, agentic coding, work where a wrong answer is meaningfully worse than a slow answer). **Reach for Haiku** when the task is light and volume matters (classification, simple lookups, the inner step of a high-volume pipeline). A common production pattern is **mix and match**: Sonnet or Opus for the user-facing summarizer, Haiku for the inner classifier.
+
+</details>
+
+**3. Explain the model-ID convention. When is a dateless ID already pinned, and when is it an alias?**
+
+<details>
+<summary>Show answer</summary>
+
+**The 4.6 generation and later** (Opus 4.8, Opus 4.7, Sonnet 4.6, Opus 4.6) use a dateless format that **is** the pinned snapshot. `claude-opus-4-8` and `claude-opus-4-7` do not change underneath you; no date suffix is needed. **Pre-4.6 models** (Haiku 4.5, Sonnet 4.5, Opus 4.5, Opus 4.1) have a date-suffixed canonical ID (`claude-haiku-4-5-20251001`) and a dateless alias (`claude-haiku-4-5`) that resolves to it. The alias is a convenience for development (you get patches automatically); the date-suffixed form is what production should use, because the alias can resolve to a different snapshot later. For new code on the 4.6 generation, the dateless ID is the right choice; for pre-4.6 models in production, prefer the date-suffixed form.
+
+</details>
+
+**4. The effort parameter: where does it go in the request, what values does it accept, and which models support it?**
+
+<details>
+<summary>Show answer</summary>
+
+The parameter goes in `output_config`, not at the top level: `output_config: {effort: "..."}`. Values: `low`, `medium`, `high` (the default), `xhigh` (Opus 4.8 and Opus 4.7), and `max` (Opus 4.8, Mythos Preview, Opus 4.7, Opus 4.6, Sonnet 4.6). Supported on Claude Opus 4.8, Mythos Preview, Opus 4.7, Opus 4.6, Sonnet 4.6, and Opus 4.5 per the public docs. **Haiku 4.5 does NOT support effort**; on Haiku, what you get is what the model decides to spend. Setting `effort: "high"` explicitly is equivalent to not setting the parameter at all.
+
+</details>
+
+**5. State the sane-starting-points for the effort dial on Sonnet 4.6 and Opus 4.7 in production.**
+
+<details>
+<summary>Show answer</summary>
+
+**Sonnet 4.6:** `medium` for most production work; `low` for high-volume or latency-sensitive (chat that is not coding); `high` for complex reasoning; `max` for the absolute highest capability. **Opus 4.8 (and Opus 4.7, same posture per the docs):** start with `xhigh` for coding and agentic work (long-horizon, tool-heavy); `high` for intelligence-sensitive workloads (this is the API default on all surfaces); `medium` for cost-sensitive workloads; `max` only when evaluation shows headroom at `xhigh`. Opus 4.7 (and 4.8 by same posture) respects lower effort levels more strictly than Opus 4.6 (it scopes work to what was asked at `low` and `medium`), so adjust deliberately rather than prompting around shallow reasoning.
+
+</details>
+
+**6. Distinguish adaptive thinking from manual extended thinking. Which models support which?**
+
+<details>
+<summary>Show answer</summary>
+
+**Adaptive thinking** (`thinking: {type: "adaptive"}`) lets the model decide when and how much to think, controlled by the effort parameter. Recommended on **Opus 4.8 and Opus 4.7** (where manual extended thinking is no longer supported and returns a 400 error), **Opus 4.6**, **Sonnet 4.6**, and Mythos Preview.
+
+**Manual extended thinking** (`thinking: {type: "enabled", budget_tokens: N}`) is the older mode. The model produces internal *thinking* content blocks before its *text* response, showing step-by-step reasoning. Supported on **Haiku 4.5** (the only mode there), still functional but deprecated on Sonnet 4.6 and Opus 4.6, NOT supported on Opus 4.8 or Opus 4.7 (returns 400). For new code on the latest models, use adaptive thinking plus effort.
+
+</details>
+
+**7. Worked cost question. A feature classifies 100,000 user questions per day (500 input tokens, 20 output tokens for the classifier), then answers 70 percent of them (500 input, 300 output). At today's per-MTok prices, what is the per-day cost of: (a) running everything through Opus, (b) running the classifier on Haiku and the answers on Sonnet?**
+
+<details>
+<summary>Show answer</summary>
+
+**(a) All-Opus.** Classifier: 100,000 calls * (500 input * $5/MTok + 20 output * $25/MTok) = 100,000 * ($0.0025 + $0.0005) = **$300/day**. Answer: 70,000 * (500 * $5/MTok + 300 * $25/MTok) = 70,000 * ($0.0025 + $0.0075) = **$700/day**. Total: **$1,000/day**.
+
+**(b) Mix.** Classifier (Haiku): 100,000 * (500 * $1/MTok + 20 * $5/MTok) = 100,000 * ($0.0005 + $0.0001) = **$60/day**. Answer (Sonnet): 70,000 * (500 * $3/MTok + 300 * $15/MTok) = 70,000 * ($0.0015 + $0.0045) = **$420/day**. Total: **$480/day**.
+
+**About 52 percent cheaper than all-Opus.** The arithmetic is not exotic; model choice and parameter choice both move the dial materially.
+
+</details>
+
+## Try it yourself: an A/B on Sonnet vs Opus
+
+About 20 minutes. You will need the SDK from lesson 1 and an Anthropic API key. Costs are a few cents at most.
+
+**Part A: a 5-question eval set.** Pick or write 5 prompts your application would realistically run. Vary difficulty (one easy, three medium, one hard). Write down the ideal answer for each (or a rubric, e.g., "must mention X, must avoid Y").
+
+**Part B: run both models.** Call each prompt twice: once with `model="claude-opus-4-8"`, once with `model="claude-sonnet-4-6"`. For each call, log: prompt, model, response, *usage.input_tokens*, *usage.output_tokens*. Compute the per-call cost for each.
+
+**Part C: compare quality.** Score each response 0/1 against your rubric (or 1-3 if you want more granularity). Total the scores per model. If Sonnet matches Opus on your set, Sonnet is the right model for this feature; if Opus pulls ahead on the hard ones, you have a routing question (use Opus for hard cases, Sonnet for easy ones).
+
+<details>
+<summary>What you'll get (an example, not the canonical answer)</summary>
+
+On a typical "summarize this paragraph in one sentence" eval, Sonnet matches Opus closely; on a "trace through this multi-step reasoning problem" eval, Opus pulls ahead. The right model for your application is the cheapest one that passes your eval, and the only way to know is to run it. Your version of this exercise will look different per task; do not assume the result.
+
+A bonus extension: add a third column for Sonnet at `effort: "low"`. If quality holds, you have a third lever (the same model, less spend per call). This is the kind of micro-optimization that compounds at scale.
+
+</details>
+
+## Flashcards
+
+Nine cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay the set out one card per page for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="The three current Claude families and their price pairs (input / output per MTok)?">
+
+Opus 4.8 (`claude-opus-4-8`, current flagship): $5 / $25. Sonnet 4.6 (`claude-sonnet-4-6`): $3 / $15. Haiku 4.5 (`claude-haiku-4-5`): $1 / $5. Opus 4.7 (`claude-opus-4-7`, legacy, same posture as 4.8). Sonnet is about 1.7x cheaper per output token than Opus; Haiku is 5x cheaper than Opus.
+
+</Flashcard>
+
+<Flashcard question="The default-pick rule for model selection?">
+
+Default to Sonnet for production. Reach for Opus on genuinely hard tasks (complex reasoning, agentic coding). Reach for Haiku when volume matters and the task is light (classification, simple lookups). Mix-and-match within one application is the common production pattern (Sonnet/Opus for user-facing, Haiku for inner classifiers).
+
+</Flashcard>
+
+<Flashcard question="When is a dateless model ID already pinned, and when is it an alias?">
+
+The 4.6 generation and later (Opus 4.8, Opus 4.7, Sonnet 4.6, Opus 4.6) are dateless AND pinned. Pre-4.6 models have a date-suffixed canonical ID (`claude-haiku-4-5-20251001`) and a dateless alias (`claude-haiku-4-5`) that resolves to it. For production stability on pre-4.6 models, use the date-suffixed form.
+
+</Flashcard>
+
+<Flashcard question="The effort parameter shape and values?">
+
+Goes in `output_config: {effort: "..."}` (not top-level). Values: `low`, `medium`, `high` (default), `xhigh` (Opus 4.8 and Opus 4.7), `max` (Opus 4.8, Mythos, Opus 4.7, Opus 4.6, Sonnet 4.6). Supported on Opus 4.8 / Mythos / Opus 4.7 / Opus 4.6 / Sonnet 4.6 / Opus 4.5. Haiku does NOT support effort.
+
+</Flashcard>
+
+<Flashcard question="Sane starting effort levels for Sonnet 4.6 in production?">
+
+`medium` for most production work. `low` for high-volume or latency-sensitive chat (non-coding). `high` for complex reasoning. `max` for absolute highest capability. Setting effort explicitly is recommended (the default is `high`, which can be a surprise on Sonnet for latency-sensitive workloads).
+
+</Flashcard>
+
+<Flashcard question="Sane starting effort levels for Opus 4.8 (and Opus 4.7) in production?">
+
+`xhigh` for coding and agentic work (long-horizon, tool-heavy). `high` for intelligence-sensitive workloads (this is the API default on all surfaces). `medium` for cost-sensitive workloads. `max` only when evals show headroom at `xhigh`. Per docs: "the guidance for Opus 4.7 also applies to Opus 4.8." Both respect lower levels strictly (scope work to what was asked); raise effort rather than prompting around shallow reasoning.
+
+</Flashcard>
+
+<Flashcard question="Adaptive thinking vs manual extended thinking, which model uses which?">
+
+Opus 4.8 and Opus 4.7: adaptive ONLY (manual returns 400). Sonnet 4.6 + Opus 4.6: adaptive recommended, manual deprecated-but-functional. Haiku 4.5: manual only (no adaptive). Adaptive shape: `thinking: {type: "adaptive"}` + effort controls depth. Manual shape: `thinking: {type: "enabled", budget_tokens: N}`.
+
+</Flashcard>
+
+<Flashcard question="Effort affects what beyond text output?">
+
+ALL tokens: text responses, tool calls, extended thinking when enabled. At lower effort: fewer tool calls, combined operations, terse confirmation messages. At higher effort: more tool calls, planning preambles, detailed summaries. This matters for the agent loop (L8 onward) where total cost is steps times per-step cost.
+
+</Flashcard>
+
+<Flashcard question="The way to actually pick a model?">
+
+Build a held-out evaluation set (Track 21 lesson 7 "LLMOps" playbook). Run candidate models against it. Pick the **cheapest model that passes evaluation**. The decision is data-driven, not vibes-driven. The same eval set tells you whether mix-and-match routing is right (Haiku for inner classifier, Sonnet for outer answer).
+
+</Flashcard>
+
+</FlashcardSet>

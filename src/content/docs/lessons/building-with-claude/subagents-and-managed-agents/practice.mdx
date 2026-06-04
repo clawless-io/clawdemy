@@ -1,0 +1,235 @@
+---
+title: "Practice: Subagents and Claude Managed Agents"
+description: Self-check on the Subagent primitive (AgentDefinition fields, context isolation, parallelization, tool restrictions, per-subagent model), Claude Managed Agents (four core concepts, five-step flow, beta header, ZDR caveat), and the decision frame between a self-built loop, Subagents, and Managed Agents, plus a hands-on try-it and flashcards.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Seven short questions. Answer each before opening the collapsible.
+
+**1. State the Subagent definition verbatim and the four benefits.**
+
+<details>
+<summary>Show answer</summary>
+
+**Verbatim:** *Subagents are separate agent instances that your main agent can spawn to handle focused subtasks. Use subagents to isolate context for focused subtasks, run multiple analyses in parallel, and apply specialized instructions without bloating the main agent's prompt.*
+
+**Four benefits the docs name:**
+- **Context isolation:** *each subagent runs in its own fresh conversation; intermediate tool calls and results stay inside the subagent; only its final message returns to the parent*.
+- **Parallelization:** multiple subagents run concurrently (style-checker + security-scanner + test-coverage in parallel during code review).
+- **Specialized instructions:** per-subagent system prompt with focused expertise (database-migration agent carries SQL best practices the main agent does not need).
+- **Tool restrictions:** per-subagent tools whitelist (doc-reviewer with only *Read* and *Grep* cannot accidentally modify files).
+
+</details>
+
+**2. The three ways to create a Subagent.**
+
+<details>
+<summary>Show answer</summary>
+
+- **Programmatic** (recommended for SDK applications): the *agents* parameter on the SDK's *query()* call, with each entry an *AgentDefinition* (TypeScript or Python).
+- **Filesystem-based:** markdown files in *.claude/agents/* directories. Loaded at Claude Code startup; new files require a restart.
+- **Built-in *general-purpose* agent:** Claude can spawn the built-in *general-purpose* subagent at any time via the *Agent* tool without you defining anything.
+
+The parent agent must include *Agent* in its *allowedTools* to auto-approve subagent invocations without a permission prompt.
+
+</details>
+
+**3. The required and key optional *AgentDefinition* fields, and which field is the routing signal.**
+
+<details>
+<summary>Show answer</summary>
+
+**Required:**
+- ***description*** (string): natural-language description of when to use this subagent. **This is the routing signal:** Claude reads it to decide whether to delegate.
+- ***prompt*** (string): the subagent's system prompt.
+
+**Key optional:**
+- ***tools*** (string array): allowed tool names; if omitted, inherits all of the parent's tools.
+- ***disallowedTools*** (string array): tool names to remove.
+- ***model***: alias (*sonnet*, *opus*, *haiku*, *inherit*) or full model ID; defaults to main model. **This is the cost lever**, per lesson 3's mix-and-match.
+- ***skills*** (string array): Agent Skills (lesson 10) to preload.
+- ***mcpServers***: MCP servers (lesson 6) available to this subagent.
+- ***maxTurns***: per-subagent iteration cap (lesson 8's discipline).
+- ***effort***: lesson 3's effort dial, per subagent.
+- ***background***: run as a non-blocking background task.
+
+**Constraint:** subagents cannot spawn their own subagents. Do NOT include *Agent* in a subagent's *tools*.
+
+</details>
+
+**4. What does a Subagent inherit from the parent, and what does it NOT inherit?**
+
+<details>
+<summary>Show answer</summary>
+
+**The Subagent receives:**
+- Its own system prompt (from *AgentDefinition.prompt*) plus the Agent tool's prompt string from the parent (this is the only channel from parent to subagent; include any file paths, errors, or decisions the subagent needs in this prompt).
+- Project *CLAUDE.md* (loaded via *settingSources*).
+- Tool definitions (inherited from parent, or the subset specified in *tools*).
+
+**The Subagent does NOT receive:**
+- The parent's conversation history or tool results.
+- Preloaded Skill content, unless listed in *AgentDefinition.skills*.
+- The parent's system prompt.
+
+This is the context-isolation property: the parent does not see (and does not pay for) the subagent's intermediate work; only the final message returns.
+
+</details>
+
+**5. State Claude Managed Agents verbatim, and what Anthropic hosts that you would otherwise build yourself.**
+
+<details>
+<summary>Show answer</summary>
+
+**Verbatim (overview):** *Pre-built, configurable agent harness that runs in managed infrastructure. Best for long-running tasks and asynchronous work*.
+
+**Verbatim (positioning vs Messages API):** *Claude Managed Agents provides the harness and infrastructure for running Claude as an autonomous agent. Instead of building your own agent loop, tool execution, and runtime, you get a fully managed environment where Claude can read files, run commands, browse the web, and execute code securely*.
+
+**What Anthropic hosts:**
+- The agent loop (the L8-style loop, productionized).
+- The sandbox (an Anthropic-managed cloud sandbox or a self-hosted equivalent you control).
+- Tool execution (bash, file operations, web search and fetch, MCP servers).
+- Long-running session state (persistent filesystems and conversation history).
+- Server-side event history (fetched in full via the API).
+- Built-in prompt caching, compaction, and other performance optimizations.
+
+**What you provide:**
+- Agent definition (model, system prompt, tools, MCP servers, Skills).
+- Environment configuration (cloud sandbox or self-hosted).
+- User events (POSTed to the session).
+
+</details>
+
+**6. The four core concepts and five-step flow of Claude Managed Agents.**
+
+<details>
+<summary>Show answer</summary>
+
+**Four core concepts:**
+- **Agent:** the model, system prompt, tools, MCP servers, and Skills.
+- **Environment:** where sessions run (cloud sandbox or self-hosted).
+- **Session:** a running agent instance within an environment, performing a specific task.
+- **Events:** messages exchanged between your application and the agent (user turns, tool results, status updates).
+
+**Five-step flow:**
+1. **Create an agent** (*POST /v1/agents* via the SDK or CLI): define model + system + tools + MCP + Skills. Create once; reference by ID across sessions.
+2. **Create an environment** (*POST /v1/environments*): cloud sandbox or self-hosted.
+3. **Start a session** (*POST /v1/sessions*): launch a session referencing the agent + environment.
+4. **Send events and stream responses:** user events POSTed; agent events streamed back as SSE; event history persisted server-side.
+5. **Steer or interrupt:** send additional user events mid-run to guide or change direction.
+
+**Beta header:** *managed-agents-2026-04-01* (SDK sets it automatically).
+
+</details>
+
+**7. The data-retention posture for Claude Managed Agents, and the decision frame between self-built loop / Subagents / Managed Agents.**
+
+<details>
+<summary>Show answer</summary>
+
+**Data retention:** Claude Managed Agents is **stateful by design** (sessions, sandbox state, and outputs persisted server-side). Consequence: **NOT currently eligible for Zero Data Retention** or HIPAA Business Associate Agreement coverage. You retain control (delete sessions, delete uploaded files via the API), but ZDR-required workloads must stay on the Messages API path (self-built loop or Subagents).
+
+**Decision frame:**
+
+- **L8-style self-built loop in your code.** When the task fits one loop, when you want full harness control, when **ZDR matters**, when latency is dominated by your tool side.
+- **Subagents (Agent SDK) inside that loop.** When you want pattern 4 (orchestrator-workers) or pattern 3 (parallelization) without writing the spawn-and-context-isolation primitive yourself; when per-subagent tool restriction is a real safety win; when running some subtasks on a smaller cheaper model is a real cost win.
+- **Claude Managed Agents.** When the agent runs for minutes or hours, when you do not want to run the sandbox, when stateful sessions are useful, **when ZDR is not a constraint**. The first call is *agents.create*; the rest is mostly send-events / receive-events.
+
+**They compose:** most production stacks mix the three (a self-built loop that calls Subagents for fan-out, Managed Agents on the workloads where the loop or sandbox is the constraint).
+
+</details>
+
+## Try it yourself: pick the right primitive for three workloads
+
+About 15 minutes. No code required; the exercise is reasoning + dispatch.
+
+**Setup:** for each of the three workloads below, walk the decision frame and pick the simplest primitive (self-built L8 loop, Subagents inside a loop, or Claude Managed Agents). For each, justify in one sentence, name the dominant constraint (control / cost / latency / data retention / runtime length), and sketch what the agent definition would look like (model, system prompt one-liner, tools, optional sub-agent decomposition).
+
+**Workload A:** A nightly script that reviews every new pull request in a repository, runs three independent checks (style, security, test coverage), aggregates the results, and posts a comment. Average runtime: 2-5 minutes per PR.
+
+**Workload B:** A customer-facing chat assistant in a HIPAA-regulated healthcare application. Each conversation is short (under 5 turns), tool use is limited to one internal API call, ZDR is required.
+
+**Workload C:** A research agent that takes a vague research question, gathers and synthesizes information from internal docs and the public web over multiple hours, and produces a written brief. The agent should be resumable mid-run; the customer may close their browser and return tomorrow.
+
+<details>
+<summary>What you'll get (example answers, not the canonical ones)</summary>
+
+**Workload A: Self-built L8 loop + Subagents.** The orchestrator-workers pattern (L9.4) fits perfectly: a parent loop spawns three subagents in parallel (*style-checker*, *security-scanner*, *test-coverage*), each on a smaller model (Sonnet) with restricted tools (read-only for style and security; *Bash* + read for test-coverage). The parent aggregates the three final messages and posts the comment on Opus 4.8. Dominant constraint: cost (parallelization saves wall-clock; per-subagent smaller model saves tokens). Not Managed Agents because the runtime is short and the harness is small; you can ship this in a couple hundred lines of SDK code.
+
+**Workload B: Self-built L8 loop, NO Subagents, NO Managed Agents.** ZDR is required and Managed Agents is not currently ZDR eligible, so Managed Agents is out. The task is short (under 5 turns, one tool), so Subagents add no value and the self-built loop from lesson 8 covers it directly. Cache the system prompt + tool definition (lesson 7); run on Haiku 4.5 or Sonnet 4.6 per lesson 3's effort dial. Dominant constraint: data retention.
+
+**Workload C: Claude Managed Agents.** Multi-hour run, must be resumable across browser sessions, stateful filesystem and conversation history are useful, no harness to build is a real saving. Create the agent with *agent_toolset_20260401* for built-in file ops + bash + web search; create a cloud sandbox environment; start a session; stream events. Resume by sending another user event to the same session ID. Dominant constraint: runtime length + resumability + minimal infrastructure. Acceptable as long as ZDR is not required (research on public + internal-but-non-PHI data, in this case).
+
+The exercise's value is the muscle memory of walking the decision frame BEFORE writing code. The most common failure mode is reaching for the shiniest primitive (Managed Agents) when a self-built loop covers the task, or building a custom harness when Managed Agents would have saved weeks.
+
+</details>
+
+## Flashcards
+
+Nine cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay the set out one card per page for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="What is a Subagent (verbatim)?">
+
+*Subagents are separate agent instances that your main agent can spawn to handle focused subtasks. Use subagents to isolate context for focused subtasks, run multiple analyses in parallel, and apply specialized instructions without bloating the main agent's prompt.* Source: Anthropic Claude Agent SDK docs.
+
+</Flashcard>
+
+<Flashcard question="The four benefits of Subagents?">
+
+**(1) Context isolation:** *only the final message returns to the parent*; intermediate tool calls stay inside the subagent. **(2) Parallelization:** concurrent subagents (style-checker + security-scanner + test-coverage in parallel). **(3) Specialized instructions:** per-subagent system prompt with focused expertise. **(4) Tool restrictions:** per-subagent tools whitelist (read-only doc-reviewer cannot modify).
+
+</Flashcard>
+
+<Flashcard question="Three ways to create a Subagent?">
+
+**(1) Programmatic** (recommended): the *agents* parameter on the SDK *query()* call with *AgentDefinition* entries. **(2) Filesystem-based:** markdown files in *.claude/agents/* directories. **(3) Built-in *general-purpose* subagent:** Claude can spawn it via the *Agent* tool without any definition. Parent must include *Agent* in *allowedTools*.
+
+</Flashcard>
+
+<Flashcard question="AgentDefinition required + key optional fields?">
+
+**Required:** *description* (the routing signal Claude reads to delegate) + *prompt* (subagent's system prompt). **Key optional:** *tools* (whitelist), *disallowedTools*, *model* (alias *sonnet* / *opus* / *haiku* / *inherit*; cost lever), *skills*, *mcpServers*, *maxTurns*, *effort*, *background*. **Constraint:** subagents cannot spawn subagents; do NOT include *Agent* in a subagent's *tools*.
+
+</Flashcard>
+
+<Flashcard question="What does a Subagent inherit, and not inherit?">
+
+**Receives:** own system prompt + Agent tool's prompt string from parent (ONLY channel from parent) + project *CLAUDE.md* + tool definitions. **Does NOT receive:** parent's conversation history or tool results, preloaded Skills (unless in *AgentDefinition.skills*), parent's system prompt. Include any file paths, error messages, or decisions the subagent needs in the Agent tool's prompt.
+
+</Flashcard>
+
+<Flashcard question="Claude Managed Agents (verbatim) + what Anthropic hosts?">
+
+**Verbatim:** *Pre-built, configurable agent harness that runs in managed infrastructure. Best for long-running tasks and asynchronous work*. **Anthropic hosts:** the agent loop, sandbox (cloud or self-hosted), tool execution (bash + file ops + web search + MCP), long-running session state, server-side event history, built-in caching + compaction. **You provide:** agent definition, environment config, user events.
+
+</Flashcard>
+
+<Flashcard question="Managed Agents: four core concepts + five-step flow?">
+
+**Four concepts:** Agent (model + system + tools + MCP + Skills), Environment (sandbox), Session (running instance), Events (messages). **Five steps:** (1) *POST /v1/agents*, (2) *POST /v1/environments*, (3) *POST /v1/sessions*, (4) Send events + stream SSE responses, (5) Steer or interrupt mid-run. **Beta header:** *managed-agents-2026-04-01* (SDK auto-sets). Idle on *session.status_idle* event.
+
+</Flashcard>
+
+<Flashcard question="Managed Agents data-retention posture?">
+
+**Stateful by design**: sessions + sandbox state + outputs persisted server-side. **Consequence:** NOT currently ZDR eligible; NOT HIPAA BAA eligible. You retain control (delete sessions + uploaded files via API). For ZDR-required workloads, stay on the Messages API path (self-built loop or Subagents).
+
+</Flashcard>
+
+<Flashcard question="Decision frame: self-built loop / Subagents / Managed Agents?">
+
+**Self-built L8 loop:** full harness control; ZDR required; short tasks; latency dominated by tool side. **Subagents inside that loop:** orchestrator-workers (L9.4) or parallelization (L9.3) without writing the spawn primitive; per-subagent tool restriction + per-subagent smaller model. **Claude Managed Agents:** long-running (minutes to hours), stateful sessions useful, no harness to build, ZDR NOT a constraint. **They compose.** Most production stacks mix the three.
+
+</Flashcard>
+
+</FlashcardSet>

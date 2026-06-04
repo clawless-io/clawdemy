@@ -1,0 +1,155 @@
+---
+title: "Lesson: Six effective-agent patterns"
+description: "Lesson 9 of Track 22 (Building with Claude). The canonical patterns the L8 loop substrate takes. Five workflow patterns plus the open-ended agent itself: prompt chaining (decompose into a fixed sequence; trade latency for accuracy); routing (classify and direct to a specialized followup); parallelization (sectioning for independent subtasks, voting for multiple perspectives); orchestrator-workers (a central LLM dynamically breaks down tasks and delegates); evaluator-optimizer (one LLM generates while another evaluates in a loop); the autonomous agent (open-ended problems where steps cannot be hardcoded). For each: the verbatim Anthropic definition, when to use, the named examples in the source post, the sketch on the L8 loop, and the trade-off that decides whether the pattern fits."
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+{/* COMPONENT PLACEHOLDER (Lead wires at promotion): <LessonFreshness lastReviewed={frontmatter.last_reviewed} /> */}
+
+{/* COMPONENT PLACEHOLDER (Lead wires at promotion): <SourceLecture url="https://www.anthropic.com/engineering/building-effective-agents" title="Anthropic engineering, 'Building Effective AI Agents' (Erik S. and Barry Zhang, 2024-12-19)" instructor="Anthropic" /> */}
+
+## Why this lesson
+
+Lesson 8 built the substrate: a 30-line loop, the *stop_reason* dispatch, *tool_choice* steering, and the four loop disciplines. That is the engine. This lesson is the catalog of canonical shapes the engine takes for common jobs. The capability the lesson builds: **pick the right pattern for a given task, recognize each pattern in the wild, and sketch its minimal implementation on the loop substrate from lesson 8**.
+
+The framework is the Anthropic engineering post *Building Effective AI Agents* (Erik S. and Barry Zhang, 2024-12-19), which names five workflow patterns and one agent pattern. That is the "six effective-agent patterns" Phase 0 promised. The standing principle from the post's summary thesis is the right frame for the whole lesson: *Success in the LLM space isn't about building the most sophisticated system. It's about building the right system for your needs*.
+
+## The taxonomy
+
+The six, in order of increasing model autonomy:
+
+| # | Pattern | Who decides the path |
+| --- | --- | --- |
+| 1 | **Prompt chaining** | Your code (fixed sequence) |
+| 2 | **Routing** | Classifier model picks the branch; your code runs it |
+| 3 | **Parallelization** | Your code (fan out, aggregate) |
+| 4 | **Orchestrator-workers** | A central LLM (delegates dynamically) |
+| 5 | **Evaluator-optimizer** | Two LLMs in a generate-and-critique loop |
+| 6 | **Autonomous agent** | The agent (plans and operates independently) |
+
+Patterns 1 through 5 are **workflows** by lesson 8's definition (predefined code paths around LLM calls). Pattern 6 is an **agent** in the full sense (the model directs its own process). Most production applications use one or two of the first five; the sixth shows up when the task shape demands it.
+
+## Pattern 1: Prompt chaining
+
+**Verbatim:** *Prompt chaining decomposes a task into a sequence of steps, where each LLM call processes the output of the previous one*.
+
+**When to use:** *This workflow is ideal for situations where the task can be easily and cleanly decomposed into fixed subtasks*.
+
+**The trade-off the post names:** *The main goal is to trade off latency for higher accuracy, by making each LLM call an easier task*. You spend more wall-clock time (two or three sequential calls) and get a cleaner result than asking the model to do everything in one big shot.
+
+**Named examples from the post:** generating marketing copy then translating it; writing a document outline, checking it meets criteria, then writing the document based on that outline.
+
+**Sketch on the L8 loop:** the loop runs three short single-call rounds; your code dispatches step N's output as step N+1's input. Add **programmatic gates** between steps so a bad intermediate result halts the chain rather than propagating downstream. With *tool_choice* set to *none* on intermediate steps you can guarantee the model writes prose rather than calling tools, then re-enable tools on the final step if needed.
+
+**When NOT to use:** if the subtasks are not knowable in advance, or if one of the intermediate outputs makes the next step's right behavior depend on what was found (routing or orchestrator-workers is the better fit).
+
+## Pattern 2: Routing
+
+**Verbatim:** *Routing classifies an input and directs it to a specialized followup task*.
+
+**When to use:** *Routing works well for complex tasks where there are distinct categories that are better handled separately, and where classification can be handled accurately*. The post notes the benefit explicitly: *This workflow allows for separation of concerns, and building more specialized prompts*.
+
+**Named examples:** directing customer service queries (general questions, refunds, technical support) into separate downstream processes; routing easy questions to a smaller model (Haiku 4.5) and difficult ones to a larger model (Sonnet 4.5) for cost optimization. The second is worth keeping in mind: routing is one of the two cleanest places in this lesson to apply lesson 3's effort-and-model dial deliberately.
+
+**Sketch on the L8 loop:** a first single call does the classification (a short system prompt and one user input; *tool_choice* set to *none* to force a text answer; sometimes structured output via a tool the model is forced to call). Your code reads the classification and dispatches to one of several specialized loops, each with its own system prompt and tool subset. The router's loop is small (one call); the specialized loops are full-featured.
+
+**When NOT to use:** when categories overlap heavily (the classifier will misroute), when the right path needs intermediate findings to decide (orchestrator-workers), or when one specialized prompt is enough to cover the field (no routing needed).
+
+## Pattern 3: Parallelization
+
+**Verbatim:** *LLMs can sometimes work simultaneously on a task and have their outputs aggregated programmatically*.
+
+**Two sub-types worth distinguishing:**
+
+- **Sectioning:** *Breaking a task into independent subtasks run in parallel*. Named example: content moderation where one model screens the query while another generates the response. Each subtask sees a different slice of the work.
+- **Voting:** *Running the same task multiple times to get diverse outputs*. Named example: multiple prompts review code for vulnerabilities and the verdicts are aggregated (majority, unanimous-required, or threshold). Same task, several runs, aggregate the answers.
+
+**When to use:** *Effective when the divided subtasks can be parallelized for speed, or when multiple perspectives or attempts are needed for higher confidence results*. The post adds the principle: *For complex tasks with multiple considerations, LLMs generally perform better when each consideration is handled by a separate LLM call*. One small model thinking about one thing tends to beat one model thinking about ten.
+
+**Sketch on the L8 loop:** N parallel single-call rounds (each on its own slice for sectioning, or each running the same prompt for voting), then a single aggregator call (or a deterministic vote in your code) over the N results. With async clients (the SDK supports concurrent calls cleanly) you get N-way speedup on the per-call latency. Cache the shared prefix (system + tools) per L7 so the parallel fan-out does not re-pay the prefix N times.
+
+**When NOT to use:** when subtasks depend on each other (sequential chaining is the fit), or when one careful call is more reliable than N noisy ones (parallelization adds variance you then have to aggregate away).
+
+## Pattern 4: Orchestrator-workers
+
+**Verbatim:** *A central LLM dynamically breaks down tasks, delegates them to worker LLMs, and synthesizes their results*.
+
+**When to use:** *Well-suited for complex tasks where you can't predict the subtasks needed*. The key distinction from parallelization, the post calls out: *the key difference from parallelization is its flexibility ... subtasks aren't pre-defined, but determined by the orchestrator based on the specific input*.
+
+**Named examples:** coding products making complex changes across multiple files (the orchestrator decides which files to touch and dispatches per-file workers); search tasks gathering and analyzing information from multiple sources (the orchestrator decides which sources to query).
+
+**Sketch on the L8 loop:** the orchestrator is a single agent loop with a small set of tools, one of which is "spawn a worker" (either a function-call to a sub-loop you run in code, or a Subagent or Claude Managed Agent from lesson 11). Each worker is itself an L8-style loop scoped to one subtask. The orchestrator collects worker results as *tool_result* blocks and decides whether to spawn more, refine, or synthesize.
+
+**When NOT to use:** when you can list the subtasks ahead of time (parallelization is simpler), or when the right answer is a single chain rather than a fan-out (prompt chaining is simpler).
+
+## Pattern 5: Evaluator-optimizer
+
+**Verbatim:** *One LLM call generates a response while another provides evaluation and feedback in a loop*.
+
+**When to use:** *Particularly effective when we have clear evaluation criteria, and when iterative refinement provides measurable value*. The two success indicators worth checking before adopting it: *LLM responses can be demonstrably improved when a human articulates their feedback*; and *the LLM can provide such feedback*. If feedback does not move the quality needle on your task, this pattern is overkill.
+
+**The shape:** generator generates; evaluator critiques; generator revises in light of the critique; repeat until the evaluator accepts or a max-iterations cap fires. The post draws the analogy explicitly: *this is analogous to the iterative writing process a human writer might go through when producing a polished document*.
+
+**Named examples:** literary translation capturing nuances through evaluator critique; complex search tasks requiring multiple search-and-analysis rounds.
+
+**Sketch on the L8 loop:** two loops alternating. The generator loop produces a candidate. Your code feeds it to the evaluator loop with a clear rubric. The evaluator returns "accept" or a critique. On accept, return. On critique, append the critique to the generator's messages and re-run. Cap the alternation at three or four rounds; the post's two success indicators are why some tasks never converge and you need to know when to stop.
+
+**When NOT to use:** when the evaluation criteria are subjective and the LLM cannot reliably score against them (you build a noisy oscillator), or when one careful generation is good enough (the extra evaluator call is wasted spend).
+
+## Pattern 6: The autonomous agent
+
+**Verbatim:** *Agents begin their work with either a command from, or interactive discussion with, the human user. Once the task is clear, agents plan and operate independently*.
+
+**When to use:** *Agents can be used for open-ended problems where it's difficult or impossible to predict the required number of steps, and where you can't hardcode a fixed path*. The autonomy is the feature; if you can hardcode a path, one of patterns 1-5 is a better fit.
+
+**The post is explicit about the costs and the discipline that buys safety:** *The autonomous nature of agents means higher costs, and the potential for compounding errors. We recommend extensive testing in sandboxed environments, along with the appropriate guardrails*. And on tool inventory: *It is therefore crucial to design toolsets and their documentation clearly and thoughtfully. You must have some level of trust in its decision-making*.
+
+**Named examples:** Anthropic's coding agent solving SWE-bench tasks (multi-file edits with no fixed path); Anthropic's *computer use* reference implementation (the agent drives the screen + mouse + keyboard); customer support agents with conversation flows plus tool integration.
+
+**Sketch on the L8 loop:** the canonical agent IS the L8 loop, scaled up. *tool_choice* set to *auto* throughout (the model decides every turn). A larger tool inventory (your custom + Anthropic-provided + MCP). A higher *max_iterations* cap (often 50 to 200 rather than 20). Tool result clearing from L7 enabled because retrievals will dominate the context window over many turns. Sandboxed dangerous tools (computer-use in a VM; destructive MCP operations denylisted). Hard ground-truth checks at each step (a search returned no results; the test suite failed; the file write rejected) so the agent has unambiguous environmental feedback.
+
+**When NOT to use:** if a workflow pattern fits, use it. The cost-and-error multiplier from autonomy is real, and a workflow keeps both bounded.
+
+## How to pick
+
+A four-question decision tree that maps directly onto the six patterns:
+
+1. **Are the steps knowable in advance and identical for every input?** If yes, **prompt chaining (1)**.
+2. **Are there distinct categories of input that need different prompts or tools?** If yes, **routing (2)**.
+3. **Can the work be split into independent pieces (or repeated for confidence)?** If yes, **parallelization (3)** (sectioning if pieces; voting if repetitions).
+4. **Are subtasks needed but their shape depends on the input?** If yes, **orchestrator-workers (4)**.
+5. **Does iterative refinement against clear criteria measurably help?** If yes, **evaluator-optimizer (5)**.
+6. **None of the above (open-ended, path-not-hardcodable, the model deciding is the whole point)?** **Autonomous agent (6)**.
+
+Most production stacks compose patterns. A customer-support application may **route** (pattern 2) the inbound query to "knowledge-base lookup" vs "complaint handler" vs "escalation"; the knowledge-base branch may **chain** (pattern 1) retrieval + answer + citation-format; the complaint branch may use **orchestrator-workers** (pattern 4) over per-policy workers; an automated quality-assurance pass at the end may use **voting** (pattern 3) across two reviewers. None of those individual sub-loops needs to be an autonomous agent.
+
+## The discipline that crosses all six
+
+The post's summary thesis is the principle that keeps the choice honest: *Success in the LLM space isn't about building the most sophisticated system. It's about building the right system for your needs*. Three implications carry over to all six patterns:
+
+- **Start simpler.** A single well-tuned augmented LLM call beats a clumsy workflow; a clean workflow beats a sloppy agent. Step up patterns only when measurement says simpler is not enough.
+- **Make ground truth available.** Every pattern works better when each step has clear environmental feedback (a test passed, a search returned, a schema validated). Workflows get this from your code; agents need it from the tools you give them.
+- **Cap and observe.** Every pattern's *max_iterations* is the safety net. Every pattern's *usage* fields are the telemetry. Lesson 12 turns these into production cost and latency monitoring.
+
+## Why this matters when you use Claude
+
+A common failure mode in early agent work is reaching for pattern 6 (the autonomous agent) on a task pattern 1, 2, or 3 would have handled cleaner, cheaper, and more reliably. Working through the decision tree above tends to surface the simpler-pattern answer faster than the temptation to wrap everything in a fully-autonomous loop. The post's summary thesis (*the right system for your needs*) is the standing call.
+
+The next two lessons add Anthropic-specific levers on top of these patterns. Lesson 10 covers Agent Skills (durable, retrievable instructions the loop can lean on per pattern) and Claude Code (a worked agent harness reading Skills). Lesson 11 covers Subagents and Claude Managed Agents, which are how patterns 4 and 6 spawn focused inner loops inside outer ones. Lesson 12 ships the result.
+
+## What you should remember
+
+- **The six patterns** are five workflows plus one agent: **prompt chaining**, **routing**, **parallelization** (sectioning or voting), **orchestrator-workers**, **evaluator-optimizer**, **autonomous agent**. Patterns 1-5 are workflows (your code drives the path); pattern 6 is an agent (the model drives the path).
+- **Pattern 1 (chaining):** decompose into a fixed sequence; trade latency for accuracy; add programmatic gates between steps. Use when subtasks are knowable in advance.
+- **Pattern 2 (routing):** classify and dispatch to a specialized followup; separation of concerns + more specialized prompts. Use when categories are distinct and classifiable; also the natural fit for sending easy questions to a smaller model (lesson 3's effort dial).
+- **Pattern 3 (parallelization):** fan out and aggregate. **Sectioning** for independent subtasks; **voting** for diverse outputs on the same task. Use when subtasks parallelize cleanly or multiple perspectives add confidence.
+- **Pattern 4 (orchestrator-workers):** central LLM dynamically breaks down and delegates. Key distinction from parallelization: subtasks are not pre-defined; the orchestrator picks them per input. Use when subtask shape depends on the input.
+- **Pattern 5 (evaluator-optimizer):** generator-and-critic in a loop. Use when evaluation criteria are clear AND feedback measurably improves output AND the LLM can produce useful feedback. Cap the alternation; not every task converges.
+- **Pattern 6 (autonomous agent):** *Agents begin their work with either a command from, or interactive discussion with, the human user. Once the task is clear, agents plan and operate independently*. Use for open-ended problems where steps cannot be hardcoded. Costs more; sandboxed testing and clear toolset documentation are non-negotiable.
+- **Cross-pattern principle (verbatim):** *Success in the LLM space isn't about building the most sophisticated system. It's about building the right system for your needs*. Start simpler; make ground truth available; cap and observe.
+- **Composition:** most production stacks combine patterns (route into chains; chain into orchestrated workers; vote at the end). No single pattern is the right answer for a whole product.
+
+A loop in lesson 8; a catalog of shapes in this lesson; durable instructions and harnesses in lesson 10; subagents and managed agents in lesson 11; shipping in lesson 12. The patterns above are the vocabulary the rest of Phase 3 builds on.

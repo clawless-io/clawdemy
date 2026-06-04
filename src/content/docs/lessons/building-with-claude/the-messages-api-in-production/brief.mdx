@@ -1,0 +1,76 @@
+---
+title: "The Messages API in production"
+description: "Lesson 2 of Track 22 (Building with Claude). The gap between a one-shot script (lesson 1) and code you can put behind real users. Streaming for interactive UIs and long generations (Python *client.messages.stream(...)* as a context manager, TypeScript *.stream(...).on('text', ...)* as an event-emitter, both with full-message helpers); the stop_reason vocabulary for non-tool-using calls (end_turn, max_tokens, stop_sequence, tool_use, refusal for safety declines with stop_details.category) with forward-refs to L5 pause_turn and L7 model_context_window_exceeded / compaction; the small error-code map (429 rate limits, 500/529 platform errors, 413 too-large) and how to classify each for retry; what the official SDKs do for you automatically (the canonical retryable set: connection errors, 408, 409, 429, and any 5xx; about two retries with exponential backoff) and what you still own (idempotency on the tool side); the request_id you must log from day one; the Message Batches API (50 percent cheaper, async, finishes in under an hour) for high-volume non-interactive work."
+track: building-with-claude
+order: 2
+phase: api-foundations
+phase_order: 2
+difficulty: standard
+estimated_read_minutes: 13
+estimated_practice_minutes: 15
+prerequisites:
+  - "lessons/building-with-claude/lesson-01-your-first-claude-api-call"
+learning_outcomes:
+  - Choose between streaming, standard, and batches by who is waiting and how long the work takes
+  - Dispatch on the stop_reason values for a non-tool-using call (end_turn, max_tokens, stop_sequence, tool_use, refusal) with the appropriate handler action per value (refusal surfaces with stop_details.category; no blind-retry)
+  - Classify HTTP error codes (400 / 401 / 429 / 500 / 504 / 529) by retry policy, use the error response body shape, and log the request_id (and usage) on every API response so production failures can be debugged at Anthropic Support level
+  - Use the official SDK's automatic retry behavior and reason about idempotency on the tool side
+  - Submit and poll a Message Batches API job for non-interactive bulk work (50 percent cheaper, under-1-hour completion)
+authors:
+  - clawdemy
+published_at: 2026-05-27
+last_reviewed: 2026-05-27
+status: published
+artifact: brief
+sidebar:
+  order: 1
+  label: Brief
+tableOfContents: false
+---
+
+import LessonFreshness from "../../../../../components/LessonFreshness.astro";
+import SourceLecture from "../../../../../components/SourceLecture.astro";
+
+<LessonFreshness lastReviewed={frontmatter.last_reviewed} />
+
+<SourceLecture url="https://platform.claude.com/docs/en/build-with-claude/working-with-messages" title="Anthropic Academy 'Building with the Claude API' (production sections) + Anthropic public Messages API, Streaming, Errors, and Batches docs" instructor="Anthropic" />
+
+## What you'll learn
+
+Lesson 1 made a working call on your laptop. This lesson is what changes when the call has to run behind real users. The single capability this lesson builds: **handle the production-side concerns the Messages API expects you to know (streaming, errors, retries, batches, and *request_id* logging) so the same primitive from lesson 1 stops being fragile under real traffic**.
+
+Concretely, you will know when to stream (interactive UIs, long generations), when to batch (bulk non-interactive work at 50 percent off), and when neither is needed; the *stop_reason* values for a non-tool-using call (*end_turn*, *max_tokens*, *stop_sequence*, *tool_use*, *refusal* for safety declines with *stop_details.category*) with one-line handler notes and forward-refs to lessons 5, 7, and 8 for the values that arrive in later phases; the small HTTP error map (400 / 401 / 402 / 403 / 413 / 429 / 500 / 504 / 529) and how to classify each by retry policy; what the official SDKs do for you automatically (the canonical retryable set: connection errors, 408, 409, 429, and any 5xx status code; about two retries via exponential backoff and jitter) and what they cannot decide (whether your specific request is **safe** to retry, which you fix on the tool side via deduplication keys); and the one production-debugging habit that pays back outsized (log the *request_id* on every response so Anthropic Support can find one specific call out of millions).
+
+Every substantive claim verifies against the public Anthropic Claude documentation at [platform.claude.com/docs/](https://platform.claude.com/docs/) (Streaming messages, Batch processing, Errors, and Working with the Messages API pages).
+
+## Where this fits
+
+This is lesson 2 of 12 of Track 22, the **second lesson of Phase 1** (foundations). Lesson 1 established the smallest primitive; this lesson is the same primitive made production-ready. Lesson 3 closes Phase 1 by going up the model-selection layer (Opus / Sonnet / Haiku, extended thinking, the *effort* dial). Together the three are everything the Phase 2 augmentation lessons (tools, MCP, caching, context management), Phase 3 agent lessons, and Phase 4 production lesson build on.
+
+The cross-track companion is **Track 21 (LLM Ops and Production)**, where lesson 7 "LLMOps" covers the same observability discipline this lesson introduces at the provider-agnostic level. The *request_id* + *usage* logging habit here is the Anthropic-specific instance of that LLMOps principle.
+
+## Before you start
+
+**Prerequisites:** lesson 1 of this track (Your first Claude API call). You should already have made at least one working API call and seen the response shape (*id*, *content*, *stop_reason*, *usage*). The try-it-yourself exercise extends lesson 1's environment.
+
+**Optional setup:** the SDK from lesson 1 (`pip install anthropic` or `npm install @anthropic-ai/sdk`); an Anthropic Console account at `https://platform.claude.com/` and an API key. Cost for the exercise is a fraction of a cent.
+
+## About the math
+
+None. The lesson is conceptual + practical: response delivery modes (streaming vs non-streaming), error classification, retry policy, and a batch-cost arithmetic ("50 percent off" is the only number worth memorizing, and you do not derive it; the docs publish it).
+
+## By the end, you'll be able to
+
+The single capability this lesson builds: **handle the production-side concerns the Messages API expects you to know (streaming, errors, retries, batches, and request_id logging) so the same primitive from lesson 1 stops being fragile under real traffic** (the lesson's second-end-state capability, per the Phase 0 lesson 2 capability mapping). Concretely, you will be able to:
+
+- Choose between streaming, standard, and batches by who is waiting and how long the work takes
+- Dispatch on the *stop_reason* values for a non-tool-using call (*end_turn*, *max_tokens*, *stop_sequence*, *tool_use*, *refusal*) with the appropriate handler action per value (*refusal* surfaces with *stop_details.category*; no blind-retry)
+- Classify HTTP error codes (400 / 401 / 429 / 500 / 504 / 529) by retry policy, use the error response body shape, and log the *request_id* (and *usage*) on every API response so production failures can be debugged at Anthropic Support level
+- Use the official SDK's automatic retry behavior and reason about idempotency on the tool side
+- Submit and poll a Message Batches API job for non-interactive bulk work (50 percent cheaper, under-1-hour completion)
+
+## Time and difficulty
+
+- **Read time:** about 13 minutes
+- **Practice time:** about 15 minutes (the try-it-yourself runs a streaming call and exercises two deliberate error cases, plus flashcards for retrieval)
+- **Difficulty:** standard (no math; the work is recognizing the patterns and adopting the habits. Slightly more substantive than lesson 1 because the table of error codes and the streaming SDK shapes are the kind of thing readers come back to as a reference.)

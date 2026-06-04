@@ -1,0 +1,168 @@
+---
+title: "Practice: Tool use, the foundation"
+description: Self-check on the tool definition, the four-step loop, the two ordering rules, tool_choice, parallel tool use, and error handling, plus a hands-on try-it and flashcards.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Seven short questions. Answer each before opening the collapsible.
+
+**1. State the three required fields of a tool definition, and what each is for.**
+
+<details>
+<summary>Show answer</summary>
+
+*name* (how the model refers back to the tool when calling it; your code uses it to dispatch), *description* (the model's instruction manual; vague descriptions produce wrong calls; tell the model what the tool does, when it is appropriate, and any constraints), *input_schema* (JSON Schema describing the parameters; use *required* for mandatory fields, *enum* for fixed-set values, and field-level *description* for unit conventions and edge cases).
+
+</details>
+
+**2. Walk the four-step tool-use loop end to end.**
+
+<details>
+<summary>Show answer</summary>
+
+(1) Your application sends a request with the *tools* array (each tool: name + description + input_schema), plus the user message. (2) The model returns a response with *stop_reason* of *tool_use* and one or more *tool_use* content blocks, each carrying *id*, *name*, and *input* (the parameters the model chose). (3) Your code parses the *tool_use* block, executes the actual tool function in your codebase passing in *input*, assembles a *tool_result* content block with *tool_use_id* (matching the step-2 id), *content* (the result as a string or list of content blocks), and optional *is_error*. (4) You send a new request with the original messages + the assistant's full step-2 *content* (an *assistant* turn) + a *user* turn containing the *tool_result* block. The model continues from there with the result in context; *stop_reason* is typically *end_turn*.
+
+</details>
+
+**3. State the two ordering rules the API enforces on tool-use message history, and the 400 error message you see when broken.**
+
+<details>
+<summary>Show answer</summary>
+
+**Rule 1:** *tool_result* blocks must IMMEDIATELY follow their corresponding *tool_use* blocks in the message history. No other messages between the assistant's *tool_use* message and the user's *tool_result* message. **Rule 2:** in the user message containing *tool_result* blocks, the *tool_result* blocks come **FIRST** in the *content* array; any text comes **AFTER** all *tool_result* blocks. The 400 error you see when broken: "tool_use ids were found without tool_result blocks immediately after".
+
+</details>
+
+**4. The four values of *tool_choice*, and when to use each.**
+
+<details>
+<summary>Show answer</summary>
+
+*auto* (default): model decides whether to use a tool and which one. The right choice for almost all cases, including agent loops.
+*any*: model must use a tool, but picks which one. Use when you want to force a tool call but do not care which.
+*tool*: model must use the specific tool you name. Use when you want to force a specific tool, for example a classifier where the only valid output is a classify call.
+*none*: tools are defined but the model is not allowed to use them this turn. Use when you want to reuse the same conversation history with and without tool access.
+
+</details>
+
+**5. The model returns multiple *tool_use* blocks in one response. How does your code handle this, and how do you send the tool_results back?**
+
+<details>
+<summary>Show answer</summary>
+
+Iterate the response content for *tool_use* blocks, execute each (in any order; the API does not require sequential execution), and assemble one *tool_result* block per *tool_use*, matched by *tool_use_id*. Send ALL the *tool_result* blocks in a SINGLE *user* message (one user message, content array of N *tool_result* blocks). This is "parallel tool use": one fan-out turn from the model, one fan-in response message from you. The model then continues with all results in context.
+
+</details>
+
+**6. When a tool execution fails, what does your code send back, and what does the docs guidance say about the error message?**
+
+<details>
+<summary>Show answer</summary>
+
+Send a *tool_result* block with *is_error* set to *true* and the error in *content*: `{type: "tool_result", tool_use_id: "...", content: "ConnectionError: ...", is_error: true}`. The docs are specific: **write instructive error messages**, not generic ones. "Rate limit exceeded. Retry after 60 seconds." gives the model context to recover or adapt. "failed" gives it nothing. The model reads the error, incorporates it into its response (often by apologizing to the user, sometimes by trying a different approach), and continues. For invalid tool inputs (missing required parameters), an *is_error: true* with an explanatory message lets the model retry two or three times with corrections before giving up.
+
+</details>
+
+**7. How does tool use differ from structured outputs?**
+
+<details>
+<summary>Show answer</summary>
+
+**Tool use** is "the model calls a function in your code, you send a result back, the model continues with the result in context." It is for letting Claude reach beyond its training corpus (look up the weather, query a database, hit your internal API). **Structured outputs** (`output_config: {format: {type: "json_schema", schema: {...}}}`) is "the model's final response is constrained to conform to a JSON schema you specify." It is for when the model's whole answer is supposed to be machine-readable data. They are separate features even though both produce JSON; both can be combined (use *strict: true* on a tool definition to apply structured-outputs guarantees to the tool input shape). Reach for tool use when you want the model to **act**; reach for structured outputs when you want the model to **return parseable data**.
+
+</details>
+
+## Try it yourself: a working tool
+
+About 20 minutes. You will need the SDK from lesson 1 and an Anthropic API key. Costs are a few cents.
+
+**Part A: define a tool.** Pick a simple tool you can implement in 10 lines of Python: maybe a hard-coded *get_weather* (return a fake temperature), or a *get_time* (return the current time in a named timezone), or a *lookup_user* (return a fake user record from a small dict). Write the tool definition (name + description + input_schema) and the Python function that executes it.
+
+**Part B: complete one round-trip.** Send a user message that should trigger the tool ("What is the weather in Tokyo?" or similar). Inspect the response: confirm *stop_reason* is *tool_use* and the *tool_use* block has the *input* parameters you expected. Execute the tool with the parsed *input*. Send the *tool_result* back in a second request (with the original user message, the assistant *tool_use* response, and a new user message containing the *tool_result* block). Print the model's final answer.
+
+**Part C: force a parallel tool call.** Add a second tool (a *get_time* if you started with *get_weather*, or vice versa). Send a question that should trigger both ("What is the weather in Tokyo and the current time there?"). Verify the response contains two *tool_use* blocks. Execute both, send both *tool_result* blocks in the same user message, print the final answer.
+
+<details>
+<summary>What you'll get (an example, not the canonical answer)</summary>
+
+For Part B you will see the loop end to end. The *stop_reason* is *tool_use*, and the response carries a *tool_use* block with an *id* like *toolu_01...* and an *input* object holding the chosen arguments, for example:
+
+```json
+{"location": "Tokyo, Japan"}
+```
+
+After you send the *tool_result* back, the next response has *stop_reason: end_turn* with a natural-language answer that incorporates the tool result. For Part C you will see Claude fan out: two *tool_use* blocks in one response (maybe a brief text block ahead of them explaining "I will look up both"), then your code dispatches both and packs both *tool_result* blocks into one user message, then the final answer combines them.
+
+The exercise is the value, not the specific response. Having the loop running in your shell history makes lessons 5 (server-side tools), 6 (MCP), and 8 (agent loop) land in concrete terms.
+
+</details>
+
+## Flashcards
+
+Nine cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay the set out one card per page for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="The three required fields of a tool definition?">
+
+*name* (how the model refers back; your dispatch key). *description* (the model's instruction manual; vague descriptions produce wrong calls). *input_schema* (JSON Schema for parameters; use *required* / *enum* / per-field *description*).
+
+</Flashcard>
+
+<Flashcard question="The four-step tool-use loop?">
+
+(1) App sends request with *tools* array + user message. (2) Model returns *stop_reason: tool_use* + *tool_use* block(s) with *id* / *name* / *input*. (3) App parses, executes, builds *tool_result* block with *tool_use_id* + *content* (+ optional *is_error*). (4) App sends new request: original messages + full assistant turn + user message containing *tool_result*. Model finishes; *stop_reason: end_turn*.
+
+</Flashcard>
+
+<Flashcard question="The two ordering rules the API enforces?">
+
+(1) *tool_result* must IMMEDIATELY follow *tool_use* in the message history; no intermediate messages. (2) *tool_result* blocks come FIRST in the user message's content array; any text comes AFTER all *tool_result* blocks. The 400 error when broken: "tool_use ids were found without tool_result blocks immediately after".
+
+</Flashcard>
+
+<Flashcard question="The four *tool_choice* values and when to use each?">
+
+*auto* (default, model decides; the right choice for almost everything including agent loops). *any* (force a tool, model picks which). *tool* (force a specific tool by name; classifier pattern). *none* (tools defined but model cannot use them this turn; useful for branching from the same history).
+
+</Flashcard>
+
+<Flashcard question="Parallel tool calls: shape and pattern?">
+
+Model returns multiple *tool_use* blocks in one response. App iterates and executes each (any order). App sends ALL *tool_result* blocks in ONE user message (one user turn, N *tool_result* blocks in *content*), matched by *tool_use_id*. One fan-out turn from model, one fan-in turn from app. Model continues with all results in context.
+
+</Flashcard>
+
+<Flashcard question="Error handling on a failed tool execution?">
+
+Send *tool_result* with *is_error: true* + error in *content*. Per docs: **write instructive errors** ("Rate limit exceeded. Retry after 60 seconds.") not generic ones ("failed"). Model recovers from clear errors, cannot from silence. For invalid tool inputs (missing required params), an *is_error: true* with explanation lets model retry 2-3 times with corrections.
+
+</Flashcard>
+
+<Flashcard question="Client tools vs server tools?">
+
+Client tools: you define + execute (full loop in your code). Use for anything your application owns (database, internal API, filesystem). Server tools: Anthropic executes on their infra (web_search, web_fetch, code_execution, tool_search); declared in *tools* same way, but no *tool_use* / *tool_result* round-trip in your code. Lesson 5 of this track is the server-tools lesson.
+
+</Flashcard>
+
+<Flashcard question="Tool use vs structured outputs?">
+
+Tool use: model calls your code, you send a result, model continues. For letting Claude reach beyond training (lookup, query, action). Structured outputs (`output_config: {format: {type: "json_schema", schema: {...}}}`): model's final response conforms to your JSON schema. For when the answer IS data. They can combine (*strict: true* on a tool applies structured-outputs guarantees to the tool input).
+
+</Flashcard>
+
+<Flashcard question="Token cost overhead of tool use?">
+
+A few hundred tokens for the tool-use system prompt, per the Tool use overview's per-model table. The *any* and specific *tool* modes are **slightly higher** than *auto* and *none* (the model commits to a tool call). Examples: Opus 4.8 290/410, Opus 4.7 675/804, Opus 4.6 / Sonnet 4.6 497/589. Plus the tokens in your *tools* array (names, descriptions, schemas). Non-negligible in an agent loop. Lesson 7 (prompt caching) cuts the repeated cost; lesson 5 covers *tool_search* (a server tool) that keeps a large tool catalog on the server side and loads relevant ones per call.
+
+</Flashcard>
+
+</FlashcardSet>

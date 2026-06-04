@@ -1,0 +1,76 @@
+---
+title: "Model Context Protocol"
+description: "Lesson 6 of Track 22 (Building with Claude). The cross-provider tool layer. What MCP is (an open standard for connecting AI applications to external systems, governed at modelcontextprotocol.io, not Anthropic-proprietary); the MCP connector pattern (Claude as the MCP client, talking directly to remote MCP servers from inside a Messages API call, no MCP client code in your application); the request shape (mcp_servers array + mcp_toolset in the tools array; the mcp-client-2025-11-20 beta header; allowlist/denylist/defer_loading configuration); the response shape (mcp_tool_use + mcp_tool_result inline blocks); the decision frame for when to reach for MCP versus inline tool definitions from lessons 4 and 5; the connector's active limits (tools only, HTTPS only, not on Bedrock or Vertex AI, not ZDR eligible, OAuth is yours); and the cross-provider value of speaking one tool protocol across many model providers."
+track: building-with-claude
+order: 6
+phase: augmentation-patterns
+phase_order: 3
+difficulty: standard
+estimated_read_minutes: 14
+estimated_practice_minutes: 15
+prerequisites:
+  - "lessons/building-with-claude/lesson-05-server-side-tools-and-built-ins"
+learning_outcomes:
+  - State what MCP is (open standard, governed at modelcontextprotocol.io, not Anthropic-proprietary), the three primitive types (tools / resources / prompts), and which one the connector currently supports (tools only)
+  - Write a Messages API call that uses the MCP connector (mcp_servers + matching mcp_toolset, mcp-client-2025-11-20 beta header) and handle the mcp_tool_use + mcp_tool_result response blocks
+  - Choose the right per-tool configuration pattern (allowlist for autonomous loops, denylist for read-only assistants, mixed with defer_loading for large catalogs across multiple servers)
+  - Apply the decision frame across lessons 4-5-6 (custom client tool, Anthropic-provided server / Anthropic-schema client tool, or MCP connector) per tool by asking "who owns the capability"
+  - Recognize when to skip the connector and use the TypeScript client-side helpers instead (local STDIO transports, MCP prompts or resources, ZDR-required workloads, or finer connection control)
+authors:
+  - clawdemy
+published_at: 2026-06-03
+last_reviewed: 2026-06-03
+status: published
+artifact: brief
+sidebar:
+  order: 1
+  label: Brief
+tableOfContents: false
+---
+
+import LessonFreshness from "../../../../../components/LessonFreshness.astro";
+import SourceLecture from "../../../../../components/SourceLecture.astro";
+
+<LessonFreshness lastReviewed={frontmatter.last_reviewed} />
+
+<SourceLecture url="https://platform.claude.com/docs/en/agents-and-tools/mcp-connector" title="Anthropic Academy 'Introduction to Model Context Protocol' + 'MCP Advanced Topics' + Anthropic public MCP connector docs + modelcontextprotocol.io spec" instructor="Anthropic" />
+
+## What you'll learn
+
+Phase 2 continues. Lesson 4 covered the tools you author (custom client tools); lesson 5 covered the tools Anthropic provides (server tools, Anthropic-schema client tools, *tool_search*). This lesson covers the third layer: the tools **someone else** provides, reachable through Model Context Protocol. The single capability this lesson builds: **explain what MCP is, when to use the MCP connector versus inline tool definitions, and what is gained by speaking one tool protocol across many model providers**.
+
+Concretely, you will know what MCP is (the Anthropic docs verbatim: *Claude's Model Context Protocol (MCP) connector feature enables you to connect to remote MCP servers directly from the Messages API without a separate MCP client*; and from the protocol's home page: *MCP (Model Context Protocol) is an open-source standard for connecting AI applications to external systems*, the USB-C-port analogy), the connector mechanics on the Messages API (*mcp_servers* array + *mcp_toolset* in the *tools* array; beta header *mcp-client-2025-11-20*; the deprecated *mcp-client-2025-04-04* and what migrated; per-tool *enabled* and *defer_loading* flags with allowlist / denylist / mixed patterns), the response shape (*mcp_tool_use* + *mcp_tool_result* inline blocks; same no-round-trip-in-your-code property as lesson 5's server tools), the decision frame across the three tool layers (custom for your logic, Anthropic-provided when Anthropic already provides the capability, MCP for third-party catalogs that speak MCP), the connector's active limits (tools only; HTTPS transports only; not on Amazon Bedrock or Vertex AI; not ZDR eligible; OAuth is your responsibility), and when to skip the connector and use the TypeScript client-side helpers (*mcpTools*, *mcpMessages*, *mcpResourceToContent*, *mcpResourceToFile*) instead.
+
+Every substantive claim verifies against the public Anthropic Claude documentation at [platform.claude.com/docs/en/agents-and-tools/mcp-connector](https://platform.claude.com/docs/en/agents-and-tools/mcp-connector) and the open Model Context Protocol specification at [modelcontextprotocol.io](https://modelcontextprotocol.io/).
+
+## Where this fits
+
+This is lesson 6 of 12 of Track 22, the **third lesson of Phase 2** (augmentation patterns). Lesson 4 walked the custom-client foundation; lesson 5 added the Anthropic-provided layer; this lesson adds the third-party-via-MCP layer. Lesson 7 (prompt caching and context management) keeps a request that mixes all three tool layers affordable to repeat. Phase 3 opens at lesson 8 by turning the per-step tool capability set into a multi-turn agent loop.
+
+The cross-track companion is **Track 20 (AI Agents and Tool Use)** for the deeper agent-design treatment of tool isolation and review gates that this lesson sketches at the connector-configuration layer (the allowlist / denylist patterns).
+
+## Before you start
+
+**Prerequisites:** lessons 1-5 of this track. Lesson 4 is load-bearing for the contrast (the connector pattern's defining property is that you do NOT write the tool-handling code lesson 4 walked through). Lesson 5 is load-bearing for the response-shape parallel (server tools also land inline with no round-trip in your code) and for the *defer_loading* + *tool_search* pairing that the *mcp_toolset* configuration ties into.
+
+**Soft recommended:** an Anthropic Console account at `https://platform.claude.com/` and an API key (lesson 1). For the try-it-yourself, a publicly-reachable HTTPS MCP server URL (the modelcontextprotocol.io ecosystem page lists known public servers) and, if the server requires it, an OAuth access token (the Anthropic docs recommend the *npx @modelcontextprotocol/inspector* tool to walk through a token during development). Cost is a few cents (standard tokens; the connector itself does not add a per-call fee).
+
+## About the math
+
+None. The lesson is taxonomic and structural: what MCP is, when to use it, the request and response shapes, the configuration patterns. No formulas; no derivations. Cost framing carries forward unchanged from lesson 5 (standard tokens + any per-tool fees the underlying tool adds + tool definitions and results in context); MCP itself does not introduce a new pricing layer.
+
+## By the end, you'll be able to
+
+The single capability this lesson builds: **explain what MCP is, when to use the MCP connector versus inline tool definitions, and what is gained by speaking one tool protocol across many model providers** (per the Phase 0 lesson 6 capability mapping). Concretely, you will be able to:
+
+- State what MCP is (open standard, governed at modelcontextprotocol.io, not Anthropic-proprietary), the three primitive types (tools / resources / prompts), and which one the connector currently supports (tools only)
+- Write a Messages API call that uses the MCP connector (*mcp_servers* + matching *mcp_toolset*, *mcp-client-2025-11-20* beta header) and handle the *mcp_tool_use* + *mcp_tool_result* response blocks
+- Choose the right per-tool configuration pattern (allowlist for autonomous loops, denylist for read-only assistants, mixed with *defer_loading* for large catalogs across multiple servers)
+- Apply the decision frame across lessons 4-5-6 (custom client tool, Anthropic-provided server / Anthropic-schema client tool, or MCP connector) per tool by asking "who owns the capability"
+- Recognize when to skip the connector and use the TypeScript client-side helpers instead (local STDIO transports, MCP prompts or resources, ZDR-required workloads, or finer connection control)
+
+## Time and difficulty
+
+- **Read time:** about 14 minutes
+- **Practice time:** about 15 minutes (the try-it-yourself runs a basic single-server connector call and the allowlist pattern, plus flashcards for retrieval)
+- **Difficulty:** standard. The protocol-and-connector vocabulary is small; the discipline is mapping the *mcp_servers* + *mcp_toolset* shape onto a real MCP server you want to call, choosing the right configuration pattern for your risk posture, and reasoning about which path (L4 / L5 / L6) is right per tool.

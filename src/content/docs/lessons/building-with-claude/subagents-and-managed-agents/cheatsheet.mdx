@@ -1,0 +1,220 @@
+---
+title: "Cheatsheet: Subagents and Claude Managed Agents"
+description: One-page reference. Subagent definition fields, the four benefits, what subagents inherit, three creation paths, Managed Agents core concepts + five-step flow + beta header + data-retention posture, and the decision frame.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## Subagents at a glance
+
+**Verbatim:** *Subagents are separate agent instances that your main agent can spawn to handle focused subtasks. Use subagents to isolate context for focused subtasks, run multiple analyses in parallel, and apply specialized instructions without bloating the main agent's prompt.*
+
+**Four benefits:** context isolation (*only the final message returns to the parent*), parallelization, specialized instructions, tool restrictions.
+
+## Three creation paths
+
+| Path | Where defined | When to use |
+| --- | --- | --- |
+| **Programmatic** | *agents* parameter on SDK *query()* call | Recommended for SDK applications |
+| **Filesystem-based** | Markdown files in *.claude/agents/* | Claude Code projects; team-shared via Git |
+| **Built-in general-purpose** | None (always available) | Quick delegation without defining a subagent |
+
+Parent must include *Agent* in *allowedTools* to auto-approve subagent invocations.
+
+## AgentDefinition fields
+
+| Field | Required | Description |
+| --- | --- | --- |
+| *description* | Yes | Routing signal Claude reads to decide whether to delegate |
+| *prompt* | Yes | Subagent's system prompt |
+| *tools* | No | Allowed tool names; if omitted, inherits all parent tools |
+| *disallowedTools* | No | Tool names to remove from the inherited set |
+| *model* | No | Alias (*sonnet*, *opus*, *haiku*, *inherit*) or full ID; **cost lever per L3** |
+| *skills* | No | L10 Agent Skills to preload |
+| *memory* | No | Memory source (*user* / *project* / *local*) |
+| *mcpServers* | No | L6 MCP servers |
+| *maxTurns* | No | Per-subagent iteration cap (L8 discipline) |
+| *background* | No | Non-blocking background task |
+| *effort* | No | L3's effort dial per subagent |
+| *permissionMode* | No | Tool-execution permission policy |
+
+**Constraint:** subagents cannot spawn their own subagents. Do NOT include *Agent* in a subagent's *tools* array.
+
+## Minimal Subagent definition
+
+```python
+from claude_agent_sdk import query, ClaudeAgentOptions, AgentDefinition
+
+async for message in query(
+    prompt="Review the authentication module for security issues",
+    options=ClaudeAgentOptions(
+        allowed_tools=["Read", "Grep", "Glob", "Agent"],
+        agents={
+            "code-reviewer": AgentDefinition(
+                description="Expert code review specialist.",
+                prompt="You are a code review specialist...",
+                tools=["Read", "Grep", "Glob"],  # read-only
+                model="sonnet",                    # smaller model for cost
+            ),
+        },
+    ),
+):
+    if hasattr(message, "result"):
+        print(message.result)
+```
+
+## What Subagents inherit (and do not)
+
+| Receives | Does NOT receive |
+| --- | --- |
+| Own system prompt + Agent tool's prompt string from parent | Parent's conversation history or tool results |
+| Project *CLAUDE.md* (via *settingSources*) | Preloaded Skill content (unless listed in *AgentDefinition.skills*) |
+| Tool definitions (inherited or subset in *tools*) | Parent's system prompt |
+
+**Only channel from parent:** the Agent tool's prompt string. Include any file paths, error messages, or decisions the subagent needs in that prompt.
+
+## Subagents → L9 patterns
+
+| L9 pattern | How Subagents realize it |
+| --- | --- |
+| **L9.3 Parallelization** (sectioning) | Concurrent subagents on independent slices |
+| **L9.4 Orchestrator-workers** | Parent loop = orchestrator; subagents = workers |
+| **L9.6 Autonomous agent** | Parent loop spawns many subagents over a long run |
+
+**Beyond dozens to hundreds of subagents:** use the *Workflow* tool (moves orchestration out of the per-turn context).
+
+## Claude Managed Agents at a glance
+
+**Verbatim:** *Pre-built, configurable agent harness that runs in managed infrastructure. Best for long-running tasks and asynchronous work.*
+
+**vs Messages API:**
+
+| | Messages API (L4-L10) | Claude Managed Agents |
+| --- | --- | --- |
+| What it is | Direct model prompting access | Pre-built configurable agent harness in managed infrastructure |
+| Best for | Custom agent loops and fine-grained control | Long-running tasks and asynchronous work |
+
+## Managed Agents: four core concepts
+
+| Concept | Description |
+| --- | --- |
+| **Agent** | Model + system prompt + tools + MCP servers + Skills |
+| **Environment** | Where sessions run (Anthropic-managed cloud sandbox or self-hosted) |
+| **Session** | Running agent instance within an environment, performing a specific task |
+| **Events** | Messages exchanged (user turns, tool results, status updates) |
+
+## Five-step flow
+
+1. **Create an agent** (*POST /v1/agents*). Define model + system + tools + MCP + Skills.
+2. **Create an environment** (*POST /v1/environments*). Cloud sandbox or self-hosted.
+3. **Start a session** (*POST /v1/sessions*). References agent + environment.
+4. **Send events + stream SSE responses.** Anthropic runs the loop; you POST user events and receive agent events.
+5. **Steer or interrupt.** Send additional user events mid-run.
+
+**Beta header:** *managed-agents-2026-04-01* (SDK auto-sets).
+
+## Minimal Managed Agents code
+
+```python
+from anthropic import Anthropic
+client = Anthropic()
+
+agent = client.beta.agents.create(
+    name="Coding Assistant",
+    model="claude-opus-4-8",
+    system="You are a helpful coding assistant.",
+    tools=[{"type": "agent_toolset_20260401"}],  # full built-in tool set
+)
+
+environment = client.beta.environments.create(
+    name="quickstart-env",
+    config={"type": "cloud", "networking": {"type": "unrestricted"}},
+)
+
+session = client.beta.sessions.create(
+    agent=agent.id, environment_id=environment.id, title="Quickstart",
+)
+
+with client.beta.sessions.events.stream(session.id) as stream:
+    client.beta.sessions.events.send(session.id, events=[
+        {"type": "user.message",
+         "content": [{"type": "text", "text": "..."}]},
+    ])
+    for event in stream:
+        if event.type == "session.status_idle":
+            break
+```
+
+## Built-in tools (Managed Agents)
+
+| Tool | Purpose |
+| --- | --- |
+| Bash | Run shell commands in the sandbox |
+| File operations | Read, write, edit, glob, grep files in the sandbox |
+| Web search and fetch | Search the web and retrieve URL content |
+| MCP servers | Connect to external tool providers (L6) |
+
+All enabled via *agent_toolset_20260401* tool type.
+
+## When to choose Managed Agents
+
+| Signal | Notes |
+| --- | --- |
+| Long-running execution | Tasks running minutes or hours with many tool calls |
+| Cloud infrastructure | Secure sandbox with pre-installed packages + network access |
+| Self-hosted execution | Sandbox on your infrastructure (compliance / data residency) |
+| Minimal infrastructure | No need to build agent loop, sandbox, tool execution |
+| Stateful sessions | Persistent filesystem + conversation history across interactions |
+
+## Data-retention posture
+
+| Property | Managed Agents | Messages API (L4-L10) |
+| --- | --- | --- |
+| ZDR eligible | **NO** (stateful by design) | Per-feature (most yes) |
+| HIPAA BAA eligible | **NO** | Per-feature |
+| Data control | Delete sessions + uploaded files via API | Per-feature |
+
+**Bottom line:** ZDR-required workloads must stay on the Messages API path (self-built loop or Subagents).
+
+## Decision frame
+
+| Pick | When |
+| --- | --- |
+| **Self-built L8 loop** | Full harness control; ZDR required; short tasks; latency dominated by tool side |
+| **Subagents inside the loop** | Orchestrator-workers (L9.4); parallelization (L9.3); per-subagent tool restriction; per-subagent smaller model (cost) |
+| **Claude Managed Agents** | Long-running async; stateful sessions useful; no harness to build; ZDR NOT a constraint |
+
+**The three compose.** Most production stacks mix them.
+
+## Common pitfalls
+
+| Failure | Recognize by | Fix |
+| --- | --- | --- |
+| Subagent never spawns | Parent does the work directly | Include *Agent* in *allowedTools*; write a clearer *description*; explicit invoke ("Use the X agent") |
+| Subagent tries to spawn subagent | Recursion error or unexpected behavior | Subagents cannot spawn subagents. Do NOT include *Agent* in subagent's *tools* |
+| Subagent missing context | Subagent asks for info parent already has | The ONLY channel is the Agent tool prompt string. Include file paths, errors, decisions in that prompt |
+| Managed Agents on ZDR workload | Compliance gap | Use the Messages API path (self-built loop or Subagents) |
+| Long-running self-built loop | Sandbox + state management complexity > the agent logic | Managed Agents would have saved weeks. Reach for it when runtime > a few minutes |
+| Cost spike on subagent fan-out | All subagents running on Opus when smaller models would suffice | Use per-subagent *model* alias (sonnet / haiku) per L3's mix-and-match |
+| Hundreds of subagents per turn | Subagents fan-out hits context limits | Use the *Workflow* tool for dozens-to-hundreds of agents (moves orchestration outside the per-turn context) |
+
+## What this lesson does NOT cover (and where to find it)
+
+| Topic | Lands at |
+| --- | --- |
+| Shipping a Claude application end to end | Lesson 12 |
+| Cost monitoring (*usage* + *usage.iterations* + Cost API) | Lesson 12 |
+| Eval-set discipline for agents | Lesson 12 + Track 21 L7 |
+| Self-hosted sandboxes for Managed Agents | platform.claude.com docs |
+| MCP tunnels (Managed Agents) | platform.claude.com docs (research preview) |
+| Dynamic workflows (dozens to hundreds of agents) | code.claude.com/docs/en/workflows |
+
+## Source
+
+- Anthropic **Subagents in the SDK** at `https://code.claude.com/docs/en/agent-sdk/subagents`.
+- Anthropic **Claude Managed Agents overview** at `https://platform.claude.com/docs/en/managed-agents/overview`.
+- Anthropic **Managed Agents quickstart** at `https://platform.claude.com/docs/en/managed-agents/quickstart`.
+- See references for the full anchor list.

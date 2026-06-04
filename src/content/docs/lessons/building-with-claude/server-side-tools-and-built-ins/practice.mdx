@@ -1,0 +1,173 @@
+---
+title: "Practice: Server-side tools and built-ins"
+description: Self-check on the three tool categories, per-tool decisions, pricing implications, the server_tool_use shape, and computer-use discipline, plus a hands-on try-it and flashcards.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Seven short questions. Answer each before opening the collapsible.
+
+**1. State the three categories of Anthropic-provided tools with one example each, and the key distinction between them.**
+
+<details>
+<summary>Show answer</summary>
+
+- **Server tools (Anthropic executes):** *web_search*, *web_fetch*, *code_execution*. You declare the type identifier; Anthropic runs the tool; the result comes back in the same response, no round-trip in your code.
+- **Anthropic-schema client tools (you execute, schema is standard):** *bash*, *computer use*, *memory*, *text_editor*. You declare the canonical type identifier; the L4 client-tool loop applies (*tool_use* → execute in your code → *tool_result*); the advantage over a fully-custom client tool is the model already knows what these tools do.
+- **Tool infrastructure:** *tool_search* (Anthropic executes the search itself; you provide the catalog of deferred tools that can be discovered). Also MCP connector (lesson 6).
+
+Key distinction: **who executes**. Server: Anthropic. Anthropic-schema client: you. Tool_search: Anthropic searches; you (or Anthropic for server-side tool variants) execute the discovered tool.
+
+</details>
+
+**2. web_search: pricing, version strings, citations, and one limit-related parameter you should always know about.**
+
+<details>
+<summary>Show answer</summary>
+
+**Pricing: $10 per 1,000 searches** ($0.01 each), plus standard token costs for search-generated content. Errors do not bill. Each search counts as one use regardless of result count. **Versions:** *web_search_20260209* is current with dynamic filtering (code execution runs internally to filter results; no need to declare *code_execution_20260120* separately); *web_search_20250305* is the older version without dynamic filtering. **Citations:** always on; each cited claim returns a *web_search_result_location* block with *url*, *title*, *encrypted_index*, and up to 150 characters of *cited_text*; the docs say to display them when surfacing API output to end users. **Limit param:** *max_uses* caps the number of searches per request, the right defense against the model getting enthusiastic.
+
+</details>
+
+**3. The code_execution free-when-used-with pricing rule: what is it, and which version pairings?**
+
+<details>
+<summary>Show answer</summary>
+
+**Code execution is free when *web_search_20260209* or *web_fetch_20260209* is in the request** (the per-execution charge is waived; dynamic filtering uses code execution internally as the substrate). Three shapes to recognize: (1) search plus computation, single tool declared (*web_search_20260209* alone, code runs internally); (2) search plus top-level code execution (declare both, charge still waived because the search tool is in the request); (3) computation only, no search or fetch (*code_execution_20260120* alone, standard per-execution pricing). Note: *code_execution* is **not ZDR-eligible** regardless of which shape.
+
+</details>
+
+**4. Where does *computer use* live in the three categories, and what discipline does the lesson recommend?**
+
+<details>
+<summary>Show answer</summary>
+
+**Anthropic-schema client tool**: Anthropic publishes the canonical schema (screenshots, mouse, keyboard); your code executes the actions. The L4 client-tool loop applies. It is in **beta** (requires the *computer-use-2025-11-24* header for Opus 4.8 / Opus 4.7 / Opus 4.6 / Sonnet 4.6 / Opus 4.5; earlier header for older models). ZDR eligible.
+
+**Discipline:** run in a **sandboxed environment** (VM, container, isolated profile with limited credentials), not your real desktop or any environment that can reach production systems, user data, or services that cost money. Treat the agent like a contractor given access only to what they need. The lesson is explicit this is general agent-security hygiene, not Anthropic-specific guidance.
+
+</details>
+
+**5. How does the server-tool response shape differ from the client-tool response shape (from L4)?**
+
+<details>
+<summary>Show answer</summary>
+
+Client tools (L4) return *tool_use* blocks with *stop_reason: tool_use*; your code dispatches and sends *tool_result* in a follow-up request. Server tools return *server_tool_use* blocks (the model's call) AND a matching tool-specific result block (*web_search_tool_result*, *code_execution_tool_result*, *web_fetch_tool_result*, *tool_search_tool_result*) with the inline result in the SAME response. There is no round-trip in your code; you iterate the content array, display text + citations, and the server-tool plumbing is hidden. The *stop_reason* at the end of a server-tool turn is typically *end_turn*, not *tool_use*. (When the API needs to yield mid-loop, you may see *stop_reason: pause_turn* and re-call to continue.)
+
+</details>
+
+**6. tool_search: when does it pay back, when does it not, and what are the two variants?**
+
+<details>
+<summary>Show answer</summary>
+
+**Pays back at scale.** Good use cases per docs: 10+ tools available; tool definitions consuming >10k tokens; selection accuracy issues with large tool sets; MCP-powered systems with 200+ tools; tool libraries growing over time. **Does not pay back** with fewer than 10 tools, when all tools are used frequently in every request, or with very small total definitions (\<100 tokens). Below ~10 tools, standard tool calling is cleaner.
+
+**Two variants:** *tool_search_tool_regex_20251119* (Python *re.search* patterns, max 200 characters; precise) and *tool_search_tool_bm25_20251119* (natural-language queries; forgiving). Maximum catalog: 10,000 tools. Returns 3-5 most relevant per search. The *tool_search* tool itself cannot have *defer_loading: true*; keep 3-5 most-used tools non-deferred too.
+
+</details>
+
+**7. State the pricing-implications mental model. Three pieces stack to give you total cost.**
+
+<details>
+<summary>Show answer</summary>
+
+Three pieces stack: **(1) standard tokens** (input + output, per the model's per-MTok price from lesson 3); **(2) per-tool fee** (web_search at $0.01 per search; code_execution free when used with web_search_20260209 or web_fetch_20260209, otherwise standard per-execution pricing); **(3) server tool results in context** (search results, code outputs, fetched pages all become input tokens on subsequent turns). The dials to manage cost: declare *web_search_20260209* (or *web_fetch_20260209*) so the code-execution per-execution charge is waived; use *max_uses* to cap runaway searches; cache stable tool definitions per lesson 7; use *tool_search* to keep large catalogs out of context (lesson 7 covers the prompt-caching interaction). The same eval-set discipline from lesson 3 applies: measure whether the tool earns its cost on your application's workload.
+
+</details>
+
+## Try it yourself: a real web search
+
+About 15 minutes. You will need the SDK from lesson 1 and an Anthropic API key. Costs are a few cents (one web search at $0.01 plus token costs).
+
+**Setup:** confirm web search is enabled for your organization in the Console at `https://platform.claude.com/settings/privacy` (per the docs, an admin must enable it before first use).
+
+**Part A: a basic web search.** Make a call with the *web_search_20250305* tool and any current-events question ("What is the latest on X?"). Print the response. Find the *server_tool_use* block, the *web_search_tool_result* block, and the final *text* block with citations.
+
+**Part B: dynamic filtering with the single-tool declaration.** Make a second call that declares ONLY *web_search_20260209* (per the docs' canonical example), with a question that benefits from both search and computation ("Search for the current prices of AAPL and GOOGL, then calculate which has a better P/E ratio"). Dynamic filtering uses code execution internally to filter search results and run the P/E calculation; no separate *code_execution_20260120* declaration is needed. The *usage* object shows *server_tool_use.web_search_requests* but no per-execution code_execution charge.
+
+**Part C: max_uses defense.** Make a call where the model could plausibly want many searches ("Compare AAPL, GOOGL, MSFT, META, AMZN current quarterly earnings"). Set *max_uses* to 2. Note the response either uses 2 or fewer (under cap, fine) or returns a *max_uses_exceeded* error in a *web_search_tool_result* block (over cap; defense fired).
+
+<details>
+<summary>What you'll get (an example, not the canonical answer)</summary>
+
+For Part A you will see the inline-response shape live: a *text* block introducing the search, a *server_tool_use* block with the query the model chose, a *web_search_tool_result* block with the results array, then a *text* block answering with *citations* attached. No round-trip in your code; the result is just there.
+
+For Part B you will see dynamic filtering in action: the model writes Python in a *server_tool_use* / *code_execution_tool_result* sequence (the code execution is the internal substrate the dynamic-filtering version runs on), processes search results before they bloat the context window, and arrives at the P/E ratio calculation. The *usage* object shows *server_tool_use.web_search_requests* but no per-execution code_execution charge.
+
+For Part C you will see *max_uses* acting as the cost guardrail. The model either stops at 2 searches and answers with the partial data, or attempts more and you see the error code; either way the cost is bounded.
+
+The exercise is the value, not the specific output. Having the three patterns running gives you the muscle memory for production: most apps use exactly this combination (web_search for current-info, *web_search_20260209* with code execution as the internal substrate for free, *max_uses* for cost discipline, citations for UX).
+
+</details>
+
+## Flashcards
+
+Nine cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay the set out one card per page for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="The three categories of Anthropic-provided tools?">
+
+(1) **Server tools** (Anthropic executes): *web_search*, *web_fetch*, *code_execution*. No round-trip in your code. (2) **Anthropic-schema client tools** (you execute, schema is standard): *bash*, *computer use*, *memory*, *text_editor*. L4 loop applies. (3) **Tool infrastructure**: *tool_search* (scale tool for large catalogs), MCP connector (lesson 6).
+
+</Flashcard>
+
+<Flashcard question="web_search pricing and two versions?">
+
+$10 per 1,000 searches ($0.01 each). *web_search_20260209* current with dynamic filtering (code execution runs internally to filter results; no need to declare *code_execution_20260120* separately); *web_search_20250305* older without dynamic filtering. Each search counts as one use regardless of result count. Errors do not bill. Citations always on.
+
+</Flashcard>
+
+<Flashcard question="The code_execution free-when-used-with pricing rule?">
+
+Code execution is FREE whenever *web_search_20260209* or *web_fetch_20260209* is in the request (per-execution charge waived). Three shapes: (1) *web_search_20260209* alone (dynamic filtering uses code internally); (2) both declared (top-level code_execution plus search/fetch; charge still waived); (3) *code_execution_20260120* alone with no search/fetch (standard per-execution pricing). Note: code_execution is NOT ZDR-eligible regardless.
+
+</Flashcard>
+
+<Flashcard question="Where does computer use sit, and what discipline?">
+
+Anthropic-schema CLIENT tool (you execute screenshots / mouse / keyboard; L4 loop). Beta (header *computer-use-2025-11-24* for current 4.x models). ZDR eligible. **Discipline:** sandbox the environment (VM, container, isolated profile with minimum credentials); never against real desktop or production-reachable systems.
+
+</Flashcard>
+
+<Flashcard question="The server-tool response shape (different from L4 client tool_use)?">
+
+*server_tool_use* (model's call) + the matching tool-specific result block (*web_search_tool_result*, *code_execution_tool_result*, *web_fetch_tool_result*, *tool_search_tool_result*) inline in the SAME response. No round-trip in your code. *stop_reason* typically *end_turn* (or *pause_turn* mid-loop, re-call to continue). Iterate the content array same as L1; display text + citations; server-tool plumbing is hidden.
+
+</Flashcard>
+
+<Flashcard question="When to use tool_search? When not?">
+
+**Use** at 10+ tools, tool definitions > 10k tokens, accuracy issues with large sets, MCP setups with 200+ tools. **Skip** for \<10 tools, all-tools-used-frequently, or \<100-token total definitions. Two variants: *tool_search_tool_regex_20251119* (precise patterns, max 200 chars) and *tool_search_tool_bm25_20251119* (natural language). Max 10,000 tools; returns 3-5 per search.
+
+</Flashcard>
+
+<Flashcard question="Pricing implications: the three stacking pieces?">
+
+(1) Standard tokens (input + output, per model price from L3). (2) Per-tool fees (web_search $0.01; code_execution free when used with *web_search_20260209* or *web_fetch_20260209*). (3) Server tool results count as input tokens on subsequent turns. Dials: declare *web_search_20260209* (or *web_fetch_20260209*) so the code-execution per-execution charge is waived; use *max_uses* to cap; cache stable definitions (L7); use *tool_search* to keep large catalogs out of context.
+
+</Flashcard>
+
+<Flashcard question="ZDR eligibility: which server tools are eligible?">
+
+**ZDR eligible:** *web_search_20250305* (basic) and *web_fetch_20250910* (basic). *computer use*. **NOT ZDR eligible:** *web_search_20260209* and *web_fetch_20260209* (dynamic-filtering versions; rely on code execution under the hood). *code_execution_20260120* (data retained per feature's standard policy). If your organization has data-retention requirements, check per-tool before declaring. Most applications can use freely; specific compliance contexts need the check.
+
+</Flashcard>
+
+<Flashcard question="Custom client tool vs server tool vs Anthropic-schema client tool: the decision?">
+
+**Custom client tool (L4):** your domain logic, your code (database, internal API, business logic). **Server tool:** general capability Anthropic operates (web_search, web_fetch, code_execution). **Anthropic-schema client tool:** general capability your environment provides but with a standard schema (bash, computer use, memory, text_editor). Question: who owns the capability + who runs the code?
+
+</Flashcard>
+
+</FlashcardSet>

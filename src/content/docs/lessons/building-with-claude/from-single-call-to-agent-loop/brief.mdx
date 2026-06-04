@@ -1,0 +1,76 @@
+---
+title: "From single call to agent loop"
+description: "Lesson 8 of Track 22 (Building with Claude). Phase 3 opener. The transition from a one-shot single-call pattern to a multi-turn loop where the model decides what to do next. The workflow-vs-agent distinction with Anthropic's verbatim definitions (workflow: predefined code paths; agent: dynamically directs its own processes and tool usage). The augmented LLM building block (retrieval + tools + memory) underneath both. The canonical loop in 30 lines (a while bounded by max_iterations that calls messages.create, appends the assistant turn, then dispatches on stop_reason). The full stop_reason vocabulary the loop handles (end_turn, tool_use, pause_turn from L5, max_tokens, stop_sequence, model_context_window_exceeded from L7, the compaction value from L7, and refusal for safety declines with stop_details.category). tool_choice for steering (auto / any / tool / none) and its small but real token-cost difference. The four loop disciplines (hard max_iterations cap, tool inventory is the surface area, the L7 cost-and-staleness levers stay engaged, explicit stop_reason dispatch). The post's framework guidance: start by using LLM APIs directly."
+track: building-with-claude
+order: 8
+phase: agent-patterns
+phase_order: 1
+difficulty: standard
+estimated_read_minutes: 15
+estimated_practice_minutes: 15
+prerequisites:
+  - "lessons/building-with-claude/lesson-07-prompt-caching-and-context-management"
+learning_outcomes:
+  - State the workflow-vs-agent distinction verbatim and pick the right path for a given task (start with workflow; graduate to agent only when steps are not knowable in advance)
+  - Build the canonical 30-line agent loop with the *messages.create* call inside a *while* bounded by *max_iterations*, appending the assistant turn each iteration, and dispatching on *stop_reason*
+  - Handle every stop_reason value the loop can return (end_turn, tool_use, pause_turn, max_tokens, stop_sequence, model_context_window_exceeded, "compaction", refusal) with the correct loop action per value (refusal surfaces with stop_details.category, no blind-retry)
+  - Use tool_choice to steer the loop (auto for agents, any / tool for workflows, none for forced final-answer turns) and account for the token-cost difference between auto/none and any/tool modes
+  - Apply the four loop disciplines (hard max-iterations cap, tool inventory as the surface area with sandbox/denylist/auth at the execute boundary, L7 cost-and-staleness levers stay engaged, explicit stop_reason dispatch with no silent fall-through)
+authors:
+  - clawdemy
+published_at: 2026-06-03
+last_reviewed: 2026-06-03
+status: published
+artifact: brief
+sidebar:
+  order: 1
+  label: Brief
+tableOfContents: false
+---
+
+import LessonFreshness from "../../../../../components/LessonFreshness.astro";
+import SourceLecture from "../../../../../components/SourceLecture.astro";
+
+<LessonFreshness lastReviewed={frontmatter.last_reviewed} />
+
+<SourceLecture url="https://www.anthropic.com/engineering/building-effective-agents" title="Anthropic engineering, 'Building Effective AI Agents' (Erik S. and Barry Zhang, 2024-12-19) + Anthropic public Tool use overview" instructor="Anthropic" />
+
+## What you'll learn
+
+Phase 3 opens here. Phase 2 (lessons 4 + 5 + 6 + 7) built the single-call building blocks: tools across three layers and the caching plus context-management levers that keep a tool-heavy call affordable. This lesson is the transition to multi-turn loops where the model decides the next step. The single capability this lesson builds: **turn a one-shot single-call pattern into a multi-turn loop with explicit stop conditions, choose deliberately between the workflow path and the agent path, and write the loop in the few lines of direct-API code it actually takes**.
+
+Concretely, you will know the workflow-vs-agent distinction (the Anthropic engineering post *Building Effective AI Agents* by Erik S. and Barry Zhang, 2024-12-19, verbatim: a workflow is a system where *LLMs and tools are orchestrated through predefined code paths*; an agent is a system where *LLMs dynamically direct their own processes and tool usage, maintaining control over how they accomplish tasks*), the standing call to *find the simplest solution possible, and only increasing complexity when needed*, the augmented LLM building block (LLM + retrieval + tools + memory) underneath both, the canonical 30-line loop (a *while* bounded by *max_iterations* that calls *messages.create*, appends the assistant turn to *messages*, then dispatches on *stop_reason*), the full *stop_reason* vocabulary (*end_turn* / *tool_use* / *pause_turn* from L5 / *max_tokens* / *stop_sequence* / *model_context_window_exceeded* from L7 / *"compaction"* from L7 when *pause_after_compaction: true* / *refusal* for safety declines with *stop_details.category* on the response) with the correct loop action per value, *tool_choice* for steering (*auto* default, *any* / *tool* for hard guarantees, *none* for forced final-answer turns) with the small per-mode token-cost difference, and the four production disciplines (hard *max_iterations* cap; tool inventory is the surface area with sandbox / denylist / auth at the *execute_tool* boundary; the L7 cost-and-staleness levers stay engaged; explicit *stop_reason* dispatch with no silent fall-through).
+
+Every substantive claim verifies against the Anthropic engineering post at [anthropic.com/engineering/building-effective-agents](https://www.anthropic.com/engineering/building-effective-agents) and the public Anthropic Claude documentation at [platform.claude.com/docs/en/agents-and-tools/tool-use/](https://platform.claude.com/docs/en/agents-and-tools/tool-use/) (Tool use overview, How tool use works, Handling stop reasons).
+
+## Where this fits
+
+This is lesson 8 of 12 of Track 22, the **Phase 3 opener** (agent patterns). Phase 2 (lessons 4-7) built the single-call building blocks; this lesson turns them into a loop. The next four lessons specialize the substrate: lesson 9 catalogs the canonical patterns the loop takes (the "six effective-agent patterns": five workflow patterns plus the open-ended agent itself); lesson 10 adds Agent Skills and Claude Code (durable instructions and a worked agent harness reading them); lesson 11 adds Subagents and Claude Managed Agents (focused inner loops spawned from outer ones); lesson 12 closes the track with what changes when an agent loop goes from notebook to production.
+
+The cross-track companion is **Track 20 (AI Agents and Tool Use)** for the full track-level depth on agent design, harness engineering, and the operational discipline of running an agent in production.
+
+## Before you start
+
+**Prerequisites:** lessons 1-7 of this track. Lesson 4 is foundational (the *tool_use* / *tool_result* round-trip is what the loop runs many times). Lesson 5 supplies *pause_turn* as a *stop_reason* the loop must handle. Lesson 7 supplies *model_context_window_exceeded* and the *"compaction"* stop reason; the L7 cost-and-staleness levers (cache the prefix, compact at 150K with cached system end, tool result clearing for tool-heavy loops) stay engaged inside the loop.
+
+**Soft recommended:** an Anthropic Console account at `https://platform.claude.com/` and an API key (lesson 1). For the try-it-yourself, one custom client tool to give the loop something to call (the *get_weather* shape from lesson 4 is enough). Cost is a few cents for a complete loop run.
+
+## About the math
+
+A small amount, all from the Anthropic Tool use overview's per-model token table. Each *tool_choice* mode injects a small auto-included tool-use system-prompt: on Opus 4.7 the count is 675 tokens for *auto* and *none*, 804 tokens for *any* and *tool* (about 19 percent higher). On Opus 4.8 the same modes cost 290 and 410 tokens. The point: forcing modes cost a little more, and across many iterations of a loop that small per-call delta is real. No derivations.
+
+## By the end, you'll be able to
+
+The single capability this lesson builds: **turn a one-shot single-call pattern into a multi-turn loop with explicit stop conditions, choose deliberately between the workflow path and the agent path, and write the loop in the few lines of direct-API code it actually takes** (per the Phase 0 lesson 8 capability mapping). Concretely, you will be able to:
+
+- State the workflow-vs-agent distinction verbatim and pick the right path for a given task (start with workflow; graduate to agent only when steps are not knowable in advance)
+- Implement the canonical 30-line agent loop with the *messages.create* call inside a *while* bounded by *max_iterations*, appending the assistant turn each iteration, and dispatching on *stop_reason*
+- Handle every *stop_reason* value the loop can return (*end_turn*, *tool_use*, *pause_turn*, *max_tokens*, *stop_sequence*, *model_context_window_exceeded*, *"compaction"*, *refusal*) with the correct loop action per value (*refusal* surfaces with *stop_details.category*, no blind-retry)
+- Use *tool_choice* to steer the loop (*auto* for agents, *any* / *tool* for workflows, *none* for forced final-answer turns) and account for the token-cost difference between *auto* / *none* and *any* / *tool* modes
+- Apply the four loop disciplines (hard *max_iterations* cap, tool inventory as the surface area with sandbox / denylist / auth at the execute boundary, L7 cost-and-staleness levers stay engaged, explicit *stop_reason* dispatch with no silent fall-through)
+
+## Time and difficulty
+
+- **Read time:** about 15 minutes
+- **Practice time:** about 15 minutes (the try-it-yourself implements the 30-line loop with one tool, extends the *stop_reason* dispatch to handle *pause_turn* and *max_tokens*, and compares *tool_choice* modes, plus flashcards for retrieval)
+- **Difficulty:** standard. The loop is small (30 lines fits on one screen); the discipline is matching the *stop_reason* dispatch to every value the API can return, choosing *tool_choice* deliberately per use case, and engaging the L7 cost-and-staleness levers inside the loop. Most production agents do not need more than this lesson's substrate plus the patterns in lesson 9.

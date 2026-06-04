@@ -1,0 +1,190 @@
+---
+title: "Cheatsheet: Model Context Protocol"
+description: One-page reference. What MCP is, the connector request shape, per-tool configuration, response blocks, decision frame, and the connector's limits.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## What MCP is (one line)
+
+Model Context Protocol (MCP) is an **open standard for connecting AI applications to external systems**. Governed at modelcontextprotocol.io. Three primitive types: **tools, resources, prompts**. USB-C analogy: one connector, many hosts, many devices.
+
+## Three tool layers in Track 22
+
+| Layer | Who owns the capability | Who writes the schema | Who executes | Lesson |
+| --- | --- | --- | --- | --- |
+| Custom client tool | You | You | You | L4 |
+| Anthropic-provided | Anthropic | Anthropic | Anthropic (server) or you (Anthropic-schema client) | L5 |
+| MCP connector | Third party | MCP server author | Connector + MCP server | **L6** |
+
+## The connector in one paragraph
+
+*Claude's Model Context Protocol (MCP) connector feature enables you to connect to remote MCP servers directly from the Messages API without a separate MCP client* (Anthropic docs, verbatim). Currently supports **tool calls only**. Requires beta header **mcp-client-2025-11-20** (deprecated: *mcp-client-2025-04-04*).
+
+## Request shape
+
+```python
+response = client.beta.messages.create(
+    model="claude-opus-4-8",
+    max_tokens=1000,
+    messages=[{"role": "user", "content": "..."}],
+    mcp_servers=[
+        {
+            "type": "url",
+            "url": "https://example-server.modelcontextprotocol.io/sse",
+            "name": "example-mcp",
+            "authorization_token": "YOUR_OAUTH_TOKEN",
+        }
+    ],
+    tools=[{"type": "mcp_toolset", "mcp_server_name": "example-mcp"}],
+    betas=["mcp-client-2025-11-20"],
+)
+```
+
+## *mcp_servers* entry fields
+
+| Field | Required | Notes |
+| --- | --- | --- |
+| `type` | Yes | Only `"url"` is supported |
+| `url` | Yes | HTTPS; Streamable HTTP or SSE transport |
+| `name` | Yes | Unique inside this request; must match exactly one *mcp_toolset* |
+| `authorization_token` | No | OAuth Bearer if the server requires it |
+
+## *mcp_toolset* entry fields
+
+| Field | Required | Notes |
+| --- | --- | --- |
+| `type` | Yes | Must be `"mcp_toolset"` |
+| `mcp_server_name` | Yes | Must match a server in *mcp_servers* |
+| `default_config` | No | Defaults for every tool: *enabled*, *defer_loading* |
+| `configs` | No | Per-tool overrides (key = tool name) |
+| `cache_control` | No | Prompt-caching breakpoint (lesson 7) |
+
+## Per-tool flags
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `enabled` | true | Include the tool |
+| `defer_loading` | false | Hold the tool's description back; surface via *tool_search* (L5) when relevant |
+
+**Precedence (highest to lowest):** *configs* > *default_config* > system defaults.
+
+## Three configuration patterns
+
+```json
+// Allowlist
+{ "type": "mcp_toolset", "mcp_server_name": "s",
+  "default_config": { "enabled": false },
+  "configs": { "search_events": { "enabled": true },
+               "list_events":   { "enabled": true } } }
+
+// Denylist (recommended baseline for read-only / human-confirm flows)
+{ "type": "mcp_toolset", "mcp_server_name": "s",
+  "configs": { "delete_all_events": { "enabled": false } } }
+
+// Mixed: allowlist + per-tool defer_loading
+{ "type": "mcp_toolset", "mcp_server_name": "s",
+  "default_config": { "enabled": false, "defer_loading": true },
+  "configs": { "search_events": { "enabled": true, "defer_loading": false } } }
+```
+
+## Validation rules
+
+- Every server in *mcp_servers* must be referenced by exactly one *mcp_toolset*.
+- Every *mcp_toolset* must name a server that exists in *mcp_servers*.
+- Unknown tool names in *configs* log a backend warning but do not error (MCP servers may have dynamic tool availability).
+
+## Response shape
+
+```json
+{ "type": "mcp_tool_use",
+  "id": "mcptoolu_014Q35RayjACSWkSj4X2yov1",
+  "name": "echo",
+  "server_name": "example-mcp",
+  "input": { "param1": "value1" } }
+
+{ "type": "mcp_tool_result",
+  "tool_use_id": "mcptoolu_014Q35RayjACSWkSj4X2yov1",
+  "is_error": false,
+  "content": [ { "type": "text", "text": "Hello" } ] }
+```
+
+- Both blocks land **inline** in the same response. No round-trip in your code (same as L5 server tools).
+- Iterate `response.content`; surface text, render *is_error*, log execution.
+
+## Decision frame: which path per tool?
+
+| Question | Yes implies |
+| --- | --- |
+| Does the tool's code already exist as an MCP server? | **MCP connector (L6)** |
+| Is the capability one Anthropic provides as a server tool? | **L5 server tool** |
+| Is the capability one Anthropic provides with a canonical client schema (bash, computer use, memory, text_editor)? | **L5 Anthropic-schema client tool** |
+| Is the logic yours and not exposed as MCP anywhere? | **L4 custom client tool** |
+
+Most production apps mix all three.
+
+## Multiple servers
+
+```json
+{ "mcp_servers": [
+    { "type": "url", "url": "https://mcp.example1.com/sse", "name": "s1" },
+    { "type": "url", "url": "https://mcp.example2.com/sse", "name": "s2" }
+  ],
+  "tools": [
+    { "type": "mcp_toolset", "mcp_server_name": "s1" },
+    { "type": "mcp_toolset", "mcp_server_name": "s2",
+      "default_config": { "defer_loading": true } }
+  ] }
+```
+
+For large catalogs across several servers: combine *defer_loading* with **tool_search (L5)** so only the relevant tools enter the prefix per call.
+
+## Limits to plan for
+
+| Limit | Implication |
+| --- | --- |
+| Tools only | Resources + prompts require client-side TypeScript helpers (not the connector) |
+| HTTPS transports only | Local STDIO servers unreachable through connector |
+| Not on Amazon Bedrock or Vertex AI | Connector available on Claude API + Claude Platform on AWS + Microsoft Foundry |
+| Not ZDR eligible | Data retained per standard policy; check before using for regulated workloads |
+| OAuth is your job | Obtain + refresh tokens application-side; *npx @modelcontextprotocol/inspector* helps in development |
+
+## Client-side TypeScript helpers (when not connector)
+
+| Helper | Use for |
+| --- | --- |
+| `mcpTools(tools, mcpClient)` | Convert MCP tools to Claude API tools (use with SDK tool runner) |
+| `mcpMessages(messages)` | Convert MCP prompt messages to Claude API message format |
+| `mcpResourceToContent(resource)` | Convert MCP resource to a content block |
+| `mcpResourceToFile(resource)` | Convert MCP resource to a file object for upload |
+
+Three when-not-to-connector cases: local STDIO transport, MCP prompts or resources needed, finer connection control needed.
+
+## Common pitfalls
+
+| Failure | Recognize by | Fix |
+| --- | --- | --- |
+| Forgetting the beta header | 400 / unsupported feature | Add `betas=["mcp-client-2025-11-20"]` |
+| Server defined but no *mcp_toolset* | Validation error | Add the matching toolset (one-to-one required) |
+| Allowlist with no tools enabled | Model has no MCP tools available | Set *default_config.enabled* false, then enable specific tools in *configs* |
+| Using connector for ZDR workload | Compliance gap | Use TypeScript helpers + self-hosted MCP client, or skip MCP for this path |
+| Routing destructive tools without review | Side-effects on third-party data | Denylist destructive tools or split into two servers (read-only + human-confirm-before-write) |
+| Many tools across many servers without *defer_loading* | Bloated prefix, slow caching | Set *default_config.defer_loading* true on the chatty servers and pair with *tool_search* (L5) |
+
+## What this lesson does NOT cover (and where to find it)
+
+| Topic | Lands at |
+| --- | --- |
+| Prompt caching on MCP tool definitions | Lesson 7 |
+| Long-session context compaction with MCP results | Lesson 7 |
+| The agent loop using MCP + server + custom tools together | Lesson 8 onward |
+| MCP server authoring (writing your own server) | modelcontextprotocol.io spec |
+
+## Source
+
+- Anthropic public Claude docs: **MCP connector** at `https://platform.claude.com/docs/en/agents-and-tools/mcp-connector`.
+- MCP specification home: `https://modelcontextprotocol.io/`.
+- See references for the full anchor list.

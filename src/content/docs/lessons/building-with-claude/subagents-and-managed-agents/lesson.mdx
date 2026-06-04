@@ -1,0 +1,191 @@
+---
+title: "Lesson: Subagents and Claude Managed Agents"
+description: "Lesson 11 of Track 22 (Building with Claude). Two Anthropic-specific primitives for patterns 4 (orchestrator-workers) and 6 (autonomous agent) from lesson 9. Subagents are separate agent instances your main agent can spawn for focused subtasks (Claude Agent SDK; defined programmatically via the agents parameter on query(), or filesystem-based as markdown in .claude/agents/, or via the built-in general-purpose agent); each runs in its own fresh conversation, only the final message returns to the parent, tool sets are restrictable per subagent, and each can run on a smaller cheaper model than the parent. Claude Managed Agents is the Anthropic-hosted harness (the managed-agents-2026-04-01 beta endpoint family: POST /v1/agents, POST /v1/environments, POST /v1/sessions, SSE event stream): Anthropic provides the agent loop, the sandbox, the tool execution, and the persistence layer; you POST user events and receive agent events. Comparison: Messages API for custom loops with fine-grained control; Managed Agents for long-running asynchronous work where you do not want to build the harness."
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+{/* COMPONENT PLACEHOLDER (Lead wires at promotion): <LessonFreshness lastReviewed={frontmatter.last_reviewed} /> */}
+
+{/* COMPONENT PLACEHOLDER (Lead wires at promotion): <SourceLecture url="https://platform.claude.com/docs/en/managed-agents/overview" title="Anthropic public Claude docs (Subagents in the Agent SDK at code.claude.com + Claude Managed Agents overview at platform.claude.com)" instructor="Anthropic" /> */}
+
+## Why this lesson
+
+Lesson 8 built the loop substrate. Lesson 9 catalogued six canonical patterns. Lesson 10 added Agent Skills (durable instructions) plus Claude Code (one worked harness). This lesson covers two Anthropic-specific primitives that realize patterns 4 (orchestrator-workers) and 6 (autonomous agent) directly. **Subagents** are how a parent agent spawns focused inner loops, one per subtask, each with its own fresh context, its own optional tool restriction, and (optionally) its own smaller cheaper model. **Claude Managed Agents** is the Anthropic-hosted harness: instead of building your own loop, sandbox, and tool execution, you POST user events and Anthropic runs the agent.
+
+The capability the lesson builds: **pick the right primitive for an agent workload** (a single L8-style loop, a Subagent fan-out inside it, or Claude Managed Agents if you would rather not run the harness yourself), **define a Subagent and a Managed Agent end to end**, and **reason about the cost, isolation, and data-retention trade-offs**.
+
+## Subagents (the focused-inner-loop primitive)
+
+The Anthropic docs frame Subagents this way verbatim: *Subagents are separate agent instances that your main agent can spawn to handle focused subtasks. Use subagents to isolate context for focused subtasks, run multiple analyses in parallel, and apply specialized instructions without bloating the main agent's prompt*. The mechanism lives in the Claude Agent SDK; the parent agent calls the *Agent* tool, the SDK spawns a subagent, and the subagent runs an inner L8-style loop until it produces a final message.
+
+The four properties the docs name are worth memorizing because they map back to lesson 9 directly.
+
+**Context isolation.** Verbatim: *Each subagent runs in its own fresh conversation. Intermediate tool calls and results stay inside the subagent; only its final message returns to the parent*. The parent does not see (and does not pay for) the subagent's intermediate work. A research subagent can read forty files; the parent sees a concise summary, not forty file contents.
+
+**Parallelization.** Multiple subagents can run concurrently. The docs' worked example: during a code review, you can run a *style-checker*, a *security-scanner*, and a *test-coverage* subagent simultaneously, cutting review time from minutes to seconds.
+
+**Specialized instructions.** Each subagent gets its own system prompt. A *database-migration* subagent can carry detailed SQL-best-practices and rollback-strategy knowledge that would be noise in the main agent's prompt.
+
+**Tool restrictions.** Each subagent can be limited to a subset of the parent's tools. A *doc-reviewer* subagent might only have *Read* and *Grep*, so it can analyze but never modify your documentation.
+
+### How to define a Subagent
+
+Three paths, per the docs: programmatic via the *agents* parameter on the SDK's *query()* call (recommended for application code), filesystem-based as markdown files in a *.claude/agents/* directory, and the built-in *general-purpose* subagent that Claude can invoke without any definition.
+
+A programmatic Python definition with two subagents looks like this:
+
+```python
+from claude_agent_sdk import query, ClaudeAgentOptions, AgentDefinition
+
+async for message in query(
+    prompt="Review the authentication module for security issues",
+    options=ClaudeAgentOptions(
+        # Auto-approve these tools, including Agent for subagent invocation
+        allowed_tools=["Read", "Grep", "Glob", "Agent"],
+        agents={
+            "code-reviewer": AgentDefinition(
+                description="Expert code review specialist. Use for quality, security, and maintainability reviews.",
+                prompt="""You are a code review specialist with expertise in security, performance, and best practices.
+Be thorough but concise.""",
+                tools=["Read", "Grep", "Glob"],   # read-only
+                model="sonnet",                    # smaller model for this subagent
+            ),
+            "test-runner": AgentDefinition(
+                description="Runs and analyzes test suites. Use for test execution and coverage analysis.",
+                prompt="You are a test execution specialist. Run tests; analyze results.",
+                tools=["Bash", "Read", "Grep"],
+            ),
+        },
+    ),
+):
+    if hasattr(message, "result"):
+        print(message.result)
+```
+
+The *AgentDefinition* fields worth knowing are *description* (required; the router signal Claude reads to decide whether to delegate to this subagent), *prompt* (required; the subagent's system prompt), *tools* (the whitelist; if omitted, the subagent inherits all of the parent's tools), *disallowedTools* (the subtraction list), *model* (an alias like *sonnet*, *opus*, *haiku*, or *inherit*, or a full model ID; lesson 3's effort dial also applies via the *effort* field), *skills* (lesson 10's Agent Skills to preload), *mcpServers* (lesson 6's MCP integrations), *memory* (a per-subagent persistent context store), *permissionMode* (the security posture for the subagent's tool calls; the same modes as the parent loop), *maxTurns* (a per-subagent cap), and *background* (run as a non-blocking background task).
+
+### What Subagents inherit (and do not)
+
+The docs are explicit about the channel between parent and subagent: *the only channel from parent to subagent is the Agent tool's prompt string*. Include any file paths, error messages, or decisions the subagent needs in that prompt.
+
+| The subagent receives | The subagent does NOT receive |
+| --- | --- |
+| Its own system prompt + the Agent tool's prompt string | The parent's conversation history or tool results |
+| Project *CLAUDE.md* (loaded via *settingSources*) | Preloaded Skill content unless listed in *AgentDefinition.skills* |
+| Tool definitions (inherited from parent, or the subset in *tools*) | The parent's system prompt |
+
+One constraint to plan around: **subagents cannot spawn their own subagents**. Do not include *Agent* in a subagent's *tools* array. For workflows that coordinate dozens to hundreds of agents, the docs point to the *Workflow* tool, which moves orchestration out of the conversation into a script the runtime executes outside the per-turn context.
+
+### How Subagents realize the lesson 9 patterns
+
+The mapping is direct. **Pattern 4 (orchestrator-workers)**: the parent loop is the orchestrator; the subagents are the workers; the orchestrator decides what to spawn at runtime based on the input, satisfying the "subtasks not pre-defined" criterion. **Pattern 3 (parallelization, sectioning sub-type)**: multiple subagents run concurrently on independent slices. **Pattern 6 (autonomous agent)**: the parent agent can spawn many subagents over a long run, each focused on a sub-goal, while keeping the main context clean.
+
+One cost angle worth pulling out. Because subagents can run on a smaller model than the parent, the per-subagent model choice is a real cost lever (lesson 3's mix-and-match pattern, now per-subagent). The docs' worked example: a strict-mode security reviewer runs on *opus*; the balanced-mode reviewer on *sonnet*; both are subagents of a parent that orchestrates them.
+
+## Claude Managed Agents (the hosted harness)
+
+If Subagents save you from writing the spawn primitive, Claude Managed Agents saves you from writing the entire harness. The docs' verbatim positioning: *Pre-built, configurable agent harness that runs in managed infrastructure. Best for long-running tasks and asynchronous work*. And: *Claude Managed Agents provides the harness and infrastructure for running Claude as an autonomous agent. Instead of building your own agent loop, tool execution, and runtime, you get a fully managed environment where Claude can read files, run commands, browse the web, and execute code securely*.
+
+The product comparison the docs publish is the cleanest decision framing:
+
+| | Messages API (lessons 4-10) | Claude Managed Agents |
+| --- | --- | --- |
+| **What it is** | Direct model prompting access | Pre-built, configurable agent harness in managed infrastructure |
+| **Best for** | Custom agent loops and fine-grained control | Long-running tasks and asynchronous work |
+
+### The four core concepts
+
+The docs name four: **Agent** (the model, system prompt, tools, MCP servers, and Skills), **Environment** (where sessions run, either an Anthropic-managed cloud sandbox or a self-hosted sandbox on your infrastructure), **Session** (a running agent instance within an environment, performing a specific task), and **Events** (the messages exchanged: user turns, tool results, status updates).
+
+### How it works
+
+Five steps, per the docs:
+
+1. **Create an agent.** Define the model, system prompt, tools, MCP servers, and Skills. Create the agent once and reference it by ID across sessions.
+2. **Create an environment.** Configure the sandbox (cloud or self-hosted).
+3. **Start a session.** Launch a session referencing the agent + environment.
+4. **Send events and stream responses.** Send user messages as events; Claude autonomously executes tools and streams results back as server-sent events (SSE). Event history is persisted server-side and can be fetched in full.
+5. **Steer or interrupt.** Send additional user events mid-run to guide or change direction.
+
+A minimal three-call agent creation in Python (the *managed-agents-2026-04-01* beta header is set automatically by the SDK):
+
+```python
+from anthropic import Anthropic
+client = Anthropic()
+
+agent = client.beta.agents.create(
+    name="Coding Assistant",
+    model="claude-opus-4-8",
+    system="You are a helpful coding assistant.",
+    tools=[{"type": "agent_toolset_20260401"}],  # the full built-in tool set
+)
+
+environment = client.beta.environments.create(
+    name="quickstart-env",
+    config={"type": "cloud", "networking": {"type": "unrestricted"}},
+)
+
+session = client.beta.sessions.create(
+    agent=agent.id,
+    environment_id=environment.id,
+    title="Quickstart session",
+)
+
+# Stream events
+with client.beta.sessions.events.stream(session.id) as stream:
+    client.beta.sessions.events.send(
+        session.id,
+        events=[{"type": "user.message", "content": [{"type": "text", "text": "..."}]}],
+    )
+    for event in stream:
+        match event.type:
+            case "agent.message":   ...
+            case "agent.tool_use":  ...
+            case "session.status_idle":  break
+```
+
+The *agent_toolset_20260401* tool type enables the full pre-built set (Bash, file operations, web search, web fetch, and more). The session goes idle on a *session.status_idle* event; you can resume by sending another user event.
+
+### When Managed Agents is the right choice
+
+The docs name four signals (verbatim): *long-running execution* (tasks that run minutes to hours with multiple tool calls); *cloud infrastructure* (a secure sandbox with pre-installed packages and network access, or a self-hosted equivalent you control); *minimal infrastructure* (no need to build your own agent loop, sandbox, or tool execution layer); *stateful sessions* (persistent filesystems and conversation history across multiple interactions).
+
+### Limits and data-retention posture
+
+Two real constraints to plan around. **Managed Agents is in beta**, gated by the *managed-agents-2026-04-01* beta header (the SDK sets it automatically). MCP tunnels and the dreaming feature inside Managed Agents are in a more limited research preview that requires explicit access.
+
+More important for production decisions: **Claude Managed Agents is stateful by design**, so sessions, sandbox state, and outputs are stored server-side. The consequence the docs name directly: Managed Agents is **not currently eligible for Zero Data Retention** or HIPAA Business Associate Agreement coverage. You retain control of the stored data (you can delete sessions and uploaded files via the API), but if your workload is ZDR-required, you keep the Messages-API path (lessons 4-10 plus a self-built harness or Subagents) until that posture changes.
+
+## Decision frame: which primitive
+
+The clean version, applied per workload:
+
+- **A single L8-style loop in your code.** When the task fits one agent loop, when you want full control of the harness, when ZDR matters, when latency is dominated by your tool side rather than the loop.
+- **Subagents (Agent SDK) inside that loop.** When you want pattern 4 (orchestrator-workers) or pattern 3 (parallelization) without writing the spawn-and-context-isolation primitive yourself, when per-subagent tool restriction is a real safety win, when running some subtasks on a smaller cheaper model is a real cost win.
+- **Claude Managed Agents.** When the agent runs for minutes or hours, when you do not want to run the sandbox, when stateful sessions are useful, when ZDR is not a constraint. The first call you make is *agents.create*; the rest is mostly send-events / receive-events.
+
+The three are composable. You can write your own L8 loop that calls Subagents for fan-out, and reach for Managed Agents only on the workloads where the loop or sandbox is the actual constraint. Most production stacks end up with a mix, the same way they end up with a mix of models from lesson 3.
+
+## Why this matters when you use Claude
+
+The hardest part of running an agent in production is rarely "make the model call." It is the harness around the call: the sandbox, the tool execution, the long-running session state, the multi-step retry policy, the per-step observability. Subagents save you from writing the spawn primitive for patterns 4 and 6 (it is real engineering when you build it yourself, and easy to get wrong on context isolation). Managed Agents saves you from writing the entire harness when you are running long-form asynchronous work and do not want to operate the runtime.
+
+The lesson 12 closer turns whichever path you chose into a shipped production application: cost monitoring on *usage* and *usage.iterations*, eval-set discipline, the rollout checklist, the data-retention posture that decides between paths.
+
+## What you should remember
+
+- **Subagents (verbatim):** *separate agent instances that your main agent can spawn to handle focused subtasks*. Three creation paths: programmatic (the *agents* parameter on the SDK *query()* call), filesystem-based (markdown files in *.claude/agents/*), or the built-in *general-purpose* subagent.
+- **Four Subagent benefits:** context isolation (only the final message returns to the parent), parallelization (concurrent subagents), specialized instructions (per-subagent system prompt), and tool restrictions (per-subagent tools whitelist).
+- ***AgentDefinition* essentials:** *description* routes; *prompt* defines behavior; *tools* restricts; *model* can be a smaller cheaper alias per subagent (a per-step instance of lesson 3's mix-and-match); *effort* applies. Subagents cannot spawn their own subagents; do not include *Agent* in a subagent's *tools*.
+- **Subagents realize the L9 patterns** directly: pattern 4 (orchestrator-workers) = parent loop + worker subagents; pattern 3 (parallelization, sectioning) = concurrent subagents; pattern 6 (autonomous agent) = parent loop spawning many subagents over a long run.
+- **Beyond dozens to hundreds of subagents:** the *Workflow* tool moves orchestration into a script outside the per-turn context.
+- **Claude Managed Agents (verbatim):** *Pre-built, configurable agent harness that runs in managed infrastructure. Best for long-running tasks and asynchronous work*. Anthropic provides the agent loop, sandbox, tool execution, and runtime; you POST events and receive SSE events.
+- **Four core concepts:** Agent, Environment, Session, Events. Three endpoints: *POST /v1/agents*, *POST /v1/environments*, *POST /v1/sessions*. Beta header *managed-agents-2026-04-01* (SDK auto-sets).
+- **Built-in tools** via *agent_toolset_20260401*: bash, file operations, web search and fetch, MCP servers.
+- **When to choose Managed Agents:** long-running execution; minimal infrastructure (no harness to build); cloud or self-hosted sandbox; stateful sessions. **NOT for ZDR-required workloads** (stateful by design; not currently ZDR or HIPAA BAA eligible).
+- **Decision frame:** L8-style self-built loop for full control or ZDR; Subagents inside that loop for orchestrator-workers / parallelization / cheaper subagents; Managed Agents for long-running asynchronous work where you skip the harness. The three compose; most production stacks mix them.
+
+A loop in lesson 8. Patterns in lesson 9. Skills + Claude Code in lesson 10. Subagents and Managed Agents here. Lesson 12 ships the result to production.

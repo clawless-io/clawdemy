@@ -1,0 +1,235 @@
+---
+title: "Practice: Prompt caching and context management"
+description: Self-check on the cache_control mechanism, pricing multipliers, usage fields, the context-window picture, compaction, context editing, and the cost-vs-staleness frame, plus a hands-on try-it and flashcards.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Seven short questions. Answer each before opening the collapsible.
+
+**1. State the *cache_control* field shape, the three placement layers, the placement order, and the maximum number of explicit breakpoints per request.**
+
+<details>
+<summary>Show answer</summary>
+
+**Shape:** the *cache_control* field with *type* set to *ephemeral* and an optional *ttl* of *1h* (default TTL is 5 minutes).
+
+**Three placement layers** (cacheable block types): the *system* array (system-prompt text blocks), the *tools* array (custom client tools from L4, server and Anthropic-schema client tools from L5, and *mcp_toolset* entries from L6), and the *messages* array (user content blocks and assistant *tool_use* / *tool_result* blocks).
+
+**Placement order for prefix construction:** *tools* → *system* → *messages*.
+
+**Maximum:** **four explicit cache breakpoints per request** (a fifth returns a 400 error). The system looks back at most 20 blocks from each explicit breakpoint when checking for prior cache writes.
+
+</details>
+
+**2. Pricing multipliers and break-even: state the three multipliers off the base input-token price, then compute the break-even hit count for a 5-minute write and a 1-hour write.**
+
+<details>
+<summary>Show answer</summary>
+
+**Three multipliers** (off the model's standard input-token price):
+
+| Token kind | Multiplier |
+| --- | --- |
+| Standard (uncached) input | 1.0x |
+| 5-minute cache write | 1.25x |
+| 1-hour cache write | 2.0x |
+| Cache hit or refresh | 0.1x (about 90 percent discount) |
+
+**Break-even (when total cost of cache + N hits equals N+1 uncached reads):**
+
+- **5-minute write:** writing costs 1.25x. Each hit saves 0.9x of the uncached price (paid 0.1x instead of 1.0x). One hit saves 0.9x; that recovers the 0.25x write premium and starts saving from the second hit. **Break-even at one hit.**
+- **1-hour write:** writing costs 2.0x. The 1.0x write premium needs 1.0 / 0.9 ≈ 1.11 hits worth of savings to recover, but in practice the first three to four hits is the realistic threshold once you account for any minimum-token floors. **Break-even at roughly two to four hits** depending on prefix size; use the longer TTL for prefixes that genuinely reuse across long sessions.
+
+The takeaway: a 5-minute cache pays back on the first reuse; a 1-hour cache is for prefixes you will hit many times across longer time spans.
+
+</details>
+
+**3. Read the *usage* object: what do *cache_creation_input_tokens*, *cache_read_input_tokens*, and *input_tokens* mean, and what is the total-input identity?**
+
+<details>
+<summary>Show answer</summary>
+
+- ***cache_creation_input_tokens***: tokens **written** to the cache this turn (new cache entry created).
+- ***cache_read_input_tokens***: tokens **read** from cache this turn (the cache prefix hit).
+- ***input_tokens***: tokens **after** the last cache breakpoint that did not hit (the uncached tail of the prefix plus the new user content).
+
+**Identity from the docs:**
+
+```
+total_input_tokens = cache_read_input_tokens
+                   + cache_creation_input_tokens
+                   + input_tokens
+```
+
+In production: watch the ratio of *cache_read_input_tokens* to total input. A healthy production stack with stable prompts often runs that ratio well over 90 percent, which is the spend reduction the multipliers buy.
+
+</details>
+
+**4. The context-window picture: which models give you 1M tokens vs 200K, what is "context rot," and what stop reason fires on overflow for current models?**
+
+<details>
+<summary>Show answer</summary>
+
+**1M-token window:** Opus 4.8 / Mythos Preview / Opus 4.7 / Opus 4.6 / Sonnet 4.6 (on Claude API, Bedrock, Vertex AI). **200K-token window:** Sonnet 4.5 and older (deprecated) models. (On Microsoft Foundry, Opus 4.8 currently runs at 200K.)
+
+**Context rot:** the docs' name for the accuracy-and-recall degradation that grows with sequence length. The line worth quoting: *as token count grows, accuracy and recall degrade, a phenomenon known as context rot. This makes curating what's in context just as important as how much space is available*. The point: fitting in the window is not the same as performing well in the window.
+
+**Overflow stop reason on Claude 4.5+ models:** *stop_reason: model_context_window_exceeded* (the API accepts the request and stops cleanly when generation hits the limit). On earlier models, opt in to that behavior with the *model-context-window-exceeded-2025-08-26* beta header; without it, the API returns a validation error upfront. Use the token-counting API to estimate ahead of time.
+
+</details>
+
+**5. Compaction: what does it do, how do you enable it, what is the default trigger, and how does it interact with prompt caching?**
+
+<details>
+<summary>Show answer</summary>
+
+**What it does:** server-side context compaction. When the conversation crosses a trigger threshold, the API generates a summary of the conversation and emits a *compaction* block in the response that replaces the older history; on subsequent requests, all message blocks prior to that *compaction* block are dropped server-side so the active context stays focused. Docs verbatim: *as conversations get longer, models struggle to maintain focus across the full history. Compaction keeps the active context focused and performant by replacing stale content with concise summaries*.
+
+**Enabling:**
+
+```python
+context_management={
+    "edits": [
+        {"type": "compact_20260112",
+         "trigger": {"type": "input_tokens", "value": 150000},
+         "pause_after_compaction": False}
+    ]
+}
+# plus beta header: betas=["compact-2026-01-12"]
+```
+
+**Default trigger:** 150,000 input tokens (minimum 50,000). **Supported models** (beta as of writing): Opus 4.8 / Mythos Preview / Opus 4.7 / Opus 4.6 / Sonnet 4.6. **ZDR eligible.**
+
+**Interaction with prompt caching:** put a *cache_control* breakpoint at the **end of the system prompt** so the system survives compaction (the post-compaction request reads the system from cache and only writes the much-shorter summary fresh). Without that breakpoint, compaction can invalidate a previously-cached system prefix.
+
+**Two costs to plan for:** compaction is an extra sampling step (billed separately under *usage.iterations*, NOT in the top-level *input_tokens* / *output_tokens*), and the **same model is used to write the summary** (no cheaper-model option). When tools are defined, set custom *instructions* on the edit forbidding tool calls during the summary (the model occasionally tries to call a tool instead of writing the summary).
+
+</details>
+
+**6. Context editing: the two server-side strategies, when to reach for each, and the cache-interaction asymmetry.**
+
+<details>
+<summary>Show answer</summary>
+
+**Two server-side strategies**, both gated by the *context-management-2025-06-27* beta header:
+
+- ***clear_tool_uses_20250919*** (tool result clearing). Clears the oldest *tool_result* blocks (and *mcp_tool_result* blocks) in chronological order, replacing each with placeholder text so Claude knows it was removed. Optional *clear_tool_inputs* also clears the corresponding *tool_use* parameters. *clear_at_least* sets a minimum tokens-cleared floor. **When to reach for it:** agentic workflows with heavy tool use where old results (file dumps, search hits, MCP retrievals) are no longer needed.
+
+- ***clear_thinking_20251015*** (thinking block clearing). Clears *thinking* blocks from extended-thinking sessions. *keep* parameter controls how many recent thinking blocks survive. **When to reach for it:** long extended-thinking sessions where you want to override the per-model-class default and tune the kept-thinking depth.
+
+**Cache-interaction asymmetry:**
+
+- **Tool result clearing INVALIDATES** the cached prefix at the clear point (you incur cache write costs after each clear). Use *clear_at_least* so the clears are large enough that the write is worth it.
+- **Thinking-block clearing preserves** the cache when blocks are kept (which the modern-model defaults do); only the points where blocks are actually cleared invalidate the cache.
+
+**Editing vs compaction:** docs explicit: *for most use cases, server-side compaction is the primary strategy for managing context in long-running conversations. The strategies on this page are useful for specific scenarios where you need more fine-grained control over what content is cleared*. Default to compaction; reach for editing when a specific block class needs to leave the context while the rest stays verbatim.
+
+</details>
+
+**7. State the trade-cost-against-staleness frame in three lines, one per lever.**
+
+<details>
+<summary>Show answer</summary>
+
+- **Cache the stable parts.** Cost lever. *cache_control* on anything whose text does not change for the session. Pays back at one (5-minute TTL) or a few (1-hour TTL) hits per breakpoint.
+- **Compact the long parts.** Staleness + budget lever. *compact_20260112* with a trigger near 150K input tokens; cache the system prompt separately so it survives compaction; pay an extra-sampling-step cost per compaction event.
+- **Clear the heavy parts.** Surgical lever. *clear_tool_uses_20250919* for agentic workflows with heavy tool use; pair with *clear_at_least* so cache invalidation pays back. *clear_thinking_20251015* for tuning thinking-block depth in extended-thinking sessions (cache survives by default if blocks are kept).
+
+The point: reach for each lever **deliberately** rather than turning all three on by default. Match the lever to the session's shape (stable prefix length, total session length, tool-call density).
+
+</details>
+
+## Try it yourself: a real cached prefix
+
+About 15 minutes. You will need the SDK from lesson 1 and an Anthropic API key. Cost is a few cents (one or two requests).
+
+**Setup:** pick a system prompt of at least 4,096 tokens (the minimum cacheable size on Opus 4.7). Anything works: a long style guide, a piece of reference documentation, or a synthetic block of repeated text. You will send the same prompt twice and check the cache turnaround.
+
+**Part A: a cache write + a cache read.** Make a first request with the long system prompt, attaching *cache_control* on the system block. Print the *usage* object and confirm *cache_creation_input_tokens* is large and *cache_read_input_tokens* is zero. Within five minutes, make a second request with the same system prompt and a different user message. Confirm *cache_creation_input_tokens* is zero (or small) and *cache_read_input_tokens* is large. Compute the cost ratio between the two turns.
+
+**Part B: the TTL knob.** Repeat Part A but set the *cache_control* field's *type* to *ephemeral* and add *ttl* set to *1h*. Note the *cache_creation_input_tokens* multiplier is 2.0x rather than 1.25x on the write turn. Decide which TTL fits the session shape you actually have (short bursts of conversation: 5 minutes; long-running agent or daily-reused operator prompt: 1 hour).
+
+**Part C: the *cache_control* on a tool definition.** Add the same *cache_control* marker to one entry in your *tools* array (a custom client tool from lesson 4, or an *mcp_toolset* entry from lesson 6). Make two requests where only the user message changes. Confirm the tool definitions also hit cache on the second turn.
+
+<details>
+<summary>What you'll get (an example, not the canonical answer)</summary>
+
+For Part A the *usage* on the first request will show a *cache_creation_input_tokens* near the system-prompt size, an *input_tokens* near zero (your tiny user message), and a high effective price per the 1.25x multiplier. On the second request, *cache_creation_input_tokens* drops to zero, *cache_read_input_tokens* picks up the same large number, *input_tokens* is again near zero, and the bill drops by roughly 90 percent on the cached portion (you paid 0.1x for the same prefix).
+
+For Part B you see the same shape but the write turn's effective price is higher (2.0x), and the break-even moves further down the hit count. The right TTL is whichever payback window matches the cadence of your real reuse.
+
+For Part C you confirm that caching is not just for system text: tool definitions are often the largest stable content in a tool-heavy application, and caching them across turns is often the single highest-leverage move in a production stack.
+
+The exercise's value is the muscle memory: in production, most teams begin by caching the system prompt; the second-highest-leverage move is caching the tool stack across L4 / L5 / L6.
+
+</details>
+
+## Flashcards
+
+Nine cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay the set out one card per page for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="What does cache_control do, and what is the field shape?">
+
+Marks a block as a cache breakpoint so its prefix is stored and reused across requests. **Shape:** the *cache_control* field with *type* set to *ephemeral* and an optional *ttl* of *1h* (default 5 minutes). Attaches to *system* text blocks, *tools* entries (custom + server + Anthropic-schema + *mcp_toolset*), and *messages* content blocks. Up to **four explicit breakpoints per request**. Placement order: *tools* → *system* → *messages*.
+
+</Flashcard>
+
+<Flashcard question="The pricing multipliers and the break-even rules?">
+
+**5-minute cache write:** 1.25x base input. **1-hour cache write:** 2.0x. **Cache hit or refresh:** 0.1x (about 90 percent discount). **Break-even:** 5-minute write pays back at one hit; 1-hour write pays back at roughly two to four hits depending on prefix size. Use 5-minute for typical chat sessions; 1-hour for long-running operator prompts and agents.
+
+</Flashcard>
+
+<Flashcard question="Three usage fields for caching and the total-input identity?">
+
+***cache_creation_input_tokens*** (written this turn), ***cache_read_input_tokens*** (hit this turn), ***input_tokens*** (uncached, after the last breakpoint). **Identity:** *total_input_tokens = cache_read_input_tokens + cache_creation_input_tokens + input_tokens*. In production, watch the read-to-total ratio (often 90 percent+ on a well-cached production stack).
+
+</Flashcard>
+
+<Flashcard question="Minimum cacheable size and exact-match rule?">
+
+**Minimum cacheable size:** 4,096 tokens on Opus 4.7 / 4.6 / 4.5 and Haiku 4.5; 1,024 tokens on Opus 4.8 / Sonnet 4.6 / Sonnet 4.5. Shorter prompts marked with *cache_control* are processed without caching (no error). **Exact-match:** a single character change anywhere in the cached span invalidates the prefix. Caching is workspace-isolated on Claude API + AWS + Foundry (beta); organization-isolated on Bedrock + Vertex.
+
+</Flashcard>
+
+<Flashcard question="The context-window picture and 'context rot'?">
+
+**1M tokens:** Opus 4.8 / Mythos Preview / Opus 4.7 / Opus 4.6 / Sonnet 4.6 on Claude API + Bedrock + Vertex AI. **200K tokens:** Sonnet 4.5 and older. **Context rot:** the docs' name for the accuracy and recall degradation that grows with sequence length: *as token count grows, accuracy and recall degrade ... curating what's in context just as important as how much space is available*. **Overflow on 4.5+ models:** *stop_reason: model_context_window_exceeded*.
+
+</Flashcard>
+
+<Flashcard question="Compaction: what is it, how to enable, default trigger?">
+
+**Server-side context compaction.** Generates a summary of older history when input crosses a trigger threshold; emits a *compaction* block; subsequent requests automatically drop prior messages. **Enable:** beta *compact-2026-01-12* + a *context_management* parameter containing an *edits* array with one entry of *type: compact_20260112*. **Default trigger:** 150,000 input tokens (min 50,000). **Models:** Opus 4.8 / Mythos / 4.7 / 4.6 + Sonnet 4.6. **Cache interaction:** put a *cache_control* breakpoint at the end of the system prompt so it survives compaction. **Billing:** extra sampling step under *usage.iterations*; same model writes the summary.
+
+</Flashcard>
+
+<Flashcard question="Context editing: two strategies + cache-interaction asymmetry?">
+
+**Beta:** *context-management-2025-06-27*. **(1) *clear_tool_uses_20250919***: clears old *tool_result* / *mcp_tool_result* blocks in chronological order (placeholder substituted); optional *clear_tool_inputs*; *clear_at_least* sets minimum cleared. INVALIDATES cache at the clear point. **(2) *clear_thinking_20251015***: clears *thinking* blocks; *keep* parameter. PRESERVES cache when blocks are kept; clears invalidate only at the clear point. **Default:** compaction is the primary strategy; editing is for fine-grained control.
+
+</Flashcard>
+
+<Flashcard question="The cost-vs-staleness frame in three lines?">
+
+**Cache the stable parts** (cost lever). *cache_control* on the system prompt, tool stack across L4 / L5 / L6, stable reference passages. **Compact the long parts** (staleness lever). *compact_20260112* with a trigger near 150K; cache the system separately so it survives. **Clear the heavy parts** (surgical lever). *clear_tool_uses_20250919* for agentic workflows; *clear_thinking_20251015* for extended-thinking sessions; pair clearing with *clear_at_least* so cache write costs pay back.
+
+</Flashcard>
+
+<Flashcard question="Where this lesson fits in Track 22?">
+
+Phase 2 closes here (augmentation patterns). L4 + L5 + L6 added three tool layers; this lesson is what keeps a request that mixes all three affordable and focused over a long session. L8 (next) opens Phase 3 (agent patterns) by turning a single-call capability set into a multi-turn agent loop where everything cached and pruned here keeps the loop affordable across many iterations.
+
+</Flashcard>
+
+</FlashcardSet>

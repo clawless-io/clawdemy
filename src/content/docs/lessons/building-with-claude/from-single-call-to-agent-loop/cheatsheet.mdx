@@ -1,0 +1,133 @@
+---
+title: "Cheatsheet: From single call to agent loop"
+description: One-page reference. Workflow vs agent, the canonical 30-line loop, the full stop_reason dispatch, tool_choice steering, and the four loop disciplines.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## Workflow vs agent (one paragraph)
+
+**Workflow** (Anthropic verbatim): *systems where LLMs and tools are orchestrated through predefined code paths*. **Agent** (verbatim): *systems where LLMs dynamically direct their own processes and tool usage, maintaining control over how they accomplish tasks*. **Difference:** who decides the next step. **Default:** *find the simplest solution possible, and only increasing complexity when needed*. Workflow for predictability + consistency on well-defined tasks; agent for flexibility + model-driven decisions at scale.
+
+## The augmented LLM building block
+
+LLM + **retrieval** + **tools** + **memory**. Make the single call as strong as possible (tools tight, retrieval targeted, memory shaped) BEFORE reaching for a loop.
+
+## The canonical loop in 30 lines
+
+```python
+def run_agent(client, system, tools, user_message, max_iterations=20):
+    messages = [{"role": "user", "content": user_message}]
+    for _ in range(max_iterations):
+        response = client.messages.create(
+            model="claude-opus-4-7", max_tokens=4096,
+            system=system, tools=tools, messages=messages,
+        )
+        messages.append({"role": "assistant", "content": response.content})
+
+        if response.stop_reason == "end_turn":
+            return response
+
+        if response.stop_reason == "tool_use":
+            results = [
+                {"type": "tool_result", "tool_use_id": b.id,
+                 "content": execute_tool(b.name, b.input)}
+                for b in response.content if b.type == "tool_use"
+            ]
+            messages.append({"role": "user", "content": results})
+            continue
+
+        if response.stop_reason == "pause_turn":
+            continue  # server-tool mid-loop yield; re-call
+
+        if response.stop_reason == "refusal":
+            return response  # model declined; stop_details.category carries reason; surface, don't blind-retry
+
+        return response  # max_tokens / stop_sequence / model_context_window_exceeded / "compaction" / etc.
+
+    raise RuntimeError("agent exceeded max_iterations")
+```
+
+**Three things this does that a single call does not:** appends the assistant turn (model sees its own prior decisions); dispatches *tool_use* blocks; bounds the iterations.
+
+## *stop_reason* dispatch table
+
+| *stop_reason* | Where introduced | Loop action |
+| --- | --- | --- |
+| *end_turn* | L1 | Return to caller |
+| *tool_use* | L4 | Execute each *tool_use* block; append *tool_result* entries on a user turn; iterate |
+| *pause_turn* | L5 | Server-tool mid-multi-iteration; re-call with assistant turn unchanged |
+| *max_tokens* | L1 | Output cap hit; raise / summarize / surface partial |
+| *stop_sequence* | L2 | Configured sequence triggered; often treat as *end_turn* with known reason |
+| *model_context_window_exceeded* | L7 | Window cap; compact (if opted in) or fail clearly |
+| *"compaction"* | L7 (*pause_after_compaction: true*) | Summary written; preserve last N turns; re-call |
+| *refusal* | L8 (safety decline) | *stop_details.category* carries the category; surface to caller; do NOT blind-retry the same prompt |
+
+**Discipline:** dispatch every value explicitly. Silent fall-through = "the agent stopped and I do not know why."
+
+## *tool_choice* steering
+
+| Mode | Meaning | Use for |
+| --- | --- | --- |
+| `{"type": "auto"}` (default) | Model decides per turn | **Agents** (the point is the model deciding) |
+| `{"type": "any"}` | Must call a tool, model picks | Workflow steps where a call is required |
+| `{"type": "tool", "name": "X"}` | Must call named tool | Deterministic workflow steps |
+| `{"type": "none"}` | Must not call any tool | Forced final-answer turns |
+
+**Cost note (auto-injected tool-use system-prompt tokens):**
+
+| Model | *auto* / *none* | *any* / *tool* |
+| --- | --- | --- |
+| Opus 4.8 | 290 | 410 |
+| Opus 4.7 | 675 | 804 |
+| Opus 4.6 / Sonnet 4.6 | 497 | 589 |
+| Opus 4.5 / Sonnet 4.5 / Haiku 4.5 | 496 | 588 |
+| Opus 4.1 | 313 | 315 |
+| Haiku 3.5 (Vertex/Bedrock only) | 264 | 355 |
+
+**Soft lever:** system-prompt nudges (*"use the tools to investigate before responding"* increases tool use; *"always call a tool first"* is stronger). **Hard guarantee:** *tool_choice*.
+
+## The four loop disciplines
+
+| Discipline | Why |
+| --- | --- |
+| **Hard *max_iterations* cap** | A runaway plan without a cap is a runaway bill |
+| **Tool inventory is the surface area** | Every tool the loop has access to is a thing the model can decide to call. Sandbox L5 computer-use; denylist destructive L6 MCP; auth + rate limits at *execute_tool* boundary |
+| **L7 levers stay engaged** | Cache the prefix; compact at 150K with cached system end (so system survives); tool result clearing for tool-heavy loops |
+| **Explicit *stop_reason* dispatch** | Silent fall-through is the production-failure path |
+
+## Direct API vs framework
+
+**Verbatim:** *Start by using LLM APIs directly: many patterns can be implemented in a few lines of code* | *If frameworks are used, ensure you understand the underlying code*.
+
+**Posture:** the 30-line loop is the production starting point. Reach for a framework only when patterns repeat AND you understand the underlying code.
+
+## Common pitfalls
+
+| Failure | Recognize by | Fix |
+| --- | --- | --- |
+| Loop forgets to append assistant turn | Model loses its own prior decisions; loops in circles | Append `{"role": "assistant", "content": response.content}` after each *messages.create* |
+| Silent fall-through on a stop reason | Agent quietly returns partial / wrong answer | Explicit dispatch on every *stop_reason* (see table above) |
+| No *max_iterations* cap | Runaway loop; surprise bill | Hard cap (20 is a typical default); raise on exceed |
+| Server tool stalls and loop spins | *pause_turn* observed but treated as an error | Re-call with assistant turn unchanged on *pause_turn* |
+| Tool block dispatch crashes loop | Exception inside *execute_tool* terminates iteration | Wrap *execute_tool* in try/except; return error as *tool_result* with *is_error: true* |
+| Loop prefix not cached | Per-iteration input bill scales linearly with turns | Add *cache_control* on system + tool stack per L7 |
+| Loop runs long, hits context limit | *stop_reason: model_context_window_exceeded* | Opt in to compaction (L7) with 150K trigger and cached system end |
+
+## What this lesson does NOT cover (and where to find it)
+
+| Topic | Lands at |
+| --- | --- |
+| The six canonical workflow + agent patterns | Lesson 9 |
+| Agent Skills + Claude Code | Lesson 10 |
+| Subagents + Claude Managed Agents | Lesson 11 |
+| Production observability for the loop (cost tracking, latency) | Lesson 12 |
+
+## Source
+
+- Anthropic, *Building Effective AI Agents* (Erik S. and Barry Zhang, 2024-12-19): https://www.anthropic.com/engineering/building-effective-agents
+- Anthropic public Claude docs: **Tool use overview** at https://platform.claude.com/docs/en/agents-and-tools/tool-use/overview
+- See references for the full anchor list.

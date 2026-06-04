@@ -1,0 +1,285 @@
+---
+title: "Lesson: Tool use, the foundation"
+description: "Lesson 4 of Track 22 (Building with Claude), opens Phase 2. The jump from one-shot calls to letting Claude reach beyond its training corpus: how to define a tool (name + description + input_schema), the four-step request-response loop (your app sends tools, the model returns a tool_use block, your code executes, you send a tool_result), the two ordering rules the API enforces (tool_result must immediately follow tool_use in the message history; tool_result blocks come first in the content array), tool_choice options (auto / any / tool / none), parallel tool use, error handling with is_error, the token-cost overhead (a few hundred system-prompt tokens per the Tool use overview's per-model table; the any and specific-tool modes are slightly higher than auto and none), and how client tools (you execute) differ from server tools (Anthropic executes). The primitive every Phase 2 and Phase 3 lesson extends."
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+{/* COMPONENT PLACEHOLDER (Lead wires at promotion): <LessonFreshness lastReviewed={frontmatter.last_reviewed} /> */}
+
+{/* COMPONENT PLACEHOLDER (Lead wires at promotion): <SourceLecture url="https://platform.claude.com/docs/en/agents-and-tools/tool-use/overview" title="Anthropic Academy 'Building with the Claude API' (tools sections) + Anthropic public Tool use docs" instructor="Anthropic" /> */}
+
+## Why this lesson
+
+Lessons 1, 2, and 3 gave you everything you need to talk to the model: a working call, the production-side patterns, and the model-selection decision. What you cannot yet do is let the model reach beyond its training corpus. The model cannot check the weather. It cannot read a row from your database. It cannot run a script. It cannot fetch the document the user just uploaded. It can describe what it would do if it could, but it cannot actually do it.
+
+Tool use is the API surface that closes that gap. You declare a set of functions the model is allowed to call (a weather lookup, a database query, an internal API). The model decides when to call one, returns a structured request for it, your code executes the request and sends the result back. The model continues from there with the result in context. The loop is small and explicit, and it is the foundation under everything Phase 2 and Phase 3 of this track will build: server-side tools (lesson 5), Model Context Protocol (lesson 6), the agent loop (lesson 8 onward), Agent Skills (lesson 10), and subagents (lesson 11) are all variations on the same primitive.
+
+This lesson covers the primitive end to end: defining a tool, the four-step request-response loop, the two ordering rules the API enforces, tool_choice, parallel tool use, error handling, and the cost overhead. It uses **client tools** (functions you write and execute) throughout; server tools (where Anthropic executes) get lesson 5.
+
+## Defining a tool
+
+A tool definition is three fields: a *name* the model uses to refer to the tool, a *description* of when and how to use it (the model reads this when deciding whether to call), and an *input_schema* (JSON Schema) describing the parameters the tool accepts.
+
+```python
+weather_tool = {
+    "name": "get_weather",
+    "description": "Get the current weather in a given location.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "location": {
+                "type": "string",
+                "description": "The city and state, e.g. San Francisco, CA",
+            },
+            "unit": {
+                "type": "string",
+                "enum": ["celsius", "fahrenheit"],
+                "description": "The temperature unit. Default celsius.",
+            },
+        },
+        "required": ["location"],
+    },
+}
+```
+
+Three things matter. **The description is the model's instruction manual** for the tool: vague descriptions produce wrong calls. "Get the weather" is worse than "Get the current weather in a given location (city + state or city + country)." Tell the model what the tool does, when it is the right tool, and any constraints.
+
+**The schema constrains the input shape.** Use *required* to mark fields the model must supply; use *enum* where the value is one of a fixed set; use the field's own *description* for unit conventions ("Default celsius") and edge cases. The more the schema captures, the fewer malformed calls you have to handle.
+
+**Tool names are how the model refers back.** Stable names. The model returns the *name* in the *tool_use* block; your code uses it to dispatch.
+
+Tools are passed in the *tools* array on the request. Optional *tool_choice* tells the model how to use them: *auto* (the default, model decides whether and which to call), *any* (force a tool call, model picks which), *tool* (force a specific tool by name), or *none* (no tools available even though some are defined). Lesson 8 onward uses *auto*; the others are tactical.
+
+## The four-step loop
+
+A single round-trip with tool use is four steps.
+
+**Step 1: your application sends a request with the tool definitions.**
+
+```python
+response = client.messages.create(
+    model="claude-opus-4-8",
+    max_tokens=1024,
+    tools=[weather_tool],
+    messages=[
+        {"role": "user", "content": "What's the weather in San Francisco?"}
+    ],
+)
+```
+
+**Step 2: the model returns a response with a *tool_use* content block.** When the model decides to call a tool, it sets *stop_reason* to *tool_use* and includes one or more *tool_use* blocks in *content*:
+
+```json
+{
+  "id": "msg_01Aq9w938a90dw8q",
+  "model": "claude-opus-4-8",
+  "stop_reason": "tool_use",
+  "role": "assistant",
+  "content": [
+    {
+      "type": "text",
+      "text": "I'll check the current weather in San Francisco for you."
+    },
+    {
+      "type": "tool_use",
+      "id": "toolu_01A09q90qw90lq917835lq9",
+      "name": "get_weather",
+      "input": { "location": "San Francisco, CA", "unit": "celsius" }
+    }
+  ]
+}
+```
+
+Three fields matter on the *tool_use* block. *id* is the handle the API uses to match this call to the result you will send back. *name* tells your code which tool to dispatch. *input* is the parameters the model chose, matching the *input_schema* you declared.
+
+**Step 3: your code executes the tool and assembles a *tool_result* block.**
+
+```python
+def execute_tool(tool_use_block):
+    if tool_use_block.name == "get_weather":
+        location = tool_use_block.input["location"]
+        unit = tool_use_block.input.get("unit", "celsius")
+        return get_weather(location, unit)
+    raise ValueError(f"Unknown tool: {tool_use_block.name}")
+
+tool_use = next(b for b in response.content if b.type == "tool_use")
+result_value = execute_tool(tool_use)
+```
+
+The *tool_result* content block carries *tool_use_id* (matching the *id* from step 2), *content* (the result as a string, or a list of nested content blocks for richer types), and optional *is_error* (set to *true* if the tool execution failed).
+
+**Step 4: you send a new request continuing the conversation, with the *tool_result* in a user message.** Pass back the entire history so far (the original user message, the assistant *tool_use* response, and the new user message carrying the *tool_result*):
+
+```python
+followup = client.messages.create(
+    model="claude-opus-4-8",
+    max_tokens=1024,
+    tools=[weather_tool],
+    messages=[
+        {"role": "user", "content": "What's the weather in San Francisco?"},
+        {"role": "assistant", "content": response.content},
+        {"role": "user", "content": [
+            {
+                "type": "tool_result",
+                "tool_use_id": tool_use.id,
+                "content": str(result_value),
+            }
+        ]},
+    ],
+)
+print(followup.content)
+```
+
+The model takes the result and uses it to finish answering the original question. *stop_reason* on this second response will typically be *end_turn* (the model is done). The user never knew there was a tool call; they asked a question and got an answer.
+
+## The two ordering rules
+
+The API enforces two rules on the message history when tools are in play, and both produce 400 errors when broken.
+
+**Rule 1: tool_result blocks must immediately follow their corresponding tool_use blocks in the message history.** You cannot insert any other messages between the assistant's *tool_use* message and the user's *tool_result* message. If you have UI state to capture or a logging step that creates a new message, do that work in your application; do not put it in the API conversation.
+
+**Rule 2: in a user message containing tool results, the tool_result blocks come FIRST in the content array.** Any text in the same user message comes after all the tool_result blocks. This will fail:
+
+```json
+{
+  "role": "user",
+  "content": [
+    { "type": "text", "text": "Here are the results:" },
+    { "type": "tool_result", "tool_use_id": "toolu_01" }
+  ]
+}
+```
+
+This is correct:
+
+```json
+{
+  "role": "user",
+  "content": [
+    { "type": "tool_result", "tool_use_id": "toolu_01" },
+    { "type": "text", "text": "What should I do next?" }
+  ]
+}
+```
+
+If you see "tool_use ids were found without tool_result blocks immediately after" as a 400 error message, one of these two rules was broken.
+
+## Parallel tool calls
+
+The model can return more than one *tool_use* block in a single response when it decides multiple tools would help. Your code should iterate the response content and dispatch each. When you send the *tool_result* blocks back, include one for each *tool_use* (matched by *tool_use_id*), all in the same user message.
+
+```python
+tool_uses = [b for b in response.content if b.type == "tool_use"]
+tool_results = [
+    {
+        "type": "tool_result",
+        "tool_use_id": tu.id,
+        "content": str(execute_tool(tu)),
+    }
+    for tu in tool_uses
+]
+
+followup = client.messages.create(
+    model="claude-opus-4-8",
+    max_tokens=1024,
+    tools=[weather_tool, calendar_tool],
+    messages=[
+        original_user_message,
+        {"role": "assistant", "content": response.content},
+        {"role": "user", "content": tool_results},
+    ],
+)
+```
+
+Parallel tool calls are how the model fans out work in one turn (look up the weather *and* check the calendar before answering). The pattern is the same as one tool call, just with more *tool_result* blocks in the response message.
+
+## Error handling
+
+When the tool execution itself fails (network error, downstream API down, validation error in the tool body), return the error message in *content* with *is_error* set to *true*:
+
+```json
+{
+  "type": "tool_result",
+  "tool_use_id": "toolu_01A09q90qw90lq917835lq9",
+  "content": "ConnectionError: the weather service API is not available (HTTP 500)",
+  "is_error": true
+}
+```
+
+The model reads the error and incorporates it into the response (often something like "I was unable to retrieve the weather; the service is unavailable. Try again later."). The Anthropic docs are specific about this: **write instructive error messages**, not generic ones. *"Rate limit exceeded. Retry after 60 seconds"* gives the model context to recover or adapt; *"failed"* gives it nothing.
+
+When the model's *attempted* use of a tool is invalid (missing required parameters, wrong types), you have two options: improve the tool *description* so the model has the context it needed, or send back a *tool_result* with *is_error: true* and an explanatory message. The model will retry two or three times with corrections before apologizing to the user. To eliminate invalid tool calls entirely, set *strict: true* on the tool definition; the API will then guarantee tool inputs match the schema exactly.
+
+## Client tools vs server tools
+
+**Client tools** are what this lesson covers: functions you define and execute in your application code. You handle the loop (parse *tool_use*, execute, send *tool_result*). The advantage is full control: the tool can do anything your application can do (hit your database, call your internal API, read a file in your filesystem).
+
+**Server tools** are run by Anthropic. You declare them in *tools* like a client tool, the model decides to use one, Anthropic executes it on their infrastructure, and you see the result already in the response (no *tool_use* / *tool_result* round-trip in your code). The current server tools include *web_search*, *web_fetch*, *code_execution*, and *tool_search*. Lesson 5 of this track is the proper server-tools lesson.
+
+The rule of thumb: **client tools for anything your application owns, server tools for general capabilities Anthropic already operates**. You will not implement a web search; you will implement a "look up this user's order history" tool.
+
+## Token cost overhead
+
+Tool use adds a small system prompt that enables the API to handle tool calls. The exact count varies by model, and the *any* and specific *tool* modes carry a **slightly higher** overhead than *auto* and *none* because the model commits to a tool call. Per the Tool use overview at this lesson's drafting:
+
+| Model | *auto* / *none* | *any* / *tool* |
+| --- | --- | --- |
+| Claude Opus 4.8 | 290 | 410 |
+| Claude Opus 4.7 | 675 | 804 |
+| Claude Opus 4.6 / Sonnet 4.6 | 497 | 589 |
+| Claude Opus 4.5 / Sonnet 4.5 / Haiku 4.5 | 496 | 588 |
+| Claude Opus 4.1 | 313 | 315 |
+
+Check the Tool use overview's per-model table for current numbers. Plus the tokens in your *tools* array (the names, descriptions, and schemas).
+
+In an agent loop with many turns and large tool definitions, this overhead is not negligible. Lesson 7 of this track covers prompt caching, which cuts the cost on the repeated tool-definition tokens to a fraction; lesson 5 covers *tool_search* (one of Anthropic's server tools), which lets a large catalog of tools live on the server side and only loads relevant ones into context per call. Both extend this lesson directly.
+
+## A note on structured outputs
+
+A common confusion: **structured outputs** is a separate Anthropic feature, not the same as tool use, even though both produce JSON. Structured outputs guarantee a response conforms to a JSON schema you specify; set the response format type to JSON schema with your schema attached, inside the *output_config* request field:
+
+```json
+"output_config": {"format": {"type": "json_schema", "schema": {/* your JSON schema */}}}
+```
+
+Use structured outputs when the model's whole response is supposed to be machine-readable data. Tool use is about the model calling a function and getting a result back to continue the conversation. The two can be combined (a tool definition can use *strict: true* to guarantee the tool input matches its schema, which is structured outputs applied to the tool-use case), but they are distinct features. If your need is "I want JSON back from the model," reach for structured outputs. If your need is "I want the model to call my code and use the result," reach for tool use.
+
+## Common pitfalls
+
+**Vague tool descriptions.** "Get the weather" is worse than "Get the current weather in a given location (city + state or city + country)." The description is what the model reads to decide whether the tool is right for the user's question. Be specific about what the tool does, when it is appropriate, and any constraints.
+
+**Missing the two ordering rules.** *tool_result* must immediately follow *tool_use* in the message history, and *tool_result* blocks come first in the content array. If you see a 400 error mentioning "tool_use ids were found without tool_result blocks," one of these was broken.
+
+**Ignoring *is_error*.** When a tool execution fails, send back *is_error: true* with an instructive error message ("Rate limit exceeded. Retry after 60 seconds.") rather than silently retrying or swallowing the failure. The model can recover from a clear error message; it cannot recover from data you never sent.
+
+**Confusing tool use with structured outputs.** They are separate features. Tool use is "model calls my code, I send a result back, model continues." Structured outputs is "model's final response conforms to my JSON schema." Reach for the one that matches the shape of what you actually need.
+
+**Treating the assistant's *tool_use* message as something other than an assistant turn.** When you send the conversation back in step 4, the assistant message has *role: assistant* and the *content* is the full *response.content* (text blocks + tool_use blocks together). The API takes that exact assistant turn back; do not reformat or filter it.
+
+## What you do not need yet
+
+This lesson stays on client tools and the bare loop. Deferred:
+
+- **Server tools** (web_search, web_fetch, code_execution, tool_search). Lesson 5. Plus the **Anthropic-schema client tools** (bash, computer use, memory, text_editor) covered in the same lesson: these reuse this lesson's client-tool loop with a canonical Anthropic schema (your code still executes them).
+- **Model Context Protocol** (declare tools that work across providers, or connect to an MCP server). Lesson 6.
+- **Prompt caching on tool definitions** (cut the tools-overhead cost when the tools are stable across calls). Lesson 7.
+- **The agent loop** (when the model and your tools talk back and forth across many turns until a task is done). Lesson 8 onward.
+- **Strict tool use deep dive**, the SDK Tool Runner abstraction, and parallel tool use in extended detail. The Anthropic docs cover each at [platform.claude.com/docs/en/agents-and-tools/tool-use/](https://platform.claude.com/docs/en/agents-and-tools/tool-use/) (Strict tool use, Tool Runner, Parallel tool use); pointers are in this lesson's references.
+
+## What you should remember
+
+- **A tool is three fields:** *name*, *description*, *input_schema* (JSON Schema). The description is the model's instruction manual; vague descriptions produce wrong calls.
+- **The four-step loop:** (1) send request with *tools*; (2) model returns *stop_reason: tool_use* and *tool_use* content block(s) with *id*, *name*, *input*; (3) your code executes the tool, assembles a *tool_result* block with *tool_use_id* and *content*; (4) send a new request including the original messages, the assistant turn (full *response.content*), and a user message with the *tool_result*.
+- **Two ordering rules** the API enforces: tool_result must immediately follow tool_use; tool_result blocks come FIRST in their user-message content array (text comes after).
+- **The *tool_choice* options:** *auto* (default, model decides), *any* (force a tool, model picks which), *tool* (force a specific tool by name), *none* (no tools).
+- **Parallel tool calls** are just multiple *tool_use* blocks in one response, with matching *tool_result* blocks in the response user message.
+- **Errors:** set *is_error: true* and write instructive error content. The model can recover from a clear error; it cannot from silence.
+- **Client tools (your code executes) vs server tools (Anthropic executes; lesson 5).** Same declaration shape; different round-trip pattern.
+- **Tool use adds a small system-prompt overhead** (a few hundred tokens; per-model values are published in the Tool use overview's token-count table, with *any* and specific *tool* modes slightly higher than *auto* and *none*), plus the *tools* array tokens. Lesson 7 (prompt caching) cuts the repeated cost.
+
+## Where this fits
+
+Lesson 4 opens Phase 2. Lesson 5 (server-side tools) and lesson 6 (Model Context Protocol) extend what one call can do beyond client-side definitions. Lesson 7 (prompt caching) addresses the cost shape this lesson introduces. Phase 3 (lessons 8-11) is where the four-step loop becomes a multi-step agent loop: the same primitive, repeated until the model says it is done.

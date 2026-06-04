@@ -1,0 +1,236 @@
+---
+title: "Practice: From single call to agent loop"
+description: Self-check on the workflow-vs-agent distinction, the canonical loop in 30 lines, the full stop_reason dispatch, tool_choice steering, max-iterations safety, and the four loop disciplines, plus a hands-on try-it and flashcards.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Seven short questions. Answer each before opening the collapsible.
+
+**1. State the workflow-vs-agent distinction verbatim, then state which to pick by default.**
+
+<details>
+<summary>Show answer</summary>
+
+**Verbatim from *Building Effective AI Agents* (Anthropic, Erik S. and Barry Zhang, 2024-12-19):**
+
+- **Workflow:** *systems where LLMs and tools are orchestrated through predefined code paths*.
+- **Agent:** *systems where LLMs dynamically direct their own processes and tool usage, maintaining control over how they accomplish tasks*.
+
+**The difference is who decides the next step.** In a workflow, your code decides. In an agent, the model decides.
+
+**Which to pick by default:** the post's standing call is *find the simplest solution possible, and only increasing complexity when needed*. Workflows give *predictability and consistency for well-defined tasks*; agents give *flexibility and model-driven decision-making at scale*. Start with workflow; graduate to agent only when the task's shape demands it (steps not knowable in advance; right path depends on intermediate findings; "what tool to call next" is itself the hard problem).
+
+</details>
+
+**2. The augmented LLM building block: name its three capabilities and why it matters before reaching for a loop.**
+
+<details>
+<summary>Show answer</summary>
+
+**The augmented LLM** = the model itself, plus three capabilities it can actively use: **retrieval** (over your data, often via a search tool), **tools** (the union of L4 custom + L5 server / Anthropic-schema + L6 MCP), and **memory** (persistent state across turns or sessions).
+
+**Why it matters first:** the post is direct that you do not start with a multi-step agent. You first make the augmented LLM as strong as you can on a single call (tool definitions tight; retrieval targeted; memory shaped). You add looping only when a single call cannot do the job. Looping multiplies cost and surfaces compounding errors; spending the first design pass on the single call avoids reaching for a loop you do not need.
+
+</details>
+
+**3. Sketch the canonical agent loop in pseudocode (the 30-line shape). What three things does the loop do that a single call does not?**
+
+<details>
+<summary>Show answer</summary>
+
+```python
+def run_agent(client, system, tools, user_message, max_iterations=20):
+    messages = [{"role": "user", "content": user_message}]
+    for _ in range(max_iterations):
+        response = client.messages.create(
+            model="claude-opus-4-7", max_tokens=4096,
+            system=system, tools=tools, messages=messages,
+        )
+        messages.append({"role": "assistant", "content": response.content})
+
+        if response.stop_reason == "end_turn":
+            return response
+
+        if response.stop_reason == "tool_use":
+            results = [
+                {"type": "tool_result", "tool_use_id": b.id,
+                 "content": execute_tool(b.name, b.input)}
+                for b in response.content if b.type == "tool_use"
+            ]
+            messages.append({"role": "user", "content": results})
+            continue
+
+        if response.stop_reason == "pause_turn":
+            continue  # server-tool mid-loop yield; re-call
+
+        return response  # max_tokens / model_context_window_exceeded / etc.
+
+    raise RuntimeError("agent exceeded max_iterations")
+```
+
+**Three things the loop does that a single call does not:**
+- **Appends the assistant turn** to *messages* after each response (the model sees its own prior decisions on the next iteration; without this, no loop).
+- **Dispatches *tool_use* blocks** to local handlers and packages the results as *tool_result* entries on a follow-up user turn.
+- **Bounds the iteration count** with a hard *max_iterations* cap so a misbehaving plan cannot run forever.
+
+(Plus: **handles non-tool stop reasons explicitly** rather than treating all as success.)
+
+</details>
+
+**4. State the full *stop_reason* vocabulary the loop dispatches on, with one-line action per value.**
+
+<details>
+<summary>Show answer</summary>
+
+| *stop_reason* | What it means | Loop action |
+| --- | --- | --- |
+| *end_turn* | Model is done | Return to caller |
+| *tool_use* | Assistant turn includes *tool_use* blocks | Execute, append *tool_result*, iterate |
+| *pause_turn* (L5) | Server-tool mid-multi-iteration yield | Re-call with assistant turn unchanged |
+| *max_tokens* | Output cap hit mid-generation | Raise cap, summarize, or surface partial |
+| *stop_sequence* | Configured stop sequence triggered | Often treat as *end_turn* with known reason |
+| *model_context_window_exceeded* (L7) | Context window hit | Compact (if opted in) or fail clearly |
+| *"compaction"* (L7, *pause_after_compaction: true*) | Summary written | Manual preservation (keep last N turns), re-call |
+| *refusal* | Model declined on safety (*stop_details.category* carries the specific category) | Surface the refusal to the caller; do not blind-retry the same prompt; do not loop until success |
+
+**The discipline:** dispatch on every value explicitly. Silent fall-through is the failure mode that produces "the agent stopped and I do not know why" debugging.
+
+</details>
+
+**5. *tool_choice* steering: state the four modes, when to use each, and the cost note.**
+
+<details>
+<summary>Show answer</summary>
+
+**Four modes:**
+
+- ***auto*** (default). Model decides per turn whether to call a tool or respond directly. **Use for:** agents (the model deciding is the whole point).
+- ***any***. Model MUST call a tool this turn; it picks which. **Use for:** workflow steps where a tool call is required but the model knows the best fit.
+- ***tool*** with a specific *name*. Model MUST call the named tool. **Use for:** workflow steps where a specific tool is the next deterministic action.
+- ***none***. Model MUST NOT call any tool. **Use for:** forced final-answer turns at the end of a workflow.
+
+**Soft lever (system prompt):** *"use the tools to investigate before responding"* increases tool use measurably; *"always call a tool first"* is stronger. Use *tool_choice* when you need a hard guarantee.
+
+**Cost note:** *any* and *tool* slightly increase the auto-injected tool-use system-prompt token count vs *auto* and *none* (on Opus 4.7, 804 vs 675 tokens; on Opus 4.8, 410 vs 290). In a long loop, that adds up.
+
+</details>
+
+**6. The four disciplines around any production agent loop.**
+
+<details>
+<summary>Show answer</summary>
+
+- **Hard max-iterations cap.** The example loop above caps at 20. The number matters less than the cap existing; without one, a runaway plan is a runaway bill.
+- **Tool inventory is the surface area.** Every tool the loop has access to is a thing the model can decide to call. Computer-use tools (L5) deserve sandboxed environments; MCP tools (L6) deserve denylist-by-default for destructive operations; custom client tools (L4) get auth and rate limits at the *execute_tool* boundary, not inside the loop.
+- **The L7 cost-and-staleness levers stay engaged.** Cache the system + tool stack so each iteration does not re-pay the prefix. If the loop runs long, opt in to compaction with a 150K trigger and cache the system prompt end so it survives. For tool-heavy loops, tool result clearing trims old retrieval payloads.
+- **Stop conditions are first-class.** Every *stop_reason* dispatched explicitly. Silent fall-through is the production-failure path.
+
+</details>
+
+**7. Direct API vs framework: state the post's call on this, and why it matters for a first agent.**
+
+<details>
+<summary>Show answer</summary>
+
+**Verbatim from the post:** *Start by using LLM APIs directly: many patterns can be implemented in a few lines of code*. And: *If frameworks are used, ensure you understand the underlying code*.
+
+**Why it matters for a first agent:** the canonical loop is 30 lines; it fits on one screen; you can read every decision the model is making and every dispatch your code is making. A framework wraps the loop, often adds patterns you do not need, and trades visibility for convenience. For a first version, the convenience is not worth the loss of "I can debug exactly what is happening." Reach for a framework only when patterns repeat (parallel workers, evaluator-optimizer harnesses) AND you understand the underlying code well enough to know what the framework is doing for you.
+
+The track's posture mirrors this: every example in T22 uses direct HTTP + the standard SDK shape. The 30-line loop is the production starting point; lesson 9 builds the canonical patterns on top of it; lessons 10 and 11 add Agent Skills, Claude Code, Subagents, and Managed Agents as Anthropic-supported building blocks rather than third-party frameworks.
+
+</details>
+
+## Try it yourself: ship a working 30-line agent
+
+About 15 minutes. You will need the SDK from lesson 1, an Anthropic API key, and one custom tool to give the model something to call.
+
+**Setup:** define a single tool that does something checkable. The classic *get_weather* with one parameter (*location*) and a hard-coded response is enough; or a database lookup; or a calculator. Anything where you can verify the loop dispatched a *tool_use*, executed your handler, and the model used the result.
+
+**Part A: implement the loop.** Paste the 30-line *run_agent* shape from the lesson body (or write it yourself). Wire one *execute_tool* dispatcher that maps tool names to your handlers. Run with a user message that requires the tool ("what is the weather in Berlin?" with *get_weather*). Print *response.stop_reason* for each iteration. Confirm the loop went: *tool_use* on iteration 1, *end_turn* on iteration 2.
+
+**Part B: add the full *stop_reason* dispatch.** Extend the loop to explicitly handle *pause_turn* (re-call with assistant turn unchanged) and *max_tokens* (raise *max_tokens* once, then surface). Test *max_tokens* by setting it small (say, 50) on a prompt that needs more.
+
+**Part C: steering with *tool_choice*.** Add a *tool_choice* parameter to your *run_agent* signature. Run once with *tool_choice* set to *auto* (the model may or may not call the tool). Run again with *tool_choice* set to *tool* mode and the tool *name* set to *get_weather*, on the same prompt. Observe the forced call. Note the token-count difference in *response.usage.input_tokens* between the two modes (the *tool*-forced mode is slightly higher per the docs).
+
+<details>
+<summary>What you'll get (an example, not the canonical answer)</summary>
+
+For Part A you will see the loop turn over twice: a *tool_use* response with one *tool_use* block, then your *execute_tool* fires, then a *tool_result* on a user turn, then a second *messages.create* call returns *end_turn* with the final text answer. The whole exchange happens in your code in well under a second of wall-clock if your tool is local.
+
+For Part B you will see *max_tokens* fire when the model would have produced a longer answer. The point is not the fix; it is the dispatch existing. Production failures of this shape are usually "the loop assumed *end_turn* and silently returned a truncated answer to the caller."
+
+For Part C you will see the model behave differently under the two *tool_choice* modes. With *auto*, the model may answer directly if the question is in its training distribution. With *tool*, the call is forced regardless. The choice is your contract with the model about who decides this iteration's step.
+
+The exercise's value is the muscle memory: a 30-line loop, a small *stop_reason* dispatch, and *tool_choice* awareness is enough to ship most useful agents on this track's substrate.
+
+</details>
+
+## Flashcards
+
+Nine cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay the set out one card per page for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="Workflow vs agent (verbatim)?">
+
+**Workflow:** *systems where LLMs and tools are orchestrated through predefined code paths*. **Agent:** *systems where LLMs dynamically direct their own processes and tool usage, maintaining control over how they accomplish tasks*. The difference is who decides the next step. Source: Anthropic, *Building Effective AI Agents* (Erik S. and Barry Zhang, 2024-12-19).
+
+</Flashcard>
+
+<Flashcard question="When workflow vs when agent?">
+
+**Workflows:** *predictability and consistency for well-defined tasks*. **Agents:** *flexibility and model-driven decision-making at scale*. The standing call: *find the simplest solution possible, and only increasing complexity when needed*. Start with workflow; graduate to agent only when steps are not knowable in advance, the right path depends on intermediate findings, or "what tool to call next" is itself the hard problem.
+
+</Flashcard>
+
+<Flashcard question="The augmented LLM building block?">
+
+LLM + **retrieval** + **tools** + **memory**. The model itself plus three capabilities it can actively use: retrieval over your data (often via a search tool), tools (the union of L4 custom + L5 server / Anthropic-schema + L6 MCP), and memory (persistent state across turns or sessions). Make the augmented LLM strong on a single call before reaching for a loop.
+
+</Flashcard>
+
+<Flashcard question="The canonical agent loop in one paragraph?">
+
+A `while` (bounded by *max_iterations*) that calls *messages.create*, appends the assistant turn to *messages*, dispatches on *stop_reason*: *end_turn* returns; *tool_use* executes each tool block and appends *tool_result* entries on a follow-up user turn; *pause_turn* re-calls with the assistant turn unchanged; other stop reasons surface to the caller. Three things the loop does that a single call does not: append the assistant turn (model sees its prior decisions), dispatch tool blocks, bound iterations.
+
+</Flashcard>
+
+<Flashcard question="The full stop_reason vocabulary the loop dispatches on?">
+
+*end_turn* (model done → return), *tool_use* (execute + append *tool_result* → iterate), *pause_turn* (L5; server-tool mid-loop yield → re-call), *max_tokens* (cap hit → raise / summarize / surface), *stop_sequence* (often treat as *end_turn* with known reason), *model_context_window_exceeded* (L7; compact if opted in or fail clearly), *"compaction"* (L7 with *pause_after_compaction: true*; preserve last N + re-call), *refusal* (model declined on safety; *stop_details.category* carries the category; surface, do not blind-retry).
+
+</Flashcard>
+
+<Flashcard question="tool_choice: four modes + when to use?">
+
+***auto*** (default): model decides per turn. Use for agents. ***any***: must call a tool, picks which. Use for workflow steps where a call is required. ***tool*** with a specific *name*: must call the named tool. Use for deterministic workflow steps. ***none***: must not call. Use for forced final-answer turns. Cost note: *any* and *tool* cost slightly more in tool-use system-prompt tokens (Opus 4.7: 804 vs 675; Opus 4.8: 410 vs 290).
+
+</Flashcard>
+
+<Flashcard question="Four disciplines around a production agent loop?">
+
+**(1)** Hard max-iterations cap (a runaway plan without a cap is a runaway bill). **(2)** Tool inventory is the surface area: sandbox dangerous tools (L5 computer use), denylist destructive MCP operations (L6), auth + rate limits at the *execute_tool* boundary. **(3)** L7 levers stay engaged: cache the prefix; compact at 150K trigger with cached system end; tool result clearing for tool-heavy loops. **(4)** Explicit dispatch on every *stop_reason*; no silent fall-through.
+
+</Flashcard>
+
+<Flashcard question="Direct API vs framework for a first agent?">
+
+**Verbatim:** *Start by using LLM APIs directly: many patterns can be implemented in a few lines of code*. And: *If frameworks are used, ensure you understand the underlying code*. The 30-line loop is the proof. A framework wraps the loop, often adds patterns you do not need, and trades visibility for convenience. For a first agent, the convenience is not worth the loss of debuggability. Reach for a framework only when patterns repeat AND you understand the underlying code.
+
+</Flashcard>
+
+<Flashcard question="Where this lesson fits in Track 22?">
+
+Phase 3 opener. Phase 2 (L4 + L5 + L6 + L7) built the single-call building blocks; this lesson turns them into a loop. **Next four lessons specialize the substrate:** L9 catalogs the canonical patterns (5 workflow + the open-ended agent = the six patterns); L10 covers Agent Skills + Claude Code on top of the loop; L11 covers Subagents + Claude Managed Agents (spawning focused loops from inside another); L12 closes the track with shipping a Claude application to production.
+
+</Flashcard>
+
+</FlashcardSet>

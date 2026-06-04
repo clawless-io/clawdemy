@@ -1,0 +1,189 @@
+---
+title: "Cheatsheet: Tool use, the foundation"
+description: One-page reference. Tool definition shape, the four-step loop, ordering rules, tool_choice, parallel calls, error handling, and the token-cost overhead.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## Tool definition
+
+```python
+tool = {
+    "name": "get_weather",
+    "description": "Get the current weather in a given location.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "location": {
+                "type": "string",
+                "description": "The city and state, e.g. San Francisco, CA",
+            },
+            "unit": {
+                "type": "string",
+                "enum": ["celsius", "fahrenheit"],
+                "description": "The temperature unit. Default celsius.",
+            },
+        },
+        "required": ["location"],
+    },
+}
+```
+
+| Field | Role |
+| --- | --- |
+| *name* | Dispatch key (model returns it; your code matches) |
+| *description* | The model's instruction manual; vague descriptions → wrong calls |
+| *input_schema* | JSON Schema (required, enum, per-field description) |
+
+## The four-step loop
+
+```
+1. App  → API:   messages + tools
+2. API  → App:   stop_reason: tool_use
+                 content: [..., tool_use{id, name, input}]
+3. App  → tool:  execute(input)
+                 tool → result
+4. App  → API:   messages + tools + assistant(content from step 2)
+                 + user(tool_result{tool_use_id, content, [is_error]})
+
+API → App:   stop_reason: end_turn, content: [text]
+```
+
+## Code: one round-trip in Python
+
+```python
+# Step 1
+response = client.messages.create(
+    model="claude-opus-4-8",
+    max_tokens=1024,
+    tools=[weather_tool],
+    messages=[{"role": "user", "content": "What's the weather in SF?"}],
+)
+
+# Step 2: response.stop_reason == "tool_use"
+tool_use = next(b for b in response.content if b.type == "tool_use")
+
+# Step 3
+result = get_weather(tool_use.input["location"])
+
+# Step 4
+followup = client.messages.create(
+    model="claude-opus-4-8",
+    max_tokens=1024,
+    tools=[weather_tool],
+    messages=[
+        {"role": "user", "content": "What's the weather in SF?"},
+        {"role": "assistant", "content": response.content},
+        {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": tool_use.id, "content": str(result)},
+        ]},
+    ],
+)
+```
+
+## Two ordering rules (400 on violation)
+
+```
+Rule 1: tool_result must IMMEDIATELY follow tool_use in the message history
+        (no intermediate messages between assistant's tool_use turn and
+        user's tool_result turn).
+
+Rule 2: tool_result blocks come FIRST in their user-message content array;
+        any text comes AFTER.
+```
+
+400 error: "tool_use ids were found without tool_result blocks immediately after".
+
+## tool_choice values
+
+| Value | Behavior | Use when |
+| --- | --- | --- |
+| *auto* (default) | Model decides whether and which to call | Almost everything, incl. agent loops |
+| *any* | Force a tool call, model picks which | You want a tool but do not care which |
+| *tool* | Force a specific tool by name | Classifier-style: only one valid output |
+| *none* | Tools defined but cannot be used this turn | Branching from the same history |
+
+## Parallel tool calls
+
+- Model returns N *tool_use* blocks in one response.
+- Iterate `response.content`, execute each.
+- Send ALL *tool_result* blocks in ONE user message (one fan-in turn).
+- Match each *tool_result* by *tool_use_id*.
+
+## Error handling
+
+```json
+{
+  "type": "tool_result",
+  "tool_use_id": "toolu_...",
+  "content": "Rate limit exceeded. Retry after 60 seconds.",
+  "is_error": true
+}
+```
+
+Write instructive errors. "Rate limit exceeded. Retry after 60 seconds." → model can recover. "failed" → cannot.
+
+Invalid tool inputs: model retries 2-3 times with corrections before apologizing. To eliminate invalid inputs entirely, set *strict: true* on the tool definition.
+
+## Client tools vs server tools
+
+| | Client tools | Server tools |
+| --- | --- | --- |
+| Where it runs | Your application | Anthropic infra |
+| Loop in your code | Yes (full 4-step) | No (results inline in response) |
+| Examples | get_weather, lookup_user, query_db | web_search, web_fetch, code_execution, tool_search |
+| Use when | Your app owns it | General capability Anthropic operates |
+
+Lesson 5 is the server-tools lesson.
+
+## Tool use vs structured outputs
+
+| Tool use | Structured outputs |
+| --- | --- |
+| Model calls function, you return result, model continues | Model's final response conforms to a JSON schema |
+| Use when: model needs to **act** | Use when: response IS data |
+| Shape: *tools*, *tool_use*, *tool_result* | Shape: `output_config: {format: {type: "json_schema", schema: {...}}}` |
+| Combine: *strict: true* on tool → structured-outputs on input | Combine: see Tool use ←→ |
+
+## Token cost overhead
+
+**Note:** *any* and specific *tool* modes carry a **slightly higher** overhead than *auto* and *none* (the model commits to a tool call). Per-model values from the Tool use overview:
+
+| Model | *auto* / *none* | *any* / *tool* |
+| --- | --- | --- |
+| Claude Opus 4.8 | 290 | 410 |
+| Claude Opus 4.7 | 675 | 804 |
+| Claude Opus 4.6 / Sonnet 4.6 | 497 | 589 |
+| Claude Opus 4.5 / Sonnet 4.5 / Haiku 4.5 | 496 | 588 |
+| Claude Opus 4.1 | 313 | 315 |
+
+Plus the tokens in your *tools* array (names, descriptions, schemas). Non-negligible in long agent loops; lesson 7 (prompt caching) cuts the repeated cost.
+
+## Common pitfalls
+
+| Failure | Recognize by | Fix |
+| --- | --- | --- |
+| Vague tool descriptions | Wrong tool called for the user's question | Be specific about what the tool does + when it is right |
+| Breaking ordering rule 1 | 400 "tool_use ids... immediately after" | tool_result message immediately after tool_use message |
+| Breaking ordering rule 2 | Same 400 | tool_result blocks FIRST, text AFTER |
+| Ignoring is_error | Model silently confused | Set *is_error: true* + write instructive error content |
+| Confusing tool use with structured outputs | Wrong API surface for the need | Tool use → model acts; structured outputs → model returns data |
+| Re-shaping assistant turn in step 4 | Schema or content errors | Pass `response.content` back verbatim as the assistant turn |
+
+## What this lesson does NOT cover (and where to find it)
+
+| Topic | Lands at |
+| --- | --- |
+| Server-side tools (web_search, web_fetch, code_execution, tool_search) + Anthropic-schema client tools (bash, computer use, memory, text_editor) | Lesson 5 |
+| Model Context Protocol (cross-provider tool definitions) | Lesson 6 |
+| Prompt caching on tool definitions (cut repeated cost) | Lesson 7 |
+| The agent loop (many turns, model + tools converging on a task) | Lessons 8 onward |
+| Agent Skills (reusable skill bundles) | Lesson 10 |
+| Tool search (large tool catalogs on the server side) | Lesson 5 |
+
+## Source
+
+- Anthropic public Claude docs, **Tool use overview** + **Handle tool calls**, at `https://platform.claude.com/docs/en/agents-and-tools/tool-use/`. Structural-mirror citation; see references.

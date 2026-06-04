@@ -1,0 +1,222 @@
+---
+title: "Practice: Agent Skills and Claude Code"
+description: Self-check on what Agent Skills are, the on-disk shape, progressive disclosure, the three surfaces, Claude Code as the worked harness, and the Skills + Claude Code composition for the L9 patterns, plus a hands-on try-it and flashcards.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Seven short questions. Answer each before opening the collapsible.
+
+**1. State what an Agent Skill is (verbatim definition), how it differs from a prompt, and the on-disk shape.**
+
+<details>
+<summary>Show answer</summary>
+
+**Verbatim definition:** *Agent Skills are modular capabilities that extend Claude's functionality. Each Skill packages instructions, metadata, and optional resources (scripts, templates) that Claude uses automatically when relevant.*
+
+**Difference from a prompt (verbatim):** *Unlike prompts (conversation-level instructions for one-off tasks), Skills load on-demand and eliminate the need to repeatedly provide the same guidance across multiple conversations.* A prompt is a thing you type once; a Skill is a thing you save once and reuse forever.
+
+**On-disk shape:** a directory with *SKILL.md* at the root. *SKILL.md* opens with YAML frontmatter (required: *name* and *description*) and continues with markdown instructions. Optional additional files (*FORMS.md*, *REFERENCE.md*, *scripts/* with executable code) sit beside *SKILL.md* and are referenced from it; they load on demand.
+
+</details>
+
+**2. The two required frontmatter fields and their constraints.**
+
+<details>
+<summary>Show answer</summary>
+
+- ***name*:** max **64 characters**; lowercase letters, numbers, hyphens only; no XML tags; **cannot be "anthropic" or "claude"**.
+- ***description*:** non-empty; max **1024 characters**; no XML tags. Should describe **both what the Skill does AND when Claude should use it**.
+
+The description is load-bearing: it is the router. Vague descriptions never trigger; precise descriptions trigger reliably.
+
+</details>
+
+**3. Progressive disclosure: the three levels, when each loads, and the token cost per level.**
+
+<details>
+<summary>Show answer</summary>
+
+| Level | When loaded | Token cost | Content |
+| --- | --- | --- | --- |
+| **1: Metadata** | Always (startup) | Around 100 tokens per Skill | *name* + *description* from YAML frontmatter; lives in system prompt |
+| **2: Instructions** | When the Skill is triggered | Under 5K tokens | *SKILL.md* body |
+| **3+: Resources** | As needed | Effectively unlimited | Bundled files (additional *.md*, scripts, data); scripts run via bash with only output entering context |
+
+**Two operational consequences:**
+- **Install many Skills without context penalty** (Level 1 is small; the system prompt scales gently with Skill count).
+- **Bundled content has effectively no context cost until accessed** (Level 3 stays on the filesystem; scripts' code never enters context, only output does).
+
+</details>
+
+**4. The three surfaces Skills run on, with the sharing model + key constraint per surface.**
+
+<details>
+<summary>Show answer</summary>
+
+- **Claude API.** Custom Skills uploaded via the */v1/skills* endpoints. Pre-built (PowerPoint *pptx*, Excel *xlsx*, Word *docx*, PDF *pdf*) via *skill_id* in the *container* parameter alongside the code execution tool. **Three beta headers required:** *code-execution-2025-08-25* + *skills-2025-10-02* + *files-api-2025-04-14*. **Sharing:** workspace-wide. **Key constraint:** **NOT ZDR eligible**; no network access; no runtime package installation.
+- **Claude Code.** Filesystem-based at *~/.claude/skills/* (personal) or *.claude/skills/* (project, committed to the repo). Auto-discovery; no upload. **Sharing:** personal or project-shared via repo. **Key constraint:** full network access; install packages locally not globally.
+- **claude.ai.** Custom Skills uploaded as zip files through Settings > Features (Pro / Max / Team / Enterprise plans). **Sharing:** individual user only; no org-wide distribution. **Key constraint:** custom Skills cannot be centrally managed by admins.
+
+**Custom Skills DO NOT sync across surfaces.** Plan per surface; upload to each where you want them.
+
+</details>
+
+**5. How Claude finds and uses a Skill (the routing mechanism).**
+
+<details>
+<summary>Show answer</summary>
+
+**Two steps:**
+
+1. **Discovery via description.** At startup, Claude sees the names and descriptions of all installed Skills in its system prompt (Level 1 metadata). When a user request matches a Skill's *when-to-use* clause in its description (e.g., "use when working with PDF files"), Claude knows the Skill is relevant.
+
+2. **Invocation via bash.** Claude reads *SKILL.md* from the filesystem using the *bash* tool (lesson 5's Anthropic-schema client tool), bringing the Level 2 instructions into context. If those instructions reference other files (*FORMS.md*, *REFERENCE.md*), Claude reads those too via additional bash calls. If they reference scripts, Claude runs them via bash and receives only the output.
+
+**This is the L9 routing pattern realized in concrete terms:** the classifier is the model's own description-matching judgment; the specialized followup is the Skill's *SKILL.md* body; the resources the followup uses are the bundled files. A Skill is NOT a tool in the L4 / L5 / L6 sense; it is a durable, on-disk package of guidance that the agent routes to.
+
+</details>
+
+**6. Claude Code (verbatim definition), the surfaces it runs on, and how its features map back to L4 + L5 + L6 + L7 + L8.**
+
+<details>
+<summary>Show answer</summary>
+
+**Verbatim definition:** *Claude Code is an agentic coding tool that reads your codebase, edits files, runs commands, and integrates with your development tools. Available in your terminal, IDE, desktop app, and browser.*
+
+**Surfaces:** terminal CLI (`claude` in a project dir; install via *curl https://claude.ai/install.sh*, Homebrew, WinGet, or apt/dnf/apk), VS Code extension, JetBrains plugin (IntelliJ + PyCharm + WebStorm), desktop app (macOS + Windows + Windows ARM64), web at claude.ai/code, iOS app.
+
+**Map to T22:**
+- **L4 (custom client tools):** custom tools you define via the Agent SDK or hooks are L4 custom tools.
+- **L5 (Anthropic-provided):** built-in *bash* and *text_editor* are Anthropic-schema client tools from L5; built-in web search etc. are L5 server tools.
+- **L6 (MCP):** MCP server configuration in the Claude Code settings uses the same *mcp_servers* + *mcp_toolset* shape from L6 under the hood.
+- **L7 (caching + context):** *CLAUDE.md* at the project root is a stable cached system prompt (handled for you). Auto memory accumulates learnings across sessions, distinct from Skills.
+- **L8 (agent loop):** Claude Code IS an L8-style loop, scaled and productionized, with the polished UI and larger built-in tool inventory.
+
+**Specialized Claude Code features:** sub-agents (lesson 11), the Agent SDK (build custom agents on Claude Code's primitives), hooks (shell commands before/after actions like auto-formatting), routines and scheduled tasks, GitHub Actions / GitLab CI/CD integration.
+
+</details>
+
+**7. How Skills + Claude Code together make the L9 patterns durable, and the security discipline that applies.**
+
+<details>
+<summary>Show answer</summary>
+
+**The composition (per L9 pattern):**
+- **Routing (L9 pattern 2):** each specialized branch is its own Skill on disk; the description routes naturally.
+- **Prompt chaining (L9 pattern 1):** each step is a Skill, with bundled scripts handing off between steps.
+- **Orchestrator-workers (L9 pattern 4):** an orchestrator Skill names worker Skills, each a focused independent Skill.
+- **Autonomous agent (L9 pattern 6):** Claude Code itself plus your domain Skills.
+
+**What changes** when patterns move from in-code strings to on-disk Skills: version history (Git-tracked), code review (PR-able), team-shareability, surface portability (modulo upload-per-surface), and auto-discovery by description.
+
+**Security discipline (verbatim):** *Use Skills only from trusted sources: those you created yourself or obtained from Anthropic*. The docs name four risks:
+- **Tool misuse** (a Skill directs Claude to invoke tools in unexpected ways).
+- **Data exposure** (a Skill with access to sensitive data leaks it).
+- **External-source compromise** (a third-party Skill changes maintainers or behavior).
+- **Skills that fetch external URLs** (fetched content may carry instructions the agent picks up).
+
+**Posture:** audit before installing. Prefer Anthropic-published (the *pptx* / *xlsx* / *docx* / *pdf* set; the open-source github.com/anthropics/skills repo) and team-authored Skills. In Claude Code specifically, project-committed *.claude/skills/* go through code review like any other code in the repo, which is the right default.
+
+</details>
+
+## Try it yourself: convert a prompt into a Skill
+
+About 15 minutes. The exercise is concrete but no Claude API calls are required; you will write a Skill on disk and validate the structure.
+
+**Setup:** pick one prompt you use repeatedly in your work. A coding-conventions reminder. A bug-report triage script. A meeting-notes formatter. A specific domain glossary you keep pasting into chats. Anything you have copy-pasted into more than three Claude sessions.
+
+**Part A: write the Skill.** Create a directory named *my-skill/* (use a real descriptive name). Inside it create *SKILL.md*. Open with YAML frontmatter:
+
+```yaml
+---
+name: your-skill-name-here
+description: One sentence on what the Skill does AND a "use when ..." clause that triggers it reliably.
+---
+```
+
+Then the markdown body: a `## Instructions` section with the guidance you would have pasted, and a `## Examples` section with two concrete examples. Save the file.
+
+**Part B: validate the frontmatter.** Verify the *name* is lowercase + alphanumeric-or-hyphens, max 64 chars, not "anthropic" or "claude". Verify the *description* is precise enough that someone reading just the description would know when to reach for the Skill. Edit the description if it is vague.
+
+**Part C: install the Skill.** If you have Claude Code installed, put the directory under *~/.claude/skills/* or commit it under *.claude/skills/* in a project repo. Start a new Claude Code session and ask a question that would trigger the Skill ("help me triage this bug report ..." for a bug-triage Skill). Confirm Claude reads *SKILL.md* via bash before responding. If you do not have Claude Code installed, zip the directory and upload it through claude.ai Settings > Features, then ask the trigger question in claude.ai.
+
+<details>
+<summary>What you'll get (an example, not the canonical answer)</summary>
+
+For Part A you have a 20- to 80-line file that captures one of your recurring prompts as durable on-disk guidance. The exercise's value is in writing the description tightly: most first-pass descriptions are too vague ("help with code review") and need to be sharpened ("Review pull request diffs for our team's specific conventions: prefer Result types over throwing exceptions, snake_case for module names, no console.log in committed code. Use when reviewing a PR diff or when the user pastes diff output and asks for review."). The second one will trigger reliably; the first will not.
+
+For Part C, in Claude Code, the first thing you see when the Skill triggers is a *bash* tool call reading your *SKILL.md* file path. That is Level 2 loading. If your Skill references additional files, you will see additional *bash* calls reading those. The cost of the whole interaction is small: Level 1 metadata is around 100 tokens; Level 2 loading is your *SKILL.md* token count plus the bash overhead.
+
+The exercise's value is the muscle memory of writing Skills tight enough that the description-as-router judgment lands. Vague descriptions are the most common failure mode; precise descriptions are the difference between a Skill that triggers reliably and one that sits unused on disk.
+
+</details>
+
+## Flashcards
+
+Nine cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay the set out one card per page for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="What is an Agent Skill (verbatim)?">
+
+*Agent Skills are modular capabilities that extend Claude's functionality. Each Skill packages instructions, metadata, and optional resources (scripts, templates) that Claude uses automatically when relevant.* Differs from a prompt: *Unlike prompts (conversation-level instructions for one-off tasks), Skills load on-demand and eliminate the need to repeatedly provide the same guidance across multiple conversations.* On-disk: a directory with *SKILL.md* at the root.
+
+</Flashcard>
+
+<Flashcard question="The two required frontmatter fields and their rules?">
+
+***name*:** max 64 chars; lowercase letters / numbers / hyphens only; no XML tags; cannot be "anthropic" or "claude". ***description*:** non-empty; max 1024 chars; no XML; must describe BOTH what the Skill does AND when Claude should use it. The description is the router. Vague descriptions never trigger; precise descriptions trigger reliably.
+
+</Flashcard>
+
+<Flashcard question="Progressive disclosure: three levels and token costs?">
+
+**L1 metadata:** always loaded in system prompt; ~100 tokens per Skill (*name* + *description*). **L2 instructions:** loaded when triggered (Claude reads *SKILL.md* via bash); under 5K tokens (the body). **L3 resources:** loaded as needed; effectively unlimited (additional .md files via bash; scripts run with only output entering context, script code never loads). **Operational consequences:** many Skills installable without context penalty; bundled content has effectively zero context cost until accessed.
+
+</Flashcard>
+
+<Flashcard question="Three surfaces and sharing models?">
+
+**Claude API:** upload via */v1/skills*; pre-built by *skill_id* in *container*; three beta headers (*code-execution-2025-08-25* + *skills-2025-10-02* + *files-api-2025-04-14*); workspace-shared; NOT ZDR eligible. **Claude Code:** filesystem at *~/.claude/skills/* (personal) or *.claude/skills/* (project); auto-discovery; no upload. **claude.ai:** zip upload via Settings > Features; per-user only; no org-wide management. Custom Skills DO NOT sync across surfaces.
+
+</Flashcard>
+
+<Flashcard question="How Claude finds + invokes a Skill?">
+
+**Discovery:** at startup, Skill *name* + *description* enter the system prompt as L1 metadata. Claude matches the user's request against descriptions. **Invocation:** Claude reads *SKILL.md* via the *bash* tool (L5's Anthropic-schema client tool). Level 2 loads. Additional bundled files load via further bash calls. Scripts run via bash with only output entering context (Level 3). The L9 routing pattern realized in concrete terms.
+
+</Flashcard>
+
+<Flashcard question="Claude Code (verbatim) + surfaces?">
+
+*Claude Code is an agentic coding tool that reads your codebase, edits files, runs commands, and integrates with your development tools. Available in your terminal, IDE, desktop app, and browser.* **Surfaces:** terminal CLI (`claude`), VS Code, JetBrains, desktop, web, iOS. Install: *curl https://claude.ai/install.sh*, Homebrew, WinGet, apt/dnf/apk. All surfaces share the same engine + *CLAUDE.md* + Skills + MCP config.
+
+</Flashcard>
+
+<Flashcard question="Claude Code features mapped to T22?">
+
+**L4 custom tools:** Agent SDK / hooks. **L5 Anthropic-provided:** built-in *bash* + *text_editor* + web search. **L6 MCP:** native via configuration (same *mcp_servers* + *mcp_toolset* shape). **L7 caching:** *CLAUDE.md* auto-cached as system prompt; auto memory accumulates learnings across sessions. **L8 loop:** Claude Code IS an L8-style loop, scaled and productionized. **L9 patterns:** any of the six implementable; sub-agents (L11) for patterns 4 + 6.
+
+</Flashcard>
+
+<Flashcard question="Skills + Claude Code = L9 patterns made durable?">
+
+**Routing (L9.2):** each branch is a Skill; description routes. **Chaining (L9.1):** chain of Skills with bundled scripts handing off. **Orchestrator-workers (L9.4):** an orchestrator Skill names worker Skills. **Autonomous agent (L9.6):** Claude Code + your domain Skills. **What changes:** version history, code review, team-shareability, surface portability, auto-discovery by description. The patterns are unchanged; the **durability and shareability** of the instructions is what Skills + Claude Code add.
+
+</Flashcard>
+
+<Flashcard question="Security discipline (verbatim) and the four risks?">
+
+**Verbatim:** *Use Skills only from trusted sources: those you created yourself or obtained from Anthropic*. **Four risks:** (1) tool misuse (Skill directs Claude to invoke tools harmfully); (2) data exposure (Skill leaks sensitive data); (3) external-source compromise (third-party Skill changes maintainers); (4) Skills that fetch external URLs (fetched content may carry instructions). **Posture:** audit before installing; prefer Anthropic-published or team-authored; project-committed *.claude/skills/* go through code review.
+
+</Flashcard>
+
+</FlashcardSet>

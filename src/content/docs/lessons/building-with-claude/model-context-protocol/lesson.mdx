@@ -1,0 +1,163 @@
+---
+title: "Lesson: Model Context Protocol"
+description: "Lesson 6 of Track 22 (Building with Claude). The cross-provider tool layer. What MCP is (an open standard for connecting AI applications to external systems, governed at modelcontextprotocol.io, not Anthropic-proprietary); the MCP connector pattern (Claude as the MCP client, talking directly to remote MCP servers from inside a Messages API call, no MCP client code in your application); the request shape (mcp_servers array + mcp_toolset in the tools array; the mcp-client-2025-11-20 beta header; allowlist/denylist/defer_loading configuration); the response shape (mcp_tool_use + mcp_tool_result blocks); the decision frame for when to reach for MCP versus inline tool definitions from lessons 4 and 5; and the cross-provider value of speaking one tool protocol across many AI applications."
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+{/* COMPONENT PLACEHOLDER (Lead wires at promotion): <LessonFreshness lastReviewed={frontmatter.last_reviewed} /> */}
+
+{/* COMPONENT PLACEHOLDER (Lead wires at promotion): <SourceLecture url="https://platform.claude.com/docs/en/agents-and-tools/mcp-connector" title="Anthropic Academy 'Introduction to Model Context Protocol' + 'MCP Advanced Topics' + Anthropic public MCP connector docs + modelcontextprotocol.io spec" instructor="Anthropic" /> */}
+
+## Why this lesson
+
+Lessons 4 and 5 covered the tools you author and the tools Anthropic provides. Lesson 4 walked the custom client tool path: you write the schema, the model returns *tool_use*, your code executes, you send *tool_result* back. Lesson 5 added the Anthropic-provided side: server tools where Anthropic runs the work, Anthropic-schema client tools where the schema is canonical, and *tool_search* for catalogs at scale.
+
+This lesson covers the third layer: the tools **someone else** provides. Model Context Protocol (MCP) is an open standard for connecting AI applications to external systems. The Anthropic docs frame the connector this way (verbatim): *Claude's Model Context Protocol (MCP) connector feature enables you to connect to remote MCP servers directly from the Messages API without a separate MCP client*. The protocol itself is governed at modelcontextprotocol.io, not by Anthropic, and the spec's home page describes it as *an open-source standard for connecting AI applications to external systems*. The same page uses the USB-C-port analogy: one standardized connector, many devices and many hosts.
+
+Three things to know by the end. What MCP actually is, beyond the name. The mechanics of the connector on the Messages API: the *mcp_servers* and *mcp_toolset* shape, the beta header, the new response blocks. And the decision frame: when to reach for MCP versus the inline tool definitions from lessons 4 and 5.
+
+## What MCP is
+
+MCP is an **open protocol** maintained at modelcontextprotocol.io and supported across a wide range of AI applications and developer tools (Claude, ChatGPT, Visual Studio Code, Cursor, and others). The protocol defines a small client-server vocabulary. An **MCP server** exposes capabilities; an **MCP client**, usually embedded in an AI application (the host), consumes them. The capabilities come in three categories: **tools** (functions the model can call), **resources** (data the model can read), and **prompts** (parameterized prompt templates the application can fetch).
+
+For T22 the practical fact is narrower. The MCP connector on the Messages API currently supports only **tool calls**. Resources and prompts are part of MCP itself but require a different integration path (covered later in this lesson). So most of the time, when you read "MCP" in this track, you can substitute "an external tool catalog Claude can call into." The connector is the path that makes that catalog reachable without your application writing MCP-client code.
+
+Two more facts to anchor the picture. First, the supported transport for the connector is HTTP (Streamable HTTP or SSE), and the server URL must be HTTPS. Local STDIO servers, the other common MCP transport, are not reachable through the connector and need the alternative path (the TypeScript helpers, covered below). Second, the MCP connector is available on the Claude API, Claude Platform on AWS, and Microsoft Foundry; it is not currently available on Amazon Bedrock or Vertex AI deployments.
+
+## The connector pattern
+
+The connector inverts who runs the MCP client. Without the connector, an MCP-aware application embeds a client library, manages the connection, lists tools, sends tool calls, parses responses, and feeds the results to the model. With the connector, Claude does the client-side work for you. You give the Messages API a server URL plus an optional authorization token; Claude talks to the server, surfaces tools, and (when the conversation calls for it) invokes them.
+
+The mental contrast with lesson 4 is direct. In lesson 4, you authored the tool's schema in your *tools* array; the model returned *tool_use*; your code ran the tool; you sent *tool_result* back. In the MCP connector pattern, you author **no tool schemas** in your code. You point at a server by name. The server's tools surface in Claude's awareness. When Claude calls a tool, the connector runs it server-side; you see the call and the result inline in the response, like a server tool from lesson 5, but the tool's code lives in someone else's MCP server, not in Anthropic's catalog.
+
+## The Messages API shape
+
+The request uses two components together: *mcp_servers* (the server connection list) and *mcp_toolset* entries inside the *tools* array (which tools are enabled and how).
+
+```python
+response = client.beta.messages.create(
+    model="claude-opus-4-8",
+    max_tokens=1000,
+    messages=[{"role": "user", "content": "What tools do you have available?"}],
+    mcp_servers=[
+        {
+            "type": "url",
+            "url": "https://example-server.modelcontextprotocol.io/sse",
+            "name": "example-mcp",
+            "authorization_token": "YOUR_TOKEN",
+        }
+    ],
+    tools=[{"type": "mcp_toolset", "mcp_server_name": "example-mcp"}],
+    betas=["mcp-client-2025-11-20"],
+)
+```
+
+The beta header that gates the feature is *mcp-client-2025-11-20* (current as of this writing; the earlier *mcp-client-2025-04-04* is deprecated and embedded tool configuration inside the server definition, which has since moved out into the *tools* array).
+
+Each entry in *mcp_servers* names a remote MCP server. The fields: *type* (only *url* is supported), *url* (HTTPS), *name* (a unique identifier inside this request), and an optional *authorization_token* (an OAuth Bearer token if the server requires auth).
+
+Each *mcp_toolset* entry in *tools* picks one of those servers by name and decides which of its tools to enable. The shape:
+
+```json
+{
+  "type": "mcp_toolset",
+  "mcp_server_name": "example-mcp",
+  "default_config": { "enabled": true, "defer_loading": false },
+  "configs": {
+    "specific_tool_name": { "enabled": true, "defer_loading": true }
+  }
+}
+```
+
+Per-tool, two flags. *enabled* (default true) is the include switch. *defer_loading* (default false) is the carry-forward from lesson 5: when true, the tool's description is not sent to the model upfront and is only loaded when *tool_search* (lesson 5) surfaces it as relevant. The configuration values merge with a clear precedence (highest to lowest): a tool-specific setting in *configs*, then the set-level *default_config*, then the system defaults.
+
+Three patterns cover most uses. **Allowlist:** *default_config.enabled* false plus per-tool *enabled* true in *configs*. **Denylist:** the default true and explicit *enabled* false on the tools you want to exclude (the docs recommend denylisting destructive or write tools when building read-only assistants, or when a human-confirm step should sit in front of state changes). **Mixed:** allowlist some tools, and inside those, vary *defer_loading* per tool.
+
+Validation rules are tight enough to catch a class of mistakes upfront. Every server in *mcp_servers* must be referenced by exactly one *mcp_toolset*; every *mcp_toolset* must name a server that exists. The pairing is one-to-one.
+
+## The response shape
+
+When Claude uses an MCP tool, two new content block types appear in the assistant message. The model's call shows up as *mcp_tool_use*:
+
+```json
+{
+  "type": "mcp_tool_use",
+  "id": "mcptoolu_014Q35RayjACSWkSj4X2yov1",
+  "name": "echo",
+  "server_name": "example-mcp",
+  "input": { "param1": "value1", "param2": "value2" }
+}
+```
+
+And the connector-executed result shows up as *mcp_tool_result*:
+
+```json
+{
+  "type": "mcp_tool_result",
+  "tool_use_id": "mcptoolu_014Q35RayjACSWkSj4X2yov1",
+  "is_error": false,
+  "content": [ { "type": "text", "text": "Hello" } ]
+}
+```
+
+This is the same iterate-the-content-array discipline from lesson 1, now with three call paths landing in the same array: *tool_use* (custom client, lesson 4), *server_tool_use* + the matching tool-specific result block (*web_search_tool_result*, *code_execution_tool_result*, *web_fetch_tool_result*, *tool_search_tool_result* from server tools, lesson 5), and *mcp_tool_use* + *mcp_tool_result* (MCP). The mental model from lesson 5 carries over: like server tools, MCP tools do not need a round-trip in your code. The connector handles the call and the result lands inline.
+
+Multiple MCP servers in one request are supported. You list each in *mcp_servers* and add a matching *mcp_toolset* in *tools* for each. Claude selects between them based on the tool names and descriptions surfaced by each server, and when tool counts get large (dozens of tools across several servers), *defer_loading* combined with *tool_search* (lesson 5) keeps only the relevant tools in the prefix per call.
+
+## When to use MCP versus inline tool definitions
+
+The decision frame across lessons 4, 5, and 6 is a single question: **who owns the capability?**
+
+- **Custom client tool (lesson 4):** the tool is your domain logic. A query against your database, a call to an internal API, a piece of business logic only your application knows. You write the schema; you run the code.
+- **Server tool or Anthropic-schema client tool (lesson 5):** the capability is general enough that Anthropic provides it. Search the web, run Python, fetch a URL, drive a terminal, edit a file. You declare; Anthropic runs (server tools) or you run against a canonical schema (Anthropic-schema client tools).
+- **MCP (lesson 6):** the capability lives in someone else's catalog, and that catalog already speaks MCP. Reach for a Notion server, a Google Calendar server, a Jira server, an internal data-platform server your colleagues operate as MCP. You point at the server; the connector handles the call.
+
+Three test questions that decide the path on a given tool. Does the tool's code already exist and speak MCP? Yes implies the connector. Is the capability one Anthropic provides as a server tool? Yes implies lesson 5. Is the tool's logic yours and not exposed as MCP anywhere? Yes implies lesson 4. Most production applications end up with a mix.
+
+A side note on the boundary between lesson 4 and lesson 6 specifically. If your tool's code is yours but you want it reachable by multiple AI applications (not only Claude), exposing it as an MCP server is the move. Your application calls the MCP server through the connector; another application's host (a different AI assistant, an editor, a CLI) calls the same server through whatever MCP integration that host offers. The tool gets written once, and any MCP-capable host can use it. That is the protocol's central practical pay-off.
+
+## The cross-provider value
+
+The MCP home page describes the protocol's role with the USB-C analogy: one standardized connector, many devices, many hosts. The practical consequence for an application developer is two things. First, when you integrate with an MCP server today, you are not betting on one model vendor. The same server is callable by any host that speaks MCP (Claude, ChatGPT, code editors with MCP support, others). Second, when you write a tool you want others to use, exposing it as an MCP server is the path that maximizes its reach. The MCP spec's home page uses the phrase "build once and integrate everywhere" for this property.
+
+For T22 the implication is concrete. If you are building on Claude today, the MCP connector lets you tap a growing ecosystem of third-party MCP servers without re-authoring tool schemas in every new application, and without locking your tool layer to a single model vendor. That is the "what is gained" part of this lesson's capability.
+
+## Limitations, ZDR, and auth
+
+The connector trades some flexibility for the no-MCP-client convenience. The active limits, as of the *mcp-client-2025-11-20* version:
+
+- **Tools only.** The MCP spec defines tools, resources, and prompts; the connector currently supports tools. Resources and prompts on Claude require the client-side path described below.
+- **HTTPS transports only.** Streamable HTTP and SSE are supported; local STDIO servers are not reachable through the connector.
+- **Not on every deployment.** The connector is available on the Claude API directly, Claude Platform on AWS, and Microsoft Foundry. It is not available on Amazon Bedrock or Vertex AI.
+- **Not ZDR eligible.** The docs are explicit: the MCP connector is not covered by Zero Data Retention. Tool definitions and execution results exchanged with MCP servers are retained per Anthropic's standard data-retention policy. If your organization has ZDR requirements, the connector is the wrong path for now.
+- **OAuth is your job.** The connector accepts an *authorization_token* per server, but obtaining and refreshing OAuth tokens is application-side. The Anthropic docs point to the MCP specification's Authorization section and to the open-source MCP inspector tool as a way to walk a token through the OAuth flow during development.
+
+Two more useful facts. *mcp_servers* is supported in the Message Batches API, and MCP tool calls inside a batched request are priced the same as in a regular Messages API request. And the *mcp_toolset* shape accepts a *cache_control* field, which is the seam where lesson 7's prompt caching attaches to the tool layer (covered in lesson 7).
+
+## When you would write your own MCP client instead
+
+The connector is not the only way to integrate MCP with Claude. The TypeScript SDK ships client-side helpers (*mcpTools*, *mcpMessages*, *mcpResourceToContent*, *mcpResourceToFile*) that convert between MCP types and Claude API types, intended for the case where you do manage an MCP client yourself. The docs themselves draw the line: *use the mcp_servers API parameter when you have remote servers accessible by URL and only need tool support; use the client-side helpers when you need local servers, prompts, resources, or more control over the connection*.
+
+Practically, this means three when-not-to-connector cases. Your MCP server runs on a local STDIO transport (the connector cannot reach it; an MCP client in your code can). You need MCP prompts or resources (the connector does not surface them; the helpers do). You need finer control over the connection lifecycle than the connector exposes. In every other case, the connector is the simpler path.
+
+## Why this matters when you use Claude
+
+The arc of Phase 2 is now legible. Lesson 4 gave you the custom-client foundation. Lesson 5 added the Anthropic-platform-provided layer (server tools, Anthropic-schema clients, *tool_search* for scale). This lesson adds the third-party layer: the open protocol that lets your Claude application reach external tool catalogs without you writing per-vendor client code. Lesson 7 (next) covers prompt caching and context management, which is what keeps the resulting tool stack affordable when a request might surface tool definitions from custom code, the Anthropic catalog, and several MCP servers in the same call.
+
+The MCP connector is also a strategic move for builders. By integrating tool catalogs through an open protocol rather than per-vendor SDKs, you keep the tool layer of your application portable across model providers. Today you use Claude; tomorrow a teammate wants to evaluate another model on the same integration. If you went through MCP, the tools survive the swap.
+
+## What you should remember
+
+- **MCP is an open standard for connecting AI applications to external systems**, governed at modelcontextprotocol.io and supported across a wide range of AI applications and developer tools, not Anthropic-proprietary.
+- **The connector lets Claude talk to remote MCP servers directly from the Messages API** without a separate MCP client in your code. You point at a server URL; the model uses the server's tools; results land inline.
+- **Request shape:** *mcp_servers* array (server connections with URL + optional OAuth token) plus *mcp_toolset* entries inside the *tools* array (per-server tool config). Beta header *mcp-client-2025-11-20*. One *mcp_toolset* per server, mandatory pairing.
+- **Tool configuration:** *enabled* and *defer_loading* per tool; allowlist by setting *default_config.enabled* false then enabling specific tools; denylist by leaving the default on and disabling specific tools (recommended for read-only assistants or human-confirm-before-state-changes flows).
+- **Response blocks:** *mcp_tool_use* (the model's call, with *server_name* + *input*) and *mcp_tool_result* (the connector-executed result, with *tool_use_id* + *content* + *is_error*). No round-trip in your code, same as lesson 5's server tools.
+- **Decision frame:** custom client tool (lesson 4) when the logic is yours and not exposed as MCP; server tool or Anthropic-schema client tool (lesson 5) when Anthropic already provides the capability; MCP connector (this lesson) when the capability lives in a third-party catalog that already speaks MCP.
+- **Limits to plan for:** tools only (not resources or prompts via connector); HTTPS transports only (no local STDIO); not on Amazon Bedrock or Vertex AI; not ZDR eligible; OAuth is your responsibility. Use the TypeScript client-side helpers when these limits get in your way.
+- **Why it matters:** one tool protocol, many AI applications. Integrate with an MCP server once and the integration survives a model-provider swap; expose your own tools as MCP servers and any MCP-capable host can use them.
+
+Lesson 4 gave you tools you own. Lesson 5 gave you tools Anthropic operates. This lesson gives you the protocol everyone else's tools speak. The next lesson is what makes a request that mixes all three layers stay affordable over a long session: prompt caching and context management.

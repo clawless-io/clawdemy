@@ -1,0 +1,147 @@
+---
+title: "Lesson: Shipping a Claude application"
+description: "Lesson 12 of Track 22 (Building with Claude), the track closer. The five production disciplines that turn what you built in L1-L11 into a shipped application. (1) Cost monitoring via the Anthropic Usage and Cost Admin API (the /v1/organizations/usage_report/messages and /v1/organizations/cost_report endpoints, an Admin API key starting sk-ant-admin..., bucket_width 1m/1h/1d, filter and group_by model + workspace + api_key + service_tier; data appears within about 5 minutes) plus the per-call usage fields from L2 and L7 (input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens, usage.iterations for compaction). (2) Latency budgets that the L2/L3/L7 levers (streaming, effort, caching, batching) move deliberately. (3) Eval-set discipline from L9's pattern 5 (cross-track to T21 L7 LLMOps). (4) Rollout discipline (feature flags, canary, A/B, rollback, request_id from L2 on every call). (5) Lifecycle and deprecation handling (Anthropic's at-least-60-days notice; Active → Legacy → Deprecated → Retired; date-pinning + Models overview as the canonical source). The rollout checklist that pulls L1-L11 together for a real production deploy."
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+{/* COMPONENT PLACEHOLDER (Lead wires at promotion): <LessonFreshness lastReviewed={frontmatter.last_reviewed} /> */}
+
+{/* COMPONENT PLACEHOLDER (Lead wires at promotion): <SourceLecture url="https://platform.claude.com/docs/en/manage-claude/usage-cost-api" title="Anthropic public Claude docs (Usage and Cost Admin API + Model deprecations + Pricing + Rate limits)" instructor="Anthropic" /> */}
+
+## Why this lesson
+
+This is the track closer. Lessons 1 to 11 gave you the smallest primitive (1), the production-side request and response patterns (2), the model selection (3), the three tool layers (4 to 6), the cost-and-staleness levers (7), the agent loop (8), the canonical patterns (9), durable instructions and a worked harness (10), and the spawn-and-hosted-harness primitives (11). This lesson is what changes when the result is *running for real users behind a deploy*.
+
+Five disciplines carry the work from prototype to production: **cost monitoring**, **latency budgets**, **eval-set discipline**, **rollout discipline**, and **lifecycle handling**. Each one has a small Anthropic surface area you already know (the *usage* fields, the Admin API, the deprecation policy), and each maps back to one or more earlier lessons. The closing artifact is a single **rollout checklist** that ties the track together.
+
+## Discipline 1: Cost monitoring
+
+Two layers cover production cost visibility: the per-call telemetry on the *usage* object you have already been logging since lesson 2, and the organization-level Usage and Cost Admin API for cross-call aggregation.
+
+### Per-call telemetry (review)
+
+Every response from the Messages API carries a *usage* object with the fields lessons 2 and 7 introduced: *input_tokens*, *output_tokens*, *cache_creation_input_tokens*, *cache_read_input_tokens*, and (for compaction-enabled requests) *usage.iterations*. The identity is *total_input_tokens = cache_read_input_tokens + cache_creation_input_tokens + input_tokens*. The production logging shape pairs all of those with *request_id* (lesson 2), *model*, *stop_reason*, and latency. The cache-hit ratio (*cache_read_input_tokens* over total input) is the single most useful number you can track per workload; for a well-cached production stack with stable prefixes, the ratio commonly runs above 90 percent.
+
+For server tools (lesson 5), the *usage* object reports per-tool counts (for example, *server_tool_use.web_search_requests*). For agent loops (lesson 8) and Managed Agents (lesson 11), the per-iteration breakdown lives in *usage.iterations*; the top-level *input_tokens* and *output_tokens* do NOT include the compaction step's tokens.
+
+### Organization-level: the Usage and Cost Admin API
+
+The Anthropic docs describe the Usage and Cost Admin API verbatim: *The Usage & Cost Admin API provides programmatic and granular access to historical API usage and cost data for your organization*. Two endpoints:
+
+- ***GET /v1/organizations/usage_report/messages***: token counts, broken down by *model*, *workspace_id*, *api_key_id*, *service_tier*, *context_window*, *inference_geo*, *speed* (beta; requires the fast-mode beta header). Time buckets via *bucket_width*: *1m* (real-time monitoring), *1h* (daily patterns), *1d* (weekly and monthly reports).
+- ***GET /v1/organizations/cost_report***: USD costs (as decimal strings in cents), grouped by *workspace_id* or *description*. Daily granularity only.
+
+Both require an **Admin API key** (starts with *sk-ant-admin...*), distinct from the standard API keys you use for the Messages API. Only organization-role admins can provision Admin keys. A minimal daily-usage call:
+
+```bash
+curl "https://api.anthropic.com/v1/organizations/usage_report/messages?\
+starting_at=2025-01-08T00:00:00Z&\
+ending_at=2025-01-15T00:00:00Z&\
+group_by[]=model&\
+bucket_width=1d" \
+  --header "anthropic-version: 2023-06-01" \
+  --header "x-api-key: $ANTHROPIC_ADMIN_KEY"
+```
+
+Two operational facts worth memorizing. **Data freshness**: per the docs, usage and cost data *typically appears within 5 minutes of API request completion*. **Polling cadence**: once per minute sustained is supported; cache results for dashboards. The endpoints support pagination via *has_more* and *next_page*; the time-granularity table caps how many buckets a single response returns.
+
+Two caveats from the docs: **Priority Tier costs use a different billing model and never appear in the cost endpoint** (track Priority Tier usage in the usage endpoint instead); and **the programmatic Usage and Cost API endpoints are not currently available on Claude Platform on AWS** (use the Console pages there). Several observability partners (CloudZero, Datadog, Grafana Cloud, Honeycomb, Vantage) ship ready-to-use integrations against these endpoints if you would rather not build dashboards yourself.
+
+### The four cost levers (recap)
+
+The four production cost levers from earlier lessons:
+
+- **Model selection** (lesson 3): the cheapest model that passes evaluation. Default to Sonnet; reach for Opus on hard tasks; reach for Haiku on volume-and-light.
+- **Effort dial** (lesson 3): per-call token spend; *medium* on Sonnet for most production work.
+- **Prompt caching** (lesson 7): about 90 percent off on hits with stable prefixes. Cache the system + tool stack at minimum.
+- **Batches** (lesson 2): 50 percent off, async, finishes in under an hour. Right for evaluations, content moderation, bulk non-interactive workloads.
+
+Add the **per-subagent model** from lesson 11 (the cost lever applied per-step in orchestrator-worker patterns) and you have the full production-cost picture.
+
+## Discipline 2: Latency budgets
+
+Define budgets per surface, not per call. A chat UI cares about **time-to-first-token (TTFT)**; a batch worker cares about end-to-end throughput; an agent loop cares about steps-times-per-step latency.
+
+The levers from earlier lessons:
+
+- **Streaming** (lesson 2): perceptually shrinks TTFT to milliseconds even on long responses; required for any chat UI on a long generation.
+- **Effort dial** (lesson 3): higher effort means more tokens, more time. Sonnet at *low* effort for chat is the canonical latency win.
+- **Prompt caching** (lesson 7): cache hits cut both TTFT and total spend; with a cached prefix, only the post-breakpoint tail is processed.
+- **Routing** (lesson 9 pattern 2): send easy queries to a smaller faster model.
+- **Batches API** (lesson 2): when latency does not matter at all, batches at 50 percent off; most finish in under an hour.
+- **Parallelization with Subagents** (lessons 9 + 11): concurrent subagents reduce wall-clock dramatically on workloads with independent subtasks.
+
+The single discipline that ties them together: **never tune latency without a budget**. Decide what TTFT is acceptable for the surface (200 ms for typing-assist; 1 to 2 seconds for chat first-token; 30 seconds for a long generation if streaming; minutes for a batched workload) and treat budget breaches as a per-incident bug.
+
+## Discipline 3: Eval-set discipline
+
+The phrase from lesson 3 carries through: *build a held-out test set, run candidate changes against it, pick the cheapest configuration that passes*. Lesson 9 pattern 5 (evaluator-optimizer) describes the loop. Track 21 lesson 7 "LLMOps" is the deeper provider-agnostic playbook for the discipline as a whole.
+
+What "passes" means is workload-specific: a structured-output task uses field accuracy or JSON-schema conformance; a summarization task uses ROUGE or a human-rubric LLM judge; an agent loop uses task completion rate. Pick the metric per workload, not per model.
+
+What changes in production specifically: the eval set is the gate, not a one-off. Every model swap, every effort-dial change, every prompt edit, every tool addition runs through it before traffic shifts. The earlier you build it, the more changes it lets you ship safely.
+
+## Discipline 4: Rollout
+
+Four moves cover the rollout layer:
+
+- **Feature flags.** Model name, system prompt, tool list, *cache_control* placement, MCP server list (lesson 6), and Subagent configurations (lesson 11) all sit behind flags. A model swap is a config change, not a deploy.
+- **Canary.** Route 1 percent of traffic to the new configuration; watch the eval set live (the *evaluation in production* lesson from Track 21 LLMOps); promote to 10 percent, then 100 percent. Tolerated quality regressions caught at 1 percent are infinitely cheaper than the same regressions caught at 100 percent.
+- **A/B against the current production configuration.** Run both for a fixed window; score live responses on your held-out set; pick the cheapest that passes. This is the same discipline lesson 3 recommended for model selection, applied to every change.
+- **Rollback plan documented and rehearsed.** The flag should toggle back in one motion. The *request_id* logging from lesson 2 is what makes incident response possible: Anthropic Support needs the *request_id* to find a specific failed call, and your own logs need it to correlate the call with your application's request.
+
+Every Claude call in production logs (at minimum): *request_id*, *model*, *stop_reason*, *usage.input_tokens*, *usage.output_tokens*, *usage.cache_read_input_tokens*, *usage.cache_creation_input_tokens*, and request latency. Pair with *feature_flag_state* and your application's *user_id* and *session_id*. That logging shape is what makes every later disposition (cost reconciliation, incident response, rollout decisions) tractable.
+
+## Discipline 5: Lifecycle handling
+
+Anthropic publishes a deprecation policy with a clean lifecycle. The four states: **Active** (fully supported and recommended), **Legacy** (no more updates; may be deprecated later), **Deprecated** (still functional but a retirement date is set), **Retired** (requests fail).
+
+Two facts to plan against. **At least 60 days notice** before retirement for publicly released models, per the docs: *Anthropic notifies customers with active deployments for models with upcoming retirements, providing at least 60 days notice before model retirement for publicly released models*. **Date-pinned IDs are the production discipline** (lesson 3): the 4.6 generation and later are dateless and already pinned; pre-4.6 models use the date-suffixed canonical ID for production stability.
+
+The audit path from the docs: in the Claude Console Usage page, click the **Export** button, review the CSV for usage by API key and model, locate any deprecated model in use, migrate before the retirement date. The Models overview at *platform.claude.com/docs/en/about-claude/models/overview* is the canonical source for current status and replacement recommendations.
+
+One smaller deprecation worth knowing: the parameters *temperature*, *top_p*, and *top_k* are deprecated on Claude Opus 4.7 and later (including Opus 4.8) and return a 400 error when set to non-default values. Omit them; use prompting to guide behavior (the prompt-engineering best-practices page is canonical for the patterns).
+
+## The rollout checklist
+
+A single checklist that pulls L1 to L11 into shippable form. Treat it as a deploy gate, not aspirational:
+
+- **Smallest primitive solid** (lesson 1): every code path constructs the Messages API request correctly; iterate the *content* array, never index it.
+- **Production-side patterns** (lesson 2): streaming on user-facing surfaces; batches for bulk non-interactive; full *stop_reason* dispatch; *request_id* logged on every call.
+- **Model + effort chosen by eval** (lesson 3): default Sonnet; reach for Opus or Haiku where the eval data supports it; effort dial set per workload (not left at the *high* default unless that is the deliberate choice).
+- **Tools deliberate** (lessons 4 to 6): custom tools where the logic is yours; server tools where Anthropic provides; MCP for third-party catalogs; denylist destructive operations; sandbox computer-use; tool descriptions tight enough to produce correct calls.
+- **Caching live** (lesson 7): *cache_control* on the system prompt and stable tool definitions at minimum; cache-hit ratio monitored in the production dashboard.
+- **Context-management posture chosen** (lesson 7): compaction opted in for sessions that will run long; tool result clearing for tool-heavy agent loops; the system prompt cached at the end so it survives compaction.
+- **Agent loop disciplines** (lesson 8): hard *max_iterations* cap; explicit *stop_reason* dispatch (no silent fall-through); tool inventory is the safety surface area.
+- **Pattern chosen by decision tree** (lesson 9): the simplest pattern that fits the task, not the most sophisticated.
+- **Skills + harness chosen** (lesson 10): durable instructions in *.claude/skills/* or uploaded via the Skills API; *CLAUDE.md* committed where appropriate; security audit on any third-party Skill.
+- **Right primitive per workload** (lesson 11): self-built L8 loop for control and ZDR; Subagents for orchestrator-workers and parallelization; Managed Agents for long-running asynchronous work when ZDR is not a constraint.
+- **Cost dashboards live** (this lesson): Usage and Cost Admin API integrated; cache-hit ratio + per-model spend + per-workspace allocation visible; alerts on per-feature budget breaches.
+- **Latency budget defined and tracked** (this lesson): per-surface TTFT and full-response targets; breaches treated as incidents.
+- **Eval set as deploy gate** (this lesson, T21 L7): every change passes evaluation before traffic shifts.
+- **Feature flags + canary + rollback** (this lesson): model name + system prompt + tool list behind flags; canary at 1 percent then 10 percent then 100 percent; rollback rehearsed.
+- **Deprecation watch** (this lesson): subscribed to Anthropic notifications; Console Usage Export reviewed quarterly; migration runway sized for the 60-day notice window.
+
+## Why this matters when you use Claude
+
+A working prototype and a shipped application are different problems. The prototype proves the model can do the thing; the shipped application proves you can keep the thing running reliably under real traffic, at a cost that pays back the value, with the ability to upgrade and roll back without taking the service down. The five disciplines here are not gold-plating; they are the difference between a model integration that lasts and one that quietly degrades over months.
+
+The track is now closed. Lesson 1 had you make a call. Lesson 12 ships the application that the call ended up being part of.
+
+## What you should remember
+
+- **Per-call telemetry on every Claude response.** Log *request_id*, *model*, *stop_reason*, *usage.input_tokens*, *usage.output_tokens*, *usage.cache_creation_input_tokens*, *usage.cache_read_input_tokens*, *usage.iterations* (when compaction is enabled), and request latency. The cache-hit ratio is the single most useful production metric.
+- **Usage and Cost Admin API** (verbatim purpose: *programmatic and granular access to historical API usage and cost data*) at *GET /v1/organizations/usage_report/messages* and *GET /v1/organizations/cost_report*. Admin API key required (*sk-ant-admin...*; distinct from regular API keys). Bucket widths *1m* / *1h* / *1d*. Filter and *group_by* by *model* / *workspace_id* / *api_key_id* / *service_tier* / *context_window* / *inference_geo*. Data appears within about 5 minutes; one-per-minute polling.
+- **Priority Tier costs never appear in the Cost endpoint** (different billing model); track Priority Tier usage in the Usage endpoint instead.
+- **NOT available on Claude Platform on AWS** (use Console there). NOT available on individual accounts (set up an organization).
+- **Latency budgets per surface, not per call.** Streaming for chat; effort dial for the cost-quality-latency triangle; cache hits cut TTFT; routing sends easy queries to faster models; Subagents parallelize independent subtasks; Batches are the "I do not care about latency" lever.
+- **Eval-set discipline.** Build a held-out test set, run candidate changes against it before shipping. The same discipline lesson 3 used for model selection applies to every prompt change, tool addition, and configuration tweak. T21 L7 LLMOps is the deeper playbook.
+- **Rollout four moves:** feature flags (model + prompt + tool list behind a flag), canary (1 percent then 10 percent then 100 percent), A/B against current production, documented and rehearsed rollback. *request_id* logging makes incident response tractable.
+- **Anthropic deprecation policy:** Active → Legacy → Deprecated → Retired. **At least 60 days notice** for publicly released models. Audit via Console Usage Export. Date-pinned IDs for production (4.6 generation and later are dateless and already pinned; pre-4.6 use date-suffixed). The Models overview is canonical.
+- ***temperature* / *top_p* / *top_k*** are deprecated on Opus 4.7+ (including 4.8); return a 400 error on non-default values. Omit; use prompting to guide behavior.
+- **The rollout checklist** pulls L1 to L11 into a single deploy gate: smallest primitive solid, production patterns (streaming + batches + *stop_reason* + *request_id*), model + effort by eval, tools deliberate, caching + compaction + clearing chosen, agent loop disciplines, pattern by decision tree, Skills and harness chosen, primitive per workload (self-built loop / Subagents / Managed Agents), cost dashboards live, latency budget tracked, eval set as deploy gate, feature flags + canary + rollback, deprecation watch.
+
+Lesson 1 had you make a call. Lesson 12 ships the application. The track is closed.

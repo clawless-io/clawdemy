@@ -1,0 +1,177 @@
+---
+title: "Lesson: Choosing your model and the effort dial"
+description: "Lesson 3 of Track 22 (Building with Claude). Closes Phase 1 with the model-selection conversation: the three current families (Opus 4.8 as the current flagship with Opus 4.7 still supported as a legacy 4.7 deployment, Sonnet 4.6, Haiku 4.5) and how they trade capability against cost and latency; the model-ID convention (dateless pinned snapshots on the 4.6 generation and later, date-suffixed canonical IDs on earlier ones); the effort parameter that controls how many tokens Claude spends on a single call across all the models that support it; adaptive thinking versus the older manual extended-thinking mode; and a worked cost example so the trade is concrete. The choice that compounds across every other lesson in T22. (Per the docs at this lesson's drafting; check the Anthropic Models overview at platform.claude.com for the current published lineup.)"
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+{/* COMPONENT PLACEHOLDER (Lead wires at promotion): <LessonFreshness lastReviewed={frontmatter.last_reviewed} /> */}
+
+{/* COMPONENT PLACEHOLDER (Lead wires at promotion): <SourceLecture url="https://platform.claude.com/docs/en/about-claude/models/overview" title="Anthropic public Claude docs: Models overview, Extended thinking, Effort, Adaptive thinking" instructor="Anthropic" /> */}
+
+## Why this lesson
+
+Lesson 1 had you pass claude-opus-4-8 as the model name. Lesson 2 had you log *usage* with every call. This lesson is the conversation about which of those model names is the right one and why, with the parameters that change what one call costs and what it can do.
+
+Model choice compounds. Every call your application makes runs against the model you chose; every dollar of your bill, every millisecond of your tail latency, every "the model got this wrong" complaint traces back to that one frontmatter line. The decision is not "Opus is best, use Opus": Opus is the most capable, but a chat application that runs every user message through Opus will burn the cost-per-user margin most teams need to keep, and a long-running agent that swaps in Opus where Haiku would have worked turns a five-dollar evaluation into a fifty-dollar one. The decision is "what does this specific call need, and what is the cheapest model that delivers it."
+
+This lesson covers the four pieces of that decision: **the three current Claude families and how they actually differ**, **the model-ID convention** (so production code pins what it expects to run), **the effort parameter** (the dial that controls how many tokens Claude spends on a call, on the models that support it), and **adaptive thinking** (the new default for the high-capability models) versus the older manual extended-thinking mode.
+
+## The three current families
+
+Anthropic publishes three current models, organized as families: Opus (capability tier), Sonnet (balance tier), Haiku (speed tier). Verbatim numbers from the public Models overview at [platform.claude.com/docs/en/about-claude/models/overview](https://platform.claude.com/docs/en/about-claude/models/overview) (verified at this lesson's drafting; prices and capabilities can shift, the docs are canonical):
+
+| Family | Model ID | Description (verbatim from docs) | Input / Output (per MTok) | Context | Max output |
+| --- | --- | --- | --- | --- | --- |
+| Opus 4.8 | claude-opus-4-8 | Anthropic's most capable model for complex reasoning and agentic coding | $5 / $25 | 1M tokens | 128k tokens |
+| Sonnet 4.6 | claude-sonnet-4-6 | The best combination of speed and intelligence | $3 / $15 | 1M tokens | 64k tokens |
+| Haiku 4.5 | claude-haiku-4-5 (alias for claude-haiku-4-5-20251001) | The fastest model with near-frontier intelligence | $1 / $5 | 200k tokens | 64k tokens |
+
+**Opus 4.7 (claude-opus-4-7) remains supported as a legacy model** with the same pricing ($5 / $25), context window (1M tokens), max output (128k), and overall posture as Opus 4.8. New code should target 4.8 for current behavior; a 4.7 deployment does not need to migrate urgently. The Models overview at [platform.claude.com/docs/en/about-claude/models/overview](https://platform.claude.com/docs/en/about-claude/models/overview) and the migration guide are canonical for per-version differences.
+
+The pricing ratio is the easiest mental model: **Sonnet is roughly 1.7x cheaper per output token than Opus and Haiku is 5x cheaper than Opus.** Knowledge cutoffs differ too (Opus 4.8 reliable through Jan 2026, Sonnet 4.6 through Aug 2025, Haiku 4.5 through Feb 2025), so a model picking Haiku may know less about recent events than one picking Opus.
+
+The capability ordering (Opus, then Sonnet, then Haiku) is not a hard ranking on every task. Haiku 4.5 is "near-frontier intelligence" (competitive with Opus on many tasks; the gap is on multi-step reasoning, complex coding, nuanced analysis). Sonnet 4.6 is "best combination of speed and intelligence," not "slightly worse Opus"; it is the right default for production workloads where Opus is overkill and Haiku is borderline.
+
+## How to pick
+
+A working rule, in increasing order of how much you should think about it:
+
+**Default to Sonnet.** For most production workloads, Sonnet 4.6 at the right effort level (more on effort below) is the right call. It costs sixty percent of Opus per token and runs faster, with intelligence good enough for the bulk of what user-facing applications need.
+
+**Reach for Opus when the task is genuinely hard.** Complex reasoning, agentic coding over multiple steps, work where a wrong answer is meaningfully worse than a slow answer. Opus 4.8's strength (and Opus 4.7's, with the same posture) is the long-horizon, hard-thinking case. The pricing reflects that.
+
+**Reach for Haiku when the task is light and volume matters.** Classification, simple lookups, the inner step of a pipeline that runs millions of times. Haiku 4.5 is "near-frontier" enough to do plenty of real work; the savings stack fast on high-volume calls.
+
+**Mix and match inside one application.** A common production pattern is Opus or Sonnet for the user-facing summarizer (where one wrong answer matters), Haiku for the inner classifier that decides which summarizer to call (where speed-times-volume is the bottleneck). Lesson 8 ("from single call to agent loop") and lesson 11 ("subagents and delegation") pick this up; the foundation here is that you do not have to pick one model for the whole application.
+
+The decision is rarely "Opus or Haiku" in the abstract. It is "what would happen on this specific call if we used Sonnet instead of Opus, and is that worth a forty-percent cost cut?" Build a held-out evaluation set (Track 21 lesson 7 "LLMOps" is the playbook here) and the question gets quantitative: same prompt, both models, measure quality. The cheapest model that passes evaluation is the right model.
+
+## Model IDs: alias versus date-pinned
+
+A small but important detail. Anthropic publishes two ID forms for some models, and which you use in production matters.
+
+**The 4.6 generation and later (Opus 4.8, Opus 4.7, Sonnet 4.6, Opus 4.6) use a dateless format that *is* a pinned snapshot.** claude-opus-4-8 does not change underneath you; it is an exact version. The Models overview is explicit: "Starting with the Claude 4.6 generation, model IDs use a dateless format that is also a pinned snapshot, not an evergreen pointer."
+
+**Pre-4.6 models have a date-suffixed canonical ID and a dateless alias** that resolves to it. claude-haiku-4-5 is an alias; the pinned ID is claude-haiku-4-5-20251001. The alias is a convenience for development (you do not have to update the date when a patch lands); the date-pinned form is what production should use, because the alias can resolve to a different snapshot later.
+
+The practical rule:
+
+- **For new code on the 4.6 generation or later:** the dateless ID is already pinned. Use claude-opus-4-8, claude-opus-4-7 (legacy), claude-sonnet-4-6 directly; you do not need a date suffix.
+- **For pre-4.6 models and for production stability across model patches generally:** use the date-suffixed form (claude-haiku-4-5-20251001, claude-sonnet-4-5-20250929). Behavior pinned; surprise patches do not happen.
+- **For development:** the alias form is fine; you get fixes automatically.
+
+If your production application is using claude-haiku-4-5 and someone reports a regression after Anthropic rolls a patch, the date-suffixed form would have isolated you. It costs nothing to be specific.
+
+## The effort parameter
+
+The effort parameter is a dial on token spending per call. It controls how many tokens Claude is willing to spend on a single response, across all the tokens that response includes (text content, tool calls, extended thinking when enabled). The values are *low*, *medium*, *high* (the default), *xhigh* (Opus 4.8 and Opus 4.7), and *max* (Opus 4.8, Mythos Preview, Opus 4.7, Opus 4.6, Sonnet 4.6).
+
+Supported on: Claude Opus 4.8, Mythos Preview, Opus 4.7, Opus 4.6, Sonnet 4.6, and Opus 4.5 per the public docs. Haiku 4.5 does **not** support the effort parameter; on Haiku, what you get is what the model decides to spend.
+
+The parameter goes in *output_config*, not at the top level:
+
+```python
+response = client.messages.create(
+    model="claude-opus-4-8",
+    max_tokens=4096,
+    messages=[{"role": "user", "content": "..."}],
+    output_config={"effort": "medium"},
+)
+```
+
+Per the public docs, sane starting points by model:
+
+- **Sonnet 4.6 default:** *medium* for most production work; *low* for high-volume or latency-sensitive (chat that is not coding); *high* for complex reasoning; *max* for the absolute highest capability.
+- **Opus 4.8 default:** start with *xhigh* for coding and agentic use cases; *high* for most other intelligence-sensitive workloads (also the API default on all surfaces); step down to *medium* or *low* only when evals show the lower level holds quality. The Effort docs state explicitly that the guidance for Opus 4.7 also applies to Opus 4.8.
+- **Opus 4.7 default (legacy, same posture as 4.8):** *xhigh* for coding and agentic work (long-horizon, tool-heavy); *high* for intelligence-sensitive workloads; *medium* for cost-sensitive workloads; *max* only when evaluation shows headroom at *xhigh*. Opus 4.7 respects lower effort levels more strictly than Opus 4.6 (it scopes work to what was asked at *low* and *medium*, instead of going beyond), so adjust deliberately rather than prompting around shallow reasoning.
+
+Two practical points. First, *high* and not setting the parameter are equivalent (*high* is the default); setting it explicitly is fine but does nothing different. Second, effort affects token spending broadly, including tool calls. At lower levels Claude makes fewer tool calls, combines operations, and proceeds directly to action without preamble; at higher levels it explains plans, makes more calls, and writes detailed summaries. This matters for lesson 8 onward (the agent loop), where total cost is steps times per-step cost.
+
+## Adaptive thinking versus extended thinking
+
+A second parameter close to effort, and a moving target as Anthropic's models evolve. The lesson covers the current state; treat the docs as the source of truth when the model lineup shifts.
+
+**Extended thinking** (also called manual thinking) is the older mechanism. The model produces internal thinking content blocks before its text response, showing step-by-step reasoning. You enable it by setting the thinking parameter's type to enabled with a budget-tokens value (literal below), and the response includes the thinking blocks alongside the text:
+
+```json
+"thinking": {"type": "enabled", "budget_tokens": N}
+```
+
+Use cases: complex reasoning, mathematical or logical problems, multi-step planning, anywhere a transparent reasoning trace is useful.
+
+**Adaptive thinking** is the new mode: the thinking parameter with adaptive type (literal below). The model decides when and how much to think, based on the difficulty of the task:
+
+```json
+"thinking": {"type": "adaptive"}
+```
+
+Recommended on Opus 4.8 and Opus 4.7 (where manual extended thinking is no longer supported and returns a 400 error), Opus 4.6, Sonnet 4.6, and Mythos Preview. The model uses the effort parameter as the control: at *high*, *xhigh*, and *max*, Claude almost always thinks deeply; at lower levels it may skip thinking for simpler problems.
+
+Current state by model:
+
+| Model | Adaptive thinking | Manual extended thinking |
+| --- | --- | --- |
+| Opus 4.8 | Recommended (default) | NOT supported; returns 400 |
+| Opus 4.7 | Recommended (default) | NOT supported; returns 400 |
+| Sonnet 4.6 | Recommended | Supported but deprecated |
+| Opus 4.6 | Recommended | Supported but deprecated |
+| Haiku 4.5 | NOT supported | Supported (the available mode) |
+
+For new code on the latest models, the right pattern is **adaptive thinking plus effort**, not manual budget-tokens configuration. On Haiku 4.5, the manual mode is still the option, and it is worth the use when the task warrants step-by-step reasoning.
+
+## A worked cost example
+
+Concrete numbers fix the abstract. Suppose you are building a feature that takes a user question, classifies it (one of ten categories), then either answers it or routes it elsewhere. Average prompt is 500 input tokens; average answer is 300 output tokens; you expect 100,000 calls per day.
+
+The feature is two calls per request: a classifier (500 input tokens, 20 output) and (for the 70 percent that get an answer) an answer call (500 input, 300 output). Each scenario below derives both legs and totals.
+
+**All-Opus version.** Classifier: 100,000 * (500 input * $5/MTok + 20 output * $25/MTok) = 100,000 * ($0.0025 + $0.0005) = **$300 per day**. Answer: 70,000 * (500 input * $5/MTok + 300 output * $25/MTok) = 70,000 * ($0.0025 + $0.0075) = **$700 per day**. **Total: $1,000 per day.**
+
+**All-Sonnet version.** Classifier: 100,000 * (500 * $3/MTok + 20 * $15/MTok) = 100,000 * ($0.0015 + $0.0003) = **$180 per day**. Answer: 70,000 * (500 * $3/MTok + 300 * $15/MTok) = 70,000 * ($0.0015 + $0.0045) = **$420 per day**. **Total: $600 per day.** About 40 percent cheaper than all-Opus.
+
+**Mix version (Haiku classifier + Sonnet answer).** Classifier (Haiku): 100,000 * (500 * $1/MTok + 20 * $5/MTok) = 100,000 * ($0.0005 + $0.0001) = **$60 per day**. Answer (Sonnet): 70,000 * (500 * $3/MTok + 300 * $15/MTok) = 70,000 * ($0.0015 + $0.0045) = **$420 per day**. **Total: $480 per day.** About 52 percent cheaper than all-Opus.
+
+The arithmetic is not exotic. The point is that model choice and parameter choice both move the dial materially. Lesson 7 (prompt caching) and lesson 12 (production cost monitoring) extend the same arithmetic to the cache-discount and the org-level dashboards; the foundation here is that the dial exists and is not subtle.
+
+## Common pitfalls
+
+**Defaulting to Opus on every call.** Opus is the most capable model; it is also the most expensive. A chat-style product that runs every user message through Opus is paying five-times-Haiku rates for traffic that Haiku could have handled. The fix is evaluation: build a held-out test set, run both models, see what actually drops.
+
+**Using the alias in production on pre-4.6 models.** claude-haiku-4-5 is an alias; the patch surface lives behind it. Pin to the date-suffixed form (claude-haiku-4-5-20251001) in production. (The 4.6 generation and later need no date suffix; the dateless ID is already pinned.)
+
+**Forgetting that effort affects tool calls.** Effort is not just "how much text Claude writes." It is total token spend per response, including the tool-call portion. In an agent loop (lesson 8 onward), lowering effort can compound: fewer tool calls per step, terser preambles, less chain-of-thought. That can be the right answer for cost; it can also be wrong if the task needs the deeper exploration.
+
+**Using manual extended thinking on a model that does not support it.** Opus 4.8 and Opus 4.7 return a 400 error if you send the manual thinking configuration (the thinking parameter's type set to enabled with a budget-tokens value, literal below):
+
+```json
+"thinking": {"type": "enabled", "budget_tokens": N}
+```
+
+The replacement is adaptive thinking plus effort. On Sonnet 4.6 and Opus 4.6, manual mode still works but is deprecated; new code should use adaptive.
+
+**Mixing model families without evaluation.** Pipelines that route work between models work well when the routing matches capability to need. They fail badly when a Haiku step needs to handle Opus-level reasoning and silently produces a worse answer. The eval set (lesson 7 of Track 21) is what tells you the routing is right.
+
+## What you do not need yet
+
+This lesson stays on the model-and-parameter layer. Topics deferred:
+
+- **The Models API** at the v1 models endpoint (for programmatic model and capability discovery). Useful when your application has to handle multiple deployments; not needed for a single-call lesson.
+- **Vision and PDF support.** All three current families handle images and PDFs; lesson 4 onward picks up specific multimodal patterns where relevant.
+- **Prompt caching discount math** (the third cost lever after model selection and the effort dial). Lesson 7.
+- **The Admin / Usage / Cost APIs** for org-level cost monitoring. Lesson 12.
+
+## What you should remember
+
+- **Three current families:** Opus 4.8 (current flagship, "Anthropic's most capable model for complex reasoning and agentic coding," $5/$25 per MTok), Sonnet 4.6 (best balance, $3/$15), Haiku 4.5 (fastest near-frontier, $1/$5). Opus 4.7 remains supported as a legacy 4.7 deployment with the same pricing and posture as 4.8. Pricing ratio matters; default to Sonnet for production, reach for Opus when the task is hard, reach for Haiku when volume matters.
+- **Mix and match inside one application.** A common production pattern is Sonnet (or Opus) for user-facing summarization, Haiku for the inner classifier. Lesson 8 onward extends this into the agent loop.
+- **Model IDs:** the 4.6 generation and later are dateless and already pinned (claude-opus-4-8, claude-opus-4-7, claude-sonnet-4-6). Pre-4.6 models use the date-suffixed form for production stability (claude-haiku-4-5-20251001); the dateless alias is for development.
+- **The effort parameter** is configured under output_config with five values: low, medium, high, xhigh, or max. It controls token spend per call across the supported models (Opus 4.8, Opus 4.7, Opus 4.6, Opus 4.5, Sonnet 4.6, Mythos). Defaults to high. Affects all tokens, including tool calls. Sonnet 4.6 production default: medium. Opus 4.8 (and Opus 4.7, same posture) production default: xhigh for coding/agentic, high for general intelligence work. The exact request literal sits in the effort-parameter section above.
+- **Adaptive thinking** is the new default mode on Opus 4.8, Opus 4.7, Opus 4.6, Sonnet 4.6: the thinking parameter with adaptive type. Manual extended thinking is the older mode (the thinking parameter's type set to enabled with a budget-tokens value), still supported on Haiku 4.5 and (deprecated) on Sonnet 4.6 and Opus 4.6, not supported on Opus 4.8 or Opus 4.7 (returns 400). The exact request literals for both modes sit in the adaptive-thinking section above.
+- **Evaluation is how you pick.** Build a held-out test set (Track 21 lesson 7 "LLMOps"), run candidate models against it, pick the cheapest that passes. The decision should be data-driven, not vibes-driven.
+
+## Where this fits
+
+Lesson 3 closes Phase 1. Together, lessons 1, 2, and 3 give you the foundations every later T22 lesson extends: the smallest primitive (1), the production patterns around it (2), and the model-and-parameter decisions on top (3). Phase 2 (lessons 4-7) augments what one call can do (tools, MCP, caching, context management). Phase 3 (lessons 8-11) extends the loop (agents, Agent Skills, subagents). Phase 4 (lesson 12) closes with shipping. The model-selection conversation here threads through every subsequent lesson: tools work differently at different effort levels, agents compound the model-cost-per-step, caching changes the input-token side of the same arithmetic, lesson 12 turns *usage* logging into org-level dashboards.

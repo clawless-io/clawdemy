@@ -1,0 +1,184 @@
+---
+title: "Cheatsheet: The Messages API in production"
+description: One-page reference. Streaming patterns, error-code map, retry policy, batches numbers, and the request_id habit.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## Streaming, at a glance
+
+```
+Python (context manager):
+  with client.messages.stream(...) as stream:
+      for text in stream.text_stream:
+          print(text, end="", flush=True)
+
+  # If you want the full Message object instead of chunks:
+  with client.messages.stream(...) as stream:
+      message = stream.get_final_message()
+
+TypeScript (event-emitter):
+  await client.messages
+    .stream({...})
+    .on("text", (text) => { process.stdout.write(text); });
+
+  // Full Message object:
+  const stream = client.messages.stream({...});
+  const message = await stream.finalMessage();
+```
+
+## When to use what
+
+| Pattern | When |
+| --- | --- |
+| **Standard non-streaming** | Short call, no user waiting, no long generation |
+| **Streaming** | Interactive UI (user is watching) OR request expected to take more than 10 minutes |
+| **Batches** | Bulk non-interactive work (evals, moderation, dataset summarization) |
+
+Decision driver: **who is waiting**. User → streaming. Nobody → batches.
+
+## HTTP error map
+
+| Code | Type | Retry? |
+| --- | --- | --- |
+| 400 | *invalid_request_error* | No (your bug; fix the request) |
+| 401 | *authentication_error* | No (API key missing/wrong/revoked) |
+| 402 | *billing_error* | No (fix in Console) |
+| 403 | *permission_error* | No (key lacks permission) |
+| 413 | *request_too_large* | No (trim the request; see size limits below) |
+| 429 | *rate_limit_error* | Yes, backoff (SDKs do this) |
+| 500 | *api_error* | Yes, backoff (SDKs do this) |
+| 504 | *timeout_error* | Switch to streaming or batches for long requests |
+| 529 | *overloaded_error* | Yes, backoff (SDKs do this) |
+
+**Rule of thumb:** 4xx is your bug, 5xx is the platform's bug, 429 and 529 are temporary.
+
+## Error response shape
+
+```json
+{
+  "type": "error",
+  "error": {
+    "type": "...",
+    "message": "..."
+  },
+  "request_id": "req_..."
+}
+```
+
+Log all three: *error.type*, *error.message*, *request_id*.
+
+## Request size limits (the 413 boundary)
+
+| Endpoint | Max request size |
+| --- | --- |
+| Messages API | 32 MB |
+| Token Counting API | 32 MB |
+| Batch API | 256 MB |
+| Files API | 500 MB |
+
+## Retry policy
+
+- Official SDKs retry **connection errors, 408, 409, 429, and any 5xx status code** with **exponential backoff + jitter** by default (about two retries).
+- You configure max attempts and per-call timeout.
+- What the SDK CANNOT decide: whether your request is **safe** to retry. Fix idempotency on the tool side (deduplication key, unique transaction id), not the API call.
+
+## Mid-stream errors
+
+Streaming can fail AFTER returning 200. Wrap the stream iterator:
+
+```
+# Python
+try:
+    with client.messages.stream(...) as stream:
+        for text in stream.text_stream:
+            ...
+except anthropic.APIError as e:
+    log_error(e)
+```
+
+```
+// TypeScript
+await client.messages
+  .stream({...})
+  .on("text", handleText)
+  .on("error", handleError);
+```
+
+Missing this: mid-stream failures get logged as "succeeded" because the HTTP status was 200.
+
+## Batches: the cost / latency dial
+
+| Property | Value |
+| --- | --- |
+| Cost vs standard | **50 percent less per token** |
+| Typical completion | **Most batches finish in under 1 hour** |
+| Per-batch size limit | 256 MB |
+| Per-request size limit | 32 MB (same as Messages API) |
+
+Right for: large-scale evaluations, content moderation, dataset summarization, nightly jobs.
+Wrong for: anything a user is waiting on (use streaming).
+
+## Batches shape
+
+```python
+batch = client.messages.batches.create(
+    requests=[
+        {
+            "custom_id": "doc_001",
+            "params": {
+                "model": "claude-opus-4-8",
+                "max_tokens": 1024,
+                "messages": [{"role": "user", "content": "Summarize: ..."}],
+            },
+        },
+        # ... many more
+    ],
+)
+# Later: poll until status is "ended", then stream results
+results = client.messages.batches.results(batch.id)
+```
+
+## request_id: the one habit
+
+Log on every response:
+
+```python
+# Python
+print(message._request_id)
+```
+
+```typescript
+// TypeScript
+console.log(message._request_id);
+```
+
+A reasonable production log line: timestamp, request_id, model, stop_reason, input_tokens, output_tokens, latency. Quote the *request_id* in Anthropic Support tickets.
+
+## Common pitfalls
+
+| Failure | Recognize by | Fix |
+| --- | --- | --- |
+| Retrying 4xx | Same 400 / 401 in retry log | Read the error.type; fix the request, do not retry |
+| Mid-stream error logged as success | Truncated response in app, no error event | Wrap stream iterator with error handler |
+| Batches for user-facing | UX feels async | Switch to streaming for the user path; keep batches for offline jobs |
+| Tool not idempotent | Duplicate side effects on retry | Add a deduplication key to the tool, not the API call |
+| No request_id logged | Cannot debug a specific failure | Log *response._request_id* on every call |
+
+## What this lesson does NOT cover (and where to find it)
+
+| Topic | Lands at |
+| --- | --- |
+| Choosing the model + extended thinking + effort | Lesson 3 |
+| Tool use (define + handle) | Lesson 4 |
+| Server-side tools (web search, code execution) | Lesson 5 |
+| Model Context Protocol | Lesson 6 |
+| Prompt caching + context management | Lesson 7 |
+| Cost monitoring + Usage and Cost API | Lesson 12 |
+
+## Source
+
+- Anthropic public Claude docs, **Streaming Messages**, **Batch processing**, **Errors**, and **Working with the Messages API** at `https://platform.claude.com/docs/`. Structural-mirror citation; see references.

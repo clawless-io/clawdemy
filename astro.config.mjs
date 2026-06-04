@@ -63,7 +63,8 @@ export default defineConfig({
 			// src/content/docs/lessons/<track>/<slug>/ with six artifact files.
 			// Sidebar entries are explicit per-lesson for now; Phase 2 (Authoring DX)
 			// may switch to autogenerate.
-			sidebar: [
+			sidebar: (() => {
+					const __groups = [
 				{
 					label: 'Start here',
 					items: [
@@ -3302,6 +3303,179 @@ export default defineConfig({
 					],
 				},
 				{
+					label: 'Track 22: Building with Claude',
+					items: [
+						{
+							label: 'Phase 1\nAPI foundations',
+							collapsed: true,
+							items: [
+								{
+									label: 'Your first Claude API call',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/building-with-claude/your-first-claude-api-call/brief' },
+										{ label: 'Lesson', slug: 'lessons/building-with-claude/your-first-claude-api-call/lesson' },
+										{ label: 'Practice', slug: 'lessons/building-with-claude/your-first-claude-api-call/practice' },
+										{ label: 'Summary', slug: 'lessons/building-with-claude/your-first-claude-api-call/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/building-with-claude/your-first-claude-api-call/cheatsheet' },
+										{ label: 'References', slug: 'lessons/building-with-claude/your-first-claude-api-call/references' },
+									],
+								},
+								{
+									label: 'The Messages API in production',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/building-with-claude/the-messages-api-in-production/brief' },
+										{ label: 'Lesson', slug: 'lessons/building-with-claude/the-messages-api-in-production/lesson' },
+										{ label: 'Practice', slug: 'lessons/building-with-claude/the-messages-api-in-production/practice' },
+										{ label: 'Summary', slug: 'lessons/building-with-claude/the-messages-api-in-production/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/building-with-claude/the-messages-api-in-production/cheatsheet' },
+										{ label: 'References', slug: 'lessons/building-with-claude/the-messages-api-in-production/references' },
+									],
+								},
+								{
+									label: 'Choosing your model and the effort dial',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/building-with-claude/choosing-your-model-and-the-effort-dial/brief' },
+										{ label: 'Lesson', slug: 'lessons/building-with-claude/choosing-your-model-and-the-effort-dial/lesson' },
+										{ label: 'Practice', slug: 'lessons/building-with-claude/choosing-your-model-and-the-effort-dial/practice' },
+										{ label: 'Summary', slug: 'lessons/building-with-claude/choosing-your-model-and-the-effort-dial/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/building-with-claude/choosing-your-model-and-the-effort-dial/cheatsheet' },
+										{ label: 'References', slug: 'lessons/building-with-claude/choosing-your-model-and-the-effort-dial/references' },
+									],
+								},
+							],
+						},
+						{
+							label: 'Phase 2\nAugmentation patterns',
+							collapsed: true,
+							items: [
+								{
+									label: 'Tool use, the foundation',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/building-with-claude/tool-use-the-foundation/brief' },
+										{ label: 'Lesson', slug: 'lessons/building-with-claude/tool-use-the-foundation/lesson' },
+										{ label: 'Practice', slug: 'lessons/building-with-claude/tool-use-the-foundation/practice' },
+										{ label: 'Summary', slug: 'lessons/building-with-claude/tool-use-the-foundation/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/building-with-claude/tool-use-the-foundation/cheatsheet' },
+										{ label: 'References', slug: 'lessons/building-with-claude/tool-use-the-foundation/references' },
+									],
+								},
+								{
+									label: 'Server-side tools and built-ins',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/building-with-claude/server-side-tools-and-built-ins/brief' },
+										{ label: 'Lesson', slug: 'lessons/building-with-claude/server-side-tools-and-built-ins/lesson' },
+										{ label: 'Practice', slug: 'lessons/building-with-claude/server-side-tools-and-built-ins/practice' },
+										{ label: 'Summary', slug: 'lessons/building-with-claude/server-side-tools-and-built-ins/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/building-with-claude/server-side-tools-and-built-ins/cheatsheet' },
+										{ label: 'References', slug: 'lessons/building-with-claude/server-side-tools-and-built-ins/references' },
+									],
+								},
+								{
+									label: 'Model Context Protocol',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/building-with-claude/model-context-protocol/brief' },
+										{ label: 'Lesson', slug: 'lessons/building-with-claude/model-context-protocol/lesson' },
+										{ label: 'Practice', slug: 'lessons/building-with-claude/model-context-protocol/practice' },
+										{ label: 'Summary', slug: 'lessons/building-with-claude/model-context-protocol/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/building-with-claude/model-context-protocol/cheatsheet' },
+										{ label: 'References', slug: 'lessons/building-with-claude/model-context-protocol/references' },
+									],
+								},
+								{
+									label: 'Prompt caching and context management',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/building-with-claude/prompt-caching-and-context-management/brief' },
+										{ label: 'Lesson', slug: 'lessons/building-with-claude/prompt-caching-and-context-management/lesson' },
+										{ label: 'Practice', slug: 'lessons/building-with-claude/prompt-caching-and-context-management/practice' },
+										{ label: 'Summary', slug: 'lessons/building-with-claude/prompt-caching-and-context-management/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/building-with-claude/prompt-caching-and-context-management/cheatsheet' },
+										{ label: 'References', slug: 'lessons/building-with-claude/prompt-caching-and-context-management/references' },
+									],
+								},
+							],
+						},
+						{
+							label: 'Phase 3\nAgent patterns',
+							collapsed: true,
+							items: [
+								{
+									label: 'From single call to agent loop',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/building-with-claude/from-single-call-to-agent-loop/brief' },
+										{ label: 'Lesson', slug: 'lessons/building-with-claude/from-single-call-to-agent-loop/lesson' },
+										{ label: 'Practice', slug: 'lessons/building-with-claude/from-single-call-to-agent-loop/practice' },
+										{ label: 'Summary', slug: 'lessons/building-with-claude/from-single-call-to-agent-loop/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/building-with-claude/from-single-call-to-agent-loop/cheatsheet' },
+										{ label: 'References', slug: 'lessons/building-with-claude/from-single-call-to-agent-loop/references' },
+									],
+								},
+								{
+									label: 'Six effective-agent patterns',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/building-with-claude/six-effective-agent-patterns/brief' },
+										{ label: 'Lesson', slug: 'lessons/building-with-claude/six-effective-agent-patterns/lesson' },
+										{ label: 'Practice', slug: 'lessons/building-with-claude/six-effective-agent-patterns/practice' },
+										{ label: 'Summary', slug: 'lessons/building-with-claude/six-effective-agent-patterns/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/building-with-claude/six-effective-agent-patterns/cheatsheet' },
+										{ label: 'References', slug: 'lessons/building-with-claude/six-effective-agent-patterns/references' },
+									],
+								},
+								{
+									label: 'Agent Skills and Claude Code',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/building-with-claude/agent-skills-and-claude-code/brief' },
+										{ label: 'Lesson', slug: 'lessons/building-with-claude/agent-skills-and-claude-code/lesson' },
+										{ label: 'Practice', slug: 'lessons/building-with-claude/agent-skills-and-claude-code/practice' },
+										{ label: 'Summary', slug: 'lessons/building-with-claude/agent-skills-and-claude-code/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/building-with-claude/agent-skills-and-claude-code/cheatsheet' },
+										{ label: 'References', slug: 'lessons/building-with-claude/agent-skills-and-claude-code/references' },
+									],
+								},
+								{
+									label: 'Subagents and Claude Managed Agents',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/building-with-claude/subagents-and-managed-agents/brief' },
+										{ label: 'Lesson', slug: 'lessons/building-with-claude/subagents-and-managed-agents/lesson' },
+										{ label: 'Practice', slug: 'lessons/building-with-claude/subagents-and-managed-agents/practice' },
+										{ label: 'Summary', slug: 'lessons/building-with-claude/subagents-and-managed-agents/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/building-with-claude/subagents-and-managed-agents/cheatsheet' },
+										{ label: 'References', slug: 'lessons/building-with-claude/subagents-and-managed-agents/references' },
+									],
+								},
+							],
+						},
+						{
+							label: 'Phase 4\nProduction',
+							collapsed: true,
+							items: [
+								{
+									label: 'Shipping a Claude application',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/building-with-claude/shipping-a-claude-application/brief' },
+										{ label: 'Lesson', slug: 'lessons/building-with-claude/shipping-a-claude-application/lesson' },
+										{ label: 'Practice', slug: 'lessons/building-with-claude/shipping-a-claude-application/practice' },
+										{ label: 'Summary', slug: 'lessons/building-with-claude/shipping-a-claude-application/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/building-with-claude/shipping-a-claude-application/cheatsheet' },
+										{ label: 'References', slug: 'lessons/building-with-claude/shipping-a-claude-application/references' },
+									],
+								},
+							],
+						},
+					],
+				},
+				{
 					label: 'Track 24: Multimodal AI',
 					items: [
 						{
@@ -3450,7 +3624,13 @@ export default defineConfig({
 						},
 					],
 				},
-			],
+			];
+					const __top = __groups.filter((g) => !/^Track \d+/.test(g.label));
+					const __tracks = __groups
+						.filter((g) => /^Track \d+/.test(g.label))
+						.sort((a, b) => parseInt(a.label.match(/Track (\d+)/)[1], 10) - parseInt(b.label.match(/Track (\d+)/)[1], 10));
+					return [...__top, ...__tracks];
+				})(),
 			components: {
 				// Adds og:image and twitter:image to every page; Starlight 0.38
 				// already emits the rest of the OG / Twitter Card meta automatically.

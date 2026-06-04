@@ -1,0 +1,130 @@
+---
+title: "Cheatsheet: Choosing your model and the effort dial"
+description: One-page reference. Family table, default-pick rule, model-ID convention, effort dial values, thinking modes, and the cost shape.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## Current Claude families
+
+| Family | Model ID | Input / Output (per MTok) | Context | Max output |
+| --- | --- | --- | --- | --- |
+| Opus 4.8 (current flagship) | `claude-opus-4-8` | $5 / $25 | 1M tok | 128k tok |
+| Sonnet 4.6 | `claude-sonnet-4-6` | $3 / $15 | 1M tok | 64k tok |
+| Haiku 4.5 | `claude-haiku-4-5` (alias for `claude-haiku-4-5-20251001`) | $1 / $5 | 200k tok | 64k tok |
+| Opus 4.7 (legacy, same posture as 4.8) | `claude-opus-4-7` | $5 / $25 | 1M tok | 128k tok |
+
+Ratios: Sonnet about 1.7x cheaper per output than Opus. Haiku 5x cheaper than Opus.
+
+Opus 4.8 description (verbatim): *Anthropic's most capable model for complex reasoning and agentic coding*. Per the docs at drafting; check the Models overview for current.
+
+## Default-pick rule
+
+```
+Sonnet by default (most production workloads).
+Opus when the task is genuinely hard.
+Haiku when volume matters and the task is light.
+Mix-and-match across models inside one app.
+```
+
+## Model ID convention
+
+| Generation | Form | What it is |
+| --- | --- | --- |
+| 4.6 and later (Opus 4.8, Opus 4.7, Sonnet 4.6, Opus 4.6) | Dateless | IS the pinned snapshot |
+| Pre-4.6 (Haiku 4.5, Sonnet 4.5, Opus 4.5, Opus 4.1) | Date-suffixed (canonical) | Pinned snapshot |
+| Pre-4.6 | Dateless (alias) | Convenience pointer; can re-resolve |
+
+**Production:** use the pinned form. For 4.6+ that is the dateless ID; for pre-4.6 that is the date-suffixed ID.
+
+## Effort parameter
+
+```python
+client.messages.create(
+    model="claude-opus-4-8",
+    max_tokens=4096,
+    messages=[...],
+    output_config={"effort": "medium"},  # <-- goes here, not top-level
+)
+```
+
+| Value | Use case |
+| --- | --- |
+| `max` | Frontier problems; absolute highest capability. Opus 4.8 / Mythos / Opus 4.7 / Opus 4.6 / Sonnet 4.6 |
+| `xhigh` | Long-horizon coding and agentic work. Opus 4.8 and Opus 4.7 |
+| `high` (default) | Complex reasoning, difficult coding. All supported models |
+| `medium` | Balanced; the Sonnet 4.6 production default; the Opus 4.8 / 4.7 cost-sensitive default |
+| `low` | Speed and lowest cost; simple tasks, subagents |
+
+**Affects ALL tokens:** text response, tool calls, extended thinking. At lower effort, fewer tool calls + terser preambles + combined operations.
+
+**Supported on:** Opus 4.8, Mythos Preview, Opus 4.7, Opus 4.6, Sonnet 4.6, Opus 4.5. **NOT Haiku 4.5.**
+
+**`high`** and not setting the parameter are equivalent.
+
+## Sane starting effort by model
+
+| Model | Production default | Notes |
+| --- | --- | --- |
+| Sonnet 4.6 | `medium` | Use `low` for chat / latency-sensitive; `high` for complex reasoning |
+| Opus 4.8 | `xhigh` (coding / agentic) or `high` (general) | API default is `high` on all surfaces; `medium`/`low` only when evals show quality holds. Docs: "the guidance for Opus 4.7 also applies to Opus 4.8" |
+| Opus 4.7 (legacy, same posture as 4.8) | `xhigh` (coding / agentic) or `high` (general) | `medium` for cost-sensitive; `max` only if evals show headroom |
+| Opus 4.6 | `high` | `medium` for cost-sensitive |
+| Haiku 4.5 | N/A (no effort support) | What you get is what the model decides |
+
+## Thinking modes
+
+| Model | Adaptive thinking | Manual extended thinking |
+| --- | --- | --- |
+| Opus 4.8 | Recommended (default) | NOT supported (returns 400) |
+| Opus 4.7 | Recommended (default) | NOT supported (returns 400) |
+| Sonnet 4.6 | Recommended | Deprecated but functional |
+| Opus 4.6 | Recommended | Deprecated but functional |
+| Haiku 4.5 | NOT supported | Supported (the only mode) |
+
+**Adaptive:** `thinking: {type: "adaptive"}` (model decides; effort controls depth).
+**Manual:** `thinking: {type: "enabled", budget_tokens: N, display: "summarized" | "omitted"}`.
+
+Response includes `thinking` content blocks (with a `signature` field) before `text` blocks when thinking fires.
+
+## Cost shape (worked example, 100k calls/day)
+
+```
+Feature: 100k calls/day; classifier (500 in + 20 out tokens),
+then answer for 70% (500 in + 300 out).
+
+All-Opus:    classifier $300 + answer $700 = $1,000/day
+All-Sonnet:  $180 + $420 = $600/day  (~40% cheaper)
+Mix (Haiku classifier + Sonnet answer):
+             $60 + $420 = $480/day  (~52% cheaper than all-Opus)
+```
+
+Model + parameter choice both move the dial materially. Lesson 7 (caching) adds the third lever; lesson 12 turns *usage* logs into dashboards.
+
+## Common pitfalls
+
+| Failure | Recognize by | Fix |
+| --- | --- | --- |
+| Defaulting to Opus everywhere | High bill, similar quality on most calls | Eval Sonnet against Opus on real prompts; swap where they tie |
+| Using alias in production | Surprise behavior change after Anthropic patches | Pin to date-suffixed form on pre-4.6 models |
+| Forgetting effort affects tool calls | Loop costs compound mysteriously | Lower effort in inner loop steps; eval the quality trade |
+| Manual thinking on Opus 4.7 | 400 error | Switch to adaptive thinking + effort |
+| Mixing models without eval | Silent quality regression on Haiku step | Eval routing decisions; pin per-step model to capability need |
+
+## What this lesson does NOT cover (and where to find it)
+
+| Topic | Lands at |
+| --- | --- |
+| Tool use (define + handle) | Lesson 4 |
+| Server-side tools (web search, code execution) | Lesson 5 |
+| Model Context Protocol | Lesson 6 |
+| Prompt caching (the 3rd cost lever) | Lesson 7 |
+| Agent loop (model + effort compound across steps) | Lesson 8 onward |
+| Admin / Usage / Cost APIs (org-level dashboards) | Lesson 12 |
+
+## Source
+
+- Anthropic public Claude docs, **Models overview**, **Extended thinking**, **Adaptive thinking**, **Effort**, at `https://platform.claude.com/docs/`. Structural-mirror citation; see references.
