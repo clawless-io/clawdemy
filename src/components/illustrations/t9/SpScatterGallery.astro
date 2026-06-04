@@ -1,0 +1,132 @@
+---
+/**
+ * Track 9 (Statistics & Probability for AI), Lesson 4, illustration 1 of 2.
+ *
+ * Four scatterplots that calibrate the eye to correlation coefficient
+ * values. Target correlations: +0.95 strong positive, -0.9 strong
+ * negative, ~0 no relationship, +0.5 weak positive. Each panel renders
+ * a point cloud generated procedurally with a fixed pseudo-random seed,
+ * and the achieved empirical r is rounded and labeled.
+ */
+
+const PANEL_W = 168;
+const PANEL_GAP = 8;
+const PANEL_X = (i: number) => 16 + i * (PANEL_W + PANEL_GAP);
+const PANEL_Y = 60;
+const PANEL_H = 260;
+const PT_PAD = 18;
+
+const N_POINTS = 28;
+
+// Deterministic LCG so the same SVG renders the same cloud every time.
+function makeRand(seed: number) {
+	let s = seed;
+	return () => {
+		s = (s * 9301 + 49297) % 233280;
+		return s / 233280;
+	};
+}
+
+// Box-Muller normal sample using a provided uniform generator.
+function normSample(rand: () => number): number {
+	let u = 0;
+	let v = 0;
+	while (u === 0) u = rand();
+	while (v === 0) v = rand();
+	return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+}
+
+type Panel = {
+	idx: 0 | 1 | 2 | 3;
+	targetR: number;
+	label: string;
+	seed: number;
+};
+
+const panels: Panel[] = [
+	{ idx: 0, targetR: 0.95, label: 'r ≈ +0.95', seed: 11 },
+	{ idx: 1, targetR: -0.9, label: 'r ≈ -0.90', seed: 7 },
+	{ idx: 2, targetR: 0, label: 'r ≈ 0', seed: 91 },
+	{ idx: 3, targetR: 0.5, label: 'r ≈ +0.50', seed: 23 },
+];
+
+type Cloud = { points: { x: number; y: number }[]; achievedR: number };
+
+function genCloud(targetR: number, seed: number): Cloud {
+	const rand = makeRand(seed);
+	const xs: number[] = [];
+	const ys: number[] = [];
+	for (let i = 0; i < N_POINTS; i++) {
+		const x = normSample(rand);
+		const noise = normSample(rand);
+		const y = targetR * x + Math.sqrt(Math.max(0, 1 - targetR * targetR)) * noise;
+		xs.push(x);
+		ys.push(y);
+	}
+	// compute empirical correlation
+	const meanX = xs.reduce((a, b) => a + b, 0) / xs.length;
+	const meanY = ys.reduce((a, b) => a + b, 0) / ys.length;
+	let num = 0;
+	let denX = 0;
+	let denY = 0;
+	for (let i = 0; i < xs.length; i++) {
+		const dx = xs[i] - meanX;
+		const dy = ys[i] - meanY;
+		num += dx * dy;
+		denX += dx * dx;
+		denY += dy * dy;
+	}
+	const r = num / Math.sqrt(denX * denY);
+
+	// normalize to fit panel
+	const minX = Math.min(...xs);
+	const maxX = Math.max(...xs);
+	const minY = Math.min(...ys);
+	const maxY = Math.max(...ys);
+	const sx = (v: number) => ((v - minX) / (maxX - minX)) * (PANEL_W - 2 * PT_PAD);
+	const sy = (v: number) => ((v - minY) / (maxY - minY)) * (PANEL_H - 2 * PT_PAD);
+	const points = xs.map((x, i) => ({ x: sx(x) + PT_PAD, y: PANEL_H - PT_PAD - sy(ys[i]) }));
+	return { points, achievedR: r };
+}
+
+const clouds = panels.map((p) => ({ ...p, ...genCloud(p.targetR, p.seed) }));
+
+const BLUE = '#3b82f6';
+const ACCENT = '#7c3aed';
+---
+
+<figure class="cw-illus">
+	<svg viewBox="0 0 740 360" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="sp-scatg-title sp-scatg-desc">
+		<title id="sp-scatg-title">Four scatterplots calibrating r values: +0.95, -0.9, 0, and +0.5</title>
+		<desc id="sp-scatg-desc">Four small scatterplots side by side, each generated procedurally to a target correlation coefficient. The leftmost panel labeled r approximately +0.95 shows points tightly clustered along an upward diagonal. The second panel labeled r approximately negative 0.9 shows points tightly clustered along a downward diagonal. The third panel labeled r approximately 0 shows a shapeless cloud with no visible direction. The fourth panel labeled r approximately +0.5 shows a loose upward trend with substantial scatter.</desc>
+
+		{clouds.map((c) => (
+			<g>
+				<rect x={PANEL_X(c.idx)} y={PANEL_Y - 24} width={PANEL_W} height={PANEL_H + 50} rx="6" fill="none" stroke="currentColor" stroke-width="0.6" opacity="0.22" />
+				<text x={PANEL_X(c.idx) + PANEL_W / 2} y={PANEL_Y - 8} text-anchor="middle" font-family="ui-monospace, SFMono-Regular, monospace" font-size="13" font-weight="700" fill={ACCENT}>{c.label}</text>
+
+				{/* light grid backdrop */}
+				<rect x={PANEL_X(c.idx) + 6} y={PANEL_Y + 6} width={PANEL_W - 12} height={PANEL_H - 12} fill="currentColor" opacity="0.02" />
+
+				{/* axes (faint) */}
+				<line x1={PANEL_X(c.idx) + PT_PAD} y1={PANEL_Y + PANEL_H - PT_PAD} x2={PANEL_X(c.idx) + PANEL_W - PT_PAD} y2={PANEL_Y + PANEL_H - PT_PAD} stroke="currentColor" stroke-width="0.6" opacity="0.4" />
+				<line x1={PANEL_X(c.idx) + PT_PAD} y1={PANEL_Y + PT_PAD} x2={PANEL_X(c.idx) + PT_PAD} y2={PANEL_Y + PANEL_H - PT_PAD} stroke="currentColor" stroke-width="0.6" opacity="0.4" />
+
+				{/* points */}
+				{c.points.map((p) => (
+					<circle cx={PANEL_X(c.idx) + p.x} cy={PANEL_Y + p.y} r="2.6" fill={BLUE} fill-opacity="0.8" />
+				))}
+
+				{/* empirical r footnote */}
+				<text x={PANEL_X(c.idx) + PANEL_W / 2} y={PANEL_Y + PANEL_H + 20} text-anchor="middle" font-family="ui-monospace, SFMono-Regular, monospace" font-size="10" fill="currentColor" opacity="0.6">empirical: {c.achievedR.toFixed(2)}</text>
+			</g>
+		))}
+	</svg>
+	<figcaption>Four scatterplots calibrate the eye. A strong positive r (~+0.95) is a tight upward diagonal; a strong negative r (~-0.90) is a tight downward diagonal. A correlation near zero looks like an undirected cloud. A moderate +0.50 is a visible upward trend with real scatter. Eyeball calibration is the first skill; the formula comes second.</figcaption>
+</figure>
+
+<style>
+	.cw-illus { margin: 1.75rem auto; max-width: 100%; }
+	.cw-illus svg { display: block; width: 100%; max-width: 740px; height: auto; margin: 0 auto; }
+	.cw-illus figcaption { text-align: center; font-size: 0.85rem; opacity: 0.75; margin-top: 0.5rem; font-style: italic; }
+</style>
