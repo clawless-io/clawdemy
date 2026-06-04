@@ -264,6 +264,13 @@ const TRACK_9_PHASE_SLUGS = [
 	'statistical-inference',
 ] as const;
 
+const TRACK_24_PHASE_SLUGS = [
+	'multimodal-foundations',
+	'large-multimodal-models',
+	'generative-multimodal-models',
+	'advanced-multimodal-directions',
+] as const;
+
 const PHASE_SLUGS = [
 	...TRACK_5_PHASE_SLUGS,
 	...TRACK_6_PHASE_SLUGS,
@@ -279,6 +286,7 @@ const PHASE_SLUGS = [
 	...TRACK_4_PHASE_SLUGS,
 	...TRACK_8_PHASE_SLUGS,
 	...TRACK_9_PHASE_SLUGS,
+	...TRACK_24_PHASE_SLUGS,
 ] as const;
 
 const BriefSchema = z.object({
@@ -307,6 +315,7 @@ const BriefSchema = z.object({
 		'visual-math-linear-algebra',
 		'visual-math-calculus',
 		'statistics-and-probability',
+		'multimodal-ai',
 	]),
 	difficulty: z.enum(['intro', 'standard', 'deep']),
 	estimated_read_minutes: z.number().int().positive(),

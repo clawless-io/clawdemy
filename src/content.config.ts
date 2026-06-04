@@ -44,6 +44,7 @@ export const collections = {
 						'visual-math-linear-algebra', // Track 4: 3Blue1Brown Essence of Linear Algebra
 						'visual-math-calculus', // Track 8: 3Blue1Brown Essence of Calculus
 						'statistics-and-probability', // Track 9: Khan Academy Statistics & Probability (curated for AI)
+						'multimodal-ai', // Track 24: Stanford CS25 "Transformers United" V4/V5/V6
 					])
 					.optional(),
 				course: z.string().optional(),
@@ -126,6 +127,11 @@ export const collections = {
 						'probability-foundations',
 						'random-variables-and-distributions',
 						'statistical-inference',
+						// Track 24 (Multimodal AI — Stanford CS25 Transformers United)
+						'multimodal-foundations',
+						'large-multimodal-models',
+						'generative-multimodal-models',
+						'advanced-multimodal-directions',
 					])
 					.optional(),
 				phase_order: z.number().int().positive().optional(),
