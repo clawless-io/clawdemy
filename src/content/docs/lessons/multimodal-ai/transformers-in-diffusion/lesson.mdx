@@ -1,0 +1,98 @@
+---
+title: 'Lesson: Transformers in diffusion models for image generation'
+description: "Phase 2 covered models that accept images as input. Phase 3 turns to the opposite direction: models that output images. Modern image generation runs on diffusion, and a specific architectural shift drove its recent quality jump: replacing the convolutional U-Net backbone (Stable Diffusion 1.x, DALL-E 2) with a transformer backbone (DiT). This lesson covers the shift, what it buys (scaling laws, global structure, architectural unification), and how text conditioning has folded back into the same transformer machinery."
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+Phase 2 of this track was about models that take images **in**: encode-then-fuse (L2), native multimodal (L3), and reasoning over multimodal inputs (L4). Phase 3 turns to the other direction. We are now interested in models that put images (and, in the next lesson, videos) **out**.
+
+The dominant approach for image generation today is **diffusion**, and modern diffusion's most recent quality jump came from a specific architectural shift. The U-Net backbone that powered Stable Diffusion 1.x and 2.x, DALL-E 2, and Imagen has been displaced by transformer backbones (DiT, Diffusion Transformers). This lesson is about what changed when transformers replaced U-Nets, what that architectural unification buys, and how text conditioning has been folded back into the same machinery.
+
+## A quick recap of diffusion
+
+Diffusion models learn to **denoise**. During training, you take a clean image, add noise to it at a chosen timestep, and ask a neural network to predict the noise that was added. At inference, you start from pure random noise and iteratively denoise it (over many timesteps) into a coherent image. The neural network at the heart of this loop takes a noisy image (at some timestep) and any conditioning (a text prompt, usually) and predicts the noise. The architecture choice of that denoiser is what this lesson is about.
+
+The rest of diffusion (the noise schedule, the sampling algorithm, the latent-space tricks) is its own large topic. For this lesson the only thing that matters is: there is a denoising network, applied many times, conditioned on text.
+
+## The original backbone: U-Net
+
+U-Net was the denoiser of choice for the first wave of latent-diffusion image models (Stable Diffusion 1.x and 2.x, DALL-E 2, Imagen). It is a convolutional architecture with **skip connections** between symmetric downsampling and upsampling stages, originally designed for biomedical image segmentation (Ronneberger et al., 2015). It worked well as a diffusion denoiser for the same reason it worked for segmentation: convolutions preserve spatial structure, and the skip connections route fine detail past the bottleneck.
+
+U-Net had real advantages, particularly at smaller scales: parameter-efficient, fast per step, and well-understood. Its limit was a structural one: convolutions are local-receptive-field operations. The model needs many layers (and the skip connections) to integrate information from far parts of the image, which constrains how cleanly it scales and how reliably it composes large, global structure.
+
+## The shift: Diffusion Transformers (DiT)
+
+Peebles and Xie introduced **DiT** in 2023: replace the U-Net with a transformer. The image is broken into patches (in latent space, typically), each patch becomes a token, and a transformer processes the sequence. The denoising step is now "given these noisy patches at this timestep, predict the noise per patch." Conditioning (timestep, text) is injected through standard transformer mechanisms.
+
+The architectural picture is the inverse of the encode-then-fuse pattern: there, an image was tokenized and fed into a language transformer; here, an image is tokenized and fed into a transformer trained specifically as a denoiser. The same trick (treat image patches as tokens) works in both directions.
+
+## What DiT buys
+
+Three things, in roughly increasing strategic importance.
+
+- **Scaling laws transfer.** Transformers have well-understood scaling behavior: as you grow parameters, data, and compute together, quality improves predictably. DiT inherits that. Larger DiT models reliably produce better images, in a way that U-Net scaling did not.
+- **Better global structure.** Attention is global. At every layer, every patch can attend to every other patch. That helps with compositional coherence (the right number of fingers, the right object relationships, consistent lighting across the image) that local-receptive-field U-Nets often muddled.
+- **Architectural unification.** This may be the biggest one. The same architecture as text and multimodal transformers means the same engineering investment (training infrastructure, distributed-training stacks, hardware kernels, inference optimizations) carries over. The hardware and software work going into LLM training pays off in image generation as well.
+
+## What the field has shipped on DiT
+
+Several production systems have moved to DiT or DiT-variant architectures (positive examples; all named under the vendor naming policy):
+
+- **Stable Diffusion 3** (Stability AI) ships a DiT-family architecture.
+- **Flux** (Black Forest Labs) is built on a DiT-family backbone.
+- **Sora** (OpenAI) applies the DiT idea to video, which the next lesson takes up specifically.
+
+The U-Net-to-DiT shift is not the only difference between these systems and their predecessors (loss function changes, flow-matching variants, better tokenizers, and more all matter too), but it is the central architectural one.
+
+## Text conditioning, and a notable wrinkle: MM-DiT
+
+Text-to-image generation needs the model to be conditioned on a text prompt. Different generations did this differently.
+
+- Early Stable Diffusion (1.x, 2.x) used **cross-attention** between text tokens and the U-Net's spatial features: text vectors live "on the side" and the image-side features attend to them.
+- Modern DiT systems often use **MM-DiT (multimodal DiT)**: text tokens and image patch tokens flow through **the same transformer**, attending to each other in every block. Stable Diffusion 3 is the canonical example.
+
+The wrinkle worth pausing on: this is the same architecture, structurally, as the native multimodal models we covered in L3. The same "tokenize everything and put it through one transformer" idea that solved deep cross-modal grounding on the input side is now also solving text-and-image fusion on the output (generative) side. It is one architectural family quietly absorbing both directions.
+
+## Practical tradeoffs
+
+DiT is not free.
+
+- **Compute per step:** at small scales, DiT is more expensive than U-Net per denoising step. The crossover is at scale; smaller models can be perfectly well-served by U-Net.
+- **Inference cost overall:** diffusion already pays an inference tax (many denoising steps); transformers do not reduce that. Modern **flow-matching** and **rectified flow** variants reduce the step count substantially and pair cleanly with DiT backbones.
+- **High resolution:** more pixels means more patches means quadratic attention cost. **Latent diffusion** (operating in a compressed latent space rather than raw pixels) is the standard mitigation; nearly every production system uses it.
+
+## Where this lesson stops, and what is a separate conversation entirely
+
+This lesson is squarely about **technique and architecture and evaluation**: how the DiT backbone works, what it buys, how text conditioning folds in, where the practical limits sit. Several adjacent conversations sit alongside image generation and are deliberately out of scope here. They are real conversations worth having; they live in different forums and are evaluated by different methods. Naming them specifically (rather than waving at "policy") makes the deferral honest.
+
+- **Use-case policy: when synthetic images are appropriate vs not.** A product decision and a platform-policy decision with stakeholders ranging from product teams to community guidelines authors. Not a technical question.
+- **Provenance and watermarking: how to attribute or mark generated images.** Its own technical sub-area (initiatives like C2PA, SynthID, others) entangled with its own policy debate. Outside this lesson.
+- **Sector-specific policies: journalism, political content, legal evidence, medical imaging.** Each sector has its own institutions, professional standards, and rules. The same architecture sits underneath; the sectoral policy belongs to those sectors.
+- **Training-data licensing: IP claims around scraped images.** An active legal and policy area with ongoing litigation. Not addressed here.
+- **Likeness and consent: generating images of real people.** Identity-rights policy with its own legislative, contractual, and ethical stakeholders. Outside this lesson.
+
+Each item above is a separate conversation. The technical content sits underneath all of them and is evaluated by different methods: training loss, image quality benchmarks (FID and successors), human preference studies. Those are this lesson's evaluation frame, and they are not the same instrument as policy debates use.
+
+## Why this matters when you use AI
+
+The image-generation tools you use today are descendants of this architectural shift. The quality jump in publicly-documented systems, such as between Stable Diffusion 2 and Stable Diffusion 3, reflects (among other changes) the move from U-Net to DiT-family backbones. When you read about a new image generator's "transformer-based architecture," DiT-family is what is meant. When the same vendor's video model claims to scale up the same way, the next lesson is about why.
+
+## Common pitfalls
+
+- **"DiT is always better than U-Net."** Not at every scale. U-Net remains efficient and effective for many smaller-scale use cases. DiT's advantage shows up at scale and where global composition matters.
+- **"Diffusion = U-Net forever."** That was the default through Stable Diffusion 2 and DALL-E 2. It is no longer the default.
+- **"Image generation is just text generation in pixel space."** No. Diffusion's objective (predict the noise added at a given timestep) and inference loop (iterative denoising over many steps) are structurally different from autoregressive next-token prediction, even though both can ride on a transformer backbone.
+- **"Bigger model = sharper images."** Quality scaling is real but is not the only axis. Tokenizer quality, dataset quality, conditioning quality, and inference-time techniques all matter; a bigger DiT alone does not fix a bad VAE.
+
+## What you should remember
+
+- **Diffusion image generation runs on a denoiser** that, applied iteratively from pure noise with text conditioning, produces an image.
+- **U-Net was the original denoiser backbone;** DiT (Diffusion Transformer) is the modern replacement, and its advantages are most visible at scale.
+- **DiT buys scaling laws, better global structure, and architectural unification** with the rest of the transformer software/hardware stack.
+- **MM-DiT** fuses text and image tokens through one transformer for conditioning, recapitulating the native-multimodal pattern from L3 on the generative side.
+- **This lesson is technique and architecture;** the use-case, provenance, sector-policy, training-data-licensing, and likeness-rights conversations are real, separate, and evaluated elsewhere.
+
+The next lesson takes the same DiT-family architecture and asks what changes when the output is video instead of a single image: an added temporal dimension, much higher compute, harder dataset curation. That is video generation, the close of Phase 3.

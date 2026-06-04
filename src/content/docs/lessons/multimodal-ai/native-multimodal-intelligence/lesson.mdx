@@ -1,0 +1,102 @@
+---
+title: 'Lesson: Native multimodal intelligence'
+description: "Lesson 2 ended on a sharp limit: in the encode-then-fuse pattern, the vision encoder and the LLM were trained separately and bridged afterward. Native multimodal architectures take the opposite bet, training one transformer on a mixed stream of text, image, audio, and video tokens from the very first step. This lesson contrasts the two designs, names what 'native' actually buys (joint co-evolution, deeper cross-modal grounding), walks the architectural shape (a unified token stream and a single transformer over it), and names the costs (tokenizer design, data scale, compute, output expense)."
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+L2 ended on a clear ceiling. In the encode-then-fuse design, the vision encoder and the language model were trained separately, and the bridge between them was added afterward. Whatever cross-modal alignment the system has came from a fine-tuning step bolted onto pieces that grew up apart. That works well enough to power most vision-language models in production today, but it leaves a real capability gap.
+
+A different design has emerged in the past two years, and it is where the frontier of multimodal AI is moving. Instead of training a vision model and a language model separately and then teaching them to talk to each other, you train **one transformer, on a mixed stream of text, image, audio, and video tokens, from the very first training step**. The modalities co-evolve during pretraining; there is no "vision side" and "language side", there is one model learning to predict the next token, which might be a word, an image patch code, or an audio segment.
+
+That family is called **natively multimodal**, and this lesson is about how it works, what it buys you, and what it costs.
+
+## The contrast in one picture
+
+The architectural shift from L2 to here is sharp enough to draw side by side:
+
+```
+Encode-then-fuse (L2):
+  pretrained vision encoder  -->  bridge / projector  -->  pretrained LLM
+       (trained on images)       (trained later)         (trained on text)
+       three trainings, three datasets, bridged after the fact
+
+Native multimodal (L3):
+  text tokens, image tokens, audio tokens, video tokens
+                       ||
+              one shared transformer
+                       ||
+                  next-token prediction
+       one training run, mixed-modality data from step 1
+```
+
+Notice the absence of separate "encoders" in the native picture. The work of turning an image into something the transformer can read is pushed into the **tokenizer**, not a parallel encoder. Once everything is tokens, one model processes them all.
+
+## How tokens for each modality get made
+
+The trick that makes native multimodal possible is treating every modality as **discrete tokens** the transformer can attend to like words.
+
+- **Text:** standard subword tokens (BPE, SentencePiece), the same as any LLM.
+- **Images:** a learned image tokenizer (often a vector-quantized autoencoder, VQ-VAE, or a more modern variant) breaks the image into patches and assigns each patch one of a few thousand discrete codes. An image becomes a sequence of "visual words," each from a fixed vocabulary.
+- **Audio:** a neural audio codec (Encodec-style architectures and their descendants) discretizes audio into a stream of tokens at some sample rate.
+- **Video:** typically frame-by-frame image tokens interleaved with temporal positional information, sometimes with motion-aware token compressions.
+
+The tokenizer designs matter enormously: a poor image tokenizer caps the model's visual quality at the tokenizer's reconstruction quality. Tokenizer design is itself a research field in this space.
+
+## The training: one stream, one objective
+
+Once every modality is tokens, the architecture is shockingly simple: one transformer trained on **next-token prediction over an interleaved stream of all modalities**. A training example might look like:
+
+```
+<image_tokens> <text:"Describe what's happening here:"> <text:"Two children..." > <image_tokens> ...
+```
+
+The model has no inherent notion that the first stretch is "an image" and the second is "text". It is predicting the next token in a long sequence, and during pretraining it sees so many interleaved sequences across modalities that its internal representations end up jointly aligned. The cross-modal interaction lives in every attention layer, not just at a bridge point.
+
+## What "native" actually buys
+
+The payoff of joint training is **deeper cross-modal grounding**, and it shows up in capabilities that bolted-on systems struggle with.
+
+- **Generation of any modality is first-class.** Because output is just next-token prediction, a natively-multimodal model can generate text, images, or audio with the same machinery. An encode-then-fuse VLM typically generates text only, even if it accepts images.
+- **Low-latency cross-modal interaction.** When you talk to a natively-multimodal model via voice, the audio path does not pass through a speech-to-text intermediate; the model attends directly to audio tokens and produces audio tokens. That is what makes the conversational latency feel like a conversation rather than a pipeline.
+- **Fine-grained joint reasoning.** A natively-multimodal model can ground a phrase in a specific region of an image with much sharper precision than a bolted-on VLM, because the alignment is learned at every layer rather than via a coarse projector.
+
+## Named examples (where native multimodal is shipping)
+
+The natively-multimodal family is well represented in current production systems and recent papers. Naming the canonical examples helps locate the design in the field.
+
+- **Chameleon** (Meta, 2024) is the cleanest academic example: a transformer trained on interleaved text and image tokens, with a discrete image tokenizer and a single next-token-prediction objective end to end. Worth reading as the reference design.
+- **GPT-4o** (OpenAI, 2024) is the most widely-felt example: an "omni" model handling text, image, and audio natively. The dramatic voice-mode latency improvements relative to the earlier pipeline-based voice assistants are an architecture signal, not just an engineering one.
+- **Gemini** (Google, 2024 onward) was designed from the start as multimodal across text, image, audio, and video.
+- **The current research direction**, including the work Victoria Lin presented at CS25 V6, is pushing further toward unified architectures where every modality is a first-class citizen with both input and output capability.
+
+## What native multimodal costs
+
+The native path is not free, and the costs are why encode-then-fuse remains the practical choice for many systems.
+
+- **Tokenizer design is non-trivial.** A bad image tokenizer caps visual quality before the transformer even gets to see the tokens. Encode-then-fuse can borrow off-the-shelf vision encoders; native multimodal cannot avoid the tokenizer problem.
+- **Data requirements are higher.** Native multimodal models must learn every modality from scratch in the same training run, which means they need much more aligned multimodal data than a system that can borrow a pretrained LLM and a pretrained ViT.
+- **Compute requirements are higher.** You cannot reuse a pretrained LLM the way encode-then-fuse can; the joint training is expensive from the start.
+- **Output is expensive when it is non-text.** Generating an image as discrete tokens can require thousands of token predictions in sequence; the same model that responds with a short text answer instantly might take several seconds to generate one image.
+
+## Why this matters when you use AI
+
+When you use GPT-4o's voice mode and the model responds with sub-second latency in a conversational tone (with timing, interruption, and emotional inflection that feel right), you are using a natively-multimodal system. The qualitative smoothness of that interaction is structurally beyond what an encode-then-fuse pipeline can produce, no matter how well engineered. As natively-multimodal training scales, more capabilities cross this gap: image and video generation as first-class outputs, fine-grained visual grounding, and the unified low-latency interaction patterns that define the next generation of consumer multimodal products.
+
+## Common pitfalls and misconceptions
+
+- **"Native multimodal is just bigger encode-then-fuse."** No. The architectural choice is fundamentally different: one model trained jointly vs. multiple models bridged after the fact. Scale alone does not bridge the gap.
+- **"Native multimodal needs less data."** The reverse is true. It cannot lean on pretrained components, so it needs more aligned multimodal data to learn each modality from scratch.
+- **"Native multimodal is always better."** Not for every use case. Encode-then-fuse remains more efficient and more modular when you can leverage existing pretrained models and joint co-evolution is not the bottleneck.
+- **"Native multimodal means the model 'understands' modalities."** It learns aligned statistical patterns across them. Joint training enables deeper grounding, not literal understanding.
+
+## What you should remember
+
+- **Native multimodal trains one transformer on mixed-modality tokens from the very first step,** in contrast to encode-then-fuse's separate-then-bridge architecture.
+- **Every modality is discretized into tokens** (text via BPE, image via VQ-VAE, audio via neural codecs, video via frame tokens) so a single transformer can process them uniformly.
+- **The payoff is deeper joint grounding:** first-class generation of any modality, low-latency cross-modal interaction, sharper fine-grained reasoning.
+- **The costs are real:** tokenizer design, data, compute, and output expense are all harder than for encode-then-fuse.
+
+We now have the two dominant architectures for accepting multimodal inputs. The next lesson goes deeper on one specific capability built on top of these architectures: **reasoning over multimodal inputs**, how modern reasoning models use images and diagrams within chain-of-thought, deliberative alignment, and tool use.

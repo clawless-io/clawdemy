@@ -1,0 +1,197 @@
+---
+title: 'Practice: From language models to large multimodal models'
+description: A self-check on the encode-then-fuse recipe and CogVLM's visual expert, an architecture-component matching exercise, a freezing-and-fine-tuning judgment question, and flashcards built for retrieval.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Seven short questions. Try to answer each one before opening the collapsible.
+
+**1. Name the three pieces of an encode-then-fuse LMM.**
+
+<details>
+<summary>Show answer</summary>
+
+A pretrained vision encoder (typically a Vision Transformer, often CLIP-trained), a bridge module that projects visual outputs into the LLM's embedding space (a small MLP in the simplest case), and a pretrained LLM that processes the resulting mixed sequence.
+
+</details>
+
+**2. Why is "preserve the LLM's language ability" a hard constraint?**
+
+<details>
+<summary>Show answer</summary>
+
+Because the language model represents billions of dollars of pretraining you cannot afford to degrade. Naively training the whole stack on multimodal data tends to make the model worse at pure-text tasks. The recipes that work freeze the LLM's text-handling weights (or unfreeze them very carefully) so language performance does not regress.
+
+</details>
+
+**3. What does the visual expert in CogVLM add?**
+
+<details>
+<summary>Show answer</summary>
+
+A parallel copy of the QKV (query/key/value) matrices and the feed-forward layer inside each transformer block, dedicated to visual tokens. Image tokens flow through the visual-expert weights; text tokens flow through the original LLM weights; they interact through shared self-attention.
+
+</details>
+
+**4. Why does CogVLM's design preserve language performance?**
+
+<details>
+<summary>Show answer</summary>
+
+Because the original LLM weights for text are untouched: the visual expert is the only piece processing image tokens, so updating it does not affect how the model handles text. The cross-modal interaction lives in attention, but per-token specialization keeps the language and visual pathways separate.
+
+</details>
+
+**5. What are the two stages of the standard LMM training recipe?**
+
+<details>
+<summary>Show answer</summary>
+
+Pretraining alignment: train the visual expert and the bridge on large image-text pair datasets (LLM frozen), so visual outputs land where the LLM can interpret them. Then visual instruction tuning: fine-tune on visual question answering and multimodal dialogue, so the model learns to use its new visual capability conversationally.
+
+</details>
+
+**6. What does CogAgent change relative to CogVLM, and what does it keep?**
+
+<details>
+<summary>Show answer</summary>
+
+It keeps the encode-then-fuse architecture (vision encoder, visual expert, LLM, two-stage training). What changes is the data distribution: it is retrained on GUI screenshots and tasks (predicting clickable element bounding boxes, generating UI plans), generalizing the same machinery from natural images to graphical interfaces.
+
+</details>
+
+**7. What is the ceiling of the encode-then-fuse pattern?**
+
+<details>
+<summary>Show answer</summary>
+
+The vision encoder and LLM were trained separately; the bridge between them was added afterward. The two halves know each other only through alignment training, much less than the joint co-evolution a single model would get if trained on mixed modalities from the start. Native multimodal architectures (next lesson) target that ceiling.
+
+</details>
+
+## Try it yourself: match the piece to the job
+
+Match each component (left) to what it does (right). Each piece does one job.
+
+```
+Components:                  Jobs:
+A. Pretrained vision encoder   1. Translates visual vectors into the LLM's embedding space
+B. Bridge / projector          2. Turns an image into a sequence of patch embeddings
+C. CogVLM visual expert        3. Holds the original text-handling weights, frozen by default
+D. Pretrained LLM              4. Processes image tokens through its own QKV and FFN, in parallel
+```
+
+<details>
+<summary>Show answer</summary>
+
+```
+A -> 2: vision encoder turns an image into patch embeddings (a "sentence" of visual tokens)
+B -> 1: bridge projects those vectors into the LLM's embedding space so the LLM can read them
+C -> 4: visual expert gives image tokens their own QKV+FFN in each block, alongside text
+D -> 3: the pretrained LLM holds the original text weights, frozen for language preservation
+```
+
+The shape that emerges: image -> encoder -> bridge -> mixed sequence with text -> shared self-attention with split per-modality weights inside each block (the CogVLM refinement) -> answer.
+
+</details>
+
+## Try it yourself: what degrades, and what does not?
+
+You are training an encode-then-fuse LMM. For each scenario, say whether **language quality** is likely to degrade and why.
+
+```
+A. You freeze the LLM entirely and train only the projector on image-text
+   pair captioning.
+B. You unfreeze every parameter (LLM, vision encoder, projector) and train
+   end-to-end on visual question answering.
+C. You use the CogVLM design (visual expert + frozen original LLM text
+   weights), and train the visual expert on captioning then on instruction
+   tuning.
+```
+
+<details>
+<summary>Show answer</summary>
+
+- **A: language quality is preserved by construction.** Frozen weights cannot regress. This is the LLaVA-style cheap recipe; cheap to train and cheap on language quality, but with a lower visual capability ceiling.
+- **B: language quality is at real risk.** With every weight unfrozen, updates from visual data flow into the LLM's text-handling layers; pure-text benchmarks often regress noticeably. Sometimes acceptable, sometimes not, depending on what the model has to ship.
+- **C: language quality is preserved.** The original LLM text weights are frozen; the visual expert is the only place image-driven updates land. This is exactly the design choice CogVLM makes to push visual capability up without paying language tax.
+
+The recurring principle: the recipe trades language preservation against how aggressively the visual side can learn. Different designs pick different points on that tradeoff.
+
+</details>
+
+## Flashcards
+
+Ten cards. Click any card to reveal the answer. Use the **Print flashcards** button for one card per page.
+
+<FlashcardSet>
+
+<Flashcard question="What are the three pieces of an encode-then-fuse LMM?">
+
+A pretrained vision encoder (usually a CLIP-trained ViT), a bridge module that projects visual outputs into the LLM's embedding space, and a pretrained LLM that processes the mixed sequence.
+
+</Flashcard>
+
+<Flashcard question="What does the vision encoder produce?">
+
+A sequence of patch embeddings: an image rewritten as a short "sentence" of visual tokens, ready to be projected and mixed with text tokens.
+
+</Flashcard>
+
+<Flashcard question="What is the bridge (projector) module for?">
+
+To translate the vision encoder's vectors into the LLM's embedding space so the LLM can read them alongside text tokens. In the simplest case it is a small MLP.
+
+</Flashcard>
+
+<Flashcard question="Why does freezing the LLM during multimodal training matter?">
+
+Because it preserves language quality by construction. Frozen weights cannot regress, so the model does not get worse at pure-text tasks while gaining visual capability.
+
+</Flashcard>
+
+<Flashcard question="What is CogVLM's visual expert?">
+
+A parallel copy of the QKV and feed-forward layers in each transformer block, dedicated to image tokens. Text tokens go through the original LLM weights; image tokens go through the visual expert; they interact via shared self-attention.
+
+</Flashcard>
+
+<Flashcard question="Why does the visual expert preserve language quality?">
+
+The original LLM text weights are untouched during multimodal training; only the visual expert learns from image data. Cross-modal interaction happens in shared attention, but per-token specialization keeps the language pathway intact.
+
+</Flashcard>
+
+<Flashcard question="What are the two stages of the standard LMM training recipe?">
+
+Stage 1 pretraining alignment: train the visual expert / bridge on image-text pairs (LLM frozen). Stage 2 visual instruction tuning: fine-tune on visual question answering and multimodal chat to teach the model to use its new visual capability.
+
+</Flashcard>
+
+<Flashcard question="What does CogAgent add over CogVLM?">
+
+Same architecture, retrained for GUI understanding: predicting clickable element bounding boxes and generating step-by-step plans for tasks in graphical interfaces. An early bridge from vision-language models to multimodal agents.
+
+</Flashcard>
+
+<Flashcard question="What is the ceiling of encode-then-fuse?">
+
+The vision encoder and LLM were trained separately; the bridge between them is added afterward. They know each other only through alignment, less than the joint co-evolution a single model trained from scratch on mixed modalities would get.
+
+</Flashcard>
+
+<Flashcard question="Why do many encode-then-fuse VLMs struggle with fine spatial detail?">
+
+The vision encoder's patches are coarse; high-resolution detail gets averaged into a single visual token, so precise spatial reasoning often suffers. Higher-resolution encoders help but raise compute.
+
+</Flashcard>
+
+</FlashcardSet>

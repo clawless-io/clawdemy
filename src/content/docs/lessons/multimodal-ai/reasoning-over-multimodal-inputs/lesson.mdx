@@ -1,0 +1,84 @@
+---
+title: 'Lesson: Reasoning over multimodal inputs'
+description: "Lessons 2 and 3 covered how multimodal models perceive multiple modalities. A different capability matters once they can perceive: reasoning over those modalities. Modern reasoning models spend significant inference compute generating chain-of-thought before answering; when that reasoning extends to images, diagrams, and other modalities, with tool use and deliberative safety checks, you get a qualitatively different system. This lesson walks how that combination (reasoning + multimodal + tool use, plus the deliberative-alignment safety technique) actually works."
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+The two previous lessons were about **how multimodal models perceive**: how an LLM is extended to see (L2 encode-then-fuse), and how a model trains modalities together from scratch (L3 native multimodal). A perceptual capability is necessary but not sufficient. Once a model can see an image, the question becomes what it can do with what it sees. **Reasoning over multimodal inputs** is the next capability layer, and it is what makes a frontier multimodal system feel qualitatively different from a vision-language model that just describes pictures.
+
+This lesson covers the three threads that, together, define modern multimodal reasoning models: chain-of-thought reasoning extended to multimodal inputs, tool use as a first-class capability, and deliberative alignment as the safety technique designed to keep all of it within the lines.
+
+## What changed with reasoning models
+
+A standard LLM answers a question in one forward pass: read the prompt, predict the answer. A **reasoning model** (the o-series and its successors at OpenAI; analogous systems at other labs) does something structurally different: it generates a long internal **chain of thought** before producing the final answer, often using many times more tokens to think than to output.
+
+The shift produced step-changes on benchmarks where deliberate reasoning matters more than retrieval-style recall: competition math, code with subtle correctness requirements, scientific problems requiring multi-step inference. The relevant idea for this lesson is that reasoning is **inference-time compute**: the model uses more compute per query, on the reasoning side, to produce a better answer. With that in hand, the natural extension is to let that reasoning span modalities.
+
+## Extending reasoning to multimodal inputs
+
+A multimodal reasoning model receives an image (a math problem, a circuit diagram, a chart, a screenshot, a piece of code in a screenshot) alongside text and **deliberates over both during its chain of thought**. The thinking is no longer text-only; it interleaves observations about the image with text reasoning steps, often referencing specific regions of the image ("the node labeled A in the upper left connects to..."), checking intermediate conclusions against what the image actually shows, and revising when a visual reading was wrong.
+
+That deliberation enables three capabilities that single-pass VLMs handle poorly or not at all:
+
+- **Visual problem solving.** Math from a photo of handwritten work; circuit analysis from a schematic; data-extraction-and-computation from a chart. Each step references the image, computes something, and continues.
+- **Self-checking across modalities.** The model can re-examine the image during reasoning, catch its own misreading, and correct course. A single-pass VLM that misreads an image typically commits to the misreading; a reasoning model can notice the inconsistency and try again.
+- **Grounded multi-step reasoning.** Each step can cite visual evidence, producing answers whose justification is explicit and auditable rather than a confident assertion the user has to trust.
+
+This is the qualitative difference: a VLM **describes** an image; a multimodal reasoning model **thinks about** an image.
+
+## Tool use as a first-class capability
+
+Reasoning models become much more powerful when they can call **tools** during their thinking. For multimodal reasoning specifically, tools matter because the model's perception is bounded by what its underlying VLM sees in one pass, and tools can extend that perception or compose it with computation.
+
+Common tools you will see in modern multimodal reasoning systems:
+
+- **Vision tools**: zoom, crop, OCR-on-region. The model decides "I need to look more closely at this part of the chart" and calls a tool that re-examines a specific area at higher resolution.
+- **Code execution**: extract numbers from a chart, run a computation on them, plot the result, verify the answer against the original image.
+- **Search**: look up additional information about something identified in the image (a product, a paper, a chemical structure).
+- **Image generation**: produce a diagram or illustration as part of the answer, often to confirm or visualize a reasoning step.
+
+When reasoning, multimodal perception, and tool use combine, the resulting system is capable of tasks that none of the three could do alone: "look at this screenshot of broken code, figure out what's wrong, look up the relevant API documentation, draft a fix, and produce a corrected screenshot showing the change." Each piece extends the others. This is also the natural bridge to the multimodal-agents territory that Lesson 9 takes up; this lesson stops at the per-query reasoning level and stays out of broader agent design.
+
+## Deliberative alignment
+
+A second axis runs alongside capability: as reasoning models gain new powers, new attack surfaces and failure modes follow. Multimodal models in particular face risks single-modal LLMs do not: prompts hidden inside images, instructions embedded in visual content, jailbreaks that use the visual channel to bypass text-based safety training.
+
+**Deliberative alignment** is the safety technique that answers this with the same machinery as reasoning itself. Instead of teaching the model safety behaviors only through data-and-RLHF, deliberative alignment trains the model to **explicitly reason over a safety specification before acting**. In effect, the model's chain of thought includes a step that recalls relevant rules from a written specification, checks the current request against them, and only then commits to an answer.
+
+For multimodal systems, the value is structural: the same inference-time reasoning that improves math performance can now be turned on the question "is this request appropriate, given everything I see and read here?" The model is not just trained to refuse certain content; it is trained to **think about whether and why** before acting.
+
+OpenAI introduced deliberative alignment in late 2024 as the alignment technique behind the o-series models; the paper and the public writeup are the reference accounts (links in references).
+
+## Where this sits architecturally
+
+A multimodal reasoning model is typically:
+
+1. A base multimodal architecture (encode-then-fuse per L2, or natively-multimodal per L3) that handles perception.
+2. **Reasoning training** added on top (chain-of-thought generation via reinforcement learning, optimizing for correct outcomes on hard tasks).
+3. **Tool-use infrastructure** wired into the reasoning loop, so the model can invoke vision tools, code execution, search, or image generation as part of its thinking.
+4. **Deliberative alignment** training threading safety reasoning through the same chain-of-thought machinery.
+
+The reasoning capability is added on top of the multimodal capability, not in place of it. A multimodal reasoning model that fails on a visual task often fails for one of two reasons: the underlying VLM mis-perceived the image (perception ceiling), or the reasoning step was wrong (reasoning ceiling). Diagnosing which is which is a useful skill in the wild.
+
+## Why this matters when you use AI
+
+When you upload a math problem photo and the model takes 30 seconds to think before answering, when you give it a screenshot of a chart and it extracts the numbers and computes the implication, when you show it broken code and it reasons through the bug before suggesting a fix, you are using a multimodal reasoning model. The latency you feel is the inference-time compute paying for better answers. The architecture distinction from a one-shot VLM is real and visible in the outputs: a VLM hands you an answer; a reasoning model hands you an answer with reasoning attached.
+
+## Common pitfalls and misconceptions
+
+- **"Reasoning models are just slow VLMs."** No. The additional inference compute is producing genuine multi-step reasoning, often visible in the chain of thought. The latency is buying capability, not just sluggishness.
+- **"More thinking is always better."** Often true, but not always: reasoning can amplify confident hallucination when the underlying perception is wrong. Self-checking helps but does not eliminate the problem.
+- **"Visual reasoning makes the model see better."** It makes the model **think about** what it sees; perception quality remains bounded by the underlying VLM. Tools (zoom, OCR-on-region) help extend perception during reasoning; pure thinking does not.
+- **"Deliberative alignment makes a multimodal model safe."** It improves robustness against certain attacks by forcing explicit reasoning over safety policy. Multimodal attack surface (prompts hidden in images, adversarial visual content) is an active research area, not solved. Treat alignment improvements as relative, not absolute.
+
+## What you should remember
+
+- **Multimodal reasoning extends chain-of-thought to images and other modalities,** interleaving visual observations with text reasoning steps and enabling self-checking and grounded multi-step answers.
+- **Tool use makes reasoning much more powerful.** Vision tools, code execution, search, and image generation called during the chain of thought extend perception and compose computation in ways pure reasoning cannot.
+- **Deliberative alignment** trains the model to reason explicitly over a safety specification before acting; for multimodal systems it brings the same chain-of-thought machinery to bear on the new attack surfaces images introduce.
+- **The architecture stacks:** base multimodal perception (L2 or L3) + reasoning training + tool-use infrastructure + deliberative alignment. The capability of the whole is the product of all four; failure can come from any layer.
+
+That closes Phase 2 on building large multimodal models. We now have perception (encode-then-fuse and native) and reasoning (this lesson) covered. Phase 3 turns to the **generative** side: how multimodal models produce images and video as output. The next lesson opens with how transformer-based architectures replaced the U-Net backbone in modern image-generation diffusion.

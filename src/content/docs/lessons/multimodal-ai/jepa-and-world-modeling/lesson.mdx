@@ -1,0 +1,85 @@
+---
+title: 'Lesson: Joint embedding predictive architectures (JEPA) and world modeling'
+description: "Phases 2 and 3 used the same underlying training objective: generative pretraining, where the model predicts a raw output (next token, next denoising step) it can be compared against ground truth. This lesson covers the most articulated alternative direction: JEPA, which predicts representations in embedding space rather than raw outputs. The bet is that focusing capacity on semantic structure instead of surface detail produces better representations for understanding and for world modeling. The lesson covers the I-JEPA and V-JEPA recipes, the world-modeling connection, where JEPA sits today (research-strong, not production-dominant), and applies the operational scope test to separate technique from autonomy-philosophy questions."
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+Across Phases 2 and 3, almost every system we covered shared one design choice: **generative pretraining**. The model predicts a raw output it can be compared against ground truth, a next token in a text stream, a next denoising step in a diffusion process, a next spacetime patch in a video. The loss measures how well the prediction matches the actual raw output, pixel by pixel or token by token.
+
+Generative pretraining has worked extraordinarily well. It powers the LMMs of L2-L4 and the generative systems of L5-L6. But it has a sharp philosophical complaint against it, championed for years by Yann LeCun and now backed by an architectural proposal: predicting raw outputs is **wasteful**. The model spends most of its capacity learning to reproduce surface details (textures, exact lighting, the precise arrangement of leaves on a tree) that contribute almost nothing to semantic understanding. If you want a system that understands the world rather than one that hallucinates plausible pixels, you should not train it on pixel-level reconstruction in the first place.
+
+The most articulated alternative is **Joint Embedding Predictive Architectures**, JEPA. This lesson is about what JEPA does differently, why its proponents argue it is the better path to representation learning and world modeling, and where it actually sits in 2026 (research-strong, not yet production-dominant).
+
+## The generative-pretraining objection, made precise
+
+A useful place to start is exactly where generative pretraining pays its cost. Consider a model trained to denoise an image of a forest. The loss compares the model's predicted noise to the actual added noise, pixel by pixel. To do well, the model must learn to reproduce every leaf's exact pixel pattern, every shadow boundary, every texture detail.
+
+A large fraction of model capacity, by this design, is spent learning to render those details. Some fraction is also doing useful representational work: figuring out that this is a forest, that the lighting is afternoon, that the composition has a tree in the foreground. But the loss does not distinguish the two; rendering a leaf wrong costs the same as missing that the scene is a forest at all. The model that ends up with the lowest loss is the one that masters surface reproduction, not necessarily the one with the cleanest semantic representations.
+
+The JEPA bet: if you change the loss to focus on semantic structure rather than surface reproduction, the same capacity does more representational work.
+
+## JEPA in three steps
+
+JEPA's solution is to predict in **embedding space**, not raw output space. The recipe, applied to images:
+
+1. Take an input image. Mask several regions.
+2. Run the **visible** portion through a **context encoder** (typically a transformer) to get a context vector.
+3. Run the **masked** portion through a **target encoder** (also typically a transformer, usually a slowly-updated copy of the context encoder) to get target vectors.
+4. Train a small **predictor** to map context vector to target vectors. The loss is measured in **embedding space**: the distance between predicted and target representations.
+
+There is no pixel-level reconstruction anywhere. The model never has to reproduce textures or precise lighting; it only has to learn representations such that the visible part of the image predicts the representation of the masked part. The capacity is freed from rendering and spent on representation.
+
+This recipe is **I-JEPA** (image-JEPA), introduced by the Meta AI group around LeCun. **V-JEPA** extends the same idea to video: mask spacetime regions, encode visible regions as context, masked regions as targets, train the predictor in embedding space across both. The pattern is identical to V-DiT-vs-DiT from Phase 3, but at the level of the training objective rather than the architecture.
+
+## Why this might be better (and the honest version of "might")
+
+The case for JEPA, as its proponents make it:
+
+- **Representation quality.** When tested on downstream tasks (classification, detection, action recognition), I-JEPA and V-JEPA representations have been competitive with or better than the strong generative-pretraining baselines on equivalent compute, despite never seeing a pixel-level loss.
+- **Sample efficiency.** Without the cost of rendering, capacity goes further. The argument is that JEPA representations carry more semantic content per parameter than generative-pretrained ones.
+- **Scalability of the abstraction.** Embedding-space prediction can be applied at multiple levels of abstraction (predict the embedding of the next second of video, predict the embedding of the next minute, predict the embedding of the next planning step). Generative prediction does not factor as cleanly across timescales.
+
+The honest version: JEPA's case is strong on the benchmarks it is designed for, but generative pretraining still dominates the systems people actually use. The dominant LLMs, multimodal models, and generative video systems are all generative-pretrained. JEPA is the most articulated alternative direction; it is not yet the consensus answer. Watching how the next few years play out is the right posture.
+
+## The world-modeling connection
+
+JEPA's relevance grows when the goal shifts from "represent" to "model the world." A **world model** is a system that predicts how an environment will evolve, used (in robotics, reinforcement learning, planning) to imagine the consequences of actions before committing to them.
+
+A generative world model predicts **future raw frames** of the environment. The same surface-reproduction tax applies, intensified: most of the capacity is spent rendering plausible future pixels that differ mostly in irrelevant detail, while the planning-relevant structure (where things are, what might happen, what affordances exist) gets only a small share.
+
+A JEPA-style world model predicts **future embeddings**. The model imagines the world's future semantic state, not its future pixels. For planning, this is exactly what you need: a decision-maker does not care whether the leaf will be in pixel (147, 203) next second, it cares whether the door will be open. Predicting in embedding space matches the level of abstraction the downstream planning will use.
+
+This is the LeCun thesis about world models, articulated across several talks and papers, and it is the natural place JEPA's representation work feeds forward. The CS25 V6 lecture this draws from sits in exactly this territory, connecting JEPA from representation learning to world modeling.
+
+## Where this lesson stops, and what is a separate conversation
+
+JEPA itself is a technique-and-evaluation topic, well within the lesson's technical scope. The world-modeling extension is also technical (an architecture and training choice, evaluated by downstream task performance). But once the term **world model** is in play, two adjacent conversations are visible enough to be named, both deferred to forums they belong in:
+
+- **Embodied AI deployment policy.** When and where autonomous physical agents should be deployed in homes, public spaces, workplaces is a policy decision with sectoral, regulatory, and community stakeholders. The instruments are public consultation, sectoral guidelines, and regulatory frameworks. Not the same instruments as technical model evaluation.
+- **AI agency and autonomy philosophy.** The fundamental "should AI agents be embodied" and "what counts as autonomous action" debates are philosophical and ethical conversations with their own institutional homes. The instruments are philosophical argument, ethical deliberation, and stakeholder consultation. Not the same instruments as benchmark performance.
+
+The operational scope test from Phase 3 applies cleanly: **what instruments would you use to settle the question?** If model evaluation benchmarks, planning-task performance, or representation-quality metrics settle it, it is in this lesson's scope. If autonomy-philosophy or accountability-legal-frameworks settle it, it is in a different conversation evaluated by different methods.
+
+## Why this matters when you use AI
+
+Almost every multimodal system you use today is generative-pretrained: the language model predicting the next token, the image model predicting the next denoising step, the video model predicting the next spacetime patch. If JEPA-style approaches succeed in displacing generative pretraining for representation learning and world modeling (and that is a real "if"), the systems of the next few years may shift from "predict the next surface output" toward "predict the next semantic state." Knowing the alternative exists, and knowing the specific complaint it answers (surface-reproduction tax), is what lets you read research news in this area as something other than noise.
+
+## Common pitfalls and misconceptions
+
+- **"JEPA replaces transformers."** It does not. JEPA is a training paradigm; the encoders and predictor inside a JEPA system are typically transformers. The difference is the loss (embedding-space) and the supervision setup (masking with a target encoder), not the network family.
+- **"JEPA solves world modeling."** It is an architectural proposal with a specific bet, not a solved problem. Production world models in robotics and RL still use a mix of approaches; JEPA is the most articulated alternative direction, not the consensus answer.
+- **"Predicting embeddings is always better than predicting outputs."** Not when the task is generation. To produce text, pixels, or audio samples, you need raw-output prediction; JEPA cannot generate the output you want. Its case is strongest for representation learning and for prediction at the level of abstraction planning needs.
+- **"Generative pretraining is wasteful, full stop."** The surface-reproduction tax is real but does not erase the value of generative pretraining; that paradigm built every multimodal system in production today. JEPA's argument is comparative ("this is more efficient") not absolute ("the other way is worthless").
+
+## What you should remember
+
+- **JEPA predicts in embedding space, not raw output space.** The model is trained to make a context embedding predict a target embedding, with the loss measured in vector space rather than pixel-by-pixel.
+- **The recipe is mask, encode visible as context, encode masked as targets, predict in embedding space.** I-JEPA does this on images, V-JEPA on video.
+- **The bet is representation quality:** by removing the surface-reproduction tax of generative pretraining, the same capacity does more semantic work.
+- **JEPA connects to world modeling** by predicting future semantic states rather than future raw frames, which matches the level of abstraction planning needs.
+- **It is research-strong, not production-dominant** as of 2026; whether it displaces generative pretraining is a live open question.
+
+The next lesson takes the world-modeling idea into a specific scientific domain (drug discovery) where multimodal world models fuse diverse data streams, and shows how the predict-the-future-state-of-the-world framing pays off in practice when the world is biological rather than physical.

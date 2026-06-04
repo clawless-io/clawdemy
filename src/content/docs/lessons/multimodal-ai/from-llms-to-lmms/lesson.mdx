@@ -1,0 +1,98 @@
+---
+title: 'Lesson: From language models to large multimodal models'
+description: "L1 said the most common way to build a multimodal model is to take an existing LLM and attach a vision encoder. This lesson walks that path concretely through CogVLM, the canonical example: how a pretrained vision transformer produces image tokens, how a bridge module projects them into the LLM's input space, where CogVLM goes deeper than the simplest LLaVA-style design with its 'visual expert' lanes, and how the model is trained in two stages without destroying the underlying language abilities."
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+The opener gave you the map: most large multimodal models are built by taking an existing language model and attaching a vision encoder to it, then training a bridge between them. That sentence is true but compressed. The interesting work is in the bridge, and in the surrounding training recipe that lets the language model gain a visual capability without losing what made it good at text in the first place.
+
+This lesson walks the encode-then-fuse path concretely, using **CogVLM** (the example Ming Ding presented in CS25 V4) as the case study. CogVLM is a useful anchor because it represents the more thoughtful end of the encode-then-fuse family, designed to preserve language performance, and it generalizes cleanly to CogAgent for graphical-interface tasks.
+
+## The starting point
+
+You have a pretrained LLM. It can read text and is utterly blind to images. The goal is to extend it so that it can take in an image alongside a text question and answer it, **without degrading** the language capability you got from billions of dollars of LLM pretraining. That preservation constraint is the part everyone underestimates: naively training the whole stack on multimodal data tends to make the model worse at pure-text tasks, which is unacceptable for any model that has to live in the same product as a text-only LLM.
+
+So the design question becomes: how do you splice vision into the model in a way that respects the existing language weights?
+
+## The two halves you need
+
+The standard recipe assembles two pieces.
+
+**A vision encoder.** Almost universally a pretrained Vision Transformer (ViT), often one that was itself trained on image-text pairs (CLIP-style contrastive learning) so its outputs are already roughly aligned with language. The encoder takes an image, breaks it into a grid of small patches, and turns each patch into a vector. The output is a sequence of patch embeddings, which you can think of as the image rewritten as a short "sentence" of visual tokens.
+
+**A bridge between vision and language.** The vision encoder's vectors are not in the LLM's embedding space; you need a module that translates. The simplest version (used by LLaVA, the cheapest credible encode-then-fuse system) is a small multilayer perceptron (MLP) that projects each visual vector into something the LLM can read. After projection, the model sees a sequence like:
+
+```
+[ img_tok_1, img_tok_2, ..., img_tok_N, "What is happening in this image?" ]
+```
+
+and processes it like any other token sequence. The vision encoder, the projector, and the LLM each handle their own piece.
+
+## First-wave architecture: encoder + projector + (often frozen) LLM
+
+The first wave of large multimodal models (LMMs) put those pieces together with minimal modification of the LLM. A typical training recipe **froze the LLM's weights entirely** and trained only the projector during alignment, then unfroze a small amount during instruction tuning. This is cheap, it works surprisingly well, and it preserves language quality by construction (frozen weights cannot regress).
+
+But this architecture has a quiet ceiling. The LLM is processing image tokens through exactly the same attention and feed-forward layers it uses for text. Those layers were never optimized for visual content. Add enough visual capacity, and you start to see the LLM's text quality slip during deeper training, while visual reasoning still falls short of dedicated vision models. CogVLM was designed to push past that ceiling.
+
+## Where CogVLM goes deeper: the "visual expert"
+
+CogVLM's structural addition is the **visual expert module**. Inside each transformer block of the LLM, CogVLM adds a parallel copy of the attention's QKV (query/key/value) matrices and the feed-forward layer, dedicated to visual tokens. When a sequence flows through the block, **text tokens are processed by the original LLM weights, and image tokens are processed by the visual-expert weights**, side by side in the same attention operation.
+
+A simplified picture of one block:
+
+```
+input sequence:  [ img_tok_1 ... img_tok_N, text_tok_1 ... text_tok_M ]
+
+   image tokens  -> visual-expert QKV   |
+                                        |---- shared self-attention -> shared FFN-equivalent
+   text tokens   -> original LLM QKV    |     across all tokens
+
+         (visual-expert FFN for image tokens; original FFN for text tokens)
+```
+
+Two things follow from that design. First, the original LLM weights for text are **untouched**, so language performance does not degrade during multimodal training; CogVLM trains the visual expert (and the vision encoder bridge) but freezes the LLM's text-handling weights. Second, image tokens now get processed through layers actually fit for visual content, while still attending jointly with text tokens through the shared self-attention. The cross-modal interaction lives in the attention; the per-modality specialization lives in the per-token-type weights.
+
+This is the central architectural difference from a LLaVA-style projector-only design: instead of forcing image tokens through text-trained transformer layers, CogVLM gives image tokens their own lane through each layer while keeping them in the same attention room as the text.
+
+## The training recipe
+
+Almost every LMM in this family is trained in two stages, and CogVLM follows the pattern.
+
+**Stage 1: pretraining alignment.** Train the visual expert (and the bridge) on large image-text pair datasets, with the LLM's language weights frozen. The objective is to make image tokens land in representational positions the LLM can interpret. You typically use captioning losses and image-text matching across hundreds of millions of pairs at this stage. The LLM does not learn anything new about language; the new modules learn to speak the LLM's language.
+
+**Stage 2: visual instruction tuning.** Fine-tune the system on visual question answering, visual instruction-following, and multimodal chat datasets. This is where the model learns to **use** its new visual capability conversationally: answer questions about images, follow instructions that mix images and text, hold a multi-turn dialogue grounded in a picture. Depending on the system, more or fewer of the model's weights are unfrozen here, and how much to unfreeze is itself a tuning decision that trades language preservation against visual sharpness.
+
+## From CogVLM to CogAgent
+
+CogAgent is the natural follow-on Ming Ding presented alongside CogVLM in the same lecture: same encode-then-fuse architecture, retrained for **graphical user interface (GUI) understanding** specifically. Where CogVLM looks at a natural image and answers a question, CogAgent looks at a screenshot, predicts the bounding boxes of clickable UI elements, and can produce step-by-step plans for completing a task in a GUI environment (open this menu, click that button, fill this field). It is an early example of the bridge from vision-language models to the multimodal-agent territory the track returns to in lesson 9. Architecturally, however, it is still encode-then-fuse: the LLM is taught to see screenshots through the same kind of visual expert pattern, just trained on a different data distribution.
+
+## The tradeoffs of encode-then-fuse
+
+The encode-then-fuse family has clear strengths and a real limit, and they are worth holding in mind as we move to the next lesson.
+
+**On the plus side:** you leverage a powerful pretrained LLM that already cost a fortune to train. You preserve language quality because the original LLM weights can be partially or fully frozen. You can swap in better vision encoders or better LLMs independently, which makes the design modular. The pattern works well enough that almost every major vision-language model in production today is some descendant of it.
+
+**The limit:** the vision encoder and the LLM were trained separately, and the bridge between them was added afterward. The two halves know each other only through the alignment training, which is much less than the joint co-evolution a single model would get if trained from the start on mixed modalities. That ceiling is what motivates the next lesson on natively-multimodal architectures, where the modalities live together in one model from the first training step.
+
+## Why this matters when you use AI
+
+Most vision-language models built by extending an existing language model are encode-then-fuse descendants. The open ones we can inspect (LLaVA, CogVLM) follow this recipe directly, and the major closed systems you have used (GPT-4V, Claude with vision) are widely understood to use some variant of it. When you upload a screenshot and the model can reason about its contents, the architecture under the hood is generally a "pretrained vision encoder, bridge module, pretrained LLM, trained in two stages" design. Not every frontier model is built this way: some, like Gemini, are trained on mixed modalities from the start, which is the natively-multimodal direction the next lesson takes up. Knowing the recipe also lets you predict capabilities and limits: such models often struggle with very high-resolution detail (the visual encoder's patches are coarse), with precise spatial reasoning, and with the kind of fine-grained cross-modal grounding that the next lesson's native architectures handle more cleanly.
+
+## Common pitfalls and misconceptions
+
+- **"The LLM is unchanged when extended with vision."** Only if its weights are frozen. The moment you unfreeze for fine-tuning, language performance can regress; how much depends on the recipe.
+- **"Bigger vision encoder always helps."** Resolution, the alignment between the encoder's training data and the LLM's, and the bridge's capacity all matter as much as encoder size.
+- **"The model sees the image."** It processes patch embeddings projected into its input space. The visual experience is yours; the model's "seeing" is attention over visual tokens.
+- **"Encode-then-fuse and native multimodal are the same thing with more compute."** They are not. The architectural choice (separate encoders bridged after the fact versus one model trained on mixed modalities from the start) carries through to the model's capability ceiling, which is where the next lesson begins.
+
+## What you should remember
+
+- **The encode-then-fuse recipe** has three parts: a pretrained vision encoder (often a CLIP-style ViT), a bridge module that projects visual outputs into the LLM's embedding space, and a pretrained LLM that processes the resulting mixed sequence.
+- **CogVLM's visual expert** is the structural refinement: image tokens get their own QKV and feed-forward weights inside each transformer block, while text tokens go through the original LLM weights, and the two interact through shared self-attention.
+- **Two-stage training** is the standard recipe: pretraining alignment on image-text pairs (LLM frozen), then visual instruction tuning on multimodal dialogue.
+- **CogAgent** generalizes the same architecture to GUI understanding, an early bridge from vision-language models to multimodal agents.
+
+The encode-then-fuse path has carried most of the field to the vision-language models you use today, and it has a real ceiling because the two halves were trained separately. The next lesson asks what happens when you stop bolting modalities together and instead train one model on mixed modalities from the very first step: natively-multimodal architectures.

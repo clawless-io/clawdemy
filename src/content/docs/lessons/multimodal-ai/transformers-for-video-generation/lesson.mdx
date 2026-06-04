@@ -1,0 +1,97 @@
+---
+title: 'Lesson: Transformers for video generation'
+description: "Lesson 5 walked the U-Net to DiT shift for image generation. This lesson takes the same DiT-family architecture and asks what changes when the output is video. The answers are about a new dimension (time), a compute explosion (more tokens per sample), a much harder dataset problem (well-captioned video at scale), and one central new technical challenge (temporal consistency across frames). The lesson covers the architectural moves (spacetime patches, latent compression in both space and time), the production landscape (Sora, Veo, Movie Gen), and is explicit about the additional out-of-scope conversations video generation raises beyond images (real-person reanimation, video provenance)."
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+The previous lesson took the diffusion denoiser from U-Net to a transformer (DiT) and walked what that shift bought: scaling laws, better global structure, architectural unification with the rest of the transformer stack. The pattern was clean: patchify the image, treat patches as tokens, run a transformer that predicts noise per patch.
+
+This lesson takes the same architectural family and asks what changes when the output is **video** rather than a single image. The short answer: a new dimension (time), a compute explosion (many more tokens per sample), a much harder dataset problem (video that is captioned well, at scale, is rare), and one central new technical challenge (keeping things coherent across frames). The DiT idea carries over; the engineering around it changes substantially.
+
+## Video as a 3D tensor of patches
+
+The naive approach to extending image generation to video is to generate each frame independently with an image DiT and stack them. This does not work: nothing forces the frames to be coherent, so the output flickers and jitters. Objects pop in and out, identities shift, motion looks wrong. Temporal consistency is the new technical problem video generation has to solve.
+
+The modern approach treats video as a three-dimensional tensor (two spatial dimensions plus time) and **patchifies it in three dimensions**. Instead of an image's grid of 2D patches, a video becomes a set of small **spacetime cuboids**: little blocks that span a few pixels horizontally, a few pixels vertically, and a few frames in time. Each spacetime cuboid becomes one token, and a single transformer attends to all of them at once. Sora introduced and popularized this framing under the term **spacetime patches**.
+
+That shift is what gives video DiT its central capability. Because attention is shared across all spacetime patches, the same token can attend to other tokens that are nearby in space (within the frame), nearby in time (a few frames over), or both (a patch in a future frame that overlaps the current scene). Temporal coherence is no longer a post-hoc constraint; it is what the attention mechanism naturally produces, since every patch sees every other patch when deciding what to predict.
+
+## The compute explosion
+
+The cost of the spacetime-patch approach is severe. A five-second video at thirty frames per second is 150 frames. If each frame is even a modest 256 spatial patches, that is roughly 38,400 tokens before you do anything else. Attention is quadratic in token count, so the cost of a full attention pass over a five-second clip is wildly larger than over a single image.
+
+Two compression strategies make this tractable, and any production video model relies on both.
+
+- **Latent compression in space.** As with image latent diffusion, you operate in a compressed latent space rather than pixel space, so each "patch" already represents a larger pixel region. This reduces the number of spatial tokens per frame by an order of magnitude or more.
+- **Latent compression in time.** A learned video tokenizer compresses several adjacent frames into one temporal patch, so the model sees fewer temporal slices than the original frame rate. Sora's spacetime patches do exactly this: each token represents a small spacetime cuboid in latent space, not a single pixel and single frame.
+
+After both compressions, the token count for a few-second clip falls into the thousands rather than the millions, and attention becomes possible. The compression-quality tradeoff is again that the **video tokenizer is the floor and ceiling** of the model's per-frame and motion quality, the same tokenizer-as-bottleneck pattern that recurs across native multimodal (L3) and image generation (L5).
+
+## The data problem
+
+Video introduces a dataset problem the image side does not face nearly as acutely. Well-captioned video at scale is rare: most video on the internet has terrible or no captions, captions tend to describe broad content rather than what is happening across time, and the cost of high-quality video labeling is enormous. Production-quality models lean heavily on **automatic captioning and recaptioning pipelines**: feed unlabeled video through a captioner that produces rich, temporal descriptions, then train on those. The quality of the captioner cascades directly into the quality of the model. Public discussions of Sora's training and the Movie Gen reports both highlight this; it is not a minor implementation detail.
+
+## What the field has shipped on video DiT
+
+Several production systems implement variants of this architecture (named positive examples per the vendor naming policy):
+
+- **Sora** (OpenAI) introduced and popularized the spacetime-patches framing in 2024, with one-minute coherent generations at notable quality.
+- **Veo** (Google) is Google's video generation family with similar architectural approach.
+- **Movie Gen** (Meta) is Andrew Brown's team's work and the system this lesson's source lecture covers in technical depth.
+- **Runway Gen-3** and other systems extend the same family in different practical directions.
+
+These systems differ in tokenizer choices, conditioning approaches, post-training, and inference techniques. Where their architectures are public (Sora, Movie Gen), they share the DiT-family backbone with spacetime patches; the closed ones (Veo, Runway) are not documented in this detail but are widely understood to use related spacetime designs. Calling something "transformer-based video generation" in 2025 generally means some descendant of this design.
+
+## What still trips video generation up
+
+Even modern video generation has predictable failure modes worth knowing.
+
+- **Physics.** Objects intersect each other strangely; gravity behaves inconsistently; deformations of flexible objects (cloth, water) sometimes follow no real-world rule. Pretraining priors help; they do not eliminate the issue.
+- **Long-horizon coherence.** A character introduced in second one may have slightly different features in second twelve. Identity drift over long horizons is unresolved.
+- **Text inside generated video.** Reading and reproducing text within a generated scene remains hard, the same issue image generation has but compounded across frames.
+- **Compute.** Even with compression, generating thirty seconds of high-resolution video is expensive; longer durations still face hard compute walls.
+
+These are research frontiers, and the architecture-of-the-day's quality jumps reflect chipping away at each.
+
+## Where this lesson stops, and what is a separate conversation entirely
+
+The same scope-line discipline from the image-generation lesson applies here. The image lesson named five categories that sit outside the architecture; video carries all five forward and adds two more that video specifically surfaces, for seven in total. Each named category sits in its own forum with its own stakeholders and is evaluated by different methods than the architecture is. Naming them keeps the technical content focused and the deferral honest.
+
+Carried forward from the image lesson (all five apply to video too):
+
+- **Use-case policy: when synthetic video is appropriate vs not.** Product and platform-policy decision; stakeholders include product teams, community-guidelines authors, and platform-level moderation.
+- **Provenance and watermarking (general): labeling synthetic media as synthetic.** The broad question of whether and how generated media should be marked, addressed by standards bodies and platform policy (C2PA, SynthID), not by the generation architecture.
+- **Sector-specific policies: journalism, political content, legal evidence.** Each sector has its own institutions and standards, and video raises these stakes higher than images, because video has historically been treated as more authoritative evidence than a still photo.
+- **Training-data licensing: scraped video data.** Often from copyrighted film and television; active legal and policy area with ongoing litigation.
+- **Likeness and consent: a real person's appearance used without permission.** The general identity-rights question that applies to any synthetic media of a real individual; it lives in law and platform policy, not in the model.
+
+Two **additional categories video raises beyond images**:
+
+- **Real-person reanimation: video-specific deepfakes.** Beyond the general likeness-and-consent question above, video generation can produce motion, action, and (with audio) speech attributed to a real person, attaching realistic behavior to the appearance. The technical capability sits underneath; the consent, identity-rights, legal-evidence, and platform-policy questions sit in their own institutional conversations.
+- **Video provenance specifically: temporal-coherence requirements.** The general provenance conversation above (C2PA, SynthID) extends to video but adds technical requirements: dynamic watermark signals that survive frame interpolation, temporal-coherence checks for tampering, video-specific subsets of C2PA. Technically distinct enough from image watermarking to be its own sub-area.
+
+And the same evaluation-methods boundary applies: this lesson's instruments are training loss, FVD (Fréchet Video Distance) and successors, motion quality metrics, and human preference studies. Those are the technical evaluation frame. They are not the same instruments policy conversations use, and that difference is what makes the scope line operational rather than rhetorical.
+
+## Why this matters when you use AI
+
+When you see synthetic video that looks plausible, this is the architecture under it. The capability arc video generation is on parallels the one image generation walked from 2022 to 2024: rapid quality jumps as the underlying architecture, datasets, and compute matured. The architecture-side story is the one this lesson covers. The social and policy story that comes alongside it is real and substantial, and it is the territory the explicit out-of-scope categories above defer to other conversations.
+
+## Common pitfalls
+
+- **"Video generation is just image generation across frames."** No. Independent frame generation produces incoherent flicker. Temporal consistency is the new central problem; spacetime patches and shared attention are what make it tractable.
+- **"Compute scales linearly with video length."** No. Attention is quadratic in token count; without spatial-and-temporal latent compression, it would be economically impossible. The video tokenizer is the floor and ceiling of the system's quality.
+- **"Any prompt will produce a clean video."** Current models have specific limits (physics, long-horizon coherence, in-frame text, durations beyond ten or so seconds). Knowing the limits avoids the disappointment of expecting them not to apply.
+- **"A bigger model alone fixes it."** Scaling helps but does not solve any of the named failure modes by itself; tokenizer quality, dataset quality, and captioning pipeline quality each set their own ceilings.
+
+## What you should remember
+
+- **Video DiT extends the image DiT idea to three dimensions** (spacetime patches): each token is a small cuboid spanning a few pixels in width, height, and time, and one transformer attends across all of them.
+- **Temporal consistency is the new central problem,** and the spacetime-patches approach is what makes attention naturally handle it.
+- **Latent compression in both space and time** is required to keep the token count tractable; the video tokenizer caps system quality.
+- **Captioned-video data is the binding constraint** on training quality; automatic recaptioning pipelines are how production systems get there.
+- **This lesson is architecture, technique, and evaluation;** the use-case, provenance, sector-policy, training-data-licensing, likeness, real-person-reanimation, and video-provenance conversations are real, separate, and evaluated elsewhere.
+
+That closes Phase 3 on generative multimodal models. Across L5 and L6 we covered how transformer architectures took over from U-Net for image generation, then extended cleanly into video with spacetime patches. Phase 4 turns to advanced multimodal directions: the first lesson covers JEPA and world modeling, which take a fundamentally different objective than the generative pretraining we have leaned on throughout Phases 2 and 3.

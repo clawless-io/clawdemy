@@ -1,0 +1,110 @@
+---
+title: 'Lesson: Multimodal agents in production'
+description: "Phases 2 through 4 covered architectures, generative models, and frontier directions. Real systems also have to ship and survive contact with millions of users. This lesson covers what changes when multimodal AI lives inside a shipping product: the gap between benchmark performance and real-world usability, RL co-design with the product (RLHF and RLAIF as practical levers), the asymmetric-verification idea, the production-specific constraints multimodal raises (variable input sizes, tool-use latency budgets, output-streaming quirks), and the discipline of separating what engineering settles from what engineering only informs."
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+Phases 2 through 4 of this track covered architectures (encode-then-fuse, native, generative, world models). Each lesson focused on what makes a research-quality multimodal model possible: the right training objective, the right data, the right scaling story. Real systems live in a different world. The same architecture that won a benchmark in a paper has to **ship**, which means surviving millions of users sending messy real inputs at all hours, hitting latency budgets users actually feel, costing an amount the business can absorb, and producing behaviors a product team can stand behind. None of those constraints show up on a benchmark.
+
+This lesson is about what changes when multimodal AI lives inside a shipping product. It draws on Karina Nguyen's CS25 V5 lecture on RL as a co-design of product and research at OpenAI, the central public account of how this co-design loop runs in practice. Two threads to hold: the gap between benchmarks and real-world usability, and the discipline of separating what engineering settles from what engineering only informs.
+
+## Research constraints vs production constraints
+
+A research-quality model is judged on benchmarks: held-out test sets, distributed similarly to training, with known ground truth. Reproducibility, ablations, scaling curves. The constraints are intellectual, not operational.
+
+A production model is judged differently. The same model in a product faces:
+
+- **Latency.** How long users wait. Architectural decisions (model size, tool use, retrieval) all have latency consequences that benchmark numbers do not measure.
+- **Cost per query.** Multimodal is especially relevant here: image input is many tokens; image output is thousands of tokens; long-document input dwarfs short text.
+- **Reliability.** Production users expect consistent behavior across sessions. Research models tolerate variance that products cannot.
+- **Safety in the wild.** Real deployment surfaces attack patterns research never imagined; the long tail of inputs is much longer than any test set.
+- **Evaluation in deployment.** A/B tests on real users give signals research benchmarks do not. What benchmarks call "performance" is one number; what users call "useful" is many.
+
+Same underlying model, fundamentally different optimization targets. That gap is what production engineering exists to close.
+
+## The benchmarks-vs-real-usability gap
+
+A specific consequence of the constraint shift is worth naming. Traditional ML benchmarks measure a model's performance on a fixed test set with known answers. Production performance measures something else: how well a model serves a real user with an ambiguous goal, messy input, no ground-truth label, and a limited patience window. The two are correlated but not identical, and the divergence is often where products succeed or fail.
+
+The path forward Karina Nguyen describes in her lecture is a tight **co-design loop**: scientists prototype, users immediately probe, signals from real usage shape the next iteration, and over time the team builds evaluation metrics that measure real-world usability rather than what traditional benchmarks happen to record. The loop is the answer to the benchmark-vs-usability gap, because it closes the gap by making the metric reflect what the product actually needs to do.
+
+## RL as co-design
+
+In research, reinforcement learning is often discussed as a separate post-training stage applied to a base model. In production it becomes co-designed with the product itself: which behaviors the product needs, which interactions users actually have, which signals are available to optimize against. Two specific techniques recur in modern production multimodal systems:
+
+- **RLHF** (Reinforcement Learning from Human Feedback). Train a reward model on human preferences over model outputs, then fine-tune the policy against that reward. The well-known approach behind much modern post-training.
+- **RLAIF** (Reinforcement Learning from AI Feedback). Use AI-generated feedback instead of (or alongside) human feedback. Faster to iterate on, more scalable, with its own tradeoffs that the co-design loop has to manage.
+
+The co-design framing is the structural point: the optimization target is shaped by the product context, not just by abstract benchmark scores. That is a structural advantage (the model is being tuned toward what users actually want) and, simultaneously, a structural risk (user behavior reflects user preferences, which can pull toward engagement rather than satisfaction, toward what feels good rather than what helps). The honest production-engineering posture takes both seriously.
+
+## Asymmetric verification
+
+A specific conceptual move from Karina Nguyen's lecture is worth naming on its own: **asymmetric verification**. Checking whether an answer is good is often much easier than producing a good answer from scratch. That asymmetry is exploitable: train one model to **generate**, train another to **verify**, use the verifier as a reward signal during the generator's RL training. The verifier does not have to be as capable as the generator, only good at the easier verification task.
+
+This idea has become structural across modern post-training: RLAIF uses LLM-judge style verifiers; tool-use systems use verification of tool outputs; many production loops have a "generate then check" structure under the hood. The general lesson is worth carrying beyond this specific application: when a task has an asymmetric cost between producing and checking, that gap is a lever production engineering can pull on.
+
+## Production constraints specific to multimodal
+
+Multimodal AI raises a few production-engineering challenges that text-only systems do not face as acutely:
+
+- **Variable input sizes.** A short text question is dozens of tokens. An image is hundreds to thousands of patch tokens. A PDF or video can be much larger. Latency and cost budgets vary by an order of magnitude across input types; production routing has to handle that variance.
+- **Output streaming quirks.** Streaming text token-by-token is well understood and feels responsive. Streaming an image is meaningless until it is mostly rendered. Streaming audio works but has its own latency tradeoffs. Multimodal output requires its own engineering for perceived responsiveness.
+- **Tool-use latency budgets.** When reasoning combines with tool use (lesson 4), each tool call adds to the user's wait. Production has to budget the loop: how many tool calls per query, when to short-circuit, when to interrupt the reasoning early.
+- **Quality calibration across modalities.** A multimodal model often varies substantially in quality between modality combinations; production may need to route uncertain queries to a stronger model, or warn users when modality combinations are weakly supported.
+
+None of these are deal-breakers; all of them are engineering work that becomes the difference between a research demo and a shipped product.
+
+## Engineering informs, but engineering does not settle
+
+A discipline worth surfacing explicitly, because it is easy to slip past. **Engineering work settles some questions and only informs others.** The two are structurally different, and conflating them tends to overstate what an engineering team can decide on its own.
+
+Engineering settles:
+
+- Latency budgets, cost per query, and whether they fit.
+- A/B-test signals between two implementations of the same intent.
+- Benchmark performance on a defined test set.
+- The design of an evaluation harness once the right metric is agreed.
+
+Engineering only informs:
+
+- Which product to ship (product strategy).
+- Who the product is for (market positioning).
+- What behavior is appropriate in genuinely ambiguous cases (values, policy, business judgment).
+- How to weigh engagement against satisfaction when they pull against each other (organizational priorities).
+
+The engineering data feeds the answers to the second list, but does not produce them; those answers come from product and business and (where relevant) policy judgments that engineering signals inform but do not settle. The operational scope test from earlier lessons applies cleanly here: **what instruments would you use to settle the question?** Latency profiling and A/B tests are engineering instruments; product strategy and deployment-policy decisions need different ones (user research, market analysis, organizational deliberation, regulatory review).
+
+## Where this lesson stops, and what is a separate conversation
+
+Several adjacent conversations are not what this lesson is about, even though they live next to it on a real product team. Each lives in its own forum, evaluated by different methods.
+
+- **Product strategy.** Which multimodal capabilities to invest in, in what order, for which audiences. Settled by product judgment and business analysis, not by engineering benchmarks.
+- **Deployment-policy decisions.** When and where to make a capability available; what to do in edge cases. Lives in product policy and (sometimes) regulatory review.
+- **Comparison-as-ranking across vendors.** The technique is the same family across labs (OpenAI's RL co-design, Anthropic's similar work on Claude, Google's on Gemini). The lesson cites Karina Nguyen's account of OpenAI's approach as a positive example of the pattern; it does not rank vendor approaches against each other, because that is a different conversation with different stakeholders.
+- **Specific organizational decisions any vendor has made.** What this lesson is and is not about: the pattern (RL co-design, asymmetric verification, production constraints) is the pedagogical territory; specific vendor product decisions are organizational matters those organizations get to make.
+
+The operational test for this watch zone: would A/B testing, latency analysis, or engineering-harness measurement settle the question? If yes, technique territory and in scope. If the question requires business judgment, market positioning, organizational priorities, or vendor-comparative ranking to settle, it lives in different conversations evaluated by different methods.
+
+## Why this matters when you use AI
+
+The reliability and responsiveness of the multimodal products you use daily (ChatGPT, Claude, Gemini, and the broader family) reflect enormous production-engineering work that does not appear in the model cards. When a voice mode responds in real time, when an image upload reliably gets understood, when a long-document analysis completes within the patience window, those are co-design outcomes between research and product, not raw model capability. Knowing the lens makes the difference between treating a deployed system as a black box and understanding the engineering reality that shapes what it does well and where it strains.
+
+## Common pitfalls and misconceptions
+
+- **"Production is research, just bigger."** No. The constraint sets are structurally different (latency, cost, reliability, safety in the wild, deployment evaluation), and a model that wins benchmarks may still fail as a product.
+- **"RL is the answer."** RL co-design is powerful, and it carries structural risks (engagement-vs-satisfaction misalignment, reward-model gaming). Treat it as a tool that needs the co-design loop to keep honest.
+- **"Multimodal production is text production but bigger."** No. Variable input sizes, multimodal output streaming, tool-use latency, and quality-calibration across modality combinations are real production differences that the text-only playbook does not cover.
+- **"Engineering settles the product question."** Engineering settles the engineering-instrumented questions (latency, cost, benchmark performance, A/B signals) and informs the others (product strategy, deployment policy, organizational priorities) without settling them. Conflating the two overstates what an engineering team can decide on its own.
+
+## What you should remember
+
+- **Production constraints are structurally different from research constraints:** latency, cost, reliability, safety in the wild, evaluation in deployment.
+- **The benchmark-vs-usability gap** is what the **co-design loop** (scientists prototype, users probe, signals shape next iteration) exists to close.
+- **RL becomes co-designed with the product:** RLHF and RLAIF as practical levers; asymmetric verification as the structural idea that "checking is easier than generating" makes new training loops possible.
+- **Multimodal production raises its own engineering challenges:** variable input sizes, output-streaming quirks, tool-use latency, cross-modal quality calibration.
+- **Engineering informs but does not settle product strategy, deployment policy, and organizational priorities;** the operational test (what instruments settle the question?) separates engineering territory from these adjacent conversations.
+
+That closes the technical lessons of the track. We have covered every major thread of multimodal AI as it stands in 2026: how it perceives (encode-then-fuse, native), how it reasons (multimodal CoT, tools, deliberative alignment), how it generates (image and video DiT), where the research frontier is heading (JEPA, world modeling, scientific applications), and what it takes to ship it (this lesson). The final lesson of the track steps back and synthesizes the cross-cutting threads, then names the frontiers we have NOT covered.

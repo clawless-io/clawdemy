@@ -2650,6 +2650,155 @@ export default defineConfig({
 						},
 					],
 				},
+				{
+					label: 'Track 24: Multimodal AI',
+					items: [
+						{
+							label: 'Phase 1\nOrientation',
+							collapsed: true,
+							items: [
+								{
+									label: 'What multimodal AI is',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/multimodal-ai/what-multimodal-ai-actually-is/brief' },
+										{ label: 'Lesson', slug: 'lessons/multimodal-ai/what-multimodal-ai-actually-is/lesson' },
+										{ label: 'Practice', slug: 'lessons/multimodal-ai/what-multimodal-ai-actually-is/practice' },
+										{ label: 'Summary', slug: 'lessons/multimodal-ai/what-multimodal-ai-actually-is/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/multimodal-ai/what-multimodal-ai-actually-is/cheatsheet' },
+										{ label: 'References', slug: 'lessons/multimodal-ai/what-multimodal-ai-actually-is/references' },
+									],
+								},
+							],
+						},
+						{
+							label: 'Phase 2\nLarge multimodal models',
+							collapsed: true,
+							items: [
+								{
+									label: 'LLMs to multimodal',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/multimodal-ai/from-llms-to-lmms/brief' },
+										{ label: 'Lesson', slug: 'lessons/multimodal-ai/from-llms-to-lmms/lesson' },
+										{ label: 'Practice', slug: 'lessons/multimodal-ai/from-llms-to-lmms/practice' },
+										{ label: 'Summary', slug: 'lessons/multimodal-ai/from-llms-to-lmms/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/multimodal-ai/from-llms-to-lmms/cheatsheet' },
+										{ label: 'References', slug: 'lessons/multimodal-ai/from-llms-to-lmms/references' },
+									],
+								},
+								{
+									label: 'Native multimodal',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/multimodal-ai/native-multimodal-intelligence/brief' },
+										{ label: 'Lesson', slug: 'lessons/multimodal-ai/native-multimodal-intelligence/lesson' },
+										{ label: 'Practice', slug: 'lessons/multimodal-ai/native-multimodal-intelligence/practice' },
+										{ label: 'Summary', slug: 'lessons/multimodal-ai/native-multimodal-intelligence/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/multimodal-ai/native-multimodal-intelligence/cheatsheet' },
+										{ label: 'References', slug: 'lessons/multimodal-ai/native-multimodal-intelligence/references' },
+									],
+								},
+								{
+									label: 'Multimodal reasoning',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/multimodal-ai/reasoning-over-multimodal-inputs/brief' },
+										{ label: 'Lesson', slug: 'lessons/multimodal-ai/reasoning-over-multimodal-inputs/lesson' },
+										{ label: 'Practice', slug: 'lessons/multimodal-ai/reasoning-over-multimodal-inputs/practice' },
+										{ label: 'Summary', slug: 'lessons/multimodal-ai/reasoning-over-multimodal-inputs/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/multimodal-ai/reasoning-over-multimodal-inputs/cheatsheet' },
+										{ label: 'References', slug: 'lessons/multimodal-ai/reasoning-over-multimodal-inputs/references' },
+									],
+								},
+							],
+						},
+						{
+							label: 'Phase 3\nGenerative models',
+							collapsed: true,
+							items: [
+								{
+									label: 'Diffusion transformers',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/multimodal-ai/transformers-in-diffusion/brief' },
+										{ label: 'Lesson', slug: 'lessons/multimodal-ai/transformers-in-diffusion/lesson' },
+										{ label: 'Practice', slug: 'lessons/multimodal-ai/transformers-in-diffusion/practice' },
+										{ label: 'Summary', slug: 'lessons/multimodal-ai/transformers-in-diffusion/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/multimodal-ai/transformers-in-diffusion/cheatsheet' },
+										{ label: 'References', slug: 'lessons/multimodal-ai/transformers-in-diffusion/references' },
+									],
+								},
+								{
+									label: 'Video generation',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/multimodal-ai/transformers-for-video-generation/brief' },
+										{ label: 'Lesson', slug: 'lessons/multimodal-ai/transformers-for-video-generation/lesson' },
+										{ label: 'Practice', slug: 'lessons/multimodal-ai/transformers-for-video-generation/practice' },
+										{ label: 'Summary', slug: 'lessons/multimodal-ai/transformers-for-video-generation/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/multimodal-ai/transformers-for-video-generation/cheatsheet' },
+										{ label: 'References', slug: 'lessons/multimodal-ai/transformers-for-video-generation/references' },
+									],
+								},
+							],
+						},
+						{
+							label: 'Phase 4\nAdvanced directions',
+							collapsed: true,
+							items: [
+								{
+									label: 'JEPA and world models',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/multimodal-ai/jepa-and-world-modeling/brief' },
+										{ label: 'Lesson', slug: 'lessons/multimodal-ai/jepa-and-world-modeling/lesson' },
+										{ label: 'Practice', slug: 'lessons/multimodal-ai/jepa-and-world-modeling/practice' },
+										{ label: 'Summary', slug: 'lessons/multimodal-ai/jepa-and-world-modeling/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/multimodal-ai/jepa-and-world-modeling/cheatsheet' },
+										{ label: 'References', slug: 'lessons/multimodal-ai/jepa-and-world-modeling/references' },
+									],
+								},
+								{
+									label: 'World models for science',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/multimodal-ai/multimodal-world-models-for-science/brief' },
+										{ label: 'Lesson', slug: 'lessons/multimodal-ai/multimodal-world-models-for-science/lesson' },
+										{ label: 'Practice', slug: 'lessons/multimodal-ai/multimodal-world-models-for-science/practice' },
+										{ label: 'Summary', slug: 'lessons/multimodal-ai/multimodal-world-models-for-science/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/multimodal-ai/multimodal-world-models-for-science/cheatsheet' },
+										{ label: 'References', slug: 'lessons/multimodal-ai/multimodal-world-models-for-science/references' },
+									],
+								},
+								{
+									label: 'Multimodal agents',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/multimodal-ai/multimodal-agents-in-production/brief' },
+										{ label: 'Lesson', slug: 'lessons/multimodal-ai/multimodal-agents-in-production/lesson' },
+										{ label: 'Practice', slug: 'lessons/multimodal-ai/multimodal-agents-in-production/practice' },
+										{ label: 'Summary', slug: 'lessons/multimodal-ai/multimodal-agents-in-production/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/multimodal-ai/multimodal-agents-in-production/cheatsheet' },
+										{ label: 'References', slug: 'lessons/multimodal-ai/multimodal-agents-in-production/references' },
+									],
+								},
+								{
+									label: 'Where it is going',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/multimodal-ai/where-multimodal-ai-is-going/brief' },
+										{ label: 'Lesson', slug: 'lessons/multimodal-ai/where-multimodal-ai-is-going/lesson' },
+										{ label: 'Practice', slug: 'lessons/multimodal-ai/where-multimodal-ai-is-going/practice' },
+										{ label: 'Summary', slug: 'lessons/multimodal-ai/where-multimodal-ai-is-going/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/multimodal-ai/where-multimodal-ai-is-going/cheatsheet' },
+										{ label: 'References', slug: 'lessons/multimodal-ai/where-multimodal-ai-is-going/references' },
+									],
+								},
+							],
+						},
+					],
+				},
 			],
 			components: {
 				// Adds og:image and twitter:image to every page; Starlight 0.38
