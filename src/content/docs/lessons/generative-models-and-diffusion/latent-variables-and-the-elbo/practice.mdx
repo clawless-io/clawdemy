@@ -1,0 +1,207 @@
+---
+title: "Practice: Latent variables and the ELBO"
+description: A self-check on the ELBO derivation and its two terms, a compute-the-ELBO-and-the-gap exercise on a fresh binary example, a verify-the-tight-case drill, and flashcards built for retrieval.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Six short questions. Answer each one in your head (or on paper) before opening the collapsible. Trying to retrieve the answer is where the learning sticks; rereading feels productive but does much less.
+
+**1. Write the latent-variable model and explain why `log p_model(x)` is intractable.**
+
+<details>
+<summary>Show answer</summary>
+
+`p_model(x) = integral over z of p(x | z) · p(z) dz`. The integral has no closed form when `p(x | z)` is a neural network, and naive Monte Carlo over the prior is unhelpful because most random latents produce tiny `p(x | z)` for any specific `x`. So we cannot evaluate `log p_model(x)` directly, and we cannot train by NLL the way Phase 1 did.
+
+</details>
+
+**2. Derive the ELBO in two lines using Jensen's inequality, starting from `log p(x)`.**
+
+<details>
+<summary>Show answer</summary>
+
+`log p(x) = log integral q(z|x) · [p(x,z) / q(z|x)] dz = log E_{z ~ q(z|x)}[p(x,z) / q(z|x)] >= E_{z ~ q(z|x)}[ log(p(x,z) / q(z|x)) ] = ELBO(x; q)`. The inequality is Jensen's, applied to `log` (which is concave): `log E[Y] >= E[log Y]`.
+
+</details>
+
+**3. State the reconstruction + KL split of the ELBO and explain what each term does.**
+
+<details>
+<summary>Show answer</summary>
+
+`ELBO(x; q) = E_{q(z|x)}[ log p(x | z) ] - KL( q(z|x) || p(z) )`. The reconstruction term measures how well the decoder reconstructs `x` from latents sampled from the encoder; maximizing it pushes the decoder to assign high probability to the true `x`. The KL term penalizes the encoder for diverging from the prior; subtracting it keeps the encoder from collapsing to a sharp posterior far from the prior. The two pull in opposite directions; training balances them.
+
+</details>
+
+**4. What is the gap between the ELBO and `log p(x)`, and what does that imply about training?**
+
+<details>
+<summary>Show answer</summary>
+
+`log p(x) - ELBO(x; q) = KL( q(z|x) || p(z|x) )`, the KL from the variational posterior (encoder) to the true posterior. Maximizing the ELBO does two good things at once: it pushes `log p(x)` up (the actual goal) AND it pushes `q(z|x)` toward `p(z|x)` (closing the bound's gap). The bound becomes tight when `q = p_posterior` exactly.
+
+</details>
+
+**5. Why is a VAE's reported "likelihood" not directly comparable to an autoregressive model's?**
+
+<details>
+<summary>Show answer</summary>
+
+The VAE reports the ELBO, a lower bound on `log p_model(x)`, with an unknown gap `KL(q || p_posterior)` that depends on how good the encoder is. An autoregressive model reports the exact `log p_model(x)` (the chain rule lets it compute the joint directly). So the VAE's number is conservative (lower than the truth) by an amount we generally do not know exactly. Treating ELBO as a likelihood understates the model.
+
+</details>
+
+**6. What is posterior collapse, and which ELBO term is "winning" when it happens?**
+
+<details>
+<summary>Show answer</summary>
+
+Posterior collapse is when the encoder `q(z | x)` learns to match the prior `p(z)` exactly, ignoring `x` entirely. The KL term in the ELBO drives this: if the KL term is being minimized harder than the reconstruction term is being maximized, the encoder picks the easy way out (match the prior, KL=0) at the cost of being uninformative. The decoder then has to reconstruct without useful latent information, and the latent space becomes unused. Modern variants (beta-VAE, KL annealing, free bits) adjust the relative weights of the two terms to control this.
+
+</details>
+
+## Try it yourself, part 1: compute the ELBO and the gap
+
+Use this setup. Binary observed `x ∈ {0, 1}`, binary latent `z ∈ {0, 1}`.
+
+```
+Prior:    p(z = 0) = p(z = 1) = 0.5
+Decoder:  p(x = 1 | z = 0) = 0.3          p(x = 1 | z = 1) = 0.9
+```
+
+About 9 minutes, pen and paper (a calculator helps for the logs; use natural log throughout).
+
+**Step 1.** Compute the marginal `p(x = 1)` and `log p(x = 1)`.
+
+**Step 2.** Compute the true posterior `p(z = 1 | x = 1)` using Bayes' rule.
+
+**Step 3.** Suppose the encoder gives `q(z = 1 | x = 1) = 0.6`. Compute the ELBO as `E_{q}[ log p(x = 1 | z) ] - KL( q(z | x = 1) || p(z) )`.
+
+**Step 4.** Verify the gap identity: `log p(x = 1) - ELBO` should equal `KL( q(z | x = 1) || p(z = 1 | x = 1) )`.
+
+<details>
+<summary>Check your work</summary>
+
+**Step 1.** `p(x = 1) = 0.5 · 0.3 + 0.5 · 0.9 = 0.15 + 0.45 = 0.6`. `log p(x = 1) = ln(0.6) ≈ -0.5108`.
+
+**Step 2.** `p(z = 1 | x = 1) = p(x = 1 | z = 1) · p(z = 1) / p(x = 1) = 0.9 · 0.5 / 0.6 = 0.45 / 0.6 = 0.75`.
+
+**Step 3.** With `q(z = 0 | x = 1) = 0.4`, `q(z = 1 | x = 1) = 0.6`:
+
+- Reconstruction: `0.4 · ln(0.3) + 0.6 · ln(0.9) ≈ 0.4 · (-1.2040) + 0.6 · (-0.1054) ≈ -0.4816 + -0.0632 ≈ -0.5448`
+- KL(q || prior): `0.4 · ln(0.4/0.5) + 0.6 · ln(0.6/0.5) ≈ 0.4 · ln(0.8) + 0.6 · ln(1.2) ≈ 0.4 · (-0.2231) + 0.6 · (0.1823) ≈ -0.0893 + 0.1094 ≈ 0.0201`
+- ELBO `≈ -0.5448 - 0.0201 ≈ -0.5649`
+
+**Step 4.** Gap: `log p(x = 1) - ELBO ≈ -0.5108 - (-0.5649) ≈ 0.0541`.
+
+Check identity: `KL(q || true posterior) = 0.4 · ln(0.4/0.25) + 0.6 · ln(0.6/0.75)`:
+
+- `0.4 · ln(1.6) ≈ 0.4 · 0.4700 ≈ 0.1880`
+- `0.6 · ln(0.8) ≈ 0.6 · (-0.2231) ≈ -0.1339`
+- Sum: `≈ 0.0541`
+
+Match. The identity `log p(x) - ELBO = KL(q || true posterior)` holds numerically, as the derivation requires.
+
+</details>
+
+## Try it yourself, part 2: the tight case
+
+Stay with the same setup (binary `x` and `z`, same prior and decoder). About 5 minutes.
+
+**Step 1.** Set the encoder to the true posterior `q(z = 1 | x = 1) = 0.75`. Recompute the reconstruction term, the KL-to-prior term, and the ELBO.
+
+**Step 2.** Verify that the ELBO now equals `log p(x = 1)` exactly (i.e., the gap is zero).
+
+<details>
+<summary>Check your work</summary>
+
+**Step 1.** With `q(z = 0 | x = 1) = 0.25`, `q(z = 1 | x = 1) = 0.75`:
+
+- Reconstruction: `0.25 · ln(0.3) + 0.75 · ln(0.9) ≈ 0.25 · (-1.2040) + 0.75 · (-0.1054) ≈ -0.3010 + -0.0791 ≈ -0.3801`
+- KL(q || prior): `0.25 · ln(0.5) + 0.75 · ln(1.5) ≈ 0.25 · (-0.6931) + 0.75 · (0.4055) ≈ -0.1733 + 0.3041 ≈ 0.1308`
+
+(Note: `q(z=0)/p(z=0) = 0.25/0.5 = 0.5`, and `q(z=1)/p(z=1) = 0.75/0.5 = 1.5`.)
+
+- ELBO: `-0.3801 - 0.1308 ≈ -0.5109`
+
+**Step 2.** `log p(x = 1) = ln(0.6) ≈ -0.5108`. ELBO `≈ -0.5109`. Match to rounding. The bound is tight (gap is zero) exactly when `q = p_posterior`, as Jensen's inequality predicts.
+
+Practical lesson: a perfect encoder makes the ELBO equal the log-likelihood. Real encoders are imperfect, so the ELBO is conservative. The amount it underestimates `log p(x)` by is exactly the KL from the encoder's posterior to the true posterior, a number that goes to zero as the encoder gets better.
+
+</details>
+
+## Flashcards
+
+Ten cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay out the full set as one card per page, ready to print or save as a PDF for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="What is a latent-variable model, and why is log p_model(x) intractable?">
+
+`p_model(x) = integral over z of p(x | z) p(z) dz`. The integral has no closed form for a neural-network decoder, and naive Monte Carlo over the prior fails because most random latents give tiny `p(x | z)`. So `log p_model(x)` is not directly computable, and we cannot train by NLL the way Phase 1 did.
+
+</Flashcard>
+
+<Flashcard question="Derive the ELBO in two lines using Jensen's inequality.">
+
+`log p(x) = log E_{z ~ q(z|x)}[ p(x,z) / q(z|x) ] >= E_{z ~ q(z|x)}[ log(p(x,z) / q(z|x)) ] = ELBO(x; q)`. The inequality is Jensen's, because `log` is concave: `log E[Y] >= E[log Y]`.
+
+</Flashcard>
+
+<Flashcard question="State the reconstruction + KL split of the ELBO.">
+
+`ELBO(x; q) = E_{q(z|x)}[ log p(x | z) ]  -  KL( q(z|x) || p(z) )`. Reconstruction (decoder fits `x` from encoder-sampled `z`) minus KL (encoder stays close to prior). The two pull in opposite directions; training balances them.
+
+</Flashcard>
+
+<Flashcard question="What does each ELBO term pull toward?">
+
+Reconstruction pulls toward a sharp, informative `q(z|x)` (so the decoder has enough information to rebuild `x`). KL pulls toward a vague, prior-like `q(z|x)`. The balance is the source of much VAE training behavior, including posterior collapse when KL wins too hard.
+
+</Flashcard>
+
+<Flashcard question="What is the gap between log p(x) and the ELBO?">
+
+`log p(x) - ELBO(x; q) = KL( q(z|x) || p(z|x) )`, the KL from the variational posterior (encoder) to the true posterior. The bound is tight exactly when `q = p_posterior`.
+
+</Flashcard>
+
+<Flashcard question="Why does maximizing the ELBO do two good things at once?">
+
+Because of the gap identity. Maximizing the ELBO pushes `log p(x)` up (the actual modeling goal) AND pushes `q(z|x)` toward `p(z|x)` (closing the bound's gap). Better model fit and better encoder approximation happen simultaneously.
+
+</Flashcard>
+
+<Flashcard question="Why isn't a VAE's reported likelihood directly comparable to an autoregressive model's?">
+
+The VAE reports the ELBO, a lower bound on `log p_model(x)` with an unknown gap (`KL(q || p_posterior)`). An autoregressive model reports the exact `log p_model(x)`. The VAE's number is conservative by an amount that depends on encoder quality, so cross-paradigm likelihood comparisons require care.
+
+</Flashcard>
+
+<Flashcard question="What is posterior collapse, and which ELBO term drives it?">
+
+Posterior collapse: the encoder `q(z | x)` matches the prior exactly, ignoring `x`. The KL term drives it; if KL is being minimized harder than reconstruction is being maximized, the encoder picks the easy way out (KL = 0) at the cost of being uninformative. Modern variants (beta-VAE, KL annealing, free bits) adjust the term weights.
+
+</Flashcard>
+
+<Flashcard question="Why does Jensen's inequality require log specifically?">
+
+Because `log` is concave: `log E[Y] >= E[log Y]` for concave functions, which makes the right side a LOWER bound (an evidence lower bound). Replace `log` with a convex function and the inequality flips direction; replace it with a non-monotonic function and the derivation breaks entirely. The choice of `log` is what gives the ELBO its name and its useful sign.
+
+</Flashcard>
+
+<Flashcard question="How does the ELBO connect to forward-KL minimization from L3?">
+
+The ELBO is the latent-variable paradigm's response to L3's forward-KL = NLL objective when the marginal is intractable. The gap identity `log p(x) - ELBO = KL(q || p_posterior)` means the latent-variable paradigm is still fundamentally about KL minimization, just with a bound on the exact objective. Maximizing the ELBO is "the closest thing to forward-KL minimization this paradigm allows."
+
+</Flashcard>
+
+</FlashcardSet>

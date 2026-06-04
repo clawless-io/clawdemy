@@ -1,0 +1,189 @@
+---
+title: "Lesson: Maximum likelihood and the KL view"
+description: The previous lesson minimized the negative log-likelihood without saying why. This lesson derives it. Maximum likelihood turns out to be exactly the empirical version of minimizing the forward KL divergence from the data distribution to the model, and that single derivation explains why every likelihood-based paradigm (autoregressive, flow, VAE-via-ELBO) shares this objective.
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+Last lesson said: "minimize the negative log-likelihood." If you took that at face value, you trained an autoregressive model successfully without anyone telling you why that was the right thing to minimize. This lesson tells you why.
+
+The answer turns out to be a one-paragraph derivation, plus a worked numerical example, plus an observation that the derivation explains the training objective for every likelihood-based generative paradigm in this track. By the end you will be able to write the forward KL divergence from the data distribution to the model, show with one line of algebra that minimizing it is exactly maximizing the expected log-likelihood under the data, and recognize the empirical NLL you have been minimizing as the Monte Carlo estimate of that expectation on a finite training set.
+
+This is a small lesson, formally. The math is one definition and one derivation. The reason it deserves its own lesson is that this single equation is the spine of likelihood-based generative modeling: autoregressive training, normalizing-flow training, and (lifted through the ELBO) VAE training all reduce to the same objective in different costumes.
+
+## The matching question
+
+Training a generative model means making the model distribution close to the data distribution. The two distributions live in the same space (over all possible data points); the data distribution is the one nature draws training examples from, and the model distribution is the one our parameterized neural network represents.
+
+We have a problem and a constraint. The problem: what does "close" mean for two distributions? The constraint: we do not have direct access to the data distribution. We only have a finite set of training samples drawn from it. So whatever "close" turns out to mean, we need an objective we can compute (or estimate) from those samples alone.
+
+The natural information-theoretic measure of how much one distribution differs from another is the **Kullback-Leibler divergence**, the KL divergence for short. Once we plug it in, the right objective falls out.
+
+## The KL divergence
+
+The KL divergence from one distribution to another is:
+
+```
+KL(p || q) = E_{x ~ p}[ log(p(x) / q(x)) ]  =  sum_x p(x) · log(p(x) / q(x))
+```
+
+(Or an integral instead of a sum if the variable is continuous.) Three properties to keep in mind:
+
+1. **Non-negative.** KL is non-negative for any pair of distributions. This follows from Jensen's inequality applied to negative log, which is convex.
+2. **Zero only at equality.** KL is zero if and only if the two distributions match everywhere. So KL equal to zero is the cleanest possible signal that the two distributions match.
+3. **Asymmetric.** KL is in general not symmetric in its two arguments: the value with the first distribution on the left differs from the value with the second on the left. The two arguments play different roles, and the "forward" vs "reverse" choice matters in practice (more on this below).
+
+KL has an information-theoretic reading: it measures the expected number of extra nats of code length you incur when you encode data drawn from the true distribution using a code optimized for a different distribution instead of the true one. ("Nats" because we are using natural log; switch to log base 2 for bits.) That reading is not strictly necessary for what follows, but it explains why KL is asymmetric: the cost of using the wrong code depends on which distribution is generating the data and which one your code expects.
+
+## The forward KL: data on the left
+
+The objective we will use is the **forward KL**, with the data distribution on the left and the model on the right:
+
+```
+KL(p_data || p_model) = E_{x ~ p_data}[ log(p_data(x) / p_model(x)) ]
+                      = E_{x ~ p_data}[ log p_data(x) - log p_model(x) ]
+                      = E_{x ~ p_data}[ log p_data(x) ]  -  E_{x ~ p_data}[ log p_model(x) ]
+```
+
+The split in the last line uses linearity of expectation. Look carefully at the two terms.
+
+The first term, the expected log-probability of the data under the data distribution, is the negative entropy of the data distribution. Crucially, **it does not depend on the model.** Whatever parameters we choose, this term stays the same.
+
+The second term, the expected log-probability of the model evaluated on data samples, is the **expected log-likelihood of the model under the data**. This is the only term we can affect by training.
+
+So minimizing the forward KL with respect to the model parameters is exactly the same as **maximizing the expected log-likelihood of the model under the data**:
+
+```
+minimize_{model}  KL(p_data || p_model)
+  is equivalent to
+maximize_{model}  E_{x ~ p_data}[ log p_model(x) ]
+```
+
+The first-term constant just shifts the objective by an amount that does not depend on the model.
+
+## From expectation to a finite training set
+
+We still do not have the data distribution itself. But we have a set of training samples drawn from it, and the Monte Carlo estimate of an expectation is just the sample average:
+
+```
+E_{x ~ p_data}[ log p_model(x) ]  ≈  (1/N) · sum_i log p_model(x_i)
+```
+
+Maximizing this sample average is **maximum likelihood**. Equivalently, **minimizing the negative log-likelihood (NLL)** of the training set:
+
+```
+minimize_{model}  -(1/N) · sum_i log p_model(x_i)
+```
+
+This is the same loss the previous lesson minimized for autoregressive models, derived now from first principles instead of asserted. The chain in three lines: minimizing forward KL → maximizing expected log-likelihood under the data → on a finite sample, minimizing the empirical NLL.
+
+The sample-size scaling is a constant that does not change the optimum, so most implementations write the loss as the **sum** of negative log-probabilities of training examples over the batch (or the average over the batch and then sum over batches, equivalent at the gradient level). The arithmetic name "NLL" hides the information-theoretic content: it is a Monte Carlo estimate of the forward KL, shifted by a model-independent constant.
+
+## A worked numerical example
+
+Take a binary outcome variable that takes value A or B, and a data distribution that is uniform:
+
+```
+p_data(A) = 0.5,   p_data(B) = 0.5
+```
+
+Suppose a first model gives probability 0.7 to A and 0.3 to B. Compute the forward KL:
+
+```
+KL(p_data || p_model)
+  = p_data(A) · log(p_data(A) / p_model(A))  +  p_data(B) · log(p_data(B) / p_model(B))
+  = 0.5 · log(0.5 / 0.7)                       +  0.5 · log(0.5 / 0.3)
+  = 0.5 · log(5/7)                              +  0.5 · log(5/3)
+  ≈ 0.5 · (-0.3365)                             +  0.5 · (0.5108)
+  ≈ -0.1683                                     +  0.2554
+  ≈ 0.0871
+```
+
+So the forward KL is approximately 0.087 nats. (Natural log throughout.) The number is positive, as KL must be when the two distributions differ.
+
+Now suppose training pushes the model to give probability 0.5 to each of A and B, matching the data exactly:
+
+```
+KL(p_data || p_model)
+  = 0.5 · log(0.5 / 0.5)  +  0.5 · log(0.5 / 0.5)
+  = 0.5 · 0                +  0.5 · 0
+  = 0
+```
+
+KL is exactly zero when the model matches the data, just as the second property promised. That is what training is trying to achieve.
+
+## Cross-entropy: the same objective in another costume
+
+There is one more name attached to this same objective. The **cross-entropy** of the model relative to the data is defined as:
+
+```
+H(p_data, p_model) = E_{x ~ p_data}[ -log p_model(x) ]
+```
+
+It is exactly the negative of the expected log-likelihood we were trying to maximize. Plug it into the forward-KL expansion and rearrange:
+
+```
+KL(p_data || p_model) = H(p_data, p_model) - H(p_data)
+```
+
+where the entropy of the data is the expected negative log-probability of the data under the data distribution, the same model-independent constant we saw earlier. Three equivalent training objectives, then:
+
+```
+minimize  KL(p_data || p_model)
+minimize  H(p_data, p_model)         (cross-entropy)
+minimize  -(1/N) · sum_i log p_model(x_i)   (empirical NLL)
+```
+
+All three differ from each other only by constants and (in the last case) a finite-sample approximation. When you read "cross-entropy loss" in a classification paper, "NLL" in a language-model paper, or "forward KL minimization" in a generative-models paper, they are the same objective, named for which side of the same equation the author was looking at.
+
+## Why we use forward KL, not reverse KL
+
+KL is asymmetric: the forward KL with the data on the left and the reverse KL with the model on the left are different numbers and lead to different training behavior. Why does the field overwhelmingly use forward KL?
+
+The decisive reason is practical: we have samples from the data distribution and a model we can evaluate. The forward KL requires expectations under the data distribution, which Monte Carlo from our training samples handles for free; we never need to evaluate the data distribution itself. The reverse KL requires expectations under the model, which is fine (we can sample from the model), but the integrand needs the log of the data probability, which we cannot evaluate, only sample from. So reverse KL is not directly computable when our access to the data is "samples only," which it almost always is.
+
+A secondary reason worth naming: forward and reverse KL have different qualitative behavior when the model is misspecified (cannot exactly match the data). Forward KL is **mass-covering**: it strongly penalizes the model for assigning low probability where the data has high probability, so it tends to "cover all the modes" even at the cost of spreading some probability where the data has none. Reverse KL is **mode-seeking**: it strongly penalizes the model for assigning high probability where the data has none, so it tends to concentrate on a few modes. For generative models we typically want mass-covering behavior (do not miss parts of the data distribution), which is another reason forward KL is the natural default.
+
+## Why this matters across the whole track
+
+This derivation is the spine of every likelihood-based paradigm.
+
+**Autoregressive models** (last lesson) train by NLL = empirical forward-KL minimization. The chain-rule factorization makes the NLL a sum of per-piece terms, but the overall objective is forward KL.
+
+**Normalizing flows** (next lesson) parameterize the model density exactly using the change-of-variables formula and train by the same empirical NLL. The KL derivation justifies why exact-density flow models are trained the same way as autoregressive models, even though the architecture is completely different.
+
+**Variational autoencoders** (lesson 5) cannot compute the model log-likelihood directly because of an intractable integral over latents. They instead maximize a lower bound on the model log-likelihood called the **ELBO**. Maximizing the ELBO does not minimize the true forward KL but it does push toward it, with a known gap that closes when the variational approximation is exact. Lesson 5 unpacks the ELBO derivation; the forward-KL view is what makes it understandable as "the closest we can get to the same objective when the integral is intractable."
+
+**GANs** are the exception. They do not minimize forward KL; they minimize a different divergence (related to the Jensen-Shannon divergence in the original GAN formulation, or the Wasserstein distance in WGAN). That is why GANs cannot give you a likelihood number: they were trained against an objective that does not involve one.
+
+**Diffusion** sits in a more subtle place. The training objective looks like an MSE on noise prediction, but lesson 14 will show it is mathematically equivalent to a weighted sum of denoising score-matching losses, which (in turn) is connected to a bound on log-likelihood. So diffusion is "likelihood-flavored" but not literally trained on forward KL.
+
+The map from lesson 1, with this derivation in hand, looks more unified than before: three of the four paradigms (autoregressive, flow, VAE-via-ELBO) all share the forward-KL objective in different forms; GANs explicitly do not; diffusion is connected through a chain of equivalences.
+
+## Why this matters when you use AI
+
+The practical payoff is two-fold.
+
+**Comparing models across architectures.** Because autoregressive language models and normalizing-flow models both train on forward KL (NLL), their training losses are directly comparable on the same data. **Perplexity** = exp(NLL per token) is the standard cross-model metric for language models, and **bits per pixel** (or bits per dim) = NLL per pixel / log(2) is the standard cross-model metric for image likelihood models. Both are forward-KL estimates expressed in interpretable units. The reason you can compare two LLMs by their perplexity (and not a GAN to anything via likelihood) is that they share this objective and a GAN does not.
+
+**Reasoning about training failures.** If an autoregressive model is doing well on training NLL but poorly on validation NLL, that is forward KL overfit on the training sample. If a model collapses to a single mode, that is mode-seeking behavior (which forward KL does not encourage but a different objective like reverse KL would). Knowing the divergence the model is trained on lets you diagnose what its loss is and is not penalizing.
+
+## Common pitfalls
+
+**Treating KL as a distance.** KL is not a metric. It does not obey symmetry or the triangle inequality. Calling it a "distance" is shorthand; the asymmetry is real and the field's choice of forward vs reverse is informed by it.
+
+**Confusing cross-entropy with entropy.** Cross-entropy is the expected negative log-probability of the model under the data distribution; entropy is the expected negative log-probability of the data under the data distribution. Cross-entropy depends on both distributions; entropy depends on only the first. The forward-KL identity links them: KL equals cross-entropy minus entropy.
+
+**Thinking NLL is a probability.** NLL is a positive number (since probabilities are between 0 and 1 and their negative logs are non-negative), but it is not itself a probability or a percentage. It is in units of nats (or bits if you used log base 2). Two models' NLLs are comparable on the same data only if you used the same log base; conventions vary.
+
+**Forgetting the model-independent constant.** The first term in the forward-KL expansion is the expected log-probability of the data under the data distribution, which does not change with the model. This is why the absolute value of an NLL is not informative on its own; only the relative value across models or epochs is. A model with an NLL of 5 is not "twice as bad" as one with NLL of 2.5; the difference is what is meaningful.
+
+## What you should remember
+
+- **Maximum likelihood is the empirical version of minimizing the forward KL divergence from the data to the model.** The derivation is one line: the forward KL equals the entropy of the data minus the expected log-probability of the model under the data; the first term does not depend on the model, so minimizing KL equals maximizing the expected log-likelihood, which on a finite sample equals minimizing the empirical NLL.
+- **Three names for the same objective:** forward KL, cross-entropy, and NLL. They differ by constants and by sample-vs-expectation, not by what they prefer. Recognizing the three names lets you read papers from different traditions on the same training objective.
+- **Forward KL is the natural choice because of sample access and mass-covering behavior.** We have samples from the data distribution and can evaluate the model; forward KL uses exactly that information. It is also mass-covering, which generative models usually want. Autoregressive, flow, and (via ELBO) VAE training all share this objective; GANs explicitly use a different one; diffusion is connected via a chain of equivalences.
+
+You now have the theoretical justification for everything in Phase 1 of this track. The next lesson takes the forward-KL objective to a new architecture, normalizing flows, where the change-of-variables formula from Track 4 lets you parameterize the model density exactly through an invertible transformation, then train it with the same NLL you have been using all along.

@@ -1,0 +1,103 @@
+---
+title: "Cheatsheet: Latent variables and the ELBO"
+description: One-page reference. The latent-variable model, the intractable marginal, the ELBO derivation via Jensen's inequality, the reconstruction + KL split, the gap identity, and the worked binary example.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## The setup
+
+```
+z ~ p(z)              prior over latents (e.g. standard Gaussian)
+x ~ p(x | z)          learned decoder
+p_model(x) = integral over z of  p(x|z) · p(z)  dz       <-- INTRACTABLE
+```
+
+We cannot compute `log p_model(x)` directly, so we cannot train by NLL = forward KL minimization the way Phase 1 did. We need a tractable surrogate.
+
+## The ELBO derivation (Jensen's inequality, two lines)
+
+Introduce a variational distribution `q(z | x)` (the encoder, learnable):
+
+```
+log p(x) = log integral q(z|x) · [p(x,z) / q(z|x)] dz
+         = log E_{z ~ q(z|x)}[ p(x,z) / q(z|x) ]
+         >= E_{z ~ q(z|x)}[ log( p(x,z) / q(z|x) ) ]              (Jensen, log is concave)
+         = ELBO(x; q)
+```
+
+So `ELBO(x; q) <= log p(x)`, equality iff `q(z | x) = p(z | x)`.
+
+## The reconstruction + KL split
+
+Factor `p(x, z) = p(x | z) · p(z)` inside the ELBO and rearrange:
+
+```
+ELBO(x; q) = E_{z ~ q(z|x)}[ log p(x|z) ]   -   KL( q(z|x) || p(z) )
+              \---- reconstruction ----/         \--- KL regularizer ---/
+```
+
+| Term | Pulls toward | Push direction |
+| --- | --- | --- |
+| Reconstruction | sharp, informative `q(z\|x)` | Encoder gives decoder enough info to rebuild `x` |
+| KL regularizer | vague, prior-like `q(z\|x)` | Encoder stays close to the prior |
+
+Training balances the two. Posterior collapse (the classical VAE pathology) happens when the KL term wins too hard and the encoder ignores `x`.
+
+## The gap identity
+
+```
+log p(x) - ELBO(x; q) = KL( q(z|x) || p(z|x) )
+```
+
+The gap is the KL from the **variational posterior** to the **true posterior**. Maximizing the ELBO does two things at once: push `log p(x)` up, and push `q(z|x)` toward `p(z|x)` (closing the gap).
+
+## Worked binary example (verify the identity numerically)
+
+Setup: `x ∈ {0,1}`, `z ∈ {0,1}`, `p(z) = [0.5, 0.5]`, decoder `p(x=1 | z=0) = 0.2`, `p(x=1 | z=1) = 0.8`.
+
+- Marginal: `p(x=1) = 0.5 · 0.2 + 0.5 · 0.8 = 0.5`, so `log p(x=1) = ln(0.5) ≈ -0.6931`
+- True posterior: `p(z=1 | x=1) = 0.8 · 0.5 / 0.5 = 0.8`
+
+**Imperfect encoder** `q(z=1 | x=1) = 0.7`:
+
+| Quantity | Computation | Value |
+| --- | --- | --- |
+| Reconstruction | `0.3·ln(0.2) + 0.7·ln(0.8)` | `≈ -0.6390` |
+| KL(q || prior) | `0.3·ln(0.6) + 0.7·ln(1.4)` | `≈ 0.0823` |
+| ELBO | reconstruction - KL | `≈ -0.7214` |
+| Gap | `log p(x) - ELBO` | `≈ 0.0282` |
+| KL(q || true posterior) | `0.3·ln(1.5) + 0.7·ln(0.875)` | `≈ 0.0281` |
+
+Gap = KL(q || true posterior), as the identity requires (match within rounding).
+
+**Tight encoder** `q(z=1 | x=1) = 0.8 (= true posterior)`:
+
+| Quantity | Value |
+| --- | --- |
+| Reconstruction | `0.2·ln(0.2) + 0.8·ln(0.8) ≈ -0.5004` |
+| KL(q || prior) | `0.2·ln(0.4) + 0.8·ln(1.6) ≈ 0.1927` |
+| ELBO | `-0.6931` |
+| Gap | `0` |
+
+ELBO equals `log p(x=1)` exactly when `q = true posterior`. Jensen's inequality is tight.
+
+## Why it matters across the track
+
+- **Lesson 6 (VAE).** Same ELBO, parameterized with neural networks; the reparameterization trick makes it trainable.
+- **Diffusion (lesson 14).** The diffusion training objective is mathematically equivalent to an ELBO for a multi-step latent-variable model whose latents are the noisy intermediate states.
+- **Cross-paradigm comparison.** VAE's reported "likelihood" is the ELBO, a lower bound. Not directly comparable to an autoregressive model's exact likelihood. Quoting an ELBO as a likelihood understates the model.
+
+## Pitfalls to dodge
+
+- **ELBO = likelihood.** No, ELBO ≤ log p(x); the gap is KL(q || true posterior), generally positive.
+- **Jensen with arbitrary functions.** The inequality goes the right way only because `log` is concave; replace it and the inequality flips.
+- **`q(z|x)` is fixed.** No, the encoder is learned along with the model; training optimizes over both.
+- **KL term as optional regularizer.** It falls out of the derivation, not added by hand. Scaling it without understanding the trade-off produces posterior collapse and other VAE pathologies.
+
+## The one-line version
+
+The ELBO is the tractable lower bound on `log p_model(x)` that we maximize when the marginal integral is intractable; it splits into reconstruction minus KL-to-prior, and the gap to the true log-likelihood is itself a KL from the variational posterior to the true posterior, which maximizing the ELBO automatically closes.

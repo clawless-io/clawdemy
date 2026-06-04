@@ -1,0 +1,100 @@
+---
+title: "Cheatsheet: Energy-based models, the partition-function problem"
+description: One-page reference. The EBM density, why Z is intractable, the maximum-likelihood gradient with positive and negative phases, MCMC sampling and contrastive divergence, the score-function escape route, and the bridge to score matching and diffusion.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## The model
+
+```
+p_θ(x) = exp(-E_θ(x)) / Z(θ)        Z(θ) = integral over x' of exp(-E_θ(x')) dx'
+```
+
+| Component | Role |
+| --- | --- |
+| `E_θ(x)` | Energy function; any neural network mapping `x` to a real number |
+| `Z(θ)` | Partition function (normalization constant); makes `p_θ` integrate to 1 |
+| Sign convention | Low energy = high probability (Boltzmann convention) |
+
+**No architectural constraint** on `E_θ`: no causality, no invertibility, no encoder-decoder split. The paradigm's main appeal.
+
+## The problem: Z is intractable
+
+`Z(θ) = integral exp(-E_θ(x)) dx` over the full `d`-dim data space.
+
+| Approach | Why it fails |
+| --- | --- |
+| Grid integration | Cells = `2^{d·bits}`, infeasible past ~5D |
+| Naive Monte Carlo (uniform proposal) | Hits low-`p_θ` regions overwhelmingly; astronomical variance |
+| Importance sampling | Needs proposal close to `p_θ`; that is what we are trying to model |
+
+So `Z(θ)` is uncomputable in practice for any nontrivial neural-network energy. Maximum likelihood (which needs `log p_θ = -E_θ − log Z`) is blocked.
+
+## A tractable special case
+
+Quadratic 1D energy `E_θ(x) = 0.5 · (x − μ)²` gives `Z = sqrt(2π)` (independent of `μ`), so `p_θ(x) = N(x; μ, 1)`, a standard Gaussian. The EBM in this case recovers a Gaussian, and `Z` is the standard Gaussian normalization. Replace the quadratic with anything richer (quartic, neural network) and `Z` loses its closed form.
+
+## The ML gradient (where trouble shows up)
+
+```
+∇_θ log p_θ(x)  =  -∇_θ E_θ(x)           +  E_{x' ~ p_θ}[ ∇_θ E_θ(x') ]
+                   \-- positive phase --/   \---- negative phase ----/
+```
+
+| Phase | Direction |
+| --- | --- |
+| Positive | Lower energy at the data point `x` (increase `p_θ(x)`) |
+| Negative | Raise energy at samples from the model (decrease `p_θ(x')`) |
+
+Equilibrium: when `p_θ = p_data`, expected gradient is zero (maximum-likelihood fixed point).
+
+## The negative phase needs model samples (MCMC)
+
+Sampling from `p_θ` is itself hard. **Langevin dynamics**:
+
+```
+x_{t+1} = x_t  -  η · ∇_x E_θ(x_t)  +  sqrt(2η) · ε_t,    ε_t ~ N(0, I)
+```
+
+Gradient pulls toward low energy; noise term keeps the chain exploring. Converges to samples from `p_θ` after many steps (slow).
+
+**Contrastive divergence (CD-k)**: run MCMC for only `k` steps from the data point (typically `k = 1` or a few). Biased gradient, but cost-bounded. The standard pragmatic compromise; has known training-stability pathologies.
+
+## The score-function escape
+
+Take the gradient with respect to `x` (not `θ`):
+
+```
+∇_x log p_θ(x)  =  -∇_x E_θ(x)  -  ∇_x log Z(θ)
+                =  -∇_x E_θ(x)  -  0                ← Z does not depend on x
+                =  -∇_x E_θ(x)
+```
+
+**`Z` vanishes under the `x`-gradient.** The **score function** `s_θ(x) = ∇_x log p_θ(x) = -∇_x E_θ(x)` is computable from one backward pass through the energy network, with NO need to know `Z`.
+
+This is the conceptual move that:
+- Opens **score matching** (L11: train by matching the model's score to the data's score)
+- Underlies **diffusion models** (L12-L14: learn to denoise from noise, mathematically equivalent to score matching)
+
+## Why EBMs are worth knowing
+
+- Unify several classical model families (RBMs, Ising models, Hopfield, energy-view CRFs)
+- Conceptual bridge to diffusion (without this lesson, "why does score matching exist?" has no answer)
+- "Energy" framing recurs across deep learning (contrastive losses, some SSL methods, DPO-family preference learning)
+
+Why NOT the practical paradigm: MCMC + CD training is slow and unstable compared to autoregressive NLL / flow exact-density / VAE ELBO / diffusion noise prediction. Modern systems use the score-based view that recovers EBM flexibility without the MCMC cost.
+
+## Pitfalls to dodge
+
+- **Treating Z as constant.** `Z(θ)` depends on `θ`; every gradient step on the energy changes it. Treating Z as a hyperparameter gives systematically biased gradients.
+- **Trying to estimate Z numerically.** Grid integration infeasible past ~5D; MCMC estimation of Z is its own research area with unreliable estimates. Use methods that bypass Z (score matching, noise contrastive estimation).
+- **Forgetting that EBMs sample by MCMC.** Generation is iterative Langevin dynamics, not a single forward pass. Slow.
+- **Mistaking the sign convention.** Boltzmann: low energy = high probability. Some papers flip to `p ∝ exp(+E)`; always check before reading derivations.
+
+## The one-line version
+
+An EBM names a free neural-network energy `E_θ(x)` and divides by an intractable partition function `Z(θ)`, which blocks maximum likelihood; the partition function vanishes under the `x`-gradient, so the score function `∇_x log p_θ = -∇_x E_θ` is computable directly, which is the conceptual escape that the next lesson (score matching) and the modern diffusion paradigm build on.

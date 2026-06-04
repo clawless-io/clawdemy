@@ -1,0 +1,25 @@
+---
+title: "Summary: VAE training in practice, the reparameterization trick"
+description: The 5-minute scan version. The VAE architecture, the reparameterization trick that makes the ELBO differentiable, the closed-form Gaussian KL, the per-example training loss, and where VAEs sit in the modern generative landscape (especially as the compression front-end in latent diffusion).
+artifact: summary
+sidebar:
+  order: 4
+  label: Summary
+---
+
+The previous lesson derived the ELBO abstractly. This lesson took it to a concrete neural-network architecture and solved the one technical problem that kept the abstract ELBO from being trained by SGD: backpropagation through a stochastic sample. The whole lesson reduces to one line: **a VAE is two neural networks (Gaussian encoder + decoder) trained on the ELBO; the reparameterization trick `z = μ + σ·ε` makes the sample differentiable, the Gaussian KL has a closed form, and the per-example loss is one Monte Carlo reconstruction plus one closed-form KL.** This is the scan-it-in-five-minutes version.
+
+## Core ideas
+
+- A **VAE** has three components: a fixed standard Gaussian **prior** `p(z) = N(0, I)` over a `d`-dim latent, an **encoder** `q(z | x) = N(μ_x, σ²_x)` whose `(μ_x, log σ²_x)` come from a neural network on `x`, and a **decoder** `p(x | z)` whose parameters come from a neural network on `z`. Predict `log σ²` (not `σ²` directly) so positivity is guaranteed by exponentiation.
+- The ELBO from L5 has a stochastic reconstruction term `E_{z ~ q(z|x)}[log p(x | z)]`. Sampling `z ~ q(z|x)` directly is not differentiable in the encoder parameters, so ordinary backprop fails.
+- The **reparameterization trick** fixes it: write `z = μ_x + σ_x · ε` with `ε ~ N(0, I)` sampled independently. The distribution of `z` is unchanged (it is still `N(μ_x, σ²_x)`), but `z` is now a deterministic function of `(x, ε)`. Backprop flows freely from `z` to the encoder parameters; the randomness lives in `ε`, treated as a constant input per step. This single move turns the ELBO from "we know it but cannot train it" into "we train it by standard SGD."
+- The **KL term has a closed form** for Gaussian `q` and standard Gaussian prior: `KL(N(μ, σ²) || N(0, 1)) = 0.5·(σ² + μ² − 1 − log σ²)`, summed over latent dimensions. Quick anchors: `μ=0, σ=1 → KL = 0`; `μ=2, σ=1 → KL = 2`; `μ=0, σ=0.5 → KL ≈ 0.318`; `μ=1, σ=2 → KL ≈ 1.307`. Zero only at the prior, positive otherwise, growing as the encoder shifts or stretches.
+- **Per-example loss**: `-ELBO(x; q) = -log p(x | z̃) + 0.5·sum over dims (σ²_x + μ²_x − 1 − log σ²_x)`, where `z̃ = μ_x + σ_x · ε`. First term: one-sample Monte Carlo reconstruction NLL. Second term: closed-form KL, exact and free of sampling. Backprop through both via the reparameterization trick.
+- **What VAEs are good at**: representation learning (structured latent codes), compression as a component in larger systems (notably **latent diffusion**, where a VAE encoder maps images to a low-dim latent space and the diffusion process runs in that latent space; this is the architecture behind Stable Diffusion), and density estimation when latent structure matters. **Less competitive** for raw-pixel sample quality (diffusion currently dominates).
+- The **reparameterization trick recurs** beyond VAEs: diffusion sampling, some RL policy-gradient methods, normalizing-flow extensions of the variational posterior. Whenever you see "differentiable sampling," the underlying move is reparameterization.
+- A note on §6 watch: VAE-based components appear in many synthetic-media systems. The mechanical content of this lesson (what a VAE is, how to train one) is separable from policy framings about synthetic-media use (content authenticity, watermarking, training-data licensing), which belong in legal/governance/ethics forums. This lesson covers the math; those questions need expertise this track does not develop.
+
+## What changes for you
+
+Before this lesson, "VAE" was probably one of several encoder-decoder architectures with no precise statement of what made it variational and what kept SGD from training a regular autoencoder with a stochastic latent. Now you have it: the variational part is the ELBO bound (L5 derivation), and the trainable part is the reparameterization trick (this lesson). When you next see a generative system that has an "encoder + decoder + latent space" structure (and most modern systems do, including the latent-diffusion family), you can place the VAE inside it and know exactly what the encoder is optimizing and how the decoder is bounded by the ELBO. The next lesson opens the adversarial paradigm, where the ELBO is dropped entirely in favor of a two-network game, with sharper samples but no principled likelihood objective.

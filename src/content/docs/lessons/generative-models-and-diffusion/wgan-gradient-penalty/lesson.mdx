@@ -1,0 +1,147 @@
+---
+title: "Lesson: GAN training in practice, Wasserstein loss and gradient penalty"
+description: The previous lesson showed that the original GAN minimizes Jensen-Shannon divergence and inherits paradigm-level pathologies (vanishing gradients, mode collapse, no clean stopping criterion). This lesson keeps the minimax framework but changes the divergence to the Wasserstein distance, which gives meaningful gradients even when the data and generator distributions barely overlap. The architectural change is the gradient penalty, which softly enforces the 1-Lipschitz constraint the Wasserstein formulation requires. The result is the more stable GAN variant most production-grade systems actually use.
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+The previous lesson left the GAN paradigm with three paradigm-level problems: vanishing gradients (the original loss saturates), mode collapse (the Jensen-Shannon divergence does not strongly penalize missing modes), and no clean stopping criterion (training losses oscillate, sample quality and loss decouple). The non-saturating loss fixes the first one practically; the rest required deeper changes.
+
+This lesson covers the deeper change. We keep the GAN's two-network minimax framework, but we replace Jensen-Shannon with a different divergence: the **Wasserstein distance** (also called the **Earth Mover's distance**). The Wasserstein distance is geometric in a way JS is not, and it gives meaningful, non-vanishing gradients even when the data and generator distributions barely overlap, which is exactly the situation early in training. To minimize it tractably, the discriminator is replaced with a **critic** constrained to be 1-Lipschitz, and the constraint is enforced softly via a **gradient penalty**. The resulting **WGAN-GP** is the GAN variant most production-grade adversarial systems actually use.
+
+By the end you will be able to write the Wasserstein objective in its dual form, explain what the 1-Lipschitz constraint does and why the gradient penalty enforces it, compute a small Wasserstein distance by hand using the cumulative-distribution formula, and place WGAN-GP correctly in the GAN family.
+
+## The intuition: Earth Mover's distance
+
+Picture two distributions as piles of dirt. The **Wasserstein distance** (in its 1-norm form, the Wasserstein-1 distance) is the **minimum amount of work needed to transport mass from one pile into the shape of the other**, where work is mass times distance moved. This is also called the Earth Mover's distance for that reason.
+
+Take a tiny example. One distribution has all its mass at position zero; another distribution has all its mass at position three. To turn the first into the second, you have to move the whole pile (mass one) a distance of three units. Work equals one times three equals three. So the Wasserstein-1 distance is three. If the second pile were at position five, the distance would be five. The Wasserstein distance scales smoothly with how far apart the distributions are; it cares about geometry.
+
+Now compare that to Jensen-Shannon for the same example. Both piles are point masses (delta functions) at different points. Their supports are disjoint, the pointwise mixture is two delta peaks of equal mass, and the Jensen-Shannon divergence comes out to its maximum value of log two (approximately 0.693) regardless of how far apart the points are. Jensen-Shannon cannot tell position three from position thirty; both are "fully disjoint."
+
+This is the precise sense in which Jensen-Shannon fails GAN training. Early in training, the generator's distribution barely overlaps the data (and certainly does not have shared support); the Jensen-Shannon divergence is pinned near its maximum and gives no gradient signal about which direction to push the generator. Wasserstein does not have this problem: the gradient of the Wasserstein-1 distance with respect to the generator parameters tells the generator to move its output mass toward the data's mass, and that gradient is meaningful even when the two distributions are completely disjoint.
+
+## The chalkboard form: Kantorovich-Rubinstein duality
+
+The Earth Mover's interpretation of the Wasserstein-1 distance is intuitive but hard to optimize directly (the transport problem is a linear program over couplings). The training-friendly form comes from a duality result:
+
+```
+W_1(p, q)  =  sup_{||f||_L ≤ 1}   E_{x ~ p}[ f(x) ]  -  E_{x ~ q}[ f(x) ]
+```
+
+The supremum is taken over all **1-Lipschitz** functions from the data space to the reals. A function is 1-Lipschitz if its slope is bounded by one everywhere: the absolute difference of the function at two points is at most the distance between those points. This is also written as the gradient constraint that the gradient norm is at most one almost everywhere (for differentiable functions).
+
+The dual form has a clean reading. The "best" function is one that assigns high values to the first distribution and low values to the second, while not being too steep anywhere (the Lipschitz constraint). The difference of expectations (under the first minus under the second) is then a measure of how separable the two are by a "gentle" function, and the supremum equals the Wasserstein distance.
+
+This is the form a neural network can be trained on. Replace the original GAN's discriminator with a network (called the **critic**, not the discriminator, because it no longer outputs a probability), constrained to be 1-Lipschitz. Train it to maximize the difference of its expected values under the data and generator distributions, and train the generator to minimize the same quantity. The two-network minimax framework is preserved; the divergence (and the constraint) has changed.
+
+## The hard part: enforcing the 1-Lipschitz constraint
+
+A standard neural network is not 1-Lipschitz by default. Its gradient can spike to any value. The original WGAN paper (Arjovsky, Chintala, Bottou, 2017) enforced the constraint by **weight clipping**: after each gradient step on the critic, clip every weight in the critic to a small symmetric range around zero. This made the network globally bounded and Lipschitz with some constant (though not necessarily one).
+
+Weight clipping worked, but it caused new problems. Most weights got pushed to the boundary, the network became less expressive, and training was sensitive to the clipping threshold. The follow-up paper (Gulrajani, Ahmed, Arjovsky, Dumoulin, Courville, 2017) introduced a better way: the **gradient penalty**.
+
+The gradient penalty adds a regularization term to the critic's loss that pushes the norm of the critic's gradient toward one at sample points. Specifically:
+
+```
+critic loss  =  -[ E_{x ~ p_data}[ f(x) ]  -  E_{x ~ p_G}[ f(x) ] ]
+                +  λ · E_{x̂ ~ p_x̂}[ ( ||∇_x f(x̂)|| - 1 )^2 ]
+```
+
+The first bracket is the (negated) Wasserstein duality form the critic maximizes; the second term is the gradient penalty, weighted by a hyperparameter (typically ten in the original paper). The penalty is evaluated at interpolated samples drawn by mixing a real and a fake sample with a uniform mixing coefficient. The intuition is that we want the critic to have gradient norm one along the "path" between real and fake, which is where the transport plan does most of its work.
+
+The gradient penalty is a **soft** constraint (the penalty pushes toward unit gradient norm, it does not strictly enforce it), but in practice it produces critics that are very close to 1-Lipschitz and that train far more stably than weight-clipped ones.
+
+This is **WGAN-GP**. The "WGAN" part says we are minimizing the Wasserstein distance via Kantorovich-Rubinstein duality. The "GP" part says we enforce the Lipschitz constraint via the gradient penalty on interpolated samples.
+
+## A worked numerical example: Wasserstein distance via the CDF formula
+
+For one-dimensional distributions, the Wasserstein-1 distance has a clean closed-form expression in terms of cumulative distribution functions:
+
+```
+W_1(p, q)  =  integral of  |F_p(x) - F_q(x)|  dx
+```
+
+where the two terms in the absolute value are the cumulative distribution functions of the two distributions. This is easy to compute on small discrete distributions.
+
+Take a two-mass discrete distribution with mass 0.5 at position zero and mass 0.5 at position two, and a similarly-shaped distribution shifted to the right by one unit: mass 0.5 at position one and mass 0.5 at position three. The CDFs are step functions:
+
+```
+F_p(x) = 0   for x < 0,    0.5   for 0 ≤ x < 2,    1   for x ≥ 2
+F_q(x) = 0   for x < 1,    0.5   for 1 ≤ x < 3,    1   for x ≥ 3
+```
+
+Compute the absolute CDF gap piecewise:
+
+```
+x < 0:           |0 − 0| = 0
+0 ≤ x < 1:       |0.5 − 0| = 0.5
+1 ≤ x < 2:       |0.5 − 0.5| = 0
+2 ≤ x < 3:       |1 − 0.5| = 0.5
+x ≥ 3:           |1 − 1| = 0
+```
+
+Integrate over the real line:
+
+```
+W_1(p, q)  =  0.5 · (1 − 0)  +  0  +  0.5 · (3 − 2)  +  0  =  0.5 + 0.5  =  1
+```
+
+So the Wasserstein-1 distance equals one, which matches the Earth Mover's intuition: move 0.5 mass one unit from position zero to position one (work 0.5), and 0.5 mass one unit from position two to position three (work 0.5), total one.
+
+Compare with what Jensen-Shannon would give for these same distributions. They have disjoint supports (one is supported on zero and two, the other on one and three), so Jensen-Shannon would not give the meaningful gradient signal that "the shift is one unit." Wasserstein does, because it counts distance.
+
+## Why WGAN-GP is more stable than the original GAN
+
+Three properties follow from the Wasserstein objective and the gradient penalty.
+
+**Meaningful gradients even when distributions are disjoint.** The Wasserstein gradient with respect to the generator tells it to move output mass toward the data's mass, scaled by the geometric distance. This does not vanish when the generator and data distributions do not overlap. Early in training, when overlap is essentially zero, the WGAN generator still gets a useful signal that Jensen-Shannon would not give.
+
+**Training loss correlates with sample quality.** The critic's output estimates the Wasserstein distance, which is itself a meaningful similarity number. So watching the critic's loss across training gives you a real proxy for "how close is the generator distribution to the data distribution?" in a way the original GAN's oscillating losses do not. This partially addresses the no-clean-stopping-criterion problem from L7.
+
+**Mode collapse is reduced (though not eliminated).** Wasserstein distance, unlike Jensen-Shannon, penalizes missing mass: if the generator ignores a mode of the data, the unmoved mass at the missed mode contributes geometric cost to the Wasserstein-1 distance, regardless of what else the generator is doing. So the generator has a gradient-level incentive to cover all modes, not just to fool the critic on a narrow set of outputs. In practice, WGAN-GP collapses much less than the original GAN, though it can still collapse under poor architecture or hyperparameter choices.
+
+What WGAN-GP does **not** fix: the paradigm still gives no likelihood number (the critic outputs a scalar, not a density), it still requires careful architecture choices (the critic must be expressive enough to approximate the supremum well), and it adds the gradient-penalty computation cost (computing the input gradient of the critic at each step). For practical deployments, WGAN-GP is the default starting point for adversarial training where the original GAN's instability would have been a blocker.
+
+## A note on what this lesson does NOT cover
+
+The §6 boundary from the previous lesson carries through this one and applies with the same structure. The mechanical content here (Wasserstein objective, 1-Lipschitz critic, gradient penalty) is separable from policy framings about adversarial-generation use cases. Four distinct forums sit outside this lesson:
+
+- **When generating synthetic faces, voices, or video of identifiable people is appropriate vs not** (use-case and consent policy);
+- **How to attribute or watermark synthesized content** (provenance policy);
+- **Sector-specific policies for generated media in journalism, politics, and legal evidence** (deployment policy);
+- **IP and licensing claims around training data scraped from named sources** (data-licensing policy).
+
+Treat the math (which this lesson gives you: the Wasserstein objective, the gradient penalty, the worked CDF computation) and the policy questions (which it explicitly does not) as separate concerns evaluated by different methods. The relevant evaluation methods for **this** lesson's scope are training stability (the critic's Wasserstein estimate, the gradient norm on interpolated samples) and sample quality (FID, Inception Score, human preference studies as introduced in lesson 9). If you are using those tools, you are in this lesson's scope. If you are using policy-debate methods (stakeholder analysis, legal frameworks, regulatory comment), you are in a different conversation with different stakeholders, and this track does not pretend to develop expertise in those frameworks.
+
+## Why this matters when you use AI
+
+WGAN-GP is the GAN family member that survived the post-GAN era. Even now, when GANs are no longer the dominant image-generation paradigm (diffusion has taken that role), WGAN-GP and its descendants are still used in production for:
+
+**Domain-specific high-resolution generation** where GAN sample quality remains competitive (StyleGAN-family architectures for face generation use a stable-training GAN variant, typically non-saturating logistic loss with R1 regularization, not WGAN-GP directly; the canonical WGAN-GP-trained image-generation system was ProGAN).
+
+**Hybrid systems** where a GAN-trained component plays a specific role (image-to-image translation, super-resolution, audio synthesis). The training stability WGAN-GP provides is what makes these production-grade.
+
+**Adversarial training as a regularization tool** outside generative models. The critic-vs-network minimax framework, with the gradient-penalty stability fix, appears in some robustness research and self-supervised learning methods.
+
+Reading a paper or system release that uses GAN technology in 2024 or later, the chances are high it is WGAN-GP-flavored rather than original-GAN-flavored. The training stability is what made GANs a practical tool rather than a research curiosity, and this lesson is where that practicality came from.
+
+## Common pitfalls
+
+**Calling the critic a "discriminator."** It is not. A discriminator outputs a probability between zero and one; a critic outputs an unbounded scalar that estimates the Wasserstein distance. The behavioral difference is small in the abstract, but the loss function and the constraints are different. Mixing the terms is a sign of conflating the original GAN with WGAN.
+
+**Skipping the gradient penalty.** Without it, the critic is not 1-Lipschitz, so the duality form does not equal the Wasserstein distance, and the training loses its theoretical grounding. Practical WGAN implementations sometimes use spectral normalization as an alternative Lipschitz-enforcement (spectral-normalization-GAN, or SN-GAN), which is a different mechanism for the same constraint. The penalty (or some equivalent) cannot be omitted.
+
+**Computing the gradient penalty on wrong points.** It is evaluated on interpolated samples between real and fake, not on real or fake samples individually. The interpolation (a uniformly-mixed combination of a real and a fake sample) covers the "path" where the transport plan does most of its work; that is where the Lipschitz constraint needs to hold most strongly.
+
+**Treating WGAN-GP as a complete fix for all GAN problems.** It dramatically improves stability and reduces mode collapse, but it still gives no likelihood, still requires careful architecture, and can still collapse under poor settings. It is a better tool, not a perfect one.
+
+## What you should remember
+
+- **The Wasserstein-1 distance is the Earth Mover's distance** between two distributions: the minimum cost to transport mass from one shape to the other. Unlike Jensen-Shannon, it scales smoothly with geometric distance, giving meaningful gradients even when distributions are disjoint. For one-dimensional distributions, the Wasserstein-1 distance is the integrated absolute CDF gap. Worked anchor: shifted bimodal distributions with disjoint supports give Wasserstein-1 equal to one (the geometric shift), where Jensen-Shannon would saturate at log two.
+- **Kantorovich-Rubinstein duality gives a trainable form:** the Wasserstein-1 distance equals the supremum over 1-Lipschitz functions of the gap between expected values under the two distributions. The critic network approximates the supremum, maximizing this quantity; the generator minimizes it.
+- **WGAN-GP enforces the 1-Lipschitz constraint via a gradient penalty** on interpolated samples between real and fake (a regularization term that pushes the critic's gradient norm toward one). This soft constraint trains far more stably than weight clipping and produces the more reliable GAN variant most production-grade adversarial systems use.
+
+You now have the GAN paradigm in its practical, production-grade form. The next lesson (lesson 9) covers a question that has been hovering over Phase 2: how do you evaluate generative models when likelihood is bounded (VAEs), unavailable (GANs), or only one of many possible quality measures? The answer is FID, Inception Score, and the broader sample-based evaluation toolkit.

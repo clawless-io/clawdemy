@@ -1,0 +1,178 @@
+---
+title: "Lesson: Diffusion models I, the forward and reverse processes"
+description: A diffusion model defines a fixed forward Markov chain that progressively noises data into Gaussian noise, then learns a reverse Markov chain that denoises step by step back to data. This lesson builds the DDPM derivation, derives the closed-form forward-sampling shortcut that makes training feasible, shows that the simplified DDPM loss is just denoising score matching at the timestep's noise level, and walks the training and sampling loops. The L11 score-matching framework and the DDPM Markov-chain framework are equivalent; this is the same model derived from two perspectives.
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+The previous lesson ended with multi-noise-level denoising score matching as the bridge to the diffusion paradigm. This lesson builds the diffusion model from a different starting point, a fixed Markov chain of noising steps, and shows that the resulting training objective is mathematically the same denoising-score-matching loss. By the end you will be able to write the forward noising chain with its closed-form sampling shortcut, write the reverse denoising chain parameterized as a noise predictor, write the simplified DDPM training loss (the one Ho et al. 2020 used to break diffusion models open) and recognize it as denoising score matching at the timestep's noise level, and walk both the training loop and the sampling loop step by step.
+
+This lesson opens the **§6 watch territory** that runs through L12, L13, and L14. Diffusion models power most modern synthetic-media generation (text-to-image, text-to-video, text-to-audio), and a deliberate set of policy and governance questions sit outside this lesson's mechanical scope. The in-body checkpoint at the end of the lesson body names them explicitly using the five-layer pattern the track has been building (specific categories, named evaluation methods, operational scope test, domain-specific instruments, and engineering-informs-not-settles framing for value questions).
+
+## The forward process, a fixed noising chain
+
+A diffusion model defines a **forward process**: a fixed (no learnable parameters) Markov chain that progressively adds Gaussian noise to data over some number of steps, until the data is indistinguishable from pure Gaussian noise.
+
+Pick a **noise schedule**, a sequence of small positive numbers between roughly ten-to-the-negative-four and 0.02 (typically a thousand steps total). The forward step is:
+
+```
+q(x_t | x_{t-1})  =  N( x_t ; sqrt(1 - β_t) · x_{t-1},  β_t · I )
+```
+
+Each step scales the previous sample down slightly by the square root of one minus the current noise-schedule value, and adds Gaussian noise of variance equal to the current schedule value. The scaling keeps total variance from blowing up; the noise drives the distribution toward pure Gaussian. After the full chain:
+
+```
+q(x_T)  ≈  N(0, I)         (for properly chosen β-schedule)
+```
+
+This is the destination. The forward process turns any data sample into approximately standard-Gaussian noise via many deterministic-with-randomness steps. **Nothing is learned here**; the chain is fixed by the choice of noise schedule.
+
+## The closed-form shortcut, why training is tractable
+
+The Markov chain has a property that makes training computationally feasible: you can sample the state at any timestep directly from the original data point in one step, without simulating the whole chain.
+
+Define the per-step retention factor as one minus the schedule value, and the cumulative retention as the product of per-step retentions up to a given timestep. Then:
+
+```
+q(x_t | x_0)  =  N( x_t ;  sqrt(ᾱ_t) · x_0,  (1 − ᾱ_t) · I )
+```
+
+Equivalently, using a single standard-Gaussian noise sample:
+
+```
+x_t  =  sqrt(ᾱ_t) · x_0  +  sqrt(1 − ᾱ_t) · ε
+```
+
+This is the computational hinge of diffusion training. Without it, training at timestep one thousand would require simulating one thousand sequential Markov steps per training example. With it, you sample a timestep uniformly, draw one noise vector, and compute the state at that timestep in one operation.
+
+**Worked numerical anchor.** Take a tiny example with two steps and constant schedule value 0.1 at both steps. Then each per-step retention is 0.9, so the cumulative retention is 0.9 after one step and 0.81 after two steps (since 0.9 times 0.9 is 0.81). For a starting data point, the closed-form gives:
+
+```
+x_2  =  sqrt(0.81) · x_0  +  sqrt(0.19) · ε
+     ≈  0.9 · x_0          +  0.436 · ε
+```
+
+After just two steps with this small noise, the signal coefficient is 0.9 (still mostly the original data) and the noise coefficient is 0.436 (modest noise). With one thousand steps and a slightly growing noise schedule, the cumulative retention at the final step shrinks to near zero, so the final state is approximately pure standard-Gaussian noise. The closed-form lets you compute any intermediate state with one operation per step.
+
+## The reverse process, what we actually learn
+
+The forward process is fixed. The **reverse process** is what the model learns. We want to invert the noising: given the current noisy state, produce the previous (less noisy) state, step by step from the final noisy state down to the first, eventually arriving at a clean sample.
+
+The reverse step is parameterized as a Gaussian:
+
+```
+p_θ(x_{t-1} | x_t)  =  N( x_{t-1};  μ_θ(x_t, t),  Σ_θ(x_t, t) )
+```
+
+The mean and covariance are functions of the noisy input and the timestep, computed by a neural network. In the standard DDPM (Ho et al. 2020), the covariance is fixed to a function of the noise schedule (typically just the current schedule value times the identity, or a related choice), so only the mean predictor is learned.
+
+The training objective is to maximize the data likelihood, which (via an ELBO derivation across the chain of latent states) reduces to a sum of KL terms between forward and reverse distributions at each step. The full derivation is in the DDPM paper; the surprising conclusion is that the whole thing simplifies dramatically.
+
+## The DDPM simplification (Ho et al. 2020): predict the noise
+
+The DDPM trick is to reparameterize the reverse mean as a function of a noise predictor (a network that takes the current noisy state and the timestep and outputs an estimate of the noise originally added). Specifically:
+
+```
+μ_θ(x_t, t)  =  (1 / sqrt(α_t)) · (  x_t  -  ( β_t / sqrt(1 − ᾱ_t) ) · ε_θ(x_t, t)  )
+```
+
+When you substitute this parameterization into the ELBO and simplify (dropping constants and reweighting some terms for empirical stability), the training loss collapses to:
+
+```
+L_simple(θ)  =  E_{t ~ Uniform{1..T},  x_0 ~ p_data,  ε ~ N(0,I)}[
+                  || ε  -  ε_θ(x_t, t) ||²
+                ]
+                where  x_t = sqrt(ᾱ_t) · x_0  +  sqrt(1 − ᾱ_t) · ε
+```
+
+This is one expectation, one squared-error loss, one neural-network evaluation per training step. **It is also exactly the denoising-score-matching objective at the noise level corresponding to the chosen timestep.** The score-based view from lesson 11 (train a network to predict noise from a noised input) and the Markov-chain DDPM view are derivations of the same loss from two perspectives.
+
+The simplification matters because it makes diffusion training a standard supervised-learning loop with a known target (the noise), no adversarial game, no encoder/decoder reparameterization, no Jacobian computation. The simplicity is the reason diffusion went from research curiosity (2015 to 2019) to dominant paradigm (2021 onward).
+
+## The training loop, one slide of pseudocode
+
+```
+repeat:
+  x_0    ~ p_data                                       # sample a real data point
+  t      ~ Uniform({1, ..., T})                         # sample a timestep
+  ε      ~ N(0, I)                                      # sample noise
+  x_t    = sqrt(ᾱ_t) · x_0  +  sqrt(1 − ᾱ_t) · ε        # closed-form forward step
+  loss   = || ε  -  ε_θ(x_t, t) ||²                      # noise-prediction MSE
+  θ      ← θ - η · ∇_θ loss                              # SGD update
+```
+
+That is the entire DDPM training procedure. The noise-predictor network takes a noised input and a timestep, outputs an estimate of the noise added, and is trained on the squared error to the true noise. Most diffusion models use a **U-Net** architecture for the noise predictor (the choice was inherited from the image-restoration literature and turned out to work well; recent work explores transformer architectures too).
+
+## The sampling loop (the reverse chain at inference)
+
+Sampling is the reverse process run from the final noisy step down to the first step:
+
+```
+x_T  ~  N(0, I)                                              # start with pure noise
+
+for t = T, T-1, ..., 1:
+  z  ~ N(0, I)  if t > 1  else  z = 0                        # stochasticity term
+  ε̂  =  ε_θ(x_t, t)                                          # predict the noise
+  x_{t-1}  =  (1 / sqrt(α_t)) · ( x_t  -  ( β_t / sqrt(1 − ᾱ_t) ) · ε̂ )  +  σ_t · z
+
+return x_0                                                   # the generated sample
+```
+
+The trained noise predictor is used at every step to denoise the running estimate; the small extra Gaussian noise term adds the bit of stochasticity the reverse chain needs to be a true probabilistic sampler rather than a deterministic recipe. After running through the whole chain, the final state is a sample from the model.
+
+**The signature trade-off of diffusion paradigms is here.** Sampling takes as many forward passes through the network as there are steps in the chain (typically a thousand in the original DDPM; later work has brought this down to around fifty for DDIM and even fewer for distilled samplers, lesson 13). This is the slow side. The fast side is training: one mean-squared-error per step on one network, no encoder-decoder split, no adversarial game.
+
+## Two ways into the same model
+
+The L11 score-based derivation and the DDPM Markov-chain derivation arrive at the same noise-prediction mean-squared-error loss, with the closed-form noised input running through both, but from two different starting points.
+
+**L11 path**: noise the data with a fixed Gaussian, observe that the score of the noised distribution has a closed-form target (the negative scaled noise), derive the denoising-score-matching loss as a mean-squared-error on noise prediction, generalize to multiple noise levels.
+
+**L12 path (this lesson)**: define a fixed Markov chain that progressively noises data, derive an ELBO over the full chain, parameterize the reverse step as a noise predictor, simplify the ELBO to a noise-prediction mean-squared-error.
+
+The two paths give the same equation. The conceptual move that makes them equivalent: the noise scale in L11 corresponds to the cumulative noise level at the chosen timestep in L12. Different parameterizations of the same noise schedule, same loss. Lesson 14 makes this equivalence formal via the SDE view.
+
+For now, the practical takeaway: when a paper says "the diffusion model is trained to predict the noise added at each step," and another paper says "the score-based model estimates the input-gradient of the time-indexed log-density at each noise level," they are describing the same thing from two angles. Recognizing this collapses a lot of paper jargon.
+
+## A note on what this lesson does NOT cover
+
+Diffusion models are the paradigm that powers most modern synthetic-media generation systems (text-to-image, text-to-video, text-to-audio). A deliberate set of policy and governance questions sit outside this lesson's mechanical scope:
+
+- **Use-case appropriateness**: when generating synthetic faces, voices, or video of identifiable people is appropriate vs not (use-case and consent policy);
+- **Provenance and watermarking**: how to attribute or watermark synthesized content; latent-diffusion provenance differs from generated-pixel provenance because the visible output passes through an encoder-decoder that may not preserve all watermark schemes (provenance policy);
+- **Sector-specific deployment**: policies for generated media in journalism, politics, legal evidence, and **medical imaging** (the medical-imaging brush is new for diffusion vs the GAN paradigm because diffusion is used clinically for image synthesis and reconstruction, with different sectoral standards);
+- **Training-data IP and licensing**: claims around training data scraped from named sources (the LAION-style scraped-image corpora used by major text-to-image systems are the canonical contested-data source for this paradigm);
+- **Likeness and consent**: more pronounced for diffusion than for VAE or GAN because output quality is higher, so identifiable-person reproduction is more recognizable;
+- **Prompt-injection content risks**: a category specific to text-conditioned diffusion (NEW for this paradigm vs L7-L8 GANs because GANs were not text-conditioned at the same scale): systems that refuse to generate certain content can be prompted around with adversarial inputs.
+
+Each of these is a distinct forum with distinct stakeholders. The relevant **evaluation methods for this lesson's scope** are paradigm-specific image-generation instruments: **FID across step counts**, **Inception Score**, **CLIP scores** for text-image alignment, **sample quality vs step-count Pareto frontier**, **perceptual studies** (human preference), and **memorization probes** (detecting reproduction of training images). If you are using those instruments, you are in this lesson's scope. If you are using policy-debate methods (stakeholder analysis, legal frameworks, regulatory comment, sectoral standards bodies), you are in a different conversation evaluated by different methods.
+
+A finer distinction worth holding onto: many of these questions split into an **empirical** part (settled by the right engineering measurement) and a **value** part (not settled by engineering alone). For example: "Does this diffusion model reproduce training-image-like content?" is empirical, settled by FID + memorization probes; "Should this diffusion model be trained on scraped image corpora?" is a value/policy question, where engineering data informs but does not settle the answer. The practical posture is defense-in-depth: training-data curation is engineering (this lesson's scope and tools); IP licensing is policy (a separate conversation with different stakeholders). Both are needed; neither alone is sufficient.
+
+## Why this matters when you use AI
+
+Two practical implications.
+
+**Reading any modern image-generation system release.** When you next see a paper or release that describes "the model is a diffusion model trained on a set of images with some conditioning," you can read the math directly: the model is a noise predictor that takes a noised input, a timestep, and the conditioning, trained on the noise-prediction mean-squared-error, run for many timesteps at inference. The architectural details (U-Net, transformer-based, attention scales) are choices about how to parameterize the noise predictor; the training and sampling loops are the same.
+
+**Latency budgets are paradigm-determined.** Diffusion sampling cost scales linearly with the number of denoising steps. The original DDPM used a thousand; modern systems use around fifty (DDIM) or fewer with distillation. If you are building on top of a diffusion-based model with a latency budget, you are working within this trade-off: more steps usually mean better quality, fewer steps mean faster generation, and the Pareto frontier is the right curve to characterize. Lesson 13 covers DDIM and classifier-free guidance, which together are most of the practical sampling-cost optimizations in the modern stack.
+
+## Common pitfalls
+
+**Treating the forward process as learned.** It is not. The noise schedule is fixed at design time; no parameters are trained in the forward chain. Only the reverse process has learnable parameters (the noise predictor).
+
+**Forgetting the closed-form forward shortcut.** Training would be infeasible if you had to simulate the full Markov chain for each training example. The closed-form shortcut (signal coefficient times the original data plus noise coefficient times a standard-Gaussian noise vector) is what makes training computationally bounded; without it, you'd be doing as many sequential operations per training example as there are steps in the chain.
+
+**Confusing the DDPM loss with a separate paradigm.** The DDPM training loss IS the denoising-score-matching loss at the corresponding noise level. They are the same equation derived two ways; lesson 14 will make this explicit. Treating them as independent recipes misses the connection.
+
+**Skipping the §6 boundary.** Diffusion is the paradigm where the mechanical/policy split matters most across the track. Mixing the math (this lesson) with the policy questions (forum-specific, not this lesson) muddles both. Keep them separate; the policy questions deserve their own conversations with the right stakeholders, evaluated by their own methods.
+
+## What you should remember
+
+- **Forward process**: fixed Markov chain that scales the previous state by a per-step retention factor and adds Gaussian noise of the scheduled variance. The **closed-form shortcut** (cumulative-retention-times-original plus cumulative-noise-times-standard-noise) lets you sample at any timestep in one operation; without this shortcut, training would be infeasible.
+- **Reverse process**: a learned Gaussian whose mean and covariance are functions of the current noisy state and timestep, parameterized via a **noise predictor** network. The **simplified DDPM loss** is a uniform-over-timesteps expectation of the squared error between the true noise and the predicted noise: one mean-squared-error on noise prediction, sampled uniformly across timesteps. This loss IS the denoising-score-matching loss at the cumulative noise level for the chosen timestep; the L11 score-based derivation and the L12 Markov-chain derivation arrive at the same equation from two perspectives.
+- **Sampling** runs the reverse chain from a standard-Gaussian starting point down to a clean sample over as many denoising steps as the schedule defines. Slow at inference (one forward pass per step), but training is a clean standard supervised-learning loop. **The §6 boundary** for diffusion lessons (covered in the in-body checkpoint) names six distinct policy/governance forums outside this lesson's mechanical scope, with operational evaluation methods (FID across step counts, CLIP scores, memorization probes, perceptual studies) marking what IS in scope.
+
+You now have the diffusion paradigm in its DDPM form: the forward chain, the closed-form shortcut, the reverse chain, the simplified noise-prediction loss, and the training and sampling loops. The next lesson covers what makes diffusion sampling fast enough for production (DDIM and step-count reduction) and how text conditioning works in practice (classifier-free guidance). Lesson 14 returns to the score-based view from L11 and makes the equivalence with this lesson's Markov-chain view explicit, via the continuous-time SDE perspective.

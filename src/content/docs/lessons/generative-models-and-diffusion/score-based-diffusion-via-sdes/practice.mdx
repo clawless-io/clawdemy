@@ -1,0 +1,203 @@
+---
+title: "Practice: Score-based diffusion via SDEs"
+description: Six-question self-check, a hand-walked probability-flow-ODE single-step integration on a linear-drift constant-diffusion SDE, a noise-predictor-to-score conversion at three timesteps, and ten flashcards. About 16 minutes.
+artifact: practice
+sidebar:
+  order: 4
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check (six questions)
+
+About 6 minutes, pen and paper.
+
+**1. Write the forward SDE and name its two main forms.**
+
+<details>
+<summary>Answer</summary>
+
+```
+dx  =  f(x, t) · dt  +  g(t) · dW
+```
+
+Where the drift sets the deterministic part of the change and the diffusion sets the noise scale per unit time. The Wiener-process increment is the continuous-time Gaussian noise.
+
+The two main forms are the **variance-preserving SDE** (state-dependent contraction drift, bounded diffusion, the continuous-time limit of DDPM) and the **variance-exploding SDE** (zero drift, unboundedly growing diffusion, the continuous-time limit of the NCSN framework from L11).
+
+</details>
+
+**2. Why does the reverse SDE involve the score function?**
+
+<details>
+<summary>Answer</summary>
+
+The Anderson 1982 reverse-time SDE result. The reverse of a forward SDE with drift and diffusion (the forward) is a reverse-time SDE whose drift gains a score-function term: forward drift minus diffusion-squared times the score, plus a reverse-time Wiener noise term. Integrating the reverse SDE backward in time from the standard Gaussian at the final time produces samples from the data distribution. The score function (the gradient of the log-density of the noised distribution at the current time) is required to integrate, which is exactly what the L11 framework trains a network to estimate.
+
+</details>
+
+**3. Write the relationship between the noise predictor and the score function. Why are they the same vector up to a scalar?**
+
+<details>
+<summary>Answer</summary>
+
+```
+score(x_t, t)  =  - eps_theta(x_t, t)  /  sqrt(1 - alpha_bar_t)
+```
+
+The score equals the negative noise prediction divided by the cumulative noise standard deviation. The relationship follows from L12's closed-form forward shortcut: the noised state at any time is a known linear combination of the original sample and a standard Gaussian noise vector, and the conditional score of the Gaussian noise model at the noised state has the closed-form value equal to negative noise divided by the noise standard deviation. The L11 training framework (train to predict the negative scaled noise) and the L12 training framework (train to predict the noise) produce the same network with the same loss, viewed through two equivalent mathematical lenses.
+
+</details>
+
+**4. Write the probability flow ODE. Why does it have the same marginals as the reverse SDE?**
+
+<details>
+<summary>Answer</summary>
+
+```
+dx / dt  =  f(x, t)  -  0.5 · g(t)^2 · score(x, t)
+```
+
+No noise term. The drift is the forward drift minus half the diffusion-squared times the score. The key fact is that this deterministic ODE has the same marginal distribution at every time as the reverse SDE. Different trajectories (the SDE's are random, the ODE's are deterministic), same marginals. The ODE is the deterministic sampler whose endpoint matches the data distribution. The L13 DDIM sampler is approximately a discretization of this ODE for the variance-preserving SDE.
+
+</details>
+
+**5. The probability flow ODE gives tractable likelihood evaluation. How does it work, and what is the cost?**
+
+<details>
+<summary>Answer</summary>
+
+Take a data sample at time zero. Integrate the probability flow ODE forward in time from the data sample to the standard Gaussian at the final time. The data log-density relates to the standard Gaussian log-density at the endpoint plus the log-determinant of the Jacobian of the integrated transformation (the change-of-variables formula from L4 applied to the ODE). The Jacobian is tracked along the integration using a continuous-time analogue of the log-determinant computation.
+
+The cost is one ODE integration per evaluated sample, with the trained network called at each step. So tractable but not free; typically requires tens to hundreds of network forward passes per likelihood evaluation. The benefit: an exact log-likelihood number that is directly comparable to autoregressive and flow models, which is what makes diffusion show up on cross-paradigm likelihood comparison tables despite the L9 "indirect" framing.
+
+</details>
+
+**6. Three lessons of Phase 3 produced the same trained network with the same loss. What does the SDE framing do that the discrete framings could not?**
+
+<details>
+<summary>Answer</summary>
+
+The SDE framing makes the equivalence of L11 (denoising score matching, discrete multi-noise-level training), L12 (DDPM Markov chain, discrete reverse sampling), and L13 (DDIM, deterministic non-Markovian sampling) formally identical. They are three discretizations of one continuous-time framework, with different sampler choices but the same trained network.
+
+The framing also unlocks new objects: the probability flow ODE as a deterministic sampler (which DDIM approximates), the tractable likelihood evaluation, and new sampler designs (continuous-time SDE solvers with adaptive step size, higher-order ODE integrators). The continuous-time language is what makes diffusion a coherent paradigm rather than three independent recipes.
+
+</details>
+
+## Probability-flow-ODE single-step integration
+
+About 5 minutes. Take a simple variance-preserving SDE on a one-dimensional state: drift equals negative one-half times the state, diffusion equals one. Suppose the trained noise predictor at the state value 1.2 and time one-half outputs the value 0.8.
+
+**Step 1.** Compute the cumulative-noise standard deviation at time one-half. For this variance-preserving SDE with drift coefficient negative one-half, the cumulative-retention coefficient is the exponential of negative one-quarter (the integral of the drift up to time one-half), approximately 0.779. The cumulative-noise variance is one minus the exponential of negative one-half (the integral of the diffusion-squared up to time one-half), approximately 0.393. The cumulative-noise standard deviation is the square root of that variance, approximately 0.627.
+
+**Step 2.** Convert the noise prediction to a score estimate:
+
+```
+score  =  - 0.8 / 0.627  ≈  -1.27
+```
+
+**Step 3.** Compute the probability-flow-ODE right-hand side at the state value 1.2 and time one-half:
+
+```
+dx / dt  =  -0.5 · 1.2  -  0.5 · 1 · (-1.27)
+         =  -0.6  +  0.635
+         =  0.035
+```
+
+**Step 4.** Take a backward step of magnitude 0.05 (so the time-step direction in backward time is negative 0.05). The update to the state is the negative of the time-step times the right-hand side, which is negative 0.05 times 0.035, approximately negative 0.00175. The next state is approximately 1.198.
+
+One step of the probability flow ODE, integrated backward by a small time step. A full integration backward from time one to time zero with a hundred such steps would produce a deterministic sample from the modeled data distribution. The same network produces a stochastic DDPM sample (reverse SDE), a deterministic DDIM-style sample (probability flow ODE), and a likelihood evaluation (probability flow ODE forward plus Jacobian).
+
+## Noise-predictor-to-score conversion at three timesteps
+
+About 3 minutes. Take the same variance-preserving SDE as the previous section (drift coefficient negative one-half, diffusion coefficient one), so the cumulative-noise standard deviation at three timesteps has these values: at time one-quarter, approximately 0.470; at time one-half, approximately 0.627; at time three-quarters, approximately 0.727. Suppose the trained noise predictor outputs the same value of 0.6 at all three timesteps (an unrealistic but illustrative case).
+
+**At time one-quarter:**
+
+```
+score  =  - 0.6 / 0.470  ≈  -1.28
+```
+
+**At time one-half:**
+
+```
+score  =  - 0.6 / 0.627  ≈  -0.96
+```
+
+**At time three-quarters:**
+
+```
+score  =  - 0.6 / 0.727  ≈  -0.83
+```
+
+The same noise prediction corresponds to a stronger score at earlier (less noised) times and a weaker score at later (more noised) times. The fixed scalar relationship is what produces this pattern: at low noise, the noise prediction is highly informative about the score; at high noise, the same noise prediction means less because the conditional Gaussian is wider.
+
+## Flashcards
+
+Ten cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay out the full set as one card per page, ready to print or save as a PDF for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="Write the forward SDE.">
+
+`dx = f(x, t) · dt + g(t) · dW`. The drift is the deterministic part, the diffusion is the noise scale per unit time, and the Wiener increment is the continuous-time Gaussian noise.
+
+</Flashcard>
+
+<Flashcard question="Name the two main forward-SDE forms.">
+
+Variance-preserving SDE (state-dependent contraction drift, bounded diffusion; continuous-time limit of DDPM) and variance-exploding SDE (zero drift, unbounded growing diffusion; continuous-time limit of the NCSN framework from L11).
+
+</Flashcard>
+
+<Flashcard question="Why does the reverse SDE involve the score function?">
+
+The Anderson 1982 reverse-time SDE result. The drift of the reverse SDE equals the forward drift minus the diffusion-squared times the score function, plus a reverse-time Wiener noise term. Integrating backward in time from the standard Gaussian at the final time produces samples from the data distribution.
+
+</Flashcard>
+
+<Flashcard question="Write the noise-predictor-to-score conversion.">
+
+`score(x_t, t) = - eps_theta(x_t, t) / sqrt(1 - alpha_bar_t)`. The score equals the negative noise prediction divided by the cumulative noise standard deviation. L11 and L12 produce the same network with the same loss.
+
+</Flashcard>
+
+<Flashcard question="Why are L11 (denoising score matching) and L12 (DDPM noise prediction) the same training framework?">
+
+The noise predictor and the score function are the same vector up to a fixed scalar. L11's "train to predict the negative scaled noise" and L12's "train to predict the noise" are the same task with a per-time-step scaling difference that does not affect the optimum. The SDE framing makes the equivalence formal.
+
+</Flashcard>
+
+<Flashcard question="Write the probability flow ODE.">
+
+`dx / dt = f(x, t) - 0.5 · g(t)^2 · score(x, t)`. No noise term. The drift is the forward drift minus half the diffusion-squared times the score.
+
+</Flashcard>
+
+<Flashcard question="Why does the probability flow ODE have the same marginals as the reverse SDE?">
+
+A standard result on Fokker-Planck equations and their continuity-equation equivalents. The reverse SDE produces stochastic trajectories whose marginal distribution at every time matches the noised data distribution. The probability flow ODE produces deterministic trajectories with the same marginals at every time. Different trajectories, same marginals.
+
+</Flashcard>
+
+<Flashcard question="What does DDIM approximate?">
+
+A discretization of the probability flow ODE for the variance-preserving SDE. The deterministic non-Markovian structure that made DDIM fast at low step counts is the ODE structure underneath. The continuous-time framing makes DDIM a discretization, not an independent trick.
+
+</Flashcard>
+
+<Flashcard question="How does the probability flow ODE give tractable likelihood?">
+
+Integrate the ODE forward in time from a data sample to the standard Gaussian at the final time. The data log-density equals the standard Gaussian log-density at the endpoint plus the log-determinant of the integrated Jacobian (the change-of-variables formula from L4). The cost is one ODE integration per evaluated sample.
+
+</Flashcard>
+
+<Flashcard question="Why does the SDE framing matter if production implementations work entirely with the discrete recipe?">
+
+Reading score-based literature fluently requires the SDE framing. Many results (the deterministic sampler limit, the tractable likelihood, continuous-time SDE solver designs, the formal equivalence of L11 / L12 / L13) are stated and proved in the continuous-time language. Production code can stay discretized; understanding the literature requires both.
+
+</Flashcard>
+
+</FlashcardSet>

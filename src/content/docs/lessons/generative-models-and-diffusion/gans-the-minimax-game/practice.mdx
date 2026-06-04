@@ -1,0 +1,204 @@
+---
+title: "Practice: GANs, the minimax game"
+description: A self-check on the minimax objective and the JS-divergence reduction, an optimal-discriminator computation, a JS-divergence verification on a 3-outcome distribution, and flashcards built for retrieval.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Six short questions. Answer each one in your head (or on paper) before opening the collapsible. Trying to retrieve the answer is where the learning sticks; rereading feels productive but does much less.
+
+**1. Write the original GAN minimax objective and explain who maximizes and who minimizes.**
+
+<details>
+<summary>Show answer</summary>
+
+`min over G  max over D   V(D, G) = E_{x ~ p_data}[log D(x)] + E_{z ~ p(z)}[log(1 − D(G(z)))]`. The discriminator `D` MAXIMIZES (wants `D(x) ≈ 1` on real `x` and `D(G(z)) ≈ 0` on fakes). The generator `G` MINIMIZES (wants the discriminator to be fooled, `D(G(z)) ≈ 1`). Training alternates updates to each.
+
+</details>
+
+**2. Derive the optimal discriminator `D*(x)` at a fixed generator.**
+
+<details>
+<summary>Show answer</summary>
+
+The integrand at each `x` is `p_data(x) · log D(x) + p_G(x) · log(1 − D(x))`. Differentiate with respect to `D(x)` and set to zero: `p_data(x)/D(x) − p_G(x)/(1 − D(x)) = 0`. Solve: `D*(x) = p_data(x) / (p_data(x) + p_G(x))`. At equilibrium `p_G = p_data`, so `D*(x) = 1/2` everywhere.
+
+</details>
+
+**3. What divergence does the generator implicitly minimize, and how does it differ from the forward KL of Phase 1?**
+
+<details>
+<summary>Show answer</summary>
+
+Substituting `D = D*` back into the minimax objective gives `V(D*, G) = -log 4 + 2 · JS(p_data || p_G)`, where `JS(p || q) = 0.5 · KL(p || m) + 0.5 · KL(q || m)` with `m = (p + q)/2`. So GANs minimize the **Jensen-Shannon divergence**: symmetric, bounded by `log 2`, unlike the forward KL of Phase 1 which is asymmetric and unbounded.
+
+</details>
+
+**4. Why does the original GAN loss suffer from vanishing gradients, and what's the standard fix?**
+
+<details>
+<summary>Show answer</summary>
+
+The generator's loss `log(1 − D(G(z)))` saturates when `D` is good (`D(G(z))` near 0): the function flattens, gradient to `G` becomes tiny. Early in training, `D` quickly becomes good (real and fake distributions barely overlap), so `G` stops learning. The **non-saturating loss**, where `G` instead maximizes `log D(G(z))`, has the same gradient direction but does not saturate. Every modern GAN uses the non-saturating variant in practice.
+
+</details>
+
+**5. Why is mode collapse a paradigm-level feature rather than a hyperparameter bug?**
+
+<details>
+<summary>Show answer</summary>
+
+Because it follows from the JS divergence the generator minimizes plus the minimax dynamics. The generator can find a narrow set of outputs that reliably fools the discriminator and score reasonably on JS while ignoring entire modes of `p_data`. Tuning hyperparameters does not change the underlying divergence; only changing the divergence (Wasserstein-GAN, next lesson) or adding regularization tricks (mini-batch discrimination, feature matching, unrolled GANs) addresses it.
+
+</details>
+
+**6. Why can a GAN not give you `log p_model(x)`?**
+
+<details>
+<summary>Show answer</summary>
+
+The training objective never computes density. `G` produces samples; `D` discriminates samples; the minimax loss is in terms of `D`'s probabilities, not `G`'s densities. There is no place in the GAN pipeline where `p_model(x)` is evaluated, so no likelihood number can be extracted. This is the precise reason the L3 cross-paradigm table lists GANs as "No likelihood."
+
+</details>
+
+## Try it yourself, part 1: optimal discriminator on a 3-outcome case
+
+Take a categorical variable over three outcomes `{A, B, C}`. About 6 minutes, pen and paper.
+
+```
+p_data = [0.5, 0.3, 0.2]
+p_G    = [0.2, 0.5, 0.3]
+```
+
+**Step 1.** Compute the optimal discriminator `D*(x) = p_data(x) / (p_data(x) + p_G(x))` for each of the three outcomes.
+
+**Step 2.** Identify the outcome where the discriminator is most confident the sample is real, and the outcome where it is most confident the sample is fake.
+
+<details>
+<summary>Check your work</summary>
+
+**Step 1.**
+
+- `D*(A) = 0.5 / (0.5 + 0.2) = 0.5 / 0.7 ≈ 0.714`
+- `D*(B) = 0.3 / (0.3 + 0.5) = 0.3 / 0.8 = 0.375`
+- `D*(C) = 0.2 / (0.2 + 0.3) = 0.2 / 0.5 = 0.4`
+
+**Step 2.** Most confident "real": outcome A (D*(A) ≈ 0.714), because the data over-produces it relative to the generator. Most confident "fake": outcome B (D*(B) = 0.375), because the generator over-produces it relative to the data. Outcome C is also weighted toward fake (D* = 0.4 < 0.5) but less strongly.
+
+The pattern: `D*(x)` is high where the data has more probability than the generator (the real distribution is "concentrated there relative to fakes"), and low where the generator has more probability than the data ("the fakes are concentrated there relative to real").
+
+</details>
+
+## Try it yourself, part 2: compute the JS divergence
+
+Stay with the same distributions from Part 1. About 8 minutes (a calculator helps).
+
+**Step 1.** Compute the pointwise mixture `m(x) = (p_data(x) + p_G(x)) / 2` for each outcome.
+
+**Step 2.** Compute `KL(p_data || m)` and `KL(p_G || m)` separately, using natural log.
+
+**Step 3.** Compute `JS(p_data || p_G) = 0.5 · KL(p_data || m) + 0.5 · KL(p_G || m)`.
+
+**Step 4.** Sanity-check: if `p_G = p_data`, what should `JS` be?
+
+<details>
+<summary>Check your work</summary>
+
+**Step 1.** `m = [(0.5+0.2)/2, (0.3+0.5)/2, (0.2+0.3)/2] = [0.35, 0.40, 0.25]`.
+
+**Step 2.** `KL(p_data || m)`:
+
+- `0.5 · ln(0.5/0.35) = 0.5 · ln(10/7) ≈ 0.5 · 0.3567 ≈ 0.1784`
+- `0.3 · ln(0.3/0.40) = 0.3 · ln(0.75) ≈ 0.3 · (-0.2877) ≈ -0.0863`
+- `0.2 · ln(0.2/0.25) = 0.2 · ln(0.8) ≈ 0.2 · (-0.2231) ≈ -0.0446`
+- Sum: `≈ 0.1784 - 0.0863 - 0.0446 ≈ 0.0475`
+
+`KL(p_G || m)`:
+
+- `0.2 · ln(0.2/0.35) = 0.2 · ln(4/7) ≈ 0.2 · (-0.5596) ≈ -0.1119`
+- `0.5 · ln(0.5/0.40) = 0.5 · ln(1.25) ≈ 0.5 · 0.2231 ≈ 0.1116`
+- `0.3 · ln(0.3/0.25) = 0.3 · ln(1.2) ≈ 0.3 · 0.1823 ≈ 0.0547`
+- Sum: `≈ -0.1119 + 0.1116 + 0.0547 ≈ 0.0544`
+
+**Step 3.** `JS(p_data || p_G) = 0.5 · 0.0475 + 0.5 · 0.0544 ≈ 0.0510` nats.
+
+**Step 4.** If `p_G = p_data`, then `m = p_data = p_G`, both KL terms are zero, and `JS = 0`. This is the equilibrium condition the minimax game pushes toward.
+
+For reference, JS is bounded above by `log 2 ≈ 0.693` nats; our value of `0.051` indicates the two distributions are quite close but not identical (some mass differences but no "missing modes").
+
+</details>
+
+## Flashcards
+
+Ten cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay out the full set as one card per page, ready to print or save as a PDF for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="Write the original GAN minimax objective.">
+
+`min over G  max over D   V(D, G) = E_{x ~ p_data}[log D(x)] + E_{z ~ p(z)}[log(1 − D(G(z)))]`. `D` maximizes (real → 1, fake → 0); `G` minimizes (try to fool `D` into outputting 1 on fakes).
+
+</Flashcard>
+
+<Flashcard question="What is the optimal discriminator D*(x) at a fixed generator?">
+
+`D*(x) = p_data(x) / (p_data(x) + p_G(x))`. Derived by maximizing the integrand pointwise. At equilibrium `p_G = p_data`, so `D*(x) = 1/2` everywhere (the discriminator cannot distinguish).
+
+</Flashcard>
+
+<Flashcard question="What implicit divergence does the generator minimize?">
+
+The Jensen-Shannon divergence: `JS(p || q) = 0.5·KL(p || m) + 0.5·KL(q || m)` with `m = (p + q)/2`. Substituting `D = D*` gives `V(D*, G) = -log 4 + 2·JS(p_data || p_G)`. Symmetric, bounded by `log 2`; different from the forward KL of Phase 1.
+
+</Flashcard>
+
+<Flashcard question="Why does the original GAN loss have vanishing gradients, and what's the standard fix?">
+
+`log(1 − D(G(z)))` saturates when `D` is good (`D(G(z))` near 0); the gradient to `G` becomes tiny. Early in training, `D` quickly gets good. Standard fix: non-saturating loss, where `G` maximizes `log D(G(z))` instead. Same gradient direction, no saturation. Every modern GAN uses this.
+
+</Flashcard>
+
+<Flashcard question="Why is mode collapse a paradigm-level feature, not a hyperparameter bug?">
+
+Because JS divergence minimization plus the minimax dynamics let the generator find a narrow set of outputs that fool the discriminator while ignoring entire modes of `p_data`. Tuning hyperparameters does not change the divergence; fixing it requires changing the objective (Wasserstein-GAN) or adding architectural regularization (mini-batch discrimination, feature matching, unrolled GANs).
+
+</Flashcard>
+
+<Flashcard question="Why can a GAN not give you log p_model(x)?">
+
+The training objective never computes density. `G` produces samples; `D` discriminates them; the loss is in `D`'s probabilities. No place in the pipeline evaluates `p_model(x)`. This is the precise sense in which GANs are "implicit / no-likelihood" on the L3 cross-paradigm table.
+
+</Flashcard>
+
+<Flashcard question="At the equilibrium of the minimax game, what does D*(x) equal everywhere?">
+
+`D*(x) = 1/2`. When `p_G = p_data`, the optimal discriminator cannot tell real from fake at any `x`, so it outputs 0.5 uniformly. This is also the equilibrium of the divergence: `JS(p_data || p_G) = 0`.
+
+</Flashcard>
+
+<Flashcard question="What is the upper bound on the Jensen-Shannon divergence (in nats)?">
+
+`log 2 ≈ 0.693` nats. JS is non-negative, zero only at equality, and never exceeds `log 2` (unlike KL, which is unbounded). The bound is one practical reason JS is more numerically tractable than KL for some optimization problems.
+
+</Flashcard>
+
+<Flashcard question="What does the cross-paradigm map (L3 cheatsheet) say about GAN training objectives?">
+
+GANs train on the Jensen-Shannon divergence (in the original formulation) or the Wasserstein distance (in WGAN, next lesson), NOT on the forward KL of Phase 1. The L3 cheatsheet's "GAN" row says "No likelihood" precisely because the training objective never involves one. Reading divergence-choice as a paradigm-design parameter is the broader lesson.
+
+</Flashcard>
+
+<Flashcard question="Why can't you use training loss as a stopping criterion for a GAN?">
+
+Both `D` and `G` losses oscillate during training (each gets better against the other and vice versa); they do not monotonically improve, and sample quality only weakly correlates with the training loss. Stopping by "loss has converged" usually stops at the wrong place. Inspect samples directly or compute an external metric like FID (lesson 9).
+
+</Flashcard>
+
+</FlashcardSet>

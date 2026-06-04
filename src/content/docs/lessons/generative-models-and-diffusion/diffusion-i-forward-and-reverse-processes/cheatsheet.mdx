@@ -1,0 +1,126 @@
+---
+title: "Cheatsheet: Diffusion models I, the forward and reverse processes"
+description: One-page reference. The forward Markov chain and closed-form sampling shortcut, the reverse process parameterized as a noise predictor, the simplified DDPM loss (equals denoising score matching), training and sampling loops, and the §6 boundary with five-layer in-body checkpoint.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## The forward process (fixed Markov chain)
+
+```
+q(x_t | x_{t-1})  =  N( x_t ;  sqrt(1 − β_t) · x_{t-1},  β_t · I )
+```
+
+`β_t` is the **noise schedule**, small positive values (~10⁻⁴ to 0.02), `T = 1000` typical. No learnable parameters here.
+
+After T steps: `q(x_T) ≈ N(0, I)`, pure Gaussian noise.
+
+## The closed-form shortcut
+
+```
+α_t = 1 − β_t,    ᾱ_t = α_1 · α_2 · ... · α_t
+
+q(x_t | x_0)  =  N( sqrt(ᾱ_t) · x_0,  (1 − ᾱ_t) · I )
+
+x_t  =  sqrt(ᾱ_t) · x_0  +  sqrt(1 − ᾱ_t) · ε,    ε ~ N(0, I)
+```
+
+Sample any timestep in **one operation** instead of t sequential steps. Computational hinge of training.
+
+**Worked anchor**: T=2, β=0.1: α=0.9, ᾱ_2=0.81. So `x_2 = 0.9·x_0 + 0.436·ε`. With T=1000 and growing β, ᾱ_T → 0, so x_T → ε (pure noise).
+
+## The reverse process (learned)
+
+```
+p_θ(x_{t-1} | x_t)  =  N( μ_θ(x_t, t),  Σ_θ(x_t, t) )
+```
+
+Standard DDPM fixes Σ_θ to a function of the noise schedule; only μ_θ is learned.
+
+**Noise-predictor reparameterization**:
+
+```
+μ_θ(x_t, t)  =  (1/sqrt(α_t)) · ( x_t  -  (β_t/sqrt(1−ᾱ_t)) · ε_θ(x_t, t) )
+```
+
+`ε_θ(x_t, t)` is the trained noise-prediction network.
+
+## The simplified DDPM loss (= denoising score matching)
+
+```
+L_simple(θ)  =  E_{t ~ Uniform{1..T}, x_0 ~ p_data, ε ~ N(0,I)}[
+                  || ε  -  ε_θ(x_t, t) ||²
+                ]
+                where  x_t = sqrt(ᾱ_t) · x_0 + sqrt(1 − ᾱ_t) · ε
+```
+
+**This is exactly DSM (L11) at noise level `sqrt(1 − ᾱ_t)`.** The L11 score-based derivation and the L12 Markov-chain derivation arrive at the same loss from two paths. L14 makes the equivalence formal via SDE view.
+
+## Training loop (one slide)
+
+```
+repeat:
+  x_0  ~ p_data
+  t    ~ Uniform({1, ..., T})
+  ε    ~ N(0, I)
+  x_t  = sqrt(ᾱ_t)·x_0 + sqrt(1−ᾱ_t)·ε
+  loss = || ε - ε_θ(x_t, t) ||²
+  θ    ← θ - η · ∇_θ loss
+```
+
+One MSE per step, sampled uniformly across timesteps. Architecture: typically U-Net (sometimes transformer).
+
+## Sampling loop (reverse chain, T forward passes)
+
+```
+x_T  ~ N(0, I)
+
+for t = T, T-1, ..., 1:
+  z   = N(0, I) if t > 1 else 0
+  ε̂   = ε_θ(x_t, t)
+  x_{t-1} = (1/sqrt(α_t)) · (x_t - (β_t/sqrt(1−ᾱ_t))·ε̂) + σ_t·z
+
+return x_0
+```
+
+Slow at inference (T=1000 forward passes in original DDPM; DDIM reduces to ~50, L13 covers).
+
+## Two paths, one model
+
+| Perspective | Path |
+| --- | --- |
+| Score matching (L11) | noise data with σ → score = -ε/σ → DSM loss → multi-noise-level extension |
+| DDPM (L12) | fixed Markov noising chain → ELBO over latents → reparameterize as noise predictor → simplified loss |
+
+**Same loss.** Noise level `σ` (L11) corresponds to `sqrt(1 − ᾱ_t)` (L12). Same model, two derivations.
+
+## A note on what this lesson does NOT cover (§6 in-body checkpoint, 5 layers)
+
+Diffusion powers most modern synthetic-media generation. Six distinct policy/governance forums sit outside this mechanical scope:
+
+| Category | What it covers |
+| --- | --- |
+| Use-case appropriateness | Synthetic faces/voices/video of identifiable people (consent) |
+| Provenance + watermarking | Attribution; latent-diffusion-specific concerns vs pixel diffusion |
+| Sector-specific | Journalism, politics, legal evidence, **MEDICAL IMAGING** (new for diffusion vs GAN era) |
+| Training-data IP | Scraped-corpora licensing (LAION-style claims) |
+| Likeness + consent | More pronounced for diffusion than VAE/GAN due to output quality |
+| Prompt-injection content risks | NEW for text-conditioned diffusion (refusal-systems prompted around) |
+
+**Evaluation methods for this lesson's scope** (operational test): FID across step counts, IS, CLIP scores, sample-quality-vs-step-count Pareto, perceptual studies, memorization probes. If you're using these tools, you're in scope. If you're using policy-debate methods (stakeholder analysis, legal frameworks, regulatory comment, sectoral standards), you're in a different conversation.
+
+**Inform-not-settle (Layer 5)**: empirical questions ("Does this model reproduce training-image-like content?") settled by FID + memorization probes. Value questions ("Should it train on scraped corpora?") inform-but-don't-settle. **Defense-in-depth**: training-data curation = engineering (this lesson's scope); IP licensing = policy (different forum). Both needed; neither alone sufficient.
+
+## Pitfalls to dodge
+
+- **Treating forward process as learned.** No, it's fixed by the β-schedule. Only reverse has parameters.
+- **Forgetting the closed-form shortcut.** Training without it = T sequential ops per example, infeasible.
+- **Confusing DDPM loss with separate paradigm.** DDPM loss IS DSM at the corresponding noise level. Same equation.
+- **Skipping the §6 boundary.** Mechanical content (this lesson) and policy questions (different forums) deserve to be kept separate; mixing muddles both.
+
+## The one-line version
+
+Diffusion fixes a Markov chain that noises data into Gaussian, learns a reverse chain parameterized as a noise predictor, and trains by a simple MSE on noise prediction that is mathematically the L11 denoising-score-matching loss; the closed-form forward shortcut makes training feasible, the reverse chain runs at inference for T steps, and L13/L14 cover speed-ups and the score-based unification.

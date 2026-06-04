@@ -1,0 +1,97 @@
+---
+title: "Cheatsheet: VAE training in practice, the reparameterization trick"
+description: One-page reference. The VAE architecture, the reparameterization trick, the closed-form Gaussian KL, the per-example VAE loss, the six-step training loop, and what VAEs are and are not good at.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## Architecture
+
+| Component | Output | Role |
+| --- | --- | --- |
+| Prior | `p(z) = N(0, I)` (fixed) | Standard Gaussian over `d`-dim latent |
+| Encoder | `q(z\|x) = N(μ_x, diag σ²_x)` | Two vectors `μ_x, log σ²_x` from network |
+| Decoder | `p(x\|z)` (Bernoulli / Gaussian / softmax) | Distribution parameters from network |
+
+Predict `log σ²` (not `σ²`); exponentiate for positivity.
+
+## The reparameterization trick
+
+Problem: `z ~ N(μ_x, σ²_x)` is stochastic, ordinary backprop cannot flow through the sampler.
+
+Solution: write the sample as a deterministic function of the encoder parameters and an independent noise variable.
+
+```
+ε ~ N(0, I)                       sampled OUTSIDE the network
+z = μ_x + σ_x · ε                 deterministic in (μ_x, σ_x); same distribution as N(μ_x, σ²_x)
+```
+
+Backprop now flows freely from `z` to the encoder. The randomness lives in `ε`, treated as a constant input per step.
+
+## Closed-form Gaussian KL
+
+```
+KL( N(μ, σ²)  ||  N(0, 1) )  =  0.5 · ( σ² + μ² − 1 − log σ² )
+```
+
+Sum over latent dimensions for a `d`-dim diagonal-Gaussian encoder.
+
+| `μ`, `σ` | KL |
+| --- | --- |
+| `0, 1` (match prior) | `0` |
+| `1, 1` (shifted mean) | `0.5` |
+| `0, 2` (wider) | `≈ 0.807` |
+
+The KL is zero only at the prior, positive otherwise, and grows as the encoder shifts or stretches away.
+
+## Per-example VAE loss
+
+```
+-ELBO(x; q) = -log p(x | z̃)   +   0.5 · sum_dims ( σ²_x + μ²_x − 1 − log σ²_x )
+              \---reconstruction--/   \-----------closed-form KL---------/
+
+z̃ = μ_x + σ_x · ε,  ε ~ N(0, I)
+```
+
+Reconstruction needs ONE Monte Carlo `z̃` sample. KL is exact, no sampling.
+
+## Training loop (one step)
+
+1. Encoder forward on `x` → `(μ_x, log σ²_x)`
+2. Sample `ε ~ N(0, I)`; compute `z̃ = μ_x + σ_x · ε`
+3. Decoder forward on `z̃` → `p(x | z̃)`; compute `-log p(x | z̃)` (reconstruction)
+4. Closed-form KL from `(μ_x, log σ²_x)`
+5. Sum: per-example loss = reconstruction + KL
+6. Backprop through everything (including `z̃` to encoder); SGD step
+
+## What VAEs are and aren't
+
+| Good at | Less competitive |
+| --- | --- |
+| Representation learning (latent code as structured representation) | State-of-the-art image sample quality (diffusion wins) |
+| Compression as a component in larger systems (latent diffusion) | Sharp samples in raw pixel space (Gaussian decoder smooths) |
+| Disentangled latents, controllable generation by latent arithmetic | Exact likelihood (only ELBO, a lower bound) |
+
+## Why it matters for AI
+
+- **Reading VAE training curves.** Two terms separately: KL too small early = posterior collapse; reconstruction stuck = decoder failing to use latent; both shrinking = healthy.
+- **Reparameterization trick recurs.** Diffusion sampling, some RL policy-gradient methods, normalizing-flow extensions of `q`. "Differentiable sampling" = reparameterization.
+- **Latent diffusion has a VAE inside.** Stable Diffusion: VAE compresses image to latent, diffusion runs in latent space. Lesson 14 builds on this.
+
+## A note on what this lesson does NOT cover
+
+VAE-based components appear in many synthetic-media systems. Framings around synthetic-media use (when appropriate, watermarking, content policies, training-data licensing) are a separate set of questions outside this mechanical lesson and belong in legal, governance, and ethics forums.
+
+## Pitfalls to dodge
+
+- **Sample from q directly** instead of reparameterizing → gradients do not flow through the encoder.
+- **Predict σ²** instead of log σ² → instability + clamp boundaries; predict log σ², exponentiate.
+- **Quote ELBO as likelihood** → ELBO is a lower bound; cross-paradigm comparisons require care.
+- **Conflate small KL with posterior collapse** → small KL can also mean prior is just a good fit; collapse is when DIFFERENT `x` produce the SAME encoder output.
+
+## The one-line version
+
+A VAE is two neural networks (Gaussian encoder + decoder) trained on the ELBO; the reparameterization trick `z = μ + σ·ε` makes the sample differentiable, the Gaussian KL has a closed form, and the per-example loss is one Monte Carlo reconstruction plus one closed-form KL.

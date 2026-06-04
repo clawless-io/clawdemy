@@ -1,0 +1,125 @@
+---
+title: "Cheatsheet: Score matching and score-based generation"
+description: One-page reference. The score-matching objective and Hyvärinen's trick, denoising score matching as noise prediction, sampling with Langevin dynamics on the learned score, multi-noise-level score matching as the bridge to diffusion, and worked numerical examples.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## What changes from L10
+
+```
+EBM training:     try to match p_θ(x) to p_data → blocked by Z(θ)
+Score matching:   match s_θ(x) = ∇_x log p_θ(x) to data score → Z drops out
+```
+
+For an EBM: `s_θ(x) = -∇_x E_θ(x)`. The score function is computable from one backward pass through the energy network; no `Z` involved.
+
+## Three reasons to train on the score, not the density
+
+| Reason | Why |
+| --- | --- |
+| `Z` drops out | `∇_x log Z(θ) = 0` (Z doesn't depend on x) |
+| Score suffices for sampling | Langevin dynamics needs only `s_θ`, no `p_θ` evaluation |
+| Score is local information | Only need direction of increasing density at `x`, not global normalization |
+
+**Tradeoff:** lose direct `log p_model(x)` evaluation; recover it later via ODE-based tricks (L14).
+
+## Explicit score matching (Hyvärinen 2005)
+
+The natural objective:
+
+```
+J_SM(θ) = (1/2) · E_{x ~ p_data}[ || s_θ(x) − ∇_x log p_data(x) ||² ]
+```
+
+Problem: we don't have `∇_x log p_data(x)`. Hyvärinen's integration-by-parts gives the equivalent form (computable from data alone, no `p_data` evaluation):
+
+```
+J_ESM(θ) = E_{x ~ p_data}[ tr(∇_x s_θ(x)) + (1/2) · ||s_θ(x)||² ]  + const
+```
+
+**The catch:** `tr(∇_x s_θ(x))` is the trace of the Jacobian, costs `d` backward passes per training point. Infeasible for high-dim `x` (an image has `d ≈ 200,000`).
+
+## Denoising score matching (Vincent 2011), the version that scales
+
+Perturb the data with Gaussian noise: `x̃ = x + σε`, `ε ~ N(0, I)`. The conditional score `∇_{x̃} log p(x̃ | x) = -ε/σ` has a closed form.
+
+```
+J_DSM(θ) = (1/2) · E_{x ~ p_data, ε ~ N(0,I)}[ || s_θ(x + σε) + ε/σ ||² ]
+```
+
+**Read this as:** the score network is trained to predict `-ε/σ` (the negative scaled noise) at the noised input `x + σε`. The score network IS a noise predictor.
+
+Training loop:
+1. Draw `x ~ p_data`, `ε ~ N(0, I)`.
+2. Compute `x̃ = x + σε`.
+3. Compute `s_θ(x̃)`.
+4. Loss = `(1/2) · ||s_θ(x̃) + ε/σ||²`.
+5. Backprop. SGD.
+
+Standard supervised-learning cost; no Jacobian.
+
+## Worked numerical example (1D Gaussian)
+
+Data: `p_data = N(0, 1)`. True score: `∇_x log p_data(x) = -x`.
+
+**Explicit SM** with model `s_θ(x) = -ax`:
+
+```
+J_SM = (1/2) · E_{x ~ N(0,1)}[ (-ax + x)² ] = (1-a)² / 2
+```
+
+| `a` | `J_SM` |
+| --- | --- |
+| `1.0` | `0` (matches true score) |
+| `0.8` | `0.02` |
+| `0.0` | `0.5` (no model, full loss) |
+
+**Denoising SM** at `σ = 1`, single example `x = 2, ε = 0.5` → `x̃ = 2.5`, target `-0.5`:
+
+| Model output `s_θ(2.5)` | Loss `(1/2)(s − target)²` |
+| --- | --- |
+| `-0.5` (exact) | `0` |
+| `-0.4` | `0.005` |
+| `0` | `0.125` |
+
+The interpretation: score network is a noise predictor.
+
+## Sampling: Langevin dynamics with learned score
+
+```
+x_{t+1} = x_t + η · s_θ(x_t) + sqrt(2η) · ε_t,    ε_t ~ N(0, I)
+```
+
+Add `η · s_θ` (score points TOWARD higher density). Iterate many steps. For single-scale `σ`, produces samples from the NOISED distribution, not the original.
+
+## Multi-noise-level score matching, the bridge to diffusion
+
+**NCSN** (Song & Ermon 2019): train a single score network conditioned on noise level `σ` across a schedule. Loss:
+
+```
+J_NCSN(θ) = sum over σ in schedule of  λ(σ) · J_DSM(θ; σ)
+```
+
+Sampling via **annealed Langevin**: start at large `σ` (noised distribution ≈ Gaussian, easy to sample), run Langevin at that scale, decrease `σ`, repeat. Chain transitions from noise to data.
+
+**Diffusion models** (L12-L14) are the same procedure derived from a Markov-chain perspective rather than score matching. The two derivations are mathematically equivalent (L14).
+
+## Why it matters for AI
+
+- **"Diffusion predicts noise" = denoising score matching.** When you read "the diffusion model is trained to predict the noise added at each step," you are reading the DSM objective directly. The network output, the noise, and the score of the noised distribution are the same vector (up to sign/scale).
+- **Cross-paradigm position.** Score-based and diffusion models do not give `log p_model(x)` directly. They give a score field, usable for sampling and (via ODEs in L14) indirect density estimation. The L9 fingerprint table listed diffusion as "indirect" for likelihood precisely because of this.
+
+## Pitfalls to dodge
+
+- **Computing explicit score-matching loss directly.** Trace-of-Jacobian is `d` backward passes per data point; infeasible for high-dim. Always use DSM.
+- **Single-noise-level training.** Learns the noised distribution's score, not the original data's. Use multi-noise-level training (NCSN / diffusion) for clean data samples.
+- **Treating `s_θ(x)` as a density or energy.** It's a vector field pointing toward locally higher density. Norm carries information; absolute value is not interpretable as `p(x)` without integration.
+- **Skipping the connection to diffusion.** DSM at multiple noise levels IS diffusion training, mathematically. Reading them as independent recipes misses the equivalence.
+
+## The one-line version
+
+Score matching trains a model to estimate `∇_x log p(x)` directly (bypassing `Z`); the practical form, denoising score matching, reduces to a noise-prediction MSE that scales to high-dim data; the multi-noise-level extension is the diffusion training objective in disguise.

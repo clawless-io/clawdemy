@@ -1,0 +1,23 @@
+---
+title: "Summary: Score matching and score-based generation"
+description: The 5-minute scan version. Score matching as direct estimation of ∇_x log p(x), Hyvärinen's integration-by-parts trick and why it doesn't scale, denoising score matching as the practical noise-prediction objective, multi-noise-level extension as the bridge to diffusion.
+artifact: summary
+sidebar:
+  order: 4
+  label: Summary
+---
+
+The previous lesson ended with the structural observation that the partition function `Z(θ)` vanishes under the `x`-gradient, leaving the score function `∇_x log p_θ(x) = -∇_x E_θ(x)` cleanly computable. This lesson is what you do with that observation. The whole lesson reduces to one line: **score matching trains a model to estimate `∇_x log p(x)` directly, bypassing `Z` entirely; the practical form, denoising score matching, reduces to a noise-prediction MSE that scales to high-dimensional data; the multi-noise-level extension is the diffusion training objective in disguise.** This is the scan-it-in-five-minutes version.
+
+## Core ideas
+
+- **Score matching** trains a model to estimate the **score function** `s_θ(x) = ∇_x log p(x)` directly, not the density `p(x)`. The partition function `Z(θ)` does not appear because it does not depend on `x`: `∇_x log Z(θ) = 0`. Three reasons to do this: (1) `Z` drops out (the EBM obstacle dissolves); (2) the score is enough to sample (Langevin dynamics needs only the score, not the density); (3) the score is local information (you only need the direction of locally increasing density, not the global normalization).
+- The tradeoff is no direct likelihood: score-based models cannot give you `log p_model(x)` in a one-line evaluation. They give a vector field, usable for sampling and (via ODE-based methods, lesson 14) indirect density estimation. This is why the L9 cross-paradigm fingerprint table listed diffusion as "indirect" for likelihood.
+- **Explicit score matching** (Hyvärinen 2005) writes the natural objective `J_SM = (1/2)·E_{p_data}[||s_θ(x) − ∇_x log p_data(x)||²]`. We do not know `∇_x log p_data(x)`; Hyvärinen's integration-by-parts gives an equivalent form computable from data samples, but with a trace-of-Jacobian term that is **infeasible in high dimensions** (`d` backward passes per data point).
+- **Denoising score matching** (Vincent 2011) is the practical fix. Perturb the data with Gaussian noise: `x̃ = x + σε`, `ε ~ N(0, I)`. The conditional score `∇_{x̃} log p(x̃ | x) = -ε/σ` has a closed form. The DSM objective `J_DSM = (1/2)·E_{x,ε}[||s_θ(x + σε) + ε/σ||²]` is just an MSE between the score-network output and the negative scaled noise. **The score network IS a noise predictor.** This conceptual identity, score ≡ noise prediction, is the move that makes everything in Phase 3 work.
+- Worked anchor on 1D Gaussian: data `N(0,1)`, true score `-x`, model `s_θ(x) = -ax`. Explicit-SM loss collapses to `(1−a)²/2`. At `a=1` the loss is zero; at `a=0.8` it is 0.02; the parabola finds its minimum at the true score. For DSM, single example `σ=1, x=2, ε=0.5` gives noised input `2.5`, target `-0.5`; a model output of `-0.4` has loss `0.005`.
+- **Multi-noise-level score matching (NCSN, 2019)** trains a single score network conditioned on `σ` across a schedule, with annealed Langevin sampling from large `σ` (initial distribution ≈ Gaussian, easy to sample) down to small `σ` (data). The next three lessons build the **diffusion model** from a Markov-chain perspective, which is mathematically equivalent (lesson 14 makes this explicit).
+
+## What changes for you
+
+Before this lesson, "the diffusion model predicts noise" was probably a sentence that named an operation without explaining the math. Now you have it: the score network IS a noise predictor at each training step, because the score of the noised distribution is the negative scaled noise that was added (Vincent 2011), and training to match the score reduces to a clean denoising MSE. When you next read a diffusion paper that says "the loss is `||ε − ε_θ(x_t, t)||²`," you will recognize that loss as the denoising-score-matching objective at one noise level, rescaled. The next lesson builds the diffusion model directly; lesson 14 returns to the equivalence with the score-matching view derived here.

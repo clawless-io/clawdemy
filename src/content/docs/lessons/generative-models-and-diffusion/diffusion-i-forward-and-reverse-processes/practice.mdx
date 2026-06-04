@@ -1,0 +1,242 @@
+---
+title: "Practice: Diffusion models I, the forward and reverse processes"
+description: A self-check on the forward and reverse chains and the simplified DDPM loss, a closed-form forward-sampling computation across two β-schedules, a hand-walked DDPM training step, and flashcards built for retrieval.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Six short questions. Answer each one in your head (or on paper) before opening the collapsible. Trying to retrieve the answer is where the learning sticks; rereading feels productive but does much less.
+
+**1. Write the forward step `q(x_t | x_{t-1})` and explain why the forward process is "fixed."**
+
+<details>
+<summary>Show answer</summary>
+
+`q(x_t | x_{t-1}) = N(x_t; sqrt(1 − β_t) · x_{t-1}, β_t · I)`. Each step scales the previous sample by `sqrt(1 − β_t)` and adds Gaussian noise of variance `β_t`. The process is fixed because the `β`-schedule is chosen at design time and has no learnable parameters; only the reverse process has trainable parameters (the network `ε_θ`).
+
+</details>
+
+**2. Write the closed-form forward shortcut and explain why it is the computational hinge of diffusion training.**
+
+<details>
+<summary>Show answer</summary>
+
+With `α_t = 1 − β_t` and `ᾱ_t = α_1 · α_2 · ... · α_t`: `x_t = sqrt(ᾱ_t) · x_0 + sqrt(1 − ᾱ_t) · ε`, with `ε ~ N(0, I)`. Equivalently `q(x_t | x_0) = N(sqrt(ᾱ_t)·x_0, (1 − ᾱ_t)·I)`. Without this shortcut, training at timestep `t = 1000` would require simulating 1000 sequential Markov steps per training example. With the shortcut, you sample `t` uniformly, draw one `ε`, and compute `x_t` in one operation.
+
+</details>
+
+**3. Write the reverse step and the DDPM noise-predictor reparameterization.**
+
+<details>
+<summary>Show answer</summary>
+
+Reverse step: `p_θ(x_{t-1} | x_t) = N(μ_θ(x_t, t), Σ_θ(x_t, t))`. Standard DDPM fixes `Σ_θ` to a function of the noise schedule; only `μ_θ` is learned. Noise-predictor reparameterization: `μ_θ(x_t, t) = (1/sqrt(α_t)) · (x_t − (β_t/sqrt(1 − ᾱ_t)) · ε_θ(x_t, t))`. The trained network is `ε_θ(x_t, t)`, predicting the noise that was added at this timestep.
+
+</details>
+
+**4. Write the simplified DDPM training loss. What is its mathematical equivalence to L11's score matching?**
+
+<details>
+<summary>Show answer</summary>
+
+`L_simple(θ) = E_{t ~ Uniform{1..T}, x_0 ~ p_data, ε ~ N(0, I)}[||ε − ε_θ(x_t, t)||²]`, with `x_t = sqrt(ᾱ_t)·x_0 + sqrt(1 − ᾱ_t)·ε`. This is exactly the denoising-score-matching loss at noise level `σ = sqrt(1 − ᾱ_t)`. The L11 score-based derivation (perturb data, predict the negative scaled noise) and the L12 DDPM Markov-chain derivation (ELBO over latents, reparameterize, simplify) arrive at the same equation from two paths.
+
+</details>
+
+**5. Walk the DDPM training loop in 6 lines of pseudocode.**
+
+<details>
+<summary>Show answer</summary>
+
+```
+repeat:
+  x_0  ~ p_data
+  t    ~ Uniform({1, ..., T})
+  ε    ~ N(0, I)
+  x_t  = sqrt(ᾱ_t) · x_0 + sqrt(1 − ᾱ_t) · ε
+  loss = ||ε − ε_θ(x_t, t)||²
+  θ    ← θ − η · ∇_θ loss
+```
+
+One MSE on noise prediction per training step, with timestep `t` sampled uniformly. Architecture: typically a U-Net (sometimes transformer-based). No adversarial game, no encoder/decoder split with reparameterization, no Jacobian computation.
+
+</details>
+
+**6. What is the signature trade-off of the diffusion paradigm?**
+
+<details>
+<summary>Show answer</summary>
+
+Training is fast and clean (one MSE per step on one network). Sampling is slow at inference (T forward passes through the network, typically T = 1000 in original DDPM; modern systems use ~50 with DDIM, or fewer with distillation, covered in L13). The slow side is the cost; the fast side is what made diffusion practical to train at the scale that produced modern image-generation systems.
+
+</details>
+
+## Try it yourself, part 1: closed-form forward sampling
+
+About 8 minutes. Use the closed-form shortcut to compute the noise coefficients at given timesteps, for two different `β`-schedules.
+
+**Schedule A**: constant `β_t = 0.1` for all `t` from 1 to T.
+
+**Schedule B**: constant `β_t = 0.01` for all `t` from 1 to T.
+
+For each schedule, compute `ᾱ_t`, `sqrt(ᾱ_t)`, and `sqrt(1 − ᾱ_t)` at `t = 1`, `t = 5`, and `t = 10`.
+
+<details>
+<summary>Check your work</summary>
+
+**Schedule A** (`α_t = 0.9`):
+
+| t | `ᾱ_t = (0.9)^t` | `sqrt(ᾱ_t)` (signal coef) | `sqrt(1 − ᾱ_t)` (noise coef) |
+| --- | --- | --- | --- |
+| 1 | 0.9 | 0.949 | 0.316 |
+| 5 | 0.59049 | 0.769 | 0.640 |
+| 10 | 0.3487 | 0.590 | 0.807 |
+
+After 10 steps of moderately aggressive noising, the signal coefficient is down to ~0.59 and the noise coefficient is up to ~0.81, so noise now dominates the noised state.
+
+**Schedule B** (`α_t = 0.99`):
+
+| t | `ᾱ_t = (0.99)^t` | `sqrt(ᾱ_t)` (signal coef) | `sqrt(1 − ᾱ_t)` (noise coef) |
+| --- | --- | --- | --- |
+| 1 | 0.99 | 0.995 | 0.100 |
+| 5 | 0.951 | 0.975 | 0.221 |
+| 10 | 0.904 | 0.951 | 0.310 |
+
+After 10 steps of mild noising, the signal is still 95% of the original; the chain would need many more steps to fully decorrelate.
+
+The interpretation: the `β`-schedule determines how fast the signal decays. Aggressive schedules (large `β`) reach near-pure-noise faster but may discard structure too quickly; mild schedules preserve more structure but need more steps. Real DDPMs use schedules that grow `β` gently from `~10⁻⁴` to `~0.02` over `T = 1000` steps, balancing these.
+
+</details>
+
+## Try it yourself, part 2: walk a single DDPM training step
+
+About 8 minutes. Use Schedule A from Part 1 (`β = 0.1` constant). Suppose at one training step you sample:
+
+- `x_0 = 2` (a scalar data point for simplicity)
+- `t = 5`
+- `ε = 0.3` (one scalar noise sample)
+
+And the network at `(x_t, t = 5)` outputs `ε_θ = 0.4`.
+
+**Step 1.** Compute `x_t = x_5` using the closed-form shortcut.
+
+**Step 2.** Compute the per-example loss `||ε − ε_θ(x_t, t)||²`. (Scalar, so the norm is just the absolute value squared.)
+
+**Step 3.** What changes about the loss in two cases: (a) the network output is exactly correct (`ε_θ = 0.3`), and (b) the network output is the negative (`ε_θ = -0.3`)?
+
+<details>
+<summary>Check your work</summary>
+
+**Step 1.** From Part 1, `sqrt(ᾱ_5) = 0.769` and `sqrt(1 − ᾱ_5) = 0.640`. So:
+
+```
+x_5 = 0.769 · 2 + 0.640 · 0.3
+    = 1.538 + 0.192
+    = 1.730
+```
+
+The noised input fed to the network is `x_5 = 1.730`, at timestep `t = 5`.
+
+**Step 2.** Loss = `||ε − ε_θ||² = (0.3 − 0.4)² = 0.01`.
+
+**Step 3.**
+
+(a) Network output `ε_θ = 0.3` (exactly correct): loss = `(0.3 − 0.3)² = 0`. This is the training-target case; gradient is zero and no parameter update happens.
+
+(b) Network output `ε_θ = -0.3` (negative of correct): loss = `(0.3 − (-0.3))² = 0.6² = 0.36`. Much larger loss; large gradient pulling the network's output toward the correct positive value. The network is being trained to predict the noise that was actually added; getting the sign wrong is heavily penalized.
+
+The training procedure does this on every step, with `(x_0, t, ε)` sampled fresh each time. Over many steps, the network learns to take `(x_t, t)` and predict `ε`, the noise that was added at that timestep.
+
+</details>
+
+## Flashcards
+
+Ten cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay out the full set as one card per page, ready to print or save as a PDF for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="Write the forward Markov-chain step (the conditional of the noised state at one step given the previous one) and explain why the forward process is fixed.">
+
+`q(x_t | x_{t-1}) = N(x_t; sqrt(1 − β_t) · x_{t-1}, β_t · I)`. Each step scales the previous sample by `sqrt(1 − β_t)` and adds Gaussian noise of variance `β_t`. The `β`-schedule is chosen at design time with no learnable parameters; only the reverse process has trainable parameters.
+
+</Flashcard>
+
+<Flashcard question="Write the closed-form forward shortcut and explain why it matters.">
+
+`x_t = sqrt(ᾱ_t) · x_0 + sqrt(1 − ᾱ_t) · ε`, with `α_t = 1 − β_t`, `ᾱ_t = product of α_1..α_t`, `ε ~ N(0, I)`. Without it, training at timestep `t = 1000` would require simulating 1000 sequential steps per example. With it, training is `O(1)` per timestep.
+
+</Flashcard>
+
+<Flashcard question="Write the reverse step and the DDPM noise-predictor reparameterization.">
+
+Reverse step: `p_θ(x_{t-1} | x_t) = N(μ_θ(x_t, t), Σ_θ)`, with `Σ_θ` fixed by schedule. `μ_θ(x_t, t) = (1/sqrt(α_t)) · (x_t − (β_t/sqrt(1 − ᾱ_t)) · ε_θ(x_t, t))`, where `ε_θ` is the trained noise-prediction network.
+
+</Flashcard>
+
+<Flashcard question="Write the simplified DDPM training loss.">
+
+`L_simple = E_{t, x_0, ε}[||ε − ε_θ(x_t, t)||²]`, with `t ~ Uniform{1..T}`, `x_0 ~ p_data`, `ε ~ N(0, I)`, `x_t = sqrt(ᾱ_t)·x_0 + sqrt(1 − ᾱ_t)·ε`. One MSE on noise prediction per step.
+
+</Flashcard>
+
+<Flashcard question="What's the equivalence between the DDPM loss and L11's score matching?">
+
+The DDPM simplified loss IS the denoising-score-matching loss at noise level `σ = sqrt(1 − ᾱ_t)`. The L11 score-based derivation (perturb data, predict negative scaled noise) and the L12 Markov-chain derivation (ELBO over latents, reparameterize, simplify) arrive at the same equation from two paths.
+
+</Flashcard>
+
+<Flashcard question="Walk the DDPM training loop in 6 lines.">
+
+```
+repeat:
+  x_0 ~ p_data
+  t   ~ Uniform({1..T})
+  ε   ~ N(0, I)
+  x_t = sqrt(ᾱ_t)·x_0 + sqrt(1−ᾱ_t)·ε
+  loss = ||ε − ε_θ(x_t, t)||²
+  θ ← θ − η·∇_θ loss
+```
+
+</Flashcard>
+
+<Flashcard question="Walk the DDPM sampling loop and name the inference cost.">
+
+```
+x_T ~ N(0, I)
+for t = T, T-1, ..., 1:
+  z = N(0, I) if t > 1 else 0
+  ε̂ = ε_θ(x_t, t)
+  x_{t-1} = (1/sqrt(α_t))·(x_t − (β_t/sqrt(1−ᾱ_t))·ε̂) + σ_t·z
+return x_0
+```
+
+Inference cost: T forward passes per sample (T = 1000 in original DDPM; L13 covers DDIM speed-up to ~50).
+
+</Flashcard>
+
+<Flashcard question="What is the signature trade-off of diffusion?">
+
+Training is fast and clean (one MSE per step on one network, no adversarial game, no Jacobian). Sampling is slow at inference (T forward passes per sample, scales linearly with T). The slow side is the cost; the fast side is what made diffusion practical to train at scale.
+
+</Flashcard>
+
+<Flashcard question="What's the network architecture for ε_θ in standard DDPM?">
+
+A U-Net (encoder-decoder convolutional architecture with skip connections), inherited from the image-restoration literature. Takes (x_t, t) as input, outputs the predicted noise. Recent work also uses transformer architectures (DiT, Diffusion Transformers); the choice of architecture for `ε_θ` is independent of the diffusion framework.
+
+</Flashcard>
+
+<Flashcard question="What are the 6 categories the §6 in-body checkpoint flags as outside this lesson's scope for diffusion?">
+
+(1) Use-case appropriateness for synthetic faces/voices/video; (2) Provenance and watermarking; (3) Sector-specific deployment (journalism, politics, legal evidence, medical imaging, with medical NEW for diffusion); (4) Training-data IP and licensing; (5) Likeness and consent (more pronounced for diffusion than VAE/GAN); (6) Prompt-injection content risks (NEW for text-conditioned diffusion).
+
+</Flashcard>
+
+</FlashcardSet>

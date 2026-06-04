@@ -1,0 +1,112 @@
+---
+title: "Cheatsheet: Maximum likelihood and the KL view"
+description: One-page reference. The KL divergence and its properties, the forward-KL = expected-log-likelihood derivation, cross-entropy as the same objective, the Monte Carlo step to empirical NLL, and which paradigms share this objective.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## KL divergence (definition)
+
+```
+KL(p || q) = E_{x ~ p}[ log(p(x) / q(x)) ] = sum_x p(x) · log(p(x) / q(x))
+```
+
+(Integral for continuous `x`.)
+
+| Property | Statement |
+| --- | --- |
+| Non-negative | `KL(p || q) >= 0` always |
+| Zero only at equality | `KL(p || q) = 0` iff `p = q` everywhere |
+| Asymmetric | `KL(p || q) != KL(q || p)` in general (not a metric) |
+
+## The derivation (one line)
+
+```
+KL(p_data || p_model)
+  = E_{p_data}[ log p_data(x) ]   -   E_{p_data}[ log p_model(x) ]
+  = -H(p_data)                     -   E_{p_data}[ log p_model(x) ]
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                                   the only model-dependent term
+```
+
+Therefore:
+
+```
+minimize KL(p_data || p_model)  ==  maximize E_{p_data}[ log p_model(x) ]
+```
+
+The first term is the negative entropy of the data, a model-independent constant.
+
+## From expectation to dataset (Monte Carlo)
+
+With `N` samples `{x_1, ..., x_N}` from `p_data`:
+
+```
+E_{p_data}[ log p_model(x) ]  ≈  (1/N) · sum_i log p_model(x_i)
+```
+
+Maximizing this = **maximum likelihood**. Equivalently:
+
+```
+minimize  -(1/N) · sum_i log p_model(x_i)   ←  empirical NLL
+```
+
+This is exactly the loss from L2.
+
+## Three names, one objective
+
+| Name | Formula | Differs by |
+| --- | --- | --- |
+| Forward KL | `KL(p_data || p_model)` | (the "true" objective) |
+| Cross-entropy | `H(p_data, p_model) = E_{p_data}[-log p_model]` | minus `H(p_data)` (constant) |
+| Empirical NLL | `-(1/N) sum_i log p_model(x_i)` | finite-sample MC estimate |
+
+Identity: `KL(p_data || p_model) = H(p_data, p_model) - H(p_data)`.
+
+## Worked numerical example
+
+`x ∈ {A, B}`, data uniform `p_data = [0.5, 0.5]`.
+
+| Model | `p_model(A)` | `p_model(B)` | KL (nats) |
+| --- | --- | --- | --- |
+| Untrained | 0.7 | 0.3 | `0.5·ln(5/7) + 0.5·ln(5/3) ≈ -0.168 + 0.255 ≈ 0.087` |
+| Matched | 0.5 | 0.5 | `0.5·ln(1) + 0.5·ln(1) = 0` |
+
+Positive when mismatched; exactly 0 when matched.
+
+## Forward vs reverse KL (why forward wins for training)
+
+- **Forward KL** `KL(p_data || p_model)`: expectations under `p_data` (we have samples); we only need to evaluate `p_model`. **Mass-covering**: penalizes assigning low probability where data has high probability.
+- **Reverse KL** `KL(p_model || p_data)`: expectations under `p_model` (fine, can sample), but the integrand needs `log p_data(x)` (we cannot evaluate). **Mode-seeking**: penalizes assigning high probability where data has low probability.
+
+Forward KL fits sample-only access and the usual generative-modeling preference for covering all of `p_data`.
+
+## Which paradigms share this objective
+
+| Paradigm | Trains on forward KL? |
+| --- | --- |
+| Autoregressive (L2) | Yes (NLL = empirical forward KL) |
+| Normalizing flows (L4) | Yes (exact density + same empirical NLL) |
+| VAEs (L5-6) | Yes-but-bounded (ELBO is a lower bound; closes when variational approximation is exact) |
+| GANs (L7-8) | No (adversarial divergence: JS, Wasserstein, etc.) |
+| Diffusion (L12-14) | Equivalent through a chain (denoising score-matching ↔ weighted KL bound) |
+
+## Why it matters for AI
+
+- **Cross-architecture comparison.** Two autoregressive LLMs are comparable by perplexity = `exp(NLL/token)`; two flow image models by bits-per-pixel. Both are forward-KL estimates in interpretable units. GANs are not comparable this way.
+- **Diagnosing training.** Good training NLL + bad validation NLL = overfit on the empirical KL. Mode collapse is mode-seeking behavior, which forward KL does not encourage.
+- **Reading papers.** "Cross-entropy loss," "NLL," and "forward KL minimization" are the same objective in different traditions; recognizing the equivalence lets you bridge papers.
+
+## Pitfalls to dodge
+
+- **KL as a distance.** No. KL is asymmetric and not a metric; forward vs reverse choice matters.
+- **Cross-entropy = entropy.** No. `H(p, q)` (cross-entropy) depends on both; `H(p)` (entropy) only on the first.
+- **NLL is a probability.** No. NLL is a non-negative number in nats (or bits with log_2). Only relative NLL values across models/epochs are meaningful.
+- **Forgetting the constant.** `H(p_data)` does not depend on the model, so absolute NLL is uninformative; deltas are what train on.
+
+## The one-line version
+
+Maximum likelihood is the empirical version of minimizing the forward KL from data to model, and three of the four paradigms in this track (autoregressive, flow, VAE-via-ELBO) all reduce to this same objective in different costumes.

@@ -1,0 +1,178 @@
+---
+title: "Lesson: GANs, the minimax game"
+description: A generative adversarial network drops the likelihood objective entirely and trains by a minimax game between a generator and a discriminator. This lesson states the objective, derives the optimal discriminator, shows that the implicit divergence GANs minimize is the Jensen-Shannon divergence (not forward KL), and explains why mode collapse and training instability are intrinsic to the paradigm rather than incidental bugs.
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+The previous three paradigms (autoregressive, flow, VAE) all kept a likelihood objective, exact or bounded. This lesson introduces the first paradigm in the track that throws likelihood away entirely. **Generative adversarial networks** (GANs) replace the principled but bounded objective of the latent-variable paradigm with a two-network game, and pay for that choice with notoriously unstable training and no likelihood you can score with, in exchange for the sharpest sample quality of any paradigm for several years of the field's history.
+
+By the end you will be able to state the minimax objective in one line, derive the optimal discriminator given a fixed generator, recognize that the implicit divergence the generator ends up minimizing is the **Jensen-Shannon divergence** (not the forward KL of Phase 1), and explain why **mode collapse** and **training instability** are paradigm-level features rather than easy-to-fix bugs.
+
+This lesson is unusual for the track because there is no clean closed-form training loss to compute by hand on small numbers; the loss depends on two networks that are themselves being trained against each other. The math we do at the chalkboard is the equilibrium analysis (the optimal discriminator given a fixed generator, and the Jensen-Shannon-divergence consequence), which a worked numerical example will pin down.
+
+## The setup: a generator and a discriminator
+
+A GAN has two neural networks playing against each other.
+
+**The generator.** Takes a latent vector drawn from a simple prior (typically a standard Gaussian, just like the VAE prior), and outputs a sample. There is no encoder, no latent posterior, no decoder distribution; the generator outputs samples directly, one per latent. We do not even need the generator to be invertible; we just need it to produce samples.
+
+**The discriminator.** Takes a sample (which could be either real data or a generator output), and outputs a scalar between zero and one interpreted as the probability that the sample came from the real data distribution. The discriminator is a standard binary classifier with a sigmoid output.
+
+The two are trained on a single objective with opposite signs: the discriminator wants to tell real from fake, and the generator wants to fool the discriminator.
+
+## The minimax objective
+
+The original GAN objective from Goodfellow et al. (2014) is:
+
+```
+min over G  max over D   V(D, G)  =  E_{x ~ p_data}[ log D(x) ]  +  E_{z ~ p(z)}[ log(1 - D(G(z))) ]
+```
+
+Read this carefully. The discriminator maximizes the objective: it wants its score to be near one on real samples (so the log-score is large) and near zero on fake samples (so the log of one-minus-score is large). The generator minimizes the objective: it wants the discriminator to score near one on generated samples (so the log of one-minus-score is small), which means it wants the discriminator to be fooled.
+
+Training alternates between updating the discriminator (a few gradient steps maximizing the objective with the generator fixed) and the generator (a few gradient steps minimizing the objective with the discriminator fixed). At equilibrium, neither network can improve unilaterally, and (under idealized conditions) the generator's distribution matches the data distribution.
+
+There is no log-likelihood anywhere. The training never asks "what is the model log-likelihood for this real example?" It only asks "can the discriminator tell?" That is the conceptual leap from Phase 1.
+
+## The optimal discriminator (the chalkboard step)
+
+Fix the generator. The generator induces a distribution over its outputs (sampling a latent from the prior, computing the generator output). The objective for the discriminator becomes, with the generator held fixed:
+
+```
+V(D, G_fixed)  =  E_{x ~ p_data}[ log D(x) ]  +  E_{x ~ p_G}[ log(1 - D(x)) ]
+              =  integral over x of  [ p_data(x) · log D(x)  +  p_G(x) · log(1 - D(x)) ]  dx
+```
+
+At each point, we maximize the integrand over the discriminator score (which lies between zero and one). Take the derivative with respect to the score and set to zero:
+
+```
+p_data(x) / D(x)  -  p_G(x) / (1 - D(x))  =  0
+```
+
+Solve:
+
+```
+D*(x)  =  p_data(x)  /  ( p_data(x) + p_G(x) )
+```
+
+This is the **optimal discriminator** at fixed generator. It has a clean reading: the optimal-discriminator score is the probability that a point came from the real data distribution, among all the probability assigned to that point by either distribution. When the generator perfectly matches the data, the optimal score is one half everywhere: the discriminator cannot distinguish real from fake, which is the equilibrium condition.
+
+## The implicit divergence: Jensen-Shannon
+
+Substitute the optimal discriminator back into the minimax objective and see what the generator is now minimizing. After algebra (omitted here; see Goodfellow et al. 2014 or CS236 Lecture 9 in *References*), the result is:
+
+```
+V(D*, G)  =  -log 4  +  2 · JS( p_data  ||  p_G )
+```
+
+where the **Jensen-Shannon divergence** between two distributions is defined as:
+
+```
+JS(p || q)  =  0.5 · KL( p  ||  m )  +  0.5 · KL( q  ||  m )       with  m = (p + q) / 2
+```
+
+The Jensen-Shannon divergence is a symmetric version of the KL: it averages the KL from each distribution to their pointwise mixture. It is non-negative, zero only when the two distributions match, and bounded above by log two (unlike KL, which can be unbounded). It is symmetric in its two arguments, so unlike forward KL, there is no asymmetric mass-covering-vs-mode-seeking choice.
+
+So the minimax game, at the optimal discriminator, reduces to **the generator minimizing the Jensen-Shannon divergence from the data distribution to the generator distribution**. GANs are JS-divergence minimization in disguise.
+
+This is the precise statement of "GANs train on a different divergence from forward KL," which the lesson-3 cross-paradigm table named. The forward KL of Phase 1 is mass-covering; the Jensen-Shannon divergence is symmetric and (at the optimal discriminator) is itself mass-covering, with its minimum at full match between the data and generator distributions. The reason mode collapse shows up as the GAN paradigm's signature failure mode is not the divergence choice itself, but the **minimax optimization dynamics**: the optimal-discriminator identity only holds at the optimal discriminator, and in practice the discriminator is always lagging behind a moving generator, so the generator best-responds against an imperfect discriminator rather than minimizing the true Jensen-Shannon objective.
+
+## A worked numerical example
+
+To pin the optimal-discriminator formula and the Jensen-Shannon divergence down on real numbers, take a discrete two-outcome case. Let the observation take value zero or one and:
+
+```
+p_data(0) = 0.5,  p_data(1) = 0.5             (uniform real data)
+p_G(0)    = 0.7,  p_G(1)    = 0.3             (generator skewed away from real)
+```
+
+**Step 1: optimal discriminator scores**:
+
+```
+D*(0)  =  p_data(0) / (p_data(0) + p_G(0))  =  0.5 / (0.5 + 0.7)  =  0.5 / 1.2  ≈  0.4167
+D*(1)  =  p_data(1) / (p_data(1) + p_G(1))  =  0.5 / (0.5 + 0.3)  =  0.5 / 0.8  =  0.625
+```
+
+The discriminator is more confident that the outcome of one is real (0.625, above one half) than the outcome of zero is real (0.4167, below one half), because the generator over-produces the outcome of zero and under-produces the outcome of one.
+
+**Step 2: Jensen-Shannon divergence**.
+
+The pointwise mixture has 0.6 mass on the outcome of zero (the average of the data probability 0.5 and the generator probability 0.7) and 0.4 mass on the outcome of one.
+
+```
+KL(p_data || m)  =  0.5 · ln(0.5/0.6)  +  0.5 · ln(0.5/0.4)
+                 ≈  0.5 · (-0.1823)     +  0.5 · (0.2231)
+                 ≈  -0.0912            +  0.1116
+                 ≈  0.0204
+
+KL(p_G || m)     =  0.7 · ln(0.7/0.6)  +  0.3 · ln(0.3/0.4)
+                 ≈  0.7 · (0.1542)     +  0.3 · (-0.2877)
+                 ≈  0.1079             +  -0.0863
+                 ≈  0.0216
+
+JS(p_data || p_G)  =  0.5 · 0.0204  +  0.5 · 0.0216  ≈  0.0210
+```
+
+So the Jensen-Shannon divergence is approximately 0.021 nats. The two distributions are close but not identical; the divergence is small but positive. If the generator matched the data exactly, both KL terms would be zero and the Jensen-Shannon divergence would be zero too, which is the equilibrium condition (optimal discriminator score of one half everywhere).
+
+## Why GANs train unstably
+
+Three failure modes are paradigm-level, not bugs.
+
+**Vanishing gradients in the original loss.** The generator's saturating loss flattens when the discriminator is good (its score on fakes is near zero): the function flattens, and the gradient to the generator becomes tiny. Early in training, the discriminator quickly gets very good (real and fake distributions barely overlap), so the generator stops learning. The **non-saturating loss**, where the generator instead maximizes the log of the discriminator score on its own samples, has the same gradient direction but does not saturate; this is the standard fix and is what every modern GAN actually optimizes. The minimax framework still describes the game; the loss function used in practice is the non-saturating variant.
+
+**Mode collapse.** The generator can find a small set of outputs that reliably fool the discriminator, then produce only those, missing entire modes of the data distribution. The Jensen-Shannon divergence at the optimal discriminator has its minimum at full coverage, so a Jensen-Shannon-optimizing generator would not collapse; but the optimal-discriminator identity only holds when the discriminator is actually optimal, and in practice the discriminator is always lagging behind a moving generator. The generator best-responds against an imperfect discriminator: if the current discriminator has not learned a particular mode yet, the generator can score reasonably without producing samples from that mode, and the gradient signal does not push it to cover the mode. The result is collapse onto a narrow output set, even though full coverage would be the Jensen-Shannon minimum if the discriminator could keep up. Symptoms: a face generator that produces only a handful of distinct face types regardless of latent; an image generator that gives the same scene composition across many samples. Mode collapse is not "fixable" by tuning; it requires either a different divergence with friendlier dynamics (Wasserstein-GAN, next lesson) or training tricks (mini-batch discrimination, feature matching, unrolled GANs) that stabilize the minimax loop.
+
+**No clear stopping criterion.** Both the discriminator and generator losses oscillate during training (each network gets better against the other and vice versa); they do not monotonically improve. Sample quality and the training loss are weakly correlated at best. You cannot stop training by "loss has converged"; you have to inspect samples or compute a metric like FID (lesson 9). This is the reason GAN training requires more babysitting than likelihood-based paradigms.
+
+## What GANs are good at, and what they are not
+
+For several years (roughly 2014-2020), GANs produced the sharpest image samples of any paradigm. **StyleGAN** and its variants set the standard for high-resolution face generation, and the inference speed (one forward pass through the generator) is hard to beat. Where GANs still earn their place:
+
+**Inference speed.** Sampling from a GAN is one forward pass through the generator. For applications where latency matters (real-time image generation, mobile inference), this is the fastest paradigm.
+
+**Sharp samples in specific domains.** Face generation, certain image-to-image translation tasks, and some audio-synthesis applications still use GAN-family methods because the resulting samples have qualities (sharpness, fine texture detail) that diffusion does not yet match in every domain.
+
+**Latent-space editing.** Well-trained GAN latent spaces have demonstrable controllability properties (semantic directions for "age," "smile," etc., found by analyzing latents). The cleanest demonstrations of latent-space arithmetic in image generation came from GANs.
+
+What GANs are not good at: density evaluation (no likelihood, period), stable out-of-the-box training, broad-coverage generation (diffusion currently surpasses for general text-to-image). The cross-paradigm map from lesson 1 puts GANs on the "implicit / no-likelihood" branch precisely because of these properties.
+
+## A note on what this lesson does NOT cover
+
+Generative adversarial networks are the paradigm where the modern **deepfake** category originated. The framing for those use cases is a set of distinct policy and governance questions outside this lesson's mechanical scope:
+
+- **When generating synthetic faces, voices, or video of identifiable people is appropriate vs not** (use-case and consent policy);
+- **How to attribute or watermark synthesized content** so downstream consumers can tell what was generated (provenance policy);
+- **Sector-specific policies for generated media in journalism, politics, and legal evidence** (deployment policy, with different stakeholders per sector);
+- **IP and licensing claims around training data scraped from named sources** (data-licensing policy).
+
+Each of these is a distinct forum with distinct stakeholders, evaluated by different methods than the mechanical questions this lesson covers. Treat the math (which this lesson gives you: minimax game, optimal discriminator, Jensen-Shannon divergence) and the policy questions (which it explicitly does not) as separate concerns evaluated by different methods. When you next read a paper or release that uses GAN technology in a sensitive domain, the math is your read on what the system can do; the policy framing comes from sources this lesson does not pretend to substitute for.
+
+## Why this matters when you use AI
+
+Even now, when GANs are no longer the dominant image-generation paradigm, the framework matters for two reasons.
+
+**Reading divergence choices.** Many later generative-model variants are framed in terms of "what divergence between the data distribution and the generator distribution do we want to minimize?" The original GAN minimizes Jensen-Shannon; the Wasserstein GAN (next lesson) minimizes the Wasserstein distance; some variants minimize alternative divergences. Recognizing the question "which divergence?" as a paradigm-design choice is what this lesson sets up. The Phase 1 forward-KL framework, the GAN's Jensen-Shannon framework, and (later) the diffusion's score-matching framework are all different answers to the same divergence-choice question.
+
+**Adversarial training as a tool.** Even outside generative models, the adversarial-training pattern (one network trying to fool another) shows up in robustness research, in some self-supervised learning methods, and in policy-vs-value training in RL. The minimax framework you learn here is reusable.
+
+## Common pitfalls
+
+**Treating the original saturating loss as the actual training loss.** Every modern GAN uses the non-saturating variant (the generator maximizes the log of the discriminator's score on its own samples) for the gradient-vanishing reason. The minimax framework still describes the game theoretically; the loss function in practice is the non-saturating variant.
+
+**Mistaking mode collapse for a bug.** Mode collapse is a paradigm-level feature of the minimax dynamics with an imperfect (always-lagging) discriminator, not a property of the Jensen-Shannon divergence itself (whose minimum at the optimal discriminator is full coverage). You do not fix it by adjusting hyperparameters; you fix it by changing the divergence to one with friendlier dynamics (Wasserstein-GAN), the architecture (with regularization tricks), or by accepting some collapse and managing it.
+
+**Expecting a likelihood number.** GANs cannot give you a model log-likelihood. The paradigm does not compute density anywhere; the training objective is the minimax game directly. This is why the L3 cross-paradigm table listed GANs as "No likelihood" rather than as a lower bound or a chain-of-equivalences case.
+
+**Using training loss to gauge sample quality.** GAN training losses oscillate; they do not monotonically improve. Sample quality is best measured by external metrics (FID, IS, lesson 9) or by inspecting samples. Stopping by "loss has converged" usually stops you at the wrong place.
+
+## What you should remember
+
+- **A GAN is two networks in a minimax game:** the generator maps latents to samples; the discriminator classifies real versus fake. The objective is the discriminator's expected log-score on real data plus its expected log of one-minus-score on fakes; the generator minimizes this objective while the discriminator maximizes it. No likelihood is ever computed.
+- **At the optimal discriminator (which is the data probability divided by the sum of data and generator probabilities at each point), the generator's objective reduces to minimizing the Jensen-Shannon divergence between the data distribution and the generator distribution.** The Jensen-Shannon divergence averages the KL from each distribution to the pointwise mixture. This is the implicit divergence the GAN paradigm minimizes; it is symmetric and bounded by log two, unlike the forward KL of Phase 1.
+- **Mode collapse, training instability, and the lack of a clean stopping criterion are paradigm-level features**, not bugs. They follow from the minimax dynamics with an always-lagging discriminator (collapse, instability) and the oscillating loss landscape (no clean stopping criterion); not from the Jensen-Shannon divergence itself, whose minimum at the optimal discriminator would be full coverage. The next lesson, *GAN training in practice*, introduces Wasserstein-GAN and gradient-penalty regularization, which change the divergence the game minimizes to one with friendlier gradients and partially fix the stability issues.
+
+You now have the adversarial paradigm in its original form. The next lesson keeps the game framework but changes the divergence and the regularization, addressing the training pathologies you just saw and giving the more stable GAN variant most production-grade systems actually use.

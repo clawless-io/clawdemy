@@ -278,6 +278,12 @@ const TRACK_10_PHASE_SLUGS = [
 	'model-evaluation',
 ] as const;
 
+const TRACK_19_PHASE_SLUGS = [
+	'generative-foundations',
+	'latent-and-adversarial',
+	'energy-score-diffusion',
+] as const;
+
 const PHASE_SLUGS = [
 	...TRACK_5_PHASE_SLUGS,
 	...TRACK_6_PHASE_SLUGS,
@@ -295,6 +301,7 @@ const PHASE_SLUGS = [
 	...TRACK_9_PHASE_SLUGS,
 	...TRACK_24_PHASE_SLUGS,
 	...TRACK_10_PHASE_SLUGS,
+	...TRACK_19_PHASE_SLUGS,
 ] as const;
 
 const BriefSchema = z.object({
@@ -325,6 +332,7 @@ const BriefSchema = z.object({
 		'statistics-and-probability',
 		'multimodal-ai',
 		'classical-machine-learning',
+		'generative-models-and-diffusion',
 	]),
 	difficulty: z.enum(['intro', 'standard', 'deep']),
 	estimated_read_minutes: z.number().int().positive(),

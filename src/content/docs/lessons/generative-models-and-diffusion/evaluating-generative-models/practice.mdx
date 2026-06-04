@@ -1,0 +1,218 @@
+---
+title: "Practice: Evaluating generative models"
+description: A self-check on why likelihood isn't universal and on the IS/FID/precision-recall toolkit, a worked 1D FID computation, an Inception-Score computation on a small categorical case, and flashcards built for retrieval.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Six short questions. Answer each one in your head (or on paper) before opening the collapsible. Trying to retrieve the answer is where the learning sticks; rereading feels productive but does much less.
+
+**1. Why is likelihood not a universal cross-paradigm metric?**
+
+<details>
+<summary>Show answer</summary>
+
+Not every paradigm has it (GANs do not compute density at all). Some have only a bound (VAEs report the ELBO, which undershoots `log p_model(x)` by `KL(q || p_posterior)`). Some have it indirectly (diffusion gives an ELBO bound from training and exact NLL only at extra ODE-based cost). Even when likelihood is exact (autoregressive, flows), it can decouple from sample quality, and units differ across paradigms (per-token NLL vs per-pixel bits-per-dim), so cross-paradigm likelihood comparisons are usually meaningless.
+
+</details>
+
+**2. Write the Inception Score formula and explain what each piece measures.**
+
+<details>
+<summary>Show answer</summary>
+
+`IS = exp( E_{x ~ p_model}[ KL( p(y | x) || p(y) ) ] )`. `p(y | x)` is the Inception classifier's class distribution for generated sample `x`; `p(y)` is the marginal over classes across the generated set. The KL is large when `p(y | x)` is sharp (sample is clearly classifiable) AND `p(y)` is broad (generator covers many classes). Higher IS = better classifiability + diversity, both as judged by the Inception classifier.
+
+</details>
+
+**3. Write the FID formula and the 1D collapse.**
+
+<details>
+<summary>Show answer</summary>
+
+General: `FID = ||μ_r − μ_g||² + Tr( Σ_r + Σ_g − 2 · sqrt(Σ_r · Σ_g) )`, where `(μ_r, Σ_r)` and `(μ_g, Σ_g)` are the Gaussian fits to real and generated Inception features. In 1D (scalar variance): `FID_1D = (μ_r − μ_g)² + (σ_r − σ_g)²`, the sum of squared mean gap and squared standard-deviation gap.
+
+</details>
+
+**4. What's the difference between what IS measures and what FID measures?**
+
+<details>
+<summary>Show answer</summary>
+
+IS measures the Inception classifier's view of generated samples (classifiability + diversity); it does NOT compare to real data. FID measures the distance between the generated and real feature distributions (both as Gaussian fits in Inception feature space); it DOES compare to real data and is sensitive to both per-sample quality and overall coverage (mode dropping shows up as covariance mismatch).
+
+</details>
+
+**5. What do precision and recall for distributions add over a single FID number?**
+
+<details>
+<summary>Show answer</summary>
+
+They separate sample quality from coverage. Precision = fraction of generated samples that fall inside the real-data feature region (high = samples look real). Recall = fraction of the real-data feature region the generator covers (high = no missing modes). FID collapses both into one number; a model can have high precision but low recall (sharp samples, mode-collapsed) and FID alone would not flag the imbalance.
+
+</details>
+
+**6. Why is "evaluation methods are a paradigm fingerprint" a useful framing?**
+
+<details>
+<summary>Show answer</summary>
+
+Because the suite of instruments a paradigm is evaluated by reveals which questions it was positioned to answer. Autoregressive paradigms answer "how surprising is this example?" with perplexity. GAN paradigms answer "does this sample fool a classifier trained on real data?" with FID/IS. Matching the metric to the deployment question (what you actually want to know about the system) is more important than reaching for the most famous metric.
+
+</details>
+
+## Try it yourself, part 1: FID on 1D Gaussians
+
+Compute `FID_1D = (μ_r − μ_g)² + (σ_r − σ_g)²` for each setting. About 5 minutes.
+
+- a) Real `(μ_r, σ_r) = (0, 1)`. Generated `(μ_g, σ_g) = (2, 1)`.
+- b) Real `(0, 1)`. Generated `(0, 2)`.
+- c) Real `(0, 1)`. Generated `(2, 2)`.
+- d) Real `(0, 1)`. Generated `(0, 1)`.
+
+<details>
+<summary>Check your work</summary>
+
+- a) `FID = (0 − 2)² + (1 − 1)² = 4 + 0 = 4`. Mean shifted by 2; variance matched.
+- b) `FID = 0 + (1 − 2)² = 1`. Mean matched; variance one unit wider.
+- c) `FID = 4 + 1 = 5`. Both mean and variance mismatched; sum of the two squared gaps.
+- d) `FID = 0 + 0 = 0`. Generator matches data; FID is exactly zero (the lower bound).
+
+The pattern: FID grows quadratically in the mean shift and quadratically in the standard-deviation difference. Both pieces matter, and they add. The general (high-dimensional) FID has the same shape; just substitute matrices for scalars and use the matrix square root.
+
+</details>
+
+## Try it yourself, part 2: Inception Score on a small categorical case
+
+Suppose your Inception classifier has just three classes `{cat, dog, bird}`, and you generate 4 samples. The classifier returns these class probability vectors for each sample:
+
+```
+Sample 1:  p(y | x_1) = [0.9, 0.05, 0.05]      (clearly a cat)
+Sample 2:  p(y | x_2) = [0.05, 0.9, 0.05]      (clearly a dog)
+Sample 3:  p(y | x_3) = [0.05, 0.05, 0.9]      (clearly a bird)
+Sample 4:  p(y | x_4) = [0.9, 0.05, 0.05]      (clearly a cat)
+```
+
+About 9 minutes (a calculator helps).
+
+**Step 1.** Compute the marginal `p(y) = (1/4) · sum_i p(y | x_i)`.
+
+**Step 2.** Compute `KL( p(y | x_i) || p(y) )` for each sample and average.
+
+**Step 3.** Compute `IS = exp( average KL )`.
+
+**Step 4.** Now suppose all 4 samples were the same `[0.9, 0.05, 0.05]` (cat, cat, cat, cat). What would IS be? Why?
+
+<details>
+<summary>Check your work</summary>
+
+**Step 1.** Average the four class vectors:
+
+```
+p(y) = (1/4) · ( [0.9, 0.05, 0.05] + [0.05, 0.9, 0.05] + [0.05, 0.05, 0.9] + [0.9, 0.05, 0.05] )
+     = (1/4) · [1.9, 1.05, 1.05]
+     = [0.475, 0.2625, 0.2625]
+```
+
+**Step 2.** `KL(p(y|x_i) || p(y))` for each sample. Use natural log:
+
+Sample 1: `0.9·ln(0.9/0.475) + 0.05·ln(0.05/0.2625) + 0.05·ln(0.05/0.2625)`
+- `0.9·ln(1.895) ≈ 0.9·0.639 ≈ 0.5751`
+- `0.05·ln(0.190) ≈ 0.05·(-1.659) ≈ -0.0830`
+- `0.05·ln(0.190) ≈ -0.0830`
+- Sum: `≈ 0.4091`
+
+Sample 2: `0.05·ln(0.05/0.475) + 0.9·ln(0.9/0.2625) + 0.05·ln(0.05/0.2625)`
+- `0.05·ln(0.105) ≈ 0.05·(-2.251) ≈ -0.1126`
+- `0.9·ln(3.429) ≈ 0.9·1.232 ≈ 1.1089`
+- `0.05·ln(0.190) ≈ -0.0830`
+- Sum: `≈ 0.9133`
+
+Sample 3: by symmetry with sample 2 (swap dog and bird): `≈ 0.9133`.
+
+Sample 4: same as sample 1: `≈ 0.4091`.
+
+Average KL: `(0.4091 + 0.9133 + 0.9133 + 0.4091) / 4 ≈ 2.6448 / 4 ≈ 0.6612`.
+
+**Step 3.** `IS = exp(0.6612) ≈ 1.937`.
+
+**Step 4.** If all 4 samples were `[0.9, 0.05, 0.05]`, the marginal would also be `[0.9, 0.05, 0.05]`, so `KL(p(y|x_i) || p(y)) = 0` for each sample (they are identical). Average KL = 0; `IS = exp(0) = 1`.
+
+The interpretation: `IS = 1` means "the generator produces samples that are individually classifiable but all of the same class" (no diversity contribution). Higher IS rewards both sharp per-sample classification AND a marginal class distribution spread across many classes. Our 4-sample case scored about 1.94 because three of the three classes were represented; perfect uniform coverage with sharp samples would score higher still (theoretical maximum on 3 classes is 3).
+
+</details>
+
+## Flashcards
+
+Ten cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay out the full set as one card per page, ready to print or save as a PDF for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="Why isn't likelihood a universal cross-paradigm evaluation metric?">
+
+Not every paradigm has it (GANs do not). Some have only a bound (VAEs report ELBO). Some have it indirectly (diffusion). Even when exact, likelihood and sample quality can decouple, and units differ across paradigms (per-token NLL vs per-pixel bits-per-dim).
+
+</Flashcard>
+
+<Flashcard question="Write the Inception Score formula.">
+
+`IS = exp( E_{x ~ p_model}[ KL( p(y | x) || p(y) ) ] )`. `p(y | x)` is Inception's class distribution for sample `x`; `p(y)` is the marginal. Large when samples are clearly classifiable AND the marginal is spread across many classes.
+
+</Flashcard>
+
+<Flashcard question="What does IS measure well, and what does it miss?">
+
+Measures well: per-sample classifiability (rough quality proxy) and class diversity (rough coverage proxy). Misses: realism vs the actual data distribution. IS does NOT compare to real data; can be gamed by Inception-friendly samples.
+
+</Flashcard>
+
+<Flashcard question="Write the FID formula and the 1D collapse.">
+
+General: `FID = ||μ_r − μ_g||² + Tr(Σ_r + Σ_g − 2·sqrt(Σ_r·Σ_g))`. In 1D (scalar variances): `FID_1D = (μ_r − μ_g)² + (σ_r − σ_g)²`, the sum of squared mean gap and squared standard-deviation gap.
+
+</Flashcard>
+
+<Flashcard question="What does FID measure well, and what does it miss?">
+
+Measures well: distance between generated and real feature distributions (compares to real data); sensitive to both per-sample quality and coverage (mode dropping shows as covariance mismatch). Misses: Inception bias (trained on ImageNet); noisy with small samples (needs ~10k+).
+
+</Flashcard>
+
+<Flashcard question="What do precision and recall for distributions add over a single FID number?">
+
+They separate quality from coverage. Precision = fraction of generated samples inside the real-data region (samples look real). Recall = fraction of real-data region covered (no missing modes). FID conflates the two; precision-recall pulls them apart.
+
+</Flashcard>
+
+<Flashcard question="Where do human preference studies sit in the metric hierarchy?">
+
+They are the ground truth for "does this look real?" Show pairs (real, generated) to raters and measure how often they pick the real one. If raters do no better than chance (50%), the generator has succeeded. Expensive and slow, so reserved for major releases or for calibrating automated metrics on new domains.
+
+</Flashcard>
+
+<Flashcard question="State the evaluation-methods-as-paradigm-fingerprint framing.">
+
+Each paradigm has a characteristic suite of evaluation instruments. Autoregressive: perplexity. Flow: NLL. VAE: ELBO + FID. GAN: FID/IS/precision-recall/human studies + WGAN critic estimate. Diffusion: FID across step counts + ELBO bound. Reading the suite reveals which questions a paradigm is positioned to answer.
+
+</Flashcard>
+
+<Flashcard question="What's the most common evaluation mistake when comparing models?">
+
+Reaching for the most famous metric without checking that its question matches your deployment question. FID is famous and useful; perplexity is famous and useful; neither answers every question. Match metric to deployment question (sample-realism, coverage, next-token surprise, text-image alignment), and use multiple metrics to guard against gaming.
+
+</Flashcard>
+
+<Flashcard question="Why does FID need at least ~10k samples to stabilize?">
+
+Because the metric estimates a covariance matrix (typically ~2048 dimensions for Inception features) from the generated samples, and covariance estimation has high variance at small sample counts. Below ~10k samples, the noise in the covariance estimate can swamp the signal. Reporting FID on hundreds of samples introduces variance that overwhelms what the metric is trying to measure.
+
+</Flashcard>
+
+</FlashcardSet>

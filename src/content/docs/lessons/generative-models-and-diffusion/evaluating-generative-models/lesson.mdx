@@ -1,0 +1,141 @@
+---
+title: "Lesson: Evaluating generative models"
+description: How do you compare a VAE to a GAN to a diffusion model, when likelihood is exact for some paradigms, bounded for others, and unavailable for the rest? This lesson covers the paradigm-agnostic evaluation toolkit (FID, Inception Score, precision and recall for distributions, human preference studies) and the cross-paradigm reading that each paradigm has its own fingerprint of evaluation instruments, not because some are better but because different paradigms answer different questions.
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+Phase 2 introduced the paradigms that step away from exact likelihood: VAEs give a lower bound (the ELBO), GANs give nothing (no density anywhere in the pipeline), and the GAN variants (WGAN-GP) replace the divergence entirely. The natural follow-up question, which has been hovering over the last four lessons, is: **how do you actually compare a VAE to a GAN to a diffusion model?** You cannot use likelihood alone, because the paradigms do not all give one. You cannot use sample quality alone, because "quality" is multi-dimensional (sharpness, coverage of all modes, realism, prompt fidelity). You need an evaluation toolkit.
+
+This lesson is that toolkit. By the end you will know what likelihood actually does and does not measure, why it is not a universal cross-paradigm metric, how the two standard sample-based image metrics (**Inception Score** and **Fréchet Inception Distance**) work, what they measure and miss, how to use precision/recall for distributions to separate sample quality from coverage, and where human preference studies sit in the hierarchy. The deeper organizing idea is **evaluation-methods-as-paradigm-fingerprint**: each paradigm has its own diagnostic suite of instruments, and reading the suite is how you read which questions a paradigm is positioned to answer well.
+
+This is a less arithmetic-dense lesson than the rest of Phase 2; the work is conceptual placement of evaluation methods rather than derivation of new objectives.
+
+## Why likelihood is not a universal metric
+
+The previous five lessons gave us four paradigm positions on likelihood:
+
+- **Autoregressive (L2-L3)** and **normalizing flows (L4)**: exact log-likelihood of the model, summed term by term (chain rule for autoregressive; change-of-variables for flows). Cleanly trainable on NLL, cleanly comparable within the paradigm (perplexity for autoregressive language models, bits-per-dim for flow image models).
+- **VAEs (L5-L6)**: lower bound only (the ELBO). The actual log-likelihood is intractable; the ELBO undershoots it by an unknown KL-divergence gap between the encoder and the true posterior. So VAE "test likelihood" is conservative.
+- **GANs (L7-L8)**: no likelihood at all. The training objective does not compute density; the critic outputs a Wasserstein estimate or a probability, neither of which is the model density. You cannot ask a GAN "what is your model's likelihood on this example?" because the question is structurally not answerable.
+- **Diffusion (L12-14, coming up)**: indirect access. The diffusion training objective is equivalent to an ELBO bound on the model log-likelihood, plus you can use an ODE-based trick to compute an exact log-likelihood at extra cost. So diffusion gives likelihood, just not for free.
+
+Even within the paradigms where likelihood is available, it is not a perfect quality proxy. Two well-known failure modes:
+
+**Likelihood and sample quality can decouple.** A model can assign high likelihood to the training data while producing samples that look terrible (typically because the model's density is "spiky" on training points without being smooth between them). Conversely, a model can produce visually impressive samples while assigning low likelihood to held-out data (typically when the model has memorized parts of the training set but does not cover the full distribution). The relationship between likelihood and "this looks right" is weaker than intuition suggests.
+
+**Likelihood units are not comparable across paradigms.** Even when two models both compute exact model log-likelihood, the units are paradigm-dependent: per-token cross-entropy for an autoregressive language model, per-pixel bits-per-dim for a flow image model. Comparing those numbers directly is meaningless without unit conversion, which usually requires assumptions that defeat the comparison.
+
+These two together mean that even when likelihood is technically computable, you often want a different metric that measures "how good are the samples?" directly.
+
+## Sample-based metrics: FID and Inception Score
+
+The standard sample-based metrics for image generation are the Inception Score (IS) and the Fréchet Inception Distance (FID), both of which use a pretrained image classifier (the Inception network) as a feature extractor.
+
+### Inception Score (IS)
+
+The Inception Score asks two things at once: are the generated images recognizable (each sample classifiable into a clear class), and is the overall set diverse (the marginal distribution over classes is spread out)? Higher is better.
+
+```
+IS  =  exp(  E_{x ~ p_model}[  KL( p(y | x)  ||  p(y) )  ]  )
+```
+
+where the per-sample term is the Inception network's class distribution for a generated sample, and the marginal is the average of those per-sample class distributions across the generated set. The KL term is large when the per-sample class distribution is sharp (a clear class for the sample) AND when the marginal is broad (the generator covers many classes). Both qualities increase IS.
+
+**What IS measures well**: per-sample classification confidence (rough proxy for sample quality) and class diversity (rough proxy for coverage).
+
+**What IS misses**: realism vs the actual data distribution. IS does not compare the generated set to real images at all; it only asks whether the generated images are individually classifiable and collectively diverse according to the Inception classifier's view of the world. A model can score well on IS by producing images that fall cleanly into Inception classes without producing images that look like the training data.
+
+### Fréchet Inception Distance (FID)
+
+FID addresses IS's main weakness by comparing the distribution of generated images to the distribution of real images, both expressed as Inception feature vectors.
+
+The setup: pass each real image and each generated image through the Inception network and extract the activations of some intermediate layer (typically the last pooling layer, producing a vector of about 2048 dimensions per image). Now you have two collections of feature vectors: the real-image features and the generated-image features.
+
+Fit a multivariate Gaussian to each: a mean and covariance for the real-image features, and a mean and covariance for the generated-image features. The Fréchet distance between these two Gaussians has a closed form:
+
+```
+FID  =  ||μ_r − μ_g||²  +  Tr( Σ_r + Σ_g − 2 · sqrt(Σ_r · Σ_g) )
+```
+
+(The square root is the matrix square root; computing it efficiently for a large covariance matrix is the expensive step in practice.)
+
+Lower FID is better; FID = 0 means the Gaussian-projected feature distributions are identical, which is the closest the metric can get to "the generator matches the data." FID is sensitive to **mode dropping** (missing parts of the data distribution shows up as a covariance mismatch) and to **visual artifacts** (per-image quality issues shift the feature distribution).
+
+**What FID measures well**: distance between generated and real distributions, projected through Inception features. Sensitive to both per-sample quality and distribution coverage.
+
+**What FID misses**: it depends on Inception specifically, which is biased toward natural-image content (the network was trained on ImageNet). FID values on out-of-distribution domains (medical scans, satellite imagery, abstract art) need to be interpreted with care. FID also gets noisy with small sample counts, typically requiring at least 10,000 generated samples to stabilize.
+
+### A worked simplified-FID example (1D Gaussians)
+
+To pin the FID formula down on numbers you can compute by hand, simplify to one-dimensional features (Inception features are typically 2048-dimensional; we shrink to 1D to make the matrices scalars).
+
+In 1D, the covariance becomes a scalar variance, and the matrix-square-root term collapses to the product of the two standard deviations. The trace is just the value itself. So:
+
+```
+FID_1D  =  (μ_r − μ_g)²  +  ( σ_r² + σ_g² − 2 · σ_r · σ_g )
+       =  (μ_r − μ_g)²  +  ( σ_r − σ_g )²
+```
+
+A neat collapse: in 1D, FID is the sum of the squared mean gap and the squared standard-deviation gap.
+
+Worked anchors:
+- **Real**: mean zero, standard deviation one. **Generated**: mean one, standard deviation one. FID in 1D equals one. The generator's mean is shifted; the variance matches.
+- **Same setup, generated has wider variance**: generated mean one, standard deviation 1.5. FID in 1D equals 1.25 (the squared standard-deviation gap of 0.25, added to the squared mean gap of one). Higher than before; both mean and variance mismatched.
+- **Match**: generated mean zero, standard deviation one. FID in 1D equals zero. Generator matches data; FID is zero, as it must be at the lower bound.
+
+The general formula in higher dimensions is the same shape, just with matrices.
+
+## Beyond image quality: precision, recall, and human preference
+
+FID and IS collapse multiple aspects of quality into one number each. For deeper diagnosis, three additional tools are standard.
+
+**Precision and recall for distributions** (Sajjadi et al. 2018; Kynkäänniemi et al. 2019) separate "sample quality" from "coverage." Imagine the real-data feature distribution as a region in feature space and the generated distribution as another region. Precision is the fraction of generated samples that fall inside the real-data region (high precision = samples look real); recall is the fraction of the real-data region that the generator covers (high recall = no missing modes). A model can have high precision but low recall (sharp samples but mode-collapsed); the inverse is rarer but possible. FID conflates these two; precision-recall pulls them apart.
+
+**Human preference studies** are the ground truth for "does this look real?" Show pairs of images (one real, one generated) to human raters; ask them to pick the real one. If raters do no better than chance (50% accuracy), the generator has succeeded at fooling humans, which is a stronger claim than any FID number. Human studies are expensive, slow, and prone to reviewer-effort effects, so they are reserved for major model releases or for calibrating automated metrics on a new domain.
+
+**Task-specific metrics** kick in when "looks right" is not the goal. Text: BLEU, ROUGE, BERTScore (compare to reference texts); perplexity for language-model evaluation. Audio: FAD (Fréchet Audio Distance, the FID analog for audio embeddings). Text-image alignment: CLIP score (cosine similarity in CLIP embedding space between the generated image and the text prompt). Each task has a metric family; FID and IS are the image-quality family.
+
+## Evaluation methods as paradigm fingerprint
+
+The deeper organizing idea, drawing the cross-paradigm map L1 set up, is that each paradigm has a characteristic suite of evaluation instruments. Reading the suite reveals which questions that paradigm is positioned to answer.
+
+| Paradigm | Primary evaluation | Secondary | What you cannot ask directly |
+| --- | --- | --- | --- |
+| Autoregressive (LLMs, PixelRNN) | Perplexity (= exp(NLL/token)) | BLEU/ROUGE for task-specific text; bits-per-dim for images | Sample quality decoupled from likelihood |
+| Normalizing flows | NLL (bits-per-dim for images) | FID for image flows | Inference speed in latency-sensitive cases |
+| VAEs | ELBO (lower bound on NLL) | FID, reconstruction MSE | Exact likelihood (only bounded) |
+| GANs (original + WGAN-GP) | FID, IS, precision/recall, human studies | Wasserstein critic estimate (WGAN); training stability metrics | Any likelihood number |
+| Diffusion | FID across step counts; CLIP score; sample quality vs step-count Pareto | ELBO bound on NLL (via training objective equivalence); ODE-based exact NLL (extra cost) | Single-step sampling speed |
+
+The pattern: paradigms that compute exact density are evaluated primarily on density (perplexity, bits-per-dim); paradigms that do not compute density are evaluated primarily on sample-distance metrics (FID, IS). Hybrids and special cases (diffusion's indirect-but-computable likelihood; WGAN's critic estimate as a training-stability instrument) have their own positions on the table.
+
+This framing is more than a comparison chart. It tells you which questions a paradigm was designed to answer well: autoregressive paradigms answer "how surprising is this example?"; GAN paradigms answer "does this sample fool a classifier trained on real data?"; diffusion answers a hybrid set depending on whether you treat its likelihood as bounded or exact. The right evaluation for a system is the one whose question matches what you actually want to know.
+
+## How evaluation-methods inform model selection
+
+Two practical patterns.
+
+**Match the metric to the deployment question.** If you are deploying a chat model and care about response quality, perplexity on held-out conversations is a reasonable proxy (autoregressive paradigm's primary instrument). If you are deploying an image generator and care about how the outputs look in your app, FID on a representative test set plus human preference studies on your specific use cases is the right combination. Reaching for a metric just because it is famous, without checking that its question matches your deployment question, is the most common evaluation mistake.
+
+**Watch for metric gaming.** Any single metric can be gamed if the model is allowed to know about it during training. IS is famously gameable (generate images that fall cleanly into Inception classes regardless of realism). FID is harder but not impossible to game (over-fit the feature distribution at the cost of pixel-level quality). The standard defense is to use multiple metrics, each measuring different aspects (FID for distribution distance, precision-recall for the quality-vs-coverage split, human studies for ground truth on realism), and to report all of them rather than a single headline number.
+
+## Common pitfalls
+
+**Comparing likelihoods across paradigms.** A VAE's ELBO is a lower bound; a GAN has no likelihood; an autoregressive model's perplexity and a flow's bits-per-dim are in different units. Cross-paradigm comparisons via likelihood numbers are usually meaningless. Use a paradigm-agnostic metric (FID, IS, human studies) when crossing paradigm lines.
+
+**Treating one metric as ground truth.** Single metrics measure single aspects (IS measures classifiability and diversity; FID measures Inception-feature distribution distance; perplexity measures next-token surprise). None is a complete picture of "good." Use multiple, and weight them by which question matches your deployment.
+
+**FID without enough samples.** FID is noisy at small sample counts and stabilizes around 10,000+ generated samples. Reporting FID on a few hundred samples introduces variance that swamps the signal. The standard practice is 10k-50k samples; if you cannot afford that, FID may not be the right metric.
+
+**Confusing "in-distribution likelihood" with "good generation."** A model that memorizes the training set gets very high likelihood on training data and possibly nothing useful elsewhere. Held-out likelihood and sample quality on novel prompts measure different things; both matter.
+
+## What you should remember
+
+- **Likelihood is not a universal cross-paradigm metric.** Exact for autoregressive and flows, bounded for VAEs (ELBO), unavailable for GANs, indirect for diffusion. Even within paradigms that have it, likelihood and sample quality can decouple, and units differ across paradigms.
+- **FID and IS are the standard sample-based image metrics.** IS measures per-sample classifiability and overall diversity (does not compare to real data); FID measures the distance between generated and real feature distributions through Inception features (compares to real data; sensitive to both quality and coverage; needs ~10k+ samples). **In 1D**: FID equals the squared mean gap plus the squared standard-deviation gap, a clean closed form. Worked anchor: real distribution at mean zero and standard deviation one, generated at mean one and standard deviation one gives FID equal to one; matched generator gives FID equal to zero.
+- **Evaluation methods are a paradigm fingerprint.** Each paradigm has a characteristic suite of instruments (autoregressive: perplexity; VAE: ELBO + FID; GAN: FID/IS/human studies/critic estimate; diffusion: FID across step counts + ELBO-bound NLL). Match the metric to the deployment question, use multiple metrics to guard against gaming, and treat human preference studies as ground truth for "does this look real?" when the budget allows.
+
+You now have the evaluation half of generative modeling, which closes Phase 2. Phase 3 opens next with energy-based models, then score matching, then full diffusion across three lessons, then the unifying SDE view, and finally the synthesis capstone at L15 that returns to the L1 four-paradigm map with all the math filled in.

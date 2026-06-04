@@ -1,0 +1,187 @@
+---
+title: "Practice: Energy-based models, the partition-function problem"
+description: A self-check on the EBM density and the partition-function obstacle, a worked Gaussian-energy example, a derivation showing the score function bypasses Z, and flashcards built for retrieval.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Six short questions. Answer each one in your head (or on paper) before opening the collapsible. Trying to retrieve the answer is where the learning sticks; rereading feels productive but does much less.
+
+**1. Write the EBM density and name each piece.**
+
+<details>
+<summary>Show answer</summary>
+
+`p_θ(x) = exp(-E_θ(x)) / Z(θ)`, where `E_θ(x)` is the energy function (any neural network mapping `x` to a real number) and `Z(θ) = integral over x' of exp(-E_θ(x')) dx'` is the partition function (normalization constant that makes `p_θ` integrate to 1). Sign convention: low energy = high probability.
+
+</details>
+
+**2. Why is `Z(θ)` intractable for a neural-network energy?**
+
+<details>
+<summary>Show answer</summary>
+
+The integral is over the full `d`-dimensional data space and has no closed form for a neural-network `E_θ`. Grid integration is infeasible past ~5D (cells grow exponentially); naive Monte Carlo with a uniform proposal hits low-probability regions overwhelmingly often, giving astronomical variance; importance sampling needs a proposal close to `p_θ`, which is what we are trying to model.
+
+</details>
+
+**3. Write the maximum-likelihood gradient for an EBM and label the two phases.**
+
+<details>
+<summary>Show answer</summary>
+
+`∇_θ log p_θ(x) = -∇_θ E_θ(x) + E_{x' ~ p_θ}[∇_θ E_θ(x')]`. **Positive phase** (`-∇_θ E_θ(x)`): lower energy at the data point. **Negative phase** (the expectation): raise energy at samples drawn from the model. At equilibrium `p_θ = p_data`, the expected gradient is zero.
+
+</details>
+
+**4. Why does the negative-phase term make training hard, and what is the standard compromise?**
+
+<details>
+<summary>Show answer</summary>
+
+The negative-phase expectation requires sampling from `p_θ`, which is itself hard because `p_θ = exp(-E_θ)/Z` with intractable `Z`. The standard sampling tool is MCMC (Langevin dynamics: `x_{t+1} = x_t - η·∇_x E_θ(x_t) + sqrt(2η)·ε_t`), which converges but is slow. The pragmatic compromise is **contrastive divergence (CD-k)**: run MCMC for only `k` steps from the data point. Gradient is biased but cost-bounded.
+
+</details>
+
+**5. Derive the score function `∇_x log p_θ(x)` from the EBM density. Why does `Z` vanish?**
+
+<details>
+<summary>Show answer</summary>
+
+`log p_θ(x) = -E_θ(x) - log Z(θ)`. Take the gradient with respect to `x`: `∇_x log p_θ(x) = -∇_x E_θ(x) - ∇_x log Z(θ) = -∇_x E_θ(x) - 0 = -∇_x E_θ(x)`. The partition function `Z(θ)` does not depend on `x` (it is a constant after integrating `x` out), so `∇_x log Z(θ) = 0`. The score function is computable from one backward pass through the energy network with no knowledge of `Z`.
+
+</details>
+
+**6. Why does the score-function observation matter for the rest of the track?**
+
+<details>
+<summary>Show answer</summary>
+
+Because it opens the score-matching framework (next lesson) and the diffusion paradigm (L12-L14). Score matching trains a model to estimate `s_θ(x) = ∇_x log p_θ(x)` directly, bypassing the partition function entirely. Diffusion models can be derived as a multi-step score-matching procedure across noise levels. EBMs' computational obstacle (intractable `Z`) is what motivates the entire score-based view of modern generative modeling.
+
+</details>
+
+## Try it yourself, part 1: a tractable EBM (Gaussian energy)
+
+Take the 1D EBM with energy `E_θ(x) = 0.5 · (x − μ)²`, where `θ = μ`. About 5 minutes, pen and paper.
+
+**Step 1.** Write out `exp(-E_θ(x))` and identify it as the kernel of a known density.
+
+**Step 2.** Compute `Z(μ) = integral exp(-0.5 · (x − μ)²) dx` (use the known standard-Gaussian normalization).
+
+**Step 3.** Write the full density `p_θ(x)` and identify which Gaussian it is.
+
+**Step 4.** Why is this case tractable, and why would replacing the quadratic with a neural network break that tractability?
+
+<details>
+<summary>Check your work</summary>
+
+**Step 1.** `exp(-0.5 · (x − μ)²)`. This is the kernel of a Gaussian density centered at `μ` with variance 1, missing only the normalization constant.
+
+**Step 2.** The integral of the Gaussian kernel is a standard result: `integral of exp(-0.5 · (x − μ)²) dx = sqrt(2π)`. Independent of `μ` (by translation invariance of the integral; shifting `x` does not change the area under the curve).
+
+**Step 3.** `p_θ(x) = exp(-0.5 · (x − μ)²) / sqrt(2π) = N(x; μ, 1)`, the standard Gaussian shifted to mean `μ`. The EBM in this case recovers a Gaussian directly, with `Z` exactly the Gaussian normalization constant.
+
+**Step 4.** The quadratic energy combined with the exponential gave us a Gaussian kernel, whose normalization is a known closed-form integral. Replace `E_θ(x) = 0.5(x−μ)²` with anything more flexible (a quartic, an MLP, a CNN) and the integral `integral exp(-E_θ(x)) dx` no longer has a closed form. In higher dimensions over a neural-network energy, even numerical estimation of `Z` becomes infeasible. Tractable `Z` is the exception (it requires the energy to combine with `exp(-·)` to give a kernel with a known integral); EBMs that are interesting precisely because their `E_θ` is expressive are exactly the EBMs where `Z` is intractable.
+
+</details>
+
+## Try it yourself, part 2: derive the score function (Z vanishes)
+
+About 5 minutes, pen and paper.
+
+**Step 1.** Start from `log p_θ(x) = -E_θ(x) − log Z(θ)`. Take the gradient with respect to `x` (NOT `θ`). What do you get for each term?
+
+**Step 2.** Why does `∇_x log Z(θ) = 0`?
+
+**Step 3.** Write the resulting score function `s_θ(x) = ∇_x log p_θ(x)` in terms of `E_θ`.
+
+**Step 4.** Compare to the gradient with respect to `θ` (the parameters): does the partition function vanish there too? Why or why not?
+
+<details>
+<summary>Check your work</summary>
+
+**Step 1.** `∇_x log p_θ(x) = ∇_x [-E_θ(x) − log Z(θ)] = -∇_x E_θ(x) − ∇_x log Z(θ)`. First term: standard gradient of the energy network with respect to its input. Second term: gradient of `log Z(θ)` with respect to `x`.
+
+**Step 2.** `Z(θ) = integral over x' of exp(-E_θ(x')) dx'`. This integral has been computed over `x'`, eliminating `x'` from the result. `Z(θ)` is a function of `θ` alone, not of `x`. Therefore `∇_x log Z(θ) = 0`: there is no `x` for the gradient to act on.
+
+**Step 3.** `s_θ(x) = ∇_x log p_θ(x) = -∇_x E_θ(x)`. The score function is just the negative gradient of the energy network with respect to its input, computable in one backward pass with no knowledge of `Z`.
+
+**Step 4.** The gradient with respect to `θ` is different: `∇_θ log p_θ(x) = -∇_θ E_θ(x) − ∇_θ log Z(θ)`, and the second term is NOT zero (changing the energy network's parameters DOES change `Z`). That second term works out to the negative-phase expectation `+ E_{x' ~ p_θ}[∇_θ E_θ(x')]`, which is what creates the training difficulty. So: `Z` vanishes under `∇_x` (the score-matching escape route), but NOT under `∇_θ` (the maximum-likelihood obstacle). This asymmetry is the precise reason score matching exists.
+
+</details>
+
+## Flashcards
+
+Ten cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay out the full set as one card per page, ready to print or save as a PDF for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="Write the EBM density.">
+
+`p_θ(x) = exp(-E_θ(x)) / Z(θ)`, where `E_θ(x)` is any neural-network energy function and `Z(θ) = integral over x' of exp(-E_θ(x')) dx'` is the partition function. Sign convention: low energy = high probability.
+
+</Flashcard>
+
+<Flashcard question="What is the EBM paradigm's main appeal, and what is its main obstacle?">
+
+Appeal: no architectural constraint on `E_θ` (any neural network works; no causality, invertibility, or encoder-decoder split required). Obstacle: the partition function `Z(θ)` is intractable for any nontrivial neural-network energy, blocking maximum-likelihood training.
+
+</Flashcard>
+
+<Flashcard question="Why is Z(θ) intractable in practice?">
+
+The integral is over the full `d`-dimensional data space; for `d > 5` or so, grid integration is infeasible. Naive Monte Carlo overwhelmingly samples low-probability regions, giving astronomical variance. Importance sampling needs a proposal close to `p_θ`, which is what we are modeling.
+
+</Flashcard>
+
+<Flashcard question="Write the maximum-likelihood gradient for an EBM and label the two phases.">
+
+`∇_θ log p_θ(x) = -∇_θ E_θ(x) + E_{x' ~ p_θ}[∇_θ E_θ(x')]`. Positive phase: lower energy at the data point. Negative phase: raise energy at samples from the model. At equilibrium `p_θ = p_data`, the expected gradient is zero.
+
+</Flashcard>
+
+<Flashcard question="Why does the negative-phase expectation make training hard?">
+
+It requires sampling from `p_θ`, which is itself hard because `Z` is intractable. MCMC (Langevin dynamics) converges but is slow; contrastive divergence (CD-k) is the pragmatic compromise (k MCMC steps from the data point), but gives a biased gradient and has training-stability pathologies.
+
+</Flashcard>
+
+<Flashcard question="What is the Langevin-dynamics update rule for sampling from an EBM?">
+
+`x_{t+1} = x_t − η · ∇_x E_θ(x_t) + sqrt(2η) · ε_t`, with `ε_t ~ N(0, I)`. The gradient pulls `x` toward low energy (high probability); the noise term keeps the chain exploring rather than collapsing to a single mode.
+
+</Flashcard>
+
+<Flashcard question="Derive the score function ∇_x log p_θ(x) from the EBM density.">
+
+`log p_θ(x) = -E_θ(x) − log Z(θ)`. Take `∇_x`: `∇_x log p_θ(x) = -∇_x E_θ(x) − ∇_x log Z(θ) = -∇_x E_θ(x)`. The partition function vanishes because `Z(θ)` does not depend on `x` (the integral over `x'` eliminated it).
+
+</Flashcard>
+
+<Flashcard question="Why does Z vanish under ∇_x but not under ∇_θ?">
+
+`Z(θ)` is a function of `θ` only (the integral over `x'` eliminated the `x` dependence), so `∇_x log Z = 0`. But `Z` does depend on `θ`: changing the energy network's parameters changes the integral. So `∇_θ log Z ≠ 0`, and that term is exactly the negative-phase expectation that creates the maximum-likelihood obstacle.
+
+</Flashcard>
+
+<Flashcard question="Why does the score-function escape matter for the rest of the track?">
+
+Because it opens score matching (next lesson) and the diffusion paradigm (L12-L14). Score matching trains a model to estimate `s_θ(x) = ∇_x log p_θ(x)` directly, bypassing `Z` entirely. Diffusion models are a multi-step score-matching procedure across noise levels. EBMs' computational obstacle is what motivates modern score-based generative modeling.
+
+</Flashcard>
+
+<Flashcard question="Why isn't direct EBM training the dominant paradigm despite the architectural freedom?">
+
+Because MCMC + CD training is slow and unstable compared to autoregressive NLL, flow exact-density, VAE ELBO, or diffusion noise prediction. Generation requires iterative Langevin dynamics, not a single forward pass. Modern systems use the score-based view that recovers EBM flexibility without the MCMC cost.
+
+</Flashcard>
+
+</FlashcardSet>

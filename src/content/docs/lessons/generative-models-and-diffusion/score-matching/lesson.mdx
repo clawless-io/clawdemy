@@ -1,0 +1,173 @@
+---
+title: "Lesson: Score matching and score-based generation"
+description: The previous lesson ended on an observation, the partition function vanishes under the x-gradient, so the score function ∇_x log p(x) is computable directly from any neural-network energy. This lesson is what you do with that observation. Score matching trains a model to estimate the score directly without ever computing Z. The practical version, denoising score matching, reduces the score-matching objective to a clean noise-prediction loss that sets up the diffusion paradigm in the next lessons.
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+Last lesson ended on the structural observation that the partition function vanishes under the input-gradient: the input-gradient of the model log-density equals the negative input-gradient of the energy, with no partition function in sight. This lesson is what you do with that observation. **Score matching** is the training framework that learns the score function (the input-gradient of the log-density) directly, without ever computing the partition function. The practical version of score matching, **denoising score matching**, reduces to a clean noise-prediction loss that you can train with stochastic gradient descent, and it sets up the diffusion paradigm that fills the next three lessons.
+
+By the end you will be able to write the score-matching objective in its original form (Hyvärinen 2005), explain why the original form is computationally awkward in high dimensions, derive the denoising score-matching variant (Vincent 2011) that fixes the awkwardness with a Gaussian-noise perturbation trick, write the resulting loss as a noise-prediction objective, and recognize that the multi-noise-level extension of denoising score matching is mathematically equivalent to the diffusion training objective (which lessons 12 to 14 will build out in full).
+
+No §6 watch on this lesson (pure technique; score matching is paradigm-level math without specific deployment surfaces).
+
+## What we are doing differently
+
+Phase 1 trained on the model log-likelihood directly (autoregressive, flow). Phase 2 trained on the ELBO bound (VAE) or on an adversarial game (GAN, WGAN). EBMs in the previous lesson tried to train on the model log-likelihood but failed because of the partition function. Score matching does something different: it does not train on the model log-likelihood at all. It trains on the **score function** (the gradient of the log-density with respect to the input).
+
+Why train on the score instead of the density? Three reasons:
+
+1. **The partition function drops out.** For an EBM (or any unnormalized density), the score equals the negative input-gradient of the energy, with no partition function in sight. The fundamental obstacle of the EBM paradigm is gone.
+
+2. **The score is enough to sample.** Langevin dynamics (lesson 10) needs only the input-gradient of the log-density and a noise schedule; it never needs to evaluate the density itself. So a learned score function gives you both a model and a sampler.
+
+3. **The score is local information.** At any point, the score only needs to know which direction increases the density at that point, not the global normalization. This is the conceptual reason the partition function does not appear.
+
+The price: we no longer get a likelihood number for free. Score-based models cannot directly tell you the model density for a given example (you would need to integrate the score to recover the density, which is expensive). They can sample, they can be used for density estimation through ODE-based tricks (lesson 14), but they do not give you a one-line log-likelihood evaluation the way autoregressive or flow models do. That tradeoff is what L9's cross-paradigm fingerprint table flagged as "indirect" for diffusion.
+
+## The original score-matching objective (Hyvärinen 2005)
+
+The natural objective is to make the model's score close to the data's score, in expectation over data:
+
+```
+J_SM(θ)  =  (1/2) · E_{x ~ p_data}[ || s_θ(x)  -  ∇_x log p_data(x) ||² ]
+```
+
+This is the **explicit score-matching** objective: squared Euclidean distance between the two score functions, averaged over data. At the optimum, the model score equals the data score everywhere, which means the model density matches the data density (up to a constant, since the score determines the density up to normalization, and that normalization is forced to integrate to one).
+
+The catch: we do not know the data score. We have samples from the data distribution but no direct access to its density (let alone its gradient). The objective is well-defined but computationally unavailable as written.
+
+Hyvärinen's 2005 trick uses integration by parts to rewrite the score-matching objective in a form that does not need the data score explicitly. The result (proved in the paper, derived in many follow-ups) is:
+
+```
+J_ESM(θ)  =  E_{x ~ p_data}[  tr( ∇_x s_θ(x) )  +  (1/2) · ||s_θ(x)||²  ]  +  const
+```
+
+where the Jacobian is the square matrix of partial derivatives of the score network with respect to its input, the trace is the sum of its diagonal entries, and the constant is a quantity that does not depend on the model parameters and can be dropped during optimization.
+
+This **equivalent score-matching** form is computable from data samples alone (no data-density evaluation needed) and gives the same gradient direction as the original. Theoretically clean.
+
+In practice, though, the trace-of-Jacobian term is expensive in high dimensions. For each data point you need to compute the diagonal of the Jacobian of the score network with respect to its input, which costs as many backward passes as there are input dimensions per training point. For a 256-by-256-by-3 color image (around 200,000 input dimensions), this is prohibitive. The original score-matching objective is theoretically elegant but operationally unworkable for high-dimensional generative modeling.
+
+## Denoising score matching (Vincent 2011), the version that scales
+
+The fix is to perturb the data with a fixed-noise-level Gaussian and learn the score of the **noised** distribution rather than the original. Specifically: pick a positive noise scale, and define the noised distribution by drawing a data sample, then adding noise (the noise scale times a standard Gaussian noise vector) to produce a noised input. The score of the noised distribution at the noised point has a clean closed form when conditioned on the original sample:
+
+```
+∇_{x̃} log p(x̃ | x)  =  ∇_{x̃} log N(x̃; x, σ² I)  =  -(x̃ - x) / σ²  =  -ε / σ
+```
+
+(The last equality uses the noised-minus-original relation from the noising step.) This is the conditional score of the Gaussian noise model; it is known analytically because the noising distribution is Gaussian.
+
+Vincent's 2011 result is that minimizing the score-matching objective on the noised distribution is **equivalent** (gives the same gradient direction in expectation) to minimizing:
+
+```
+J_DSM(θ)  =  (1/2) · E_{x ~ p_data, ε ~ N(0, I)}[  || s_θ(x̃)  -  (-ε / σ) ||²  ]
+          =  (1/2) · E_{x, ε}[  || s_θ(x + σε)  +  ε / σ ||²  ]
+```
+
+(Up to a constant the model parameters do not depend on.) Read this carefully. The score network is applied to a noised input, and the **target** is the negative scaled noise that was added. Training the score network is exactly training it to predict the noise, up to a fixed scaling by the reciprocal noise scale.
+
+This is computationally cheap. No Jacobian, no trace, no integration by parts. Each training step:
+1. Draw a data sample and a standard-Gaussian noise vector.
+2. Compute the noised input (data plus noise scale times noise vector).
+3. Run the score network on the noised input.
+4. Compute the squared error between the score network output and the negative scaled noise target.
+5. Backpropagate.
+
+That is the entire training loop. It scales to high-dimensional inputs (the cost per step is one forward and one backward pass through the score network, just like any standard supervised-learning loop) and it learns the score function at the chosen noise scale.
+
+## A worked numerical example
+
+To make the connection between score, noise, and prediction concrete, take a one-dimensional standard-Gaussian data distribution. The true score is:
+
+```
+∇_x log p_data(x)  =  -x      (for the standard Gaussian)
+```
+
+Suppose a model learns a simple linear score function that scales the input by some learnable coefficient and negates it. The explicit score-matching loss:
+
+```
+J_SM(θ)  =  (1/2) · E_{x ~ N(0, 1)}[ (s_θ(x) - (-x))² ]
+         =  (1/2) · E[ (-ax + x)² ]
+         =  (1/2) · E[ ((1 - a) · x)² ]
+         =  (1/2) · (1 - a)² · E[x²]
+         =  (1/2) · (1 - a)² · 1
+         =  (1 - a)² / 2
+```
+
+When the coefficient equals one, the loss is zero and the model matches the true data score exactly. When the coefficient is 0.8, the loss equals the squared coefficient gap of 0.04 divided by two, or 0.02. As the model converges, the loss approaches zero, and the score function approaches the true negative-of-the-input form.
+
+Now do the denoising-score-matching version. Pick noise scale one. Sample a data point at value two and a noise value of 0.5; the noised input is 2.5. The target is the negative scaled noise, which equals negative 0.5.
+
+Suppose the model predicts negative 0.4 at the noised input. The per-example loss:
+
+```
+(1/2) · ((-0.4) - (-0.5))²  =  (1/2) · (0.1)²  =  (1/2) · 0.01  =  0.005
+```
+
+If the model predicts exactly negative 0.5, the per-example loss is zero. Training minimizes the expectation of this loss over data-and-noise pairs; in the limit, the score network learns to predict the negative scaled noise for every noised input, which is the score of the noised distribution.
+
+The interpretation that recurs through Phase 3: **the score network is a noise predictor.** Give it a noised input, ask "what noise was added?" The answer (negative scaled) is the score of the noised distribution. This identification, score ≡ noise prediction, is the conceptual move that the diffusion paradigm reuses at every noise level.
+
+## Sampling: Langevin dynamics with a learned score
+
+Once we have a trained score network, sampling from the (noised) data distribution uses Langevin dynamics from lesson 10, with the learned score replacing the energy gradient:
+
+```
+x_{t+1}  =  x_t  +  η · s_θ(x_t)  +  sqrt(2η) · ε_t,        ε_t ~ N(0, I)
+```
+
+(Sign convention: the score points toward higher density, so we add the step-size times the score rather than subtracting an energy gradient.) Many iterations of this update produce a sample from the distribution whose score the network approximates.
+
+If we trained at a single noise level, we get samples from the noised distribution, not the original data distribution. To recover samples from the original, we need to train at **multiple noise levels** and "anneal" the noise scale down during sampling. This is the next step.
+
+## Multi-noise-level score matching, the bridge to diffusion
+
+The full version of score-based generation, often called **noise-conditional score networks** or NCSN (Song and Ermon, 2019), trains a single score network conditioned on the noise level:
+
+```
+s_θ(x̃, σ)  ≈  ∇_{x̃} log p_σ(x̃)         for each σ in a chosen schedule
+```
+
+The training loss is a weighted sum of denoising-score-matching losses across noise levels:
+
+```
+J_NCSN(θ)  =  sum over σ in schedule  of  λ(σ) · J_DSM(θ; σ)
+```
+
+where the per-noise-level weight (often set to the variance, to balance the loss magnitudes across scales) is chosen by hand.
+
+Sampling uses **annealed Langevin dynamics**: start at a large noise level (where the noised distribution is approximately Gaussian and easy to sample from), run Langevin steps using the score at that noise level, then decrease the noise level and continue. The chain progressively transitions from noise to data, with the score network guiding each step.
+
+This procedure works. It produces image samples of comparable quality to GANs of its era (2019-2020) and is a clean theoretical alternative to adversarial training. But the cleanest formulation of the same idea is **the diffusion model** (Sohl-Dickstein et al. 2015; Ho et al. 2020), which derives the multi-noise-level training and sampling procedure from a Markov-chain perspective rather than a score-matching perspective. The two derivations are mathematically equivalent (lesson 14 makes this explicit), and the diffusion framing has come to dominate the literature. Lessons 12 and 13 build the diffusion model directly; lesson 14 returns to the score-based view and shows the equivalence.
+
+For now, the takeaway: score matching is the training recipe, denoising score matching is the practical noise-prediction variant, and the multi-noise-level extension is the bridge to the diffusion paradigm that has dominated image generation since around 2021.
+
+## Why this matters when you use AI
+
+Two practical implications.
+
+**"The model predicts noise" is not a metaphor.** When you read that a diffusion model is "trained to predict the noise added at each step," you are reading the denoising-score-matching objective directly. The network output, the noise added, the score of the noised distribution: these are the same vector, up to a sign and a scaling. Recognizing this collapses a lot of diffusion-paper jargon into one operation.
+
+**Score-based models give different evaluation handles than likelihood-based models.** A learned score function does not give you the model log-likelihood directly. It gives you a vector field on the data space, which you can use to sample (Langevin), to estimate density along an ODE path (lesson 14), or to compare paradigms via sample-based metrics (FID, IS, the lesson 9 toolkit). The cross-paradigm fingerprint table from lesson 9 listed diffusion as "indirect" for likelihood precisely because the score-based view does not provide it as a one-line evaluation.
+
+## Common pitfalls
+
+**Computing the explicit score-matching loss directly.** The Hyvärinen 2005 form requires the trace of the Jacobian of the score network. In high dimensions this is as many backward passes per data point as the input has dimensions, and is infeasible. Always use denoising score matching for practical training.
+
+**Forgetting the noise scale dependence.** Score matching at a single noise level learns the score of the NOISED distribution at that scale, not the original data distribution. To sample from the original, you need multi-noise-level training and annealed Langevin (or equivalently, a diffusion model with a noise schedule). A single-scale score network does not give clean original-data samples.
+
+**Treating the score as a probability or energy.** It is neither; it is a vector pointing in the direction of locally increasing log-density. Norms of the score (high near low-density regions; low near modes) carry useful information, but the score at a point is not directly interpretable as the density or the negative energy without integrating along a path.
+
+**Skipping the connection to diffusion.** The diffusion training objective and the multi-noise-level denoising score-matching objective are the same equation written two ways. Reading a diffusion paper without knowing this risks treating them as independent recipes; they are not.
+
+## What you should remember
+
+- **Score matching trains a model to estimate the score function (the input-gradient of the log-density) directly, bypassing the partition function entirely.** The explicit objective (squared distance between the model score and the data score, in expectation under the data) cannot be computed (we don't have the data score); Hyvärinen's 2005 trick gives an equivalent form requiring only data samples, but the trace-of-Jacobian cost is prohibitive in high dimensions.
+- **Denoising score matching (Vincent 2011) fixes the scaling problem.** Perturb data by adding Gaussian noise; the score of the noised distribution has a closed-form target (the negative scaled noise), so the loss reduces to a noise-prediction mean-squared error. The score network is a noise predictor; this is the conceptual identification at the heart of modern score-based and diffusion methods.
+- **Multi-noise-level score matching (NCSN, 2019) bridges to diffusion.** Train a single score network conditioned on noise level across a schedule of noise scales; sample via annealed Langevin from large noise down to small. The same procedure, derived from a Markov-chain perspective, is the diffusion model (lessons 12-14); the two derivations are equivalent.
+
+You now have the score-based training framework that motivates the rest of Phase 3. The next lesson opens the diffusion model in its Markov-chain formulation (the DDPM derivation), and lessons 13 and 14 finish out the diffusion paradigm with sampling and the unifying SDE view, returning explicitly to the equivalence with the score-matching framework derived here.

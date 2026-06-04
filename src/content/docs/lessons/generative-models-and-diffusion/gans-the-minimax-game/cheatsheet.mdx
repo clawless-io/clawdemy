@@ -1,0 +1,109 @@
+---
+title: "Cheatsheet: GANs, the minimax game"
+description: One-page reference. The minimax objective, the optimal discriminator, the Jensen-Shannon divergence interpretation, a worked numerical example, paradigm-level failure modes (mode collapse, instability), and what GANs are and are not good at.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## The setup (two networks)
+
+| Network | Input | Output | Role |
+| --- | --- | --- | --- |
+| Generator `G` | latent `z ~ p(z)` (Gaussian) | sample `x = G(z)` | Sample directly; no encoder, no decoder distribution |
+| Discriminator `D` | sample `x` | scalar in `[0, 1]` | Binary classifier: probability `x` is real |
+
+No likelihood is computed anywhere. The training game replaces the likelihood objective.
+
+## The minimax objective
+
+```
+min over G  max over D   V(D, G)
+  =  E_{x ~ p_data}[ log D(x) ]  +  E_{z ~ p(z)}[ log(1 - D(G(z))) ]
+```
+
+`D` maximizes (real → 1, fake → 0); `G` minimizes (try to make `D(G(z)) → 1`). Training alternates.
+
+## The optimal discriminator (chalkboard)
+
+Fix `G`; let `p_G` be the generator's induced distribution. Maximizing the integrand at each `x`:
+
+```
+D*(x)  =  p_data(x)  /  ( p_data(x) + p_G(x) )
+```
+
+At equilibrium `p_G = p_data`, so `D*(x) = 1/2` everywhere (the discriminator cannot distinguish).
+
+## The implicit divergence: Jensen-Shannon
+
+Substitute `D = D*` back in:
+
+```
+V(D*, G)  =  -log 4  +  2 · JS( p_data || p_G )
+
+JS(p || q)  =  0.5 · KL(p || m)  +  0.5 · KL(q || m)        with  m = (p + q) / 2
+```
+
+So GANs minimize the **Jensen-Shannon divergence**: symmetric, bounded by `log 2`, NOT the forward KL of Phase 1. This is the precise sense in which GANs "use a different divergence" than the likelihood-based paradigms.
+
+## Worked numerical example
+
+`p_data = [0.5, 0.5]`, `p_G = [0.7, 0.3]`. Mixture `m = [0.6, 0.4]`.
+
+| Quantity | Value |
+| --- | --- |
+| `D*(0) = 0.5 / 1.2` | `≈ 0.4167` (D thinks `x=0` more likely fake) |
+| `D*(1) = 0.5 / 0.8` | `= 0.625` (D thinks `x=1` more likely real) |
+| `KL(p_data \|\| m) = 0.5 ln(5/6) + 0.5 ln(5/4)` | `≈ 0.0204` |
+| `KL(p_G \|\| m) = 0.7 ln(7/6) + 0.3 ln(3/4)` | `≈ 0.0216` |
+| `JS = 0.5 · 0.0204 + 0.5 · 0.0216` | `≈ 0.021` nats |
+
+At `p_G = p_data`: `D* = 1/2`, both KLs = 0, JS = 0 (equilibrium).
+
+## Paradigm-level failure modes (not bugs)
+
+| Failure | Cause | Standard mitigation |
+| --- | --- | --- |
+| Vanishing gradients | `log(1 - D(G(z)))` saturates when `D` is good | Non-saturating loss: `G` maximizes `log D(G(z))` (same gradient direction, no saturation) |
+| Mode collapse | JS minimization + minimax dynamics; G can fool D with a narrow output set | Wasserstein-GAN (next lesson), feature matching, mini-batch discrimination, unrolled GANs |
+| No stopping criterion | Losses oscillate; not monotone | Inspect samples; use FID (lesson 9), not training loss |
+
+Modern training uses the non-saturating loss; the minimax framework is the theoretical description.
+
+## GANs are good at / not good at
+
+| Good at | Not good at |
+| --- | --- |
+| Inference speed (one forward pass through `G`) | Density evaluation (no likelihood, period) |
+| Sharp samples in specific domains (StyleGAN faces, image-to-image) | Stable out-of-the-box training |
+| Latent-space editing (semantic directions for "age," "smile," etc.) | Broad-coverage generation (diffusion now leads for general text-to-image) |
+
+## Why it matters for AI
+
+- **Divergence-choice as paradigm-design.** Many later generative variants are framed as "which divergence?" GAN minimizes JS, WGAN minimizes Wasserstein, Phase 1 paradigms minimize forward KL, diffusion uses score matching. Recognizing the question matters.
+- **Adversarial training as a tool.** Even outside generative models, the adversarial pattern recurs (robustness research, some self-supervised methods, policy-vs-value in RL).
+- **Reading model releases that use GAN components.** The mechanical math (this lesson) is separable from the policy framing (next section).
+
+## A note on what this lesson does NOT cover
+
+GANs are the paradigm where the modern deepfake category originated. The framing for those use cases is a set of distinct policy/governance questions outside this lesson's mechanical scope:
+
+- **When generating synthetic faces, voices, or video of identifiable people is appropriate vs not** (use-case and consent policy);
+- **How to attribute or watermark synthesized content** (provenance policy);
+- **Sector-specific policies for generated media in journalism, politics, and legal evidence** (deployment policy);
+- **IP and licensing claims around training data scraped from named sources** (data-licensing policy).
+
+Each is a distinct forum with distinct stakeholders, evaluated by different methods. Treat the math and the policy as separate concerns.
+
+## Pitfalls to dodge
+
+- **Treating the original saturating loss as the training loss.** Every modern GAN uses non-saturating. Same gradient direction, no saturation.
+- **Mistaking mode collapse for a bug.** Paradigm-level; fix it by changing divergence (Wasserstein-GAN) or with regularization tricks, not hyperparameter tuning.
+- **Expecting a likelihood number.** GANs do not compute density anywhere.
+- **Using training loss for stopping.** Losses oscillate; use FID or inspect samples.
+
+## The one-line version
+
+A GAN is two networks in a minimax game; at optimal `D*`, the generator minimizes the Jensen-Shannon divergence (not forward KL); mode collapse and training instability are paradigm-level features of that divergence choice, not bugs to tune away.

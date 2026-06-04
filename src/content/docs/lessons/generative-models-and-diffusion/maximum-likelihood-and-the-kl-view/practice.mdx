@@ -1,0 +1,204 @@
+---
+title: "Practice: Maximum likelihood and the KL view"
+description: A self-check on the forward-KL derivation, a compute-KL-from-distributions exercise on a 3-outcome case, a cross-entropy = KL + entropy verification, and flashcards built for retrieval.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Six short questions. Answer each one in your head (or on paper) before opening the collapsible. Trying to retrieve the answer is where the learning sticks; rereading feels productive but does much less.
+
+**1. Write the definition of `KL(p || q)` and state its three key properties.**
+
+<details>
+<summary>Show answer</summary>
+
+`KL(p || q) = E_{x ~ p}[ log(p(x)/q(x)) ] = sum_x p(x) · log(p(x)/q(x))`. Properties: (1) non-negative (`KL >= 0` always); (2) zero if and only if `p = q` everywhere; (3) asymmetric (`KL(p || q) != KL(q || p)` in general; it is not a metric).
+
+</details>
+
+**2. Show in one line that minimizing the forward KL is equivalent to maximizing the expected log-likelihood under the data.**
+
+<details>
+<summary>Show answer</summary>
+
+`KL(p_data || p_model) = E_{p_data}[log p_data(x)] - E_{p_data}[log p_model(x)]`. The first term does not depend on the model, so minimizing the KL with respect to the model is the same as minimizing `-E_{p_data}[log p_model(x)]`, which is maximizing `E_{p_data}[log p_model(x)]`, the expected log-likelihood.
+
+</details>
+
+**3. Why is "minimum forward KL" equivalent in practice to "minimum empirical NLL" on a finite dataset?**
+
+<details>
+<summary>Show answer</summary>
+
+Because the Monte Carlo estimate of `E_{p_data}[log p_model(x)]` from `N` data samples `{x_1, ..., x_N}` is the sample average `(1/N) sum_i log p_model(x_i)`. Maximizing that is maximum likelihood; equivalently, minimizing `-(1/N) sum_i log p_model(x_i)` is minimizing the empirical NLL. So the practical training loss is a Monte Carlo estimate of the forward KL (shifted by a model-independent constant).
+
+</details>
+
+**4. State the identity that connects forward KL, cross-entropy, and entropy.**
+
+<details>
+<summary>Show answer</summary>
+
+`KL(p_data || p_model) = H(p_data, p_model) - H(p_data)`, where `H(p_data, p_model) = E_{p_data}[-log p_model]` is the cross-entropy and `H(p_data) = E_{p_data}[-log p_data]` is the (Shannon) entropy of the data. So forward KL and cross-entropy differ only by a model-independent constant (the data entropy).
+
+</details>
+
+**5. Why do we use forward KL (not reverse KL) for training generative models?**
+
+<details>
+<summary>Show answer</summary>
+
+Two reasons. **Practical**: forward KL `KL(p_data || p_model)` requires expectations under `p_data` (we have samples, this is free via Monte Carlo) and evaluations of `p_model` (we can do, by definition). Reverse KL `KL(p_model || p_data)` requires expectations under `p_model` (fine, we can sample) but the integrand needs `log p_data(x)` (we cannot evaluate, only sample from). **Behavioral**: forward KL is mass-covering (penalizes assigning low probability where data has high probability), which generative models usually want; reverse KL is mode-seeking, which can lead to collapse.
+
+</details>
+
+**6. Which of the four paradigms from lesson 1 explicitly does NOT train on forward KL?**
+
+<details>
+<summary>Show answer</summary>
+
+GANs. They train on an adversarial divergence (related to the Jensen-Shannon divergence in the original formulation, or the Wasserstein distance in WGAN). That is why GANs cannot give you a likelihood number for an example: their training objective never involves one. Autoregressive and flow models train on forward KL directly (empirical NLL); VAEs train on the ELBO, a lower bound on `log p_model`. Diffusion is connected via a chain of equivalences (lesson 14).
+
+</details>
+
+## Try it yourself, part 1: compute the forward KL
+
+Take a categorical variable `x` over three outcomes `{x, y, z}`. Data distribution and a candidate model distribution:
+
+```
+p_data  = [0.4, 0.4, 0.2]
+p_model = [0.5, 0.3, 0.2]
+```
+
+About 8 minutes, pen and paper (a calculator helps for the logs; use natural log throughout).
+
+**Step 1.** Compute `KL(p_data || p_model)` term by term.
+
+**Step 2.** Now imagine training pushed the model to match the data exactly: `p_model = [0.4, 0.4, 0.2]`. Compute the KL again. What value do you expect?
+
+<details>
+<summary>Check your work</summary>
+
+**Step 1.** Three terms (one per outcome):
+
+- `0.4 · ln(0.4 / 0.5) = 0.4 · ln(0.8) ≈ 0.4 · (-0.223) ≈ -0.0893`
+- `0.4 · ln(0.4 / 0.3) = 0.4 · ln(4/3) ≈ 0.4 · 0.2877 ≈ 0.1151`
+- `0.2 · ln(0.2 / 0.2) = 0.2 · ln(1) = 0.2 · 0 = 0`
+
+Sum: `KL(p_data || p_model) ≈ -0.0893 + 0.1151 + 0 ≈ 0.0258` nats.
+
+Positive (as it must be), and small because the two distributions are already fairly close.
+
+**Step 2.** When `p_model = p_data`, every ratio `p_data(x) / p_model(x) = 1`, every `ln(1) = 0`, so every term contributes 0. The KL is exactly 0, as the "zero only at equality" property requires.
+
+</details>
+
+## Try it yourself, part 2: verify cross-entropy = KL + entropy
+
+Stay with the same distributions from Part 1 (`p_data = [0.4, 0.4, 0.2]`, `p_model = [0.5, 0.3, 0.2]`). The identity `KL(p_data || p_model) = H(p_data, p_model) - H(p_data)` must hold numerically. Verify it. About 8 minutes.
+
+**Step 1.** Compute the entropy of the data, `H(p_data) = -sum_x p_data(x) · ln(p_data(x))`.
+
+**Step 2.** Compute the cross-entropy of the model relative to the data, `H(p_data, p_model) = -sum_x p_data(x) · ln(p_model(x))`.
+
+**Step 3.** Check that `H(p_data, p_model) - H(p_data)` matches your KL from Part 1.
+
+<details>
+<summary>Check your work</summary>
+
+**Step 1.** Three terms (`-p · ln p`):
+
+- `-0.4 · ln(0.4) ≈ -0.4 · (-0.9163) ≈ 0.3665`
+- `-0.4 · ln(0.4) ≈ 0.3665` (same)
+- `-0.2 · ln(0.2) ≈ -0.2 · (-1.6094) ≈ 0.3219`
+
+Sum: `H(p_data) ≈ 0.3665 + 0.3665 + 0.3219 ≈ 1.0549` nats.
+
+**Step 2.** Three terms (`-p_data · ln p_model`):
+
+- `-0.4 · ln(0.5) ≈ -0.4 · (-0.6931) ≈ 0.2772`
+- `-0.4 · ln(0.3) ≈ -0.4 · (-1.2040) ≈ 0.4816`
+- `-0.2 · ln(0.2) ≈ 0.3219`
+
+Sum: `H(p_data, p_model) ≈ 0.2772 + 0.4816 + 0.3219 ≈ 1.0807` nats.
+
+**Step 3.** `H(p_data, p_model) - H(p_data) ≈ 1.0807 - 1.0549 ≈ 0.0258` nats. This matches the KL from Part 1 exactly. The identity holds: cross-entropy is forward KL plus the (model-independent) data entropy.
+
+The practical lesson: when a paper says "minimize cross-entropy" and another says "minimize KL," they are minimizing the same thing up to a model-independent constant.
+
+</details>
+
+## Flashcards
+
+Ten cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay out the full set as one card per page, ready to print or save as a PDF for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="What is the definition of KL(p || q)?">
+
+`KL(p || q) = E_{x ~ p}[ log(p(x) / q(x)) ] = sum_x p(x) · log(p(x) / q(x))`. (Integral for continuous `x`.) An expected log-ratio.
+
+</Flashcard>
+
+<Flashcard question="What are the three key properties of KL divergence?">
+
+(1) Non-negative: `KL(p || q) >= 0` always. (2) Zero only at equality: `KL(p || q) = 0` iff `p = q`. (3) Asymmetric: `KL(p || q) != KL(q || p)` in general. Not a metric.
+
+</Flashcard>
+
+<Flashcard question="In one line, why is minimizing forward KL the same as maximizing expected log-likelihood?">
+
+`KL(p_data || p_model) = E_{p_data}[log p_data] - E_{p_data}[log p_model]`. The first term doesn't depend on the model, so minimizing KL ≡ maximizing `E_{p_data}[log p_model]`.
+
+</Flashcard>
+
+<Flashcard question="Why is empirical NLL the practical version of minimizing forward KL?">
+
+The expectation `E_{p_data}[log p_model(x)]` is estimated by Monte Carlo from training samples: `(1/N) sum_i log p_model(x_i)`. Maximizing that = maximum likelihood; equivalently, minimizing `-(1/N) sum_i log p_model(x_i)` = minimizing the empirical NLL.
+
+</Flashcard>
+
+<Flashcard question="State the identity linking forward KL, cross-entropy, and entropy.">
+
+`KL(p_data || p_model) = H(p_data, p_model) - H(p_data)`. Cross-entropy minus entropy of the data. The data entropy is model-independent, so KL and cross-entropy differ only by a constant.
+
+</Flashcard>
+
+<Flashcard question="Why do we use forward KL (not reverse KL) for training?">
+
+Practical: forward KL needs expectations under `p_data` (free via samples) and evaluations of `p_model` (we can do). Reverse KL needs `log p_data(x)`, which we cannot evaluate. Behavioral: forward KL is mass-covering (penalizes missing modes); reverse KL is mode-seeking (can collapse).
+
+</Flashcard>
+
+<Flashcard question="What is the difference between mass-covering and mode-seeking behavior?">
+
+Mass-covering (forward KL): the model is penalized for assigning low probability where data has high probability, so it tends to spread probability to cover all modes. Mode-seeking (reverse KL): the model is penalized for assigning high probability where data has none, so it tends to concentrate on a few modes.
+
+</Flashcard>
+
+<Flashcard question="Which paradigms train on forward KL, and which explicitly do not?">
+
+Train on forward KL: autoregressive (L2), normalizing flows (L4), VAEs via the ELBO lower bound (L5-6). Do not: GANs (adversarial divergence like JS or Wasserstein). Connected via equivalences: diffusion (L12-14).
+
+</Flashcard>
+
+<Flashcard question="What is perplexity, and what KL fact makes it a usable cross-model metric?">
+
+`Perplexity = exp(NLL per token)`. Because two autoregressive language models trained on the same data both minimize the same forward KL (empirical NLL), their NLLs (and exponentials thereof) are directly comparable. The shared objective is what makes cross-model comparison meaningful.
+
+</Flashcard>
+
+<Flashcard question="Why isn't the absolute value of an NLL informative on its own?">
+
+Because the forward-KL identity has a model-independent constant (`+H(p_data)`) baked into the NLL via the Monte Carlo estimate: empirical NLL equals KL plus the data entropy, and only the KL part is what the model can affect. So absolute NLL values mix the model's KL with the data's intrinsic entropy. Only relative NLL (across models on the same data, or across epochs) is meaningful.
+
+</Flashcard>
+
+</FlashcardSet>

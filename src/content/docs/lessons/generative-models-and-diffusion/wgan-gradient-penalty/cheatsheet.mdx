@@ -1,0 +1,110 @@
+---
+title: "Cheatsheet: GAN training in practice, Wasserstein loss and gradient penalty"
+description: One-page reference. Earth Mover's intuition, Wasserstein objective and Kantorovich-Rubinstein duality, the 1-Lipschitz critic, the gradient penalty, worked CDF computation, and what WGAN-GP fixes vs what it does not.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## The core swap from L7
+
+```
+Original GAN:  minimize Jensen-Shannon divergence (via discriminator outputting probabilities)
+WGAN(-GP):    minimize Wasserstein distance (via critic outputting unbounded scalar, 1-Lipschitz)
+```
+
+JS saturates at `log 2` when distributions are disjoint (no gradient). Wasserstein scales smoothly with geometric distance (always meaningful gradient).
+
+## Earth Mover's intuition
+
+`W_1(p, q)` = minimum cost to transport mass from `p` into the shape of `q`, where cost = mass × distance moved.
+
+Point-mass example: `p` at `x=0`, `q` at `x=3` → `W_1 = 3` (move all mass 3 units). JS would give `log 2` regardless of distance.
+
+## Kantorovich-Rubinstein duality (trainable form)
+
+```
+W_1(p, q)  =  sup over 1-Lipschitz f   ( E_{x ~ p}[f(x)]  -  E_{x ~ q}[f(x)] )
+```
+
+A function is **1-Lipschitz** if `|f(x) − f(y)| ≤ ||x − y||` for all `x, y` (equivalently `||∇f(x)|| ≤ 1` almost everywhere).
+
+| Network | What it does |
+| --- | --- |
+| **Critic** `f` (not "discriminator") | Outputs unbounded scalar; maximizes `E_{p_data}[f] − E_{p_G}[f]` |
+| **Generator** `G` | Minimizes the same quantity (move output mass closer to data) |
+
+## Enforcing the 1-Lipschitz constraint
+
+| Approach | How | Status |
+| --- | --- | --- |
+| Weight clipping (original WGAN) | Clip each critic weight to `[-c, c]` after each step | Worked, but reduced expressiveness; hyperparameter sensitive |
+| **Gradient penalty (WGAN-GP)** | Add `λ · E_x̂ [(||∇_x f(x̂)|| − 1)²]` to critic loss; `x̂` interpolated between real and fake; `λ ≈ 10` | **Standard practical choice**; much more stable |
+| Spectral normalization (SN-GAN) | Normalize the spectral norm of each weight matrix | Alternative; some advantages for certain architectures |
+
+The gradient penalty is a SOFT constraint (it pushes gradient norm toward 1 at sample points). In practice this produces near-1-Lipschitz critics that train far more stably than weight-clipped ones.
+
+## WGAN-GP critic loss
+
+```
+critic loss  =  -[ E_{x ~ p_data}[ f(x) ]  -  E_{x ~ p_G}[ f(x) ] ]
+                +  λ · E_{x̂}[ ( ||∇_x f(x̂)|| - 1 )² ]
+```
+
+with `x̂ = α · x_real + (1 − α) · x_fake`, `α ~ Uniform(0, 1)`. Generator loss is just the (negated) first bracket.
+
+## Worked numerical: W_1 via CDF (1D)
+
+For 1D: `W_1(p, q) = integral |F_p(x) − F_q(x)| dx`.
+
+Take `p`: mass `0.5` at `x=0` and `x=2`. Take `q`: mass `0.5` at `x=1` and `x=3` (shifted by 1).
+
+CDFs: `F_p = 0 for x<0`, `0.5 for 0≤x<2`, `1 for x≥2`; `F_q = 0 for x<1`, `0.5 for 1≤x<3`, `1 for x≥3`.
+
+| Interval | `|F_p − F_q|` |
+| --- | --- |
+| `x < 0` | `0` |
+| `0 ≤ x < 1` | `0.5` |
+| `1 ≤ x < 2` | `0` |
+| `2 ≤ x < 3` | `0.5` |
+| `x ≥ 3` | `0` |
+
+`W_1 = 0.5·1 + 0.5·1 = 1`. Matches Earth Mover's intuition (move 0.5 mass 1 unit, twice).
+
+JS for these same distributions: disjoint support → JS = `log 2` regardless. Wasserstein wins on geometric sensitivity.
+
+## What WGAN-GP fixes vs what it does not
+
+| Problem | Original GAN | WGAN-GP |
+| --- | --- | --- |
+| Vanishing gradients on disjoint distributions | Yes (JS pinned at `log 2`) | NO, meaningful gradients |
+| No clean stopping criterion | Yes (oscillating losses) | Partial; critic loss correlates with sample quality |
+| Mode collapse | Yes (JS dynamics) | Reduced (Wasserstein penalizes missing mass; not eliminated) |
+| No likelihood | Yes | Yes (no fix) |
+| Requires careful architecture | Yes | Yes (Lipschitz constraint must be respected) |
+| Extra compute | (baseline) | Gradient penalty adds `∇_x f(x̂)` computation per step |
+
+WGAN-GP is the GAN family member that survived the post-GAN era and the default starting point for production-grade adversarial training.
+
+## A note on what this lesson does NOT cover
+
+The §6 boundary from L7 carries through this lesson. Four distinct policy/governance forums sit outside this mechanical scope:
+- When generating synthetic faces/voices/video of identifiable people is appropriate vs not (use-case + consent)
+- Attribution and watermarking of synthesized content (provenance)
+- Sector-specific policies for journalism, politics, legal evidence (deployment)
+- IP and licensing claims around training data scraped from named sources (data-licensing)
+
+The relevant evaluation methods for **this** lesson's scope are: training stability (the critic's Wasserstein estimate, the gradient norm on interpolated samples) and sample quality (FID, Inception Score, human preference studies; covered in lesson 9). If you are using those tools, you are in this lesson's scope. If you are using policy-debate methods (stakeholder analysis, legal frameworks, regulatory comment), you are in a different conversation.
+
+## Pitfalls to dodge
+
+- **Calling the critic a "discriminator."** Critic outputs unbounded scalar (Wasserstein estimate), not probability.
+- **Skipping the gradient penalty.** Without Lipschitz enforcement, the duality form does not equal `W_1`. Use GP or spectral normalization.
+- **Computing GP on wrong points.** Interpolated samples `x̂`, not real or fake alone.
+- **Treating WGAN-GP as a complete fix.** Better, not perfect. No likelihood. Still can collapse under poor settings.
+
+## The one-line version
+
+WGAN-GP replaces Jensen-Shannon with the Wasserstein distance (Earth Mover's, geometric, gives meaningful gradients on disjoint distributions) and enforces the required 1-Lipschitz critic constraint via a gradient penalty on interpolated samples; the result is the production-grade GAN variant.

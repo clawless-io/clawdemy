@@ -46,6 +46,7 @@ export const collections = {
 						'statistics-and-probability', // Track 9: Khan Academy Statistics & Probability (curated for AI)
 						'classical-machine-learning', // Track 10: StatQuest (Josh Starmer) + Microsoft ML-For-Beginners
 						'multimodal-ai', // Track 24: Stanford CS25 "Transformers United" V4/V5/V6
+						'generative-models-and-diffusion', // Track 19: Stanford CS236 + Berkeley CS294-158
 					])
 					.optional(),
 				course: z.string().optional(),
@@ -138,6 +139,10 @@ export const collections = {
 						'large-multimodal-models',
 						'generative-multimodal-models',
 						'advanced-multimodal-directions',
+						// Track 19 (Generative Models and Diffusion — Stanford CS236 / Berkeley CS294-158)
+						'generative-foundations',
+						'latent-and-adversarial',
+						'energy-score-diffusion',
 					])
 					.optional(),
 				phase_order: z.number().int().positive().optional(),

@@ -1,0 +1,100 @@
+---
+title: "Lesson: The four-paradigm landscape and where modern systems sit"
+description: The capstone of Track 19. Returns to the four-paradigm map from lesson 1 with every paradigm's training objective, sampling procedure, and trade-off characterized in full from the 13 intervening lessons. Places modern systems (autoregressive language models, Stable Diffusion and other latent diffusion systems, GAN-based face generators, latent-diffusion hybrids, and multimodal models) on the map explicitly. Closes the track on the same map it opened with, this time with the math underneath.
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+Lesson 1 opened with a map. Four paradigms of generative modeling, one-line descriptions of each, and a promise that every modern system you have heard of would fit into one of them. Thirteen lessons later, you have built each paradigm from its foundations: the chain rule and next-token prediction for autoregressive models, the change-of-variables formula for normalizing flows, the ELBO and the variational autoencoder for latent-variable models, the minimax game and the Wasserstein distance for GANs, the energy-based framework and score matching for the score-based family, and the DDPM Markov chain, DDIM deterministic sampler, and continuous-time SDE for the diffusion paradigm that score-based generation became.
+
+This lesson returns to the map and fills in everything that was promised. By the end you will be able to read any modern generative-AI system release (a paper, a model card, a blog post), identify which of the four paradigms it sits in, name its training objective and sampling procedure, predict its primary trade-offs (sampling speed, likelihood evaluation, sample quality, controllability), and place it on the four-paradigm map without needing to read between the lines. The capability is paradigm fluency, and it is the central deliverable of the track.
+
+## The four paradigms, recapped
+
+A generative model learns the data distribution well enough to sample new data from it. There are four ways the modern field has found to do this, and every system you have read about across the track sits in one or a combination of them.
+
+**Autoregressive.** Factor the joint distribution by the chain rule of probability. Train each conditional with a neural network constrained to causality (typically masked self-attention for text, causal convolutions for images). The training objective is the negative log-likelihood, which by the chain rule decomposes into a sum of per-piece log-probabilities. Sampling is sequential: draw the first piece, then the second conditioned on the first, then the third conditioned on the first two, and so on. Exact likelihood, sequential sampling, the dominant paradigm for text.
+
+**Latent-variable.** Introduce a hidden code drawn from a simple prior, run it through a learned decoder to produce data. The marginal likelihood requires an integral over all possible latents that is intractable for any neural-network decoder. Train by maximizing the ELBO (a tractable lower bound on the marginal log-likelihood) plus the reparameterization trick (which makes the stochastic sample differentiable). Sampling is parallel: one draw from the prior, one decoder forward pass. The latent-variable paradigm gives a compressed, often structured representation of the data; bounded likelihood, parallel sampling, the natural choice when latent structure matters.
+
+**Adversarial.** Drop likelihood entirely. Train a generator (which maps a random latent to data samples) against a discriminator (which classifies real vs fake) in a minimax game. The original objective minimizes the Jensen-Shannon divergence between the generator distribution and the data distribution; the Wasserstein-GAN variant with gradient penalty minimizes the Wasserstein-1 distance instead, giving meaningful gradients when the two distributions barely overlap. Sampling is one forward pass through the generator. No likelihood, sharp samples for several years of the field's history, training stability that depends heavily on the variant.
+
+**Score-based / diffusion.** Train a network to estimate the score function (the gradient of the log-density) of a noised version of the data distribution. The training loss reduces to a noise-prediction mean-squared error (denoising score matching from lesson 11, or equivalently the simplified DDPM loss from lesson 12). The forward and reverse processes are stochastic differential equations in continuous time (lesson 14); the discretizations include the DDPM Markov-chain sampler (lesson 12), the deterministic DDIM sampler (lesson 13), and the probability-flow-ODE-based sampler that also enables tractable likelihood evaluation. Sampling is multi-step (typically tens of steps for production-grade samplers). The dominant paradigm for modern image, video, and audio generation.
+
+The four paradigms are not competing dogmas. They are the four mathematically clean ways to learn a distribution that the field has converged on. Specific systems often combine them in carefully designed ways, and the next section walks through several worked examples.
+
+## Placing modern systems on the map
+
+The map is only useful if you can apply it. Take a sample of widely-discussed systems from the last several years and walk through which paradigm each one is, what its training objective is, and what its primary trade-offs look like.
+
+**A modern autoregressive language model.** A transformer trained on next-token prediction across a large text corpus. Architecture: causal self-attention (the masked-attention move you saw in lesson 2 plus standard transformer machinery). Training objective: next-token cross-entropy (the chain-rule factorization of negative log-likelihood, the form of the forward-KL minimization from lesson 3). Sampling: one forward pass per generated token, with the prefix re-attended each step. KV caching makes the per-token cost roughly constant in the prefix length, which is what makes interactive chat experiences possible.
+
+This is paradigm 1, autoregressive, full stop. The fact that the model is enormous and trained on a huge corpus does not change the paradigm; it makes the paradigm scale. The trade-offs from lesson 1 hold: exact likelihood (perplexity is a meaningful number), sequential sampling (latency scales with output length), drift on long outputs (early errors compound), and a clean training story (one loss, one architecture, scale).
+
+**A text-to-image latent diffusion model like Stable Diffusion.** A two-component system: a variational-autoencoder-like encoder-decoder that maps images to a lower-dimensional latent space and back (paradigm 2, latent-variable, with a particular choice of decoder), and a diffusion model that operates in that latent space (paradigm 4, score-based / diffusion). The latent-space diffusion uses the DDIM-family sampler with classifier-free guidance (lesson 13). Training is two-stage: first the VAE on image reconstruction, then the diffusion model on the encoded latents.
+
+This is a **hybrid**. It uses paradigm 2 for compression (the encoder lets the diffusion model operate on a much smaller latent space than the pixel space, which is what makes high-resolution generation computationally feasible) and paradigm 4 for sample generation. Reading a model card from this family, you should see both pieces named explicitly: a VAE encoder-decoder and a U-Net or transformer-based diffusion noise predictor. The training objective for each piece is what each paradigm uses (ELBO for the VAE, noise-prediction MSE for the diffusion model). Sampling combines them: encode-prior-noise, run the diffusion sampler in latent space, decode the final latent to pixels.
+
+**A GAN-based face generator like StyleGAN.** A generator network maps a random latent (typically a Gaussian) to images. A discriminator network classifies real vs generated images. Training is the minimax game with a stable-training variant (StyleGAN specifically uses non-saturating logistic loss with R1 regularization; ProGAN was the canonical Wasserstein-GAN-gradient-penalty-trained system, and WGAN-GP and its descendants remain a common choice elsewhere). Sampling is one forward pass through the generator. The latent space often has demonstrable controllability (semantic directions for facial attributes, learned by analyzing the latent manifold).
+
+This is paradigm 3, adversarial. Pure-form, with the production-grade improvements from lesson 8. The reason GAN-based face generators are still competitive for face-specific applications is that the paradigm produces extremely sharp samples and has fast inference; the reason diffusion has taken over broader image generation is that diffusion handles mode coverage and prompt conditioning better than GANs do.
+
+**A modern text-to-video diffusion system.** A diffusion model that operates on video latents (spatial-temporal). The architecture extends the U-Net or transformer to handle the temporal dimension. The training objective is the same noise-prediction loss; the sampler is a DDIM-family deterministic sampler; classifier-free guidance handles the text conditioning.
+
+This is paradigm 4, diffusion, extended to video. The math is the same as the image case (the lessons 11 through 14 derivations), with the modeling extended to a higher-dimensional state. Trade-offs scale: the per-step cost is higher (a video tensor is much larger than an image tensor), and the sampling step count is tuned to fit the latency budget.
+
+**A multimodal model that combines an autoregressive language model with a diffusion image generator.** The architecture pipes text through an autoregressive language model, uses its outputs to condition a diffusion image generator, and (in some designs) feeds generated images back through the language model for iterative refinement. Each component is one of the four paradigms; the system is the composition.
+
+This is a hybrid, paradigm 1 plus paradigm 4. The training is typically component-wise (each piece is trained on its paradigm-native objective) plus an alignment stage that couples them. Reading such a system requires recognizing the components and their interaction; the four-paradigm map gives you the vocabulary to do that.
+
+## What the four paradigms have in common
+
+After thirteen lessons of paradigm-specific derivations, it is worth naming what every paradigm shares.
+
+**A trained network that maps the data domain to a function.** Autoregressive models train networks to map a prefix to a next-piece probability distribution. Flows train networks to map data to a base distribution invertibly. VAEs train networks (encoder and decoder pair) to compress data to a latent and reconstruct it. GANs train networks to map a random latent to samples and to classify samples. Diffusion models train networks to estimate the score function (equivalently, predict noise) at every noise level.
+
+In every case, the network is a function the paradigm needs the network to approximate well. The architectural choices (transformers, U-Nets, masked convolutions, MLPs) are choices about how to parameterize the function; the paradigm specifies what function is being approximated.
+
+**An information-theoretic objective tied to the data distribution.** Forward KL minimization for the likelihood-based paradigms (autoregressive, flows, VAEs through the ELBO); Jensen-Shannon or Wasserstein-distance minimization for the adversarial paradigm; score matching (equivalent to a particular Fisher-information-style divergence) for the score-based paradigm. Each paradigm picks a divergence between the model and the data distribution, and the training procedure minimizes that divergence on training samples.
+
+**A sampling procedure with paradigm-specific cost and structure.** Sequential one-pass-per-piece for autoregressive; one-pass-total for flows, VAEs, and GANs; multi-step for diffusion. The sampling cost is a property of the paradigm, not of the model size, and it determines the latency-budget envelope of any system built on the paradigm.
+
+**A set of trade-offs that cannot be jointly optimized.** Exact likelihood vs parallel sampling. Sharp samples vs likelihood evaluation. Sample quality vs sampling speed. Mode coverage vs sample sharpness. Each paradigm picks a specific position on the trade-off space; choosing a paradigm is choosing a position.
+
+## How to read any new generative-AI system release
+
+The capability the track is building toward is reading a new release fluently. The procedure:
+
+**Identify the training objective.** Is the model trained on next-token cross-entropy? It is autoregressive. On an ELBO with a reconstruction term and a KL term? It is a VAE or a VAE-family hybrid. On an adversarial loss with a discriminator (or critic)? It is a GAN, probably WGAN-style. On a noise-prediction mean-squared error (or equivalently, denoising score matching)? It is diffusion. On a combination? It is a hybrid; name the components.
+
+**Identify the sampling procedure.** Is it one forward pass per output piece? Autoregressive. One forward pass total? Flow, VAE, or GAN. Multi-step with a noise schedule? Diffusion. Two-stage with encoder and decoder around an inner sampling loop? Latent-diffusion hybrid.
+
+**Identify the trade-offs.** Sequential sampling means latency scales with output length, so the model is constrained on long generations. Adversarial training means the model gives no likelihood, so it cannot be compared to other models on a likelihood metric. Diffusion means the model has a multi-step sampling cost, so its latency is set by the step count and the per-step network forward pass.
+
+**Place the system on the map.** Pick the paradigm or paradigms the system uses. Predict its sample quality, latency, and controllability from the paradigm's properties. If the system claims an unusual property (a diffusion model that samples in one step; an autoregressive model that gives parallel sampling), the system is doing something non-standard, and the paper will describe what.
+
+This procedure is paradigm fluency. It is what the track exists to build, and once you have it, the field reads as a coherent landscape rather than a stream of new models.
+
+## A note on what this lesson does NOT cover
+
+The track has covered the math of generative modeling. It has not covered:
+
+- **The systems engineering of training large models.** Distributed training, hardware (GPU, TPU, custom accelerators), training-data pipelines, debugging at scale. These are the topics of an MLOps or systems-engineering track. The math here is necessary but not sufficient for building production systems.
+- **The policy, governance, and societal questions around generative AI.** The §6 watch-territory framing on lessons 7, 12, 13, and 14 named six categories of policy questions (use-case appropriateness, provenance and watermarking, sector-specific deployment, training-data IP and licensing, likeness and consent, prompt-injection content risks). Each is a distinct conversation with distinct stakeholders, evaluated by methods this track does not cover. The capability the track builds is paradigm fluency for reading the math; the capability to navigate the policy landscape requires expertise in those forums.
+- **The frontier research directions.** New objectives, new architectures, new sampling procedures appear continuously. The framework this track gives you is what makes them readable; the frontier itself moves faster than any single course can keep up with.
+
+## Why this matters when you use AI
+
+The four-paradigm map is a thinking tool. When you read about a new model, your first move is to place it. Where does it sit? What does the paradigm imply about its behavior? What trade-offs is it inheriting from the paradigm choice? What is it doing differently from the standard paradigm setup that the paper claims gives it an advantage?
+
+This habit is the difference between reading the field as a stream of hype and reading it as an evolving technical literature. The map does not tell you which model to use or which paper is important; it tells you how to read each one critically.
+
+## What you should remember
+
+- **There are four paradigms of generative modeling: autoregressive, latent-variable, adversarial, and score-based / diffusion.** Each picks a training objective (chain-rule NLL for autoregressive, ELBO for VAEs, minimax for GANs, noise-prediction MSE for diffusion), a sampling procedure (sequential, parallel one-pass, parallel one-pass, multi-step), and a trade-off profile (exact vs bounded vs no likelihood; sequential vs parallel vs multi-step sampling; sharp vs broad-coverage samples; controllability properties).
+- **Modern systems often combine paradigms.** Latent diffusion uses a VAE for compression and a diffusion model in the latent space. Multimodal systems pipe an autoregressive language model through a diffusion image generator. Reading a system means identifying its components and how they fit on the four-paradigm map, not assuming every system is a single paradigm.
+- **Paradigm fluency is the deliverable.** Identify the training objective, identify the sampling procedure, predict the trade-offs, place the system on the map. This is the procedure for reading any new generative-AI release critically. The math you have built through the track is what makes this procedure precise.
+
+You have finished Track 19. You have placed every paradigm on the map and built each one from its foundations. You can now read any modern generative-AI system release, identify which paradigm it sits in, name its training objective and sampling procedure, predict its primary trade-offs, and place it on the four-paradigm map without needing to read between the lines. The procedure is paradigm fluency. The map is the spine. Generative models are not magic; they are math, and the math is the same math you already have.

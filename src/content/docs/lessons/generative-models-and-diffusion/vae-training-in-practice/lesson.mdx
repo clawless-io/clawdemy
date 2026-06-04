@@ -1,0 +1,137 @@
+---
+title: "Lesson: VAE training in practice, the reparameterization trick"
+description: The previous lesson derived the ELBO abstractly. This lesson takes it to a concrete variational autoencoder, where the encoder and decoder are neural networks. The key trainability move is the reparameterization trick (writing a stochastic sample as a deterministic function of the parameters plus an independent noise variable), which makes the ELBO differentiable. The KL term has a closed-form expression for the standard Gaussian-prior + Gaussian-encoder setup, so the full per-example VAE loss is one Monte Carlo reconstruction plus one closed-form KL.
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+Last lesson derived the ELBO as an abstract bound: the expected decoder log-likelihood under the encoder, minus the KL divergence from the encoder to the prior. This lesson takes it to a real architecture, the **variational autoencoder** (VAE), and answers the two practical questions the abstract ELBO leaves open. First: how do you parameterize the encoder and decoder so they are neural networks you can train? Second: how do you backpropagate through the expectation over the encoder when sampling from it is a stochastic operation that ordinary backprop cannot pass through?
+
+The first answer is straightforward. The second is the **reparameterization trick**, the move that made VAEs trainable by SGD and that recurs throughout modern generative modeling (it shows up in diffusion sampling, in policy-gradient variance reduction, and in many other places). By the end you will be able to write the full VAE loss for one training example as a single closed-form expression you could differentiate by hand, and you will know exactly what the reparameterization trick does and why ordinary backprop without it fails.
+
+## Architecture: two neural networks plus a Gaussian latent
+
+The standard VAE uses a multivariate standard Gaussian prior over a latent vector. The encoder and decoder are both neural networks. Their outputs are the **parameters** of distributions, not samples.
+
+The **encoder** is a neural network that takes an observation and outputs two vectors: a mean vector (one per latent dimension) and a log-variance vector (one per latent dimension, predicted in log-space so the variance stays positive after exponentiating). The encoder's posterior is then defined as a diagonal Gaussian:
+
+```
+q(z | x) = N(z;  μ_x,  diag(σ²_x))
+```
+
+Diagonal covariance means each latent dimension is conditionally independent given the observation. That is a real modeling restriction (the true posterior can have correlations the encoder cannot capture), but it is the standard tractable choice and the one most VAE papers use.
+
+The **decoder** is a neural network that takes a latent and outputs the parameters of a distribution over the observation. For binary images, that is per-pixel Bernoulli logits; for natural images, per-pixel Gaussian means (and sometimes variances); for text, per-token softmax logits. The decoder's exact form depends on the data type, but its role is fixed: produce a decoder distribution so you can evaluate the decoder log-likelihood for any observation-latent pair.
+
+So a VAE is, structurally, two neural networks: the encoder maps an observation to encoder parameters, and the decoder maps a latent to a decoder distribution. The standard Gaussian prior on the latent is not learned; it is fixed.
+
+## The reparameterization trick: making the sample differentiable
+
+The ELBO's reconstruction term involves an expectation over the encoder's posterior:
+
+```
+E_{z ~ q(z|x)}[ log p(x | z) ]
+```
+
+In practice we estimate this expectation by Monte Carlo: draw one sample from the encoder (or a few), compute the decoder log-likelihood for each, average. For SGD training we need the **gradient** of this expectation with respect to the encoder parameters.
+
+Here is where ordinary backprop hits a wall. If we sample a latent directly from the encoder Gaussian using a random-number generator inside the network, the sampling operation is not differentiable in the usual chain-rule sense. A general-purpose alternative does exist: the score-function (REINFORCE-style log-derivative) estimator works for any distribution we can sample from and evaluate, but it has prohibitive variance in high-dimensional latent spaces and would make SGD training too slow to converge in practice. So we want a way to make the stochasticity sit outside the differentiable computation, where ordinary backprop applies and the gradient estimate is low-variance.
+
+The reparameterization trick does exactly that. Instead of sampling the latent from the encoder Gaussian directly, we sample a noise variable from a standard Gaussian (independent of the network parameters), and write:
+
+```
+z = μ_x + σ_x · ε
+```
+
+(Here the per-dimension standard deviation is computed deterministically from the encoder's log-variance output by exponentiating half of it; the operations are elementwise.) The distribution of the sampled latent is still the encoder Gaussian, because applying the encoder mean-plus-standard-deviation-times-noise map to a standard-Gaussian noise gives a Gaussian with the right mean and covariance. But now the latent is a **deterministic** function of the observation and the noise, where the randomness lives in the noise and the encoder parameters live in the mean and standard deviation. We can backprop through the deterministic function freely; the random noise is treated as a constant input at each step.
+
+This single move turns the ELBO from "we know the answer but we cannot train it" into "we can train it with standard SGD, by drawing one fresh noise sample per training step." That is the entire technical content of the reparameterization trick.
+
+The trick generalizes beyond Gaussians: any distribution that can be written as a deterministic transformation of a base noise variable (the "location-scale" family is the canonical case; more exotic distributions are handled by normalizing flows applied to the encoder) admits reparameterization. For Gaussian latents specifically, the mean-plus-standard-deviation-times-noise formula is the canonical one and the one every basic VAE uses.
+
+## The KL term has a closed form
+
+The ELBO's second term is the KL from the encoder Gaussian to the standard-Gaussian prior. For two Gaussians, the KL has a closed-form expression. For our specific case (diagonal-covariance Gaussian against an isotropic standard Gaussian prior), each dimension contributes independently and the total is:
+
+```
+KL( N(μ, σ²) || N(0, 1) )  =  0.5 · ( σ² + μ² - 1 - log σ² )
+```
+
+(For a multi-dimensional latent, sum this expression over the latent dimensions, using the per-dimension mean and variance.)
+
+This is one of the small handful of closed-form KL divergences in the wild, and it is what makes the VAE's KL term cheap (no Monte Carlo over the latent needed). The reconstruction term still requires a Monte Carlo sample of the latent to compute, but the KL is exact and free.
+
+Quick sanity checks on the formula:
+
+- Mean zero, standard deviation one: the KL evaluates to zero. The encoder matches the prior exactly, so the KL is zero, as it should be.
+- Mean one, standard deviation one: the KL evaluates to one half. The encoder mean is one unit away from the prior; pays 0.5 nats.
+- Mean zero, standard deviation two (so variance four): the KL evaluates to approximately 0.807. The encoder is more spread than the prior; pays about 0.8 nats.
+
+The formula gives positive values for any encoder that differs from the standard prior, hits zero only at the prior, and goes up as the encoder either shifts (large mean) or stretches (large variance) away from the prior. This is exactly the regularizer the VAE wants.
+
+## Putting the loss together
+
+The per-example VAE training loss is the **negative** ELBO (we minimize, so flip the sign):
+
+```
+-ELBO(x; q) = -E_{z ~ q(z|x)}[ log p(x | z) ]  +  KL( q(z|x) || p(z) )
+             = -log p(x | z̃)                    +  0.5 · sum over dims of ( σ²_x + μ²_x - 1 - log σ²_x )
+                  where  z̃ = μ_x + σ_x · ε,  ε ~ N(0, I)
+```
+
+For one training step on one example:
+
+1. Run the encoder on the observation to get the encoder mean and log-variance.
+2. Sample a noise vector from a standard Gaussian. Compute the standard deviation by exponentiating half the log-variance, then form the reparameterized latent as encoder mean plus standard deviation times noise.
+3. Run the decoder on the reparameterized latent to get the decoder distribution parameters. Compute the negative log-likelihood of the original observation under this distribution. This is the reconstruction term (one-sample Monte Carlo estimate).
+4. Compute the closed-form KL term from the encoder mean and log-variance.
+5. Add the two terms; that is the per-example loss. Sum or average over a batch.
+6. Backprop. The reparameterization trick means the entire computation is differentiable in the encoder and decoder parameters, including the reparameterized latent that flowed through both networks.
+
+Every modern VAE implementation does roughly this. Variants change the architecture, the prior, the KL weighting (beta-VAE), or the decoder output distribution, but the core loop is this six-step recipe.
+
+## What VAEs are good at, and what they are not
+
+This is where to be careful. VAEs were one of two leading neural generative paradigms introduced in 2013-2014 (alongside GANs), and while they have always been a principled choice for likelihood-based latent-variable modeling, raw-pixel sample quality was quickly dominated by GANs and, more recently, by diffusion models. Where VAEs still earn their place:
+
+**Representation learning.** The encoder's latent code is a compressed, structured representation of the data. Latent-space arithmetic ("subtract latent for 'smiling' from latent for 'not smiling'") works in many trained VAEs, and the latent space often disentangles factors of variation that downstream tasks can use. Many modern systems use a VAE-style encoder as a representation-learning component even when the generative model is something else.
+
+**Compression for downstream models.** Latent diffusion models (notably Stable Diffusion) use a VAE to compress images from pixel space to a much lower-dimensional latent space, then run a diffusion process in the latent space. The VAE here is doing structured compression, not state-of-the-art generation. This hybrid is the dominant pattern for high-resolution generative systems.
+
+**Density estimation with structure.** When you want both a generative model and an interpretable latent code (each dimension corresponds to some factor), VAEs offer trade-offs that pure flows or pure diffusion do not.
+
+VAE samples (especially in raw pixel space) tend to be blurrier than GAN or diffusion samples. This is a known property of the Gaussian decoder (which averages over the posterior) and the KL pressure toward a smooth latent space. For applications where sample quality is the primary metric, modern systems pick a different paradigm. For applications where the latent structure is the point, VAEs remain competitive.
+
+## A note on what this lesson does NOT cover
+
+VAEs and their latent-diffusion descendants are used in many systems that generate synthetic media. The framing for those use cases (when synthetic media is appropriate, how to attribute or watermark it, what content policies apply, what training-data licensing arguments hold) is a separate set of questions outside this lesson's mechanical scope. This lesson covers what a VAE is and how to train one. Policy framings around synthetic-media use belong in legal, governance, and ethics forums, and applying them well requires expertise this track does not pretend to develop. When you next read a system card or model release that uses a VAE-based component, treat the math (which this lesson gives you) and the policy questions (which it explicitly does not) as separate concerns evaluated by different methods.
+
+## Why this matters when you use AI
+
+Three concrete implications.
+
+**Reading VAE training curves.** A VAE's per-example loss is reconstruction plus KL. If you watch these two terms separately during training and one is misbehaving, you can diagnose: KL going to zero very early is posterior collapse (the encoder ignored the observation); reconstruction stagnating while KL falls is the decoder failing to use the latent; both shrinking together is healthy.
+
+**The reparameterization trick recurs.** Once you know the trick (sample a noise variable independent of parameters, transform deterministically), you will spot it in many places. Diffusion sampling uses it. Some policy-gradient methods in RL use a version of it. Any time you see "differentiable sampling," the underlying move is reparameterization.
+
+**Latent diffusion has a VAE inside.** When you sample from Stable Diffusion, the heavy lifting (the U-Net denoising) is in a low-dimensional latent space, and a VAE encoder + decoder maps between that latent space and pixel space. The reason that hybrid works at high resolution (where pure pixel-space diffusion is computationally infeasible) is that the VAE compresses an image down to a tractable latent first. The latent diffusion lesson in Phase 3 will build on this.
+
+## Common pitfalls
+
+**Sampling from the encoder directly instead of reparameterizing.** Calling a stochastic sampler inside the network forward pass breaks gradient flow through the encoder. Always use mean plus standard-deviation times noise with externally-sampled noise; this is the move that makes the ELBO trainable.
+
+**Predicting variance directly instead of log-variance.** A neural network output is unbounded, but variance must be positive. Predicting the log-variance and exponentiating ensures positivity by construction. Predicting variance directly and clamping is fragile and produces gradient discontinuities at the clamp boundary.
+
+**Quoting the ELBO as the model's likelihood.** The ELBO is a lower bound on the model log-likelihood, not the value. A VAE's "test ELBO" undershoots the true likelihood by an unknown amount (the gap is the KL from the encoder to the true posterior, which is generally positive). Cross-paradigm comparisons with autoregressive models (which give exact likelihood) require care.
+
+**Conflating posterior collapse with KL being too small in absolute terms.** Posterior collapse is specifically when the encoder STOPS using the observation (the encoder's output is the same regardless of input). A small KL is not automatically collapse; it can also mean the prior is just a good fit. Diagnose by checking whether different observations produce different encoder outputs, not by the KL value alone.
+
+## What you should remember
+
+- **A VAE is two neural networks: an encoder producing a diagonal-Gaussian posterior over the latent, and a decoder producing a distribution over the observation, with a standard Gaussian prior on the latent.** The ELBO is the training objective; the implementation problem is making it differentiable.
+- **The reparameterization trick makes the ELBO trainable:** write the latent as encoder mean plus standard deviation times a standard-Gaussian noise vector sampled independently. The stochasticity is factored out into the noise, leaving the latent a deterministic function of the encoder output. Backprop flows freely through the latent to the encoder parameters.
+- **The KL term has a closed form for a Gaussian encoder against a standard Gaussian prior:** one half times variance plus squared mean minus one minus log variance, summed over latent dimensions. So per-example VAE loss equals single-sample reconstruction NLL plus closed-form Gaussian KL.
+
+You now have the latent-variable paradigm in trainable form. The next lesson opens the adversarial paradigm, where instead of bounding the model log-likelihood (since the integral is intractable) we drop the likelihood objective entirely and replace it with a game between two networks, getting sharp samples and giving up likelihood evaluation.

@@ -1,0 +1,109 @@
+---
+title: "Cheatsheet: Normalizing flows, change of variables for distributions"
+description: One-page reference. The change-of-variables formula in 1D and many dimensions, the NLL training objective for flows, worked numerical examples, architectural constraints, and how flows compare with the other paradigms.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## The change-of-variables formula
+
+**1D:** for `Z` with density `p_Z`, and `X = f(Z)` with `f` differentiable and strictly monotonic:
+
+```
+p_X(x) = p_Z(f^{-1}(x)) / |df/dz|        with z = f^{-1}(x)
+```
+
+**Multidimensional:** for `f : R^d → R^d` invertible:
+
+```
+p_X(x) = p_Z(f^{-1}(x)) / |det(J_f(z))|
+```
+
+`J_f` is the Jacobian matrix (`d × d` partial derivatives); `det(J_f)` is the volume scaling factor from Track 4. The absolute value keeps the density non-negative.
+
+Intuition: the transformation warps `z`-space into `x`-space; the determinant tells you how much it stretches volume; dividing by it conserves total probability.
+
+## Worked numerical examples
+
+**1D (uniform → uniform).** `Z ~ Uniform(0, 1)`, `f(z) = 3z + 1`. Then `f^{-1}(x) = (x-1)/3`, `df/dz = 3`, and:
+
+```
+p_X(x) = 1 / 3   on x in [1, 4]      (integral = 3 · 1/3 = 1)
+```
+
+**2D (uniform square → rectangle).** `Z ~ Uniform([0,1]^2)`, `f(z) = A z` with `A = [[2,0],[0,1]]`, `det A = 2`:
+
+```
+p_X(x) = 1 / 2   on x in [0, 2] × [0, 1]    (integral = 2 · 1/2 = 1)
+```
+
+The unit square doubled in area, so density halved.
+
+## Training objective (NLL = forward-KL minimization, same as L3)
+
+Take log of the change-of-variables formula:
+
+```
+log p_X(x) = log p_Z(f^{-1}(x)) - log |det(J_f(z))|
+NLL(x)    = -log p_Z(f^{-1}(x)) + log |det(J_f(z))|
+```
+
+For each training example: invert it to get `z`, evaluate `log p_Z(z)` under the simple base, compute `log |det J_f|` at that point, sum (negative). Backpropagate.
+
+## Sampling: one forward pass
+
+```
+z ~ p_Z          (one RNG call, e.g. multivariate standard Gaussian)
+x = f(z)         (one forward pass through the flow)
+```
+
+vs. autoregressive's `n` forward passes for an `n`-piece output. This parallel sampling is the flow paradigm's main advantage.
+
+## Composition: stack many invertible layers
+
+```
+f = f_K ∘ f_{K-1} ∘ ... ∘ f_1
+
+log |det J_f| = sum_{k=1..K} log |det J_{f_k}|        (chain rule of determinants)
+```
+
+Each new layer adds one tractable log-determinant term; flows get flexible by stacking many simple invertible blocks.
+
+## Architectural constraints (the price)
+
+| Requirement | What it means | Standard solution |
+| --- | --- | --- |
+| Invertibility | `f` must be a bijection (one-to-one, onto) | Coupling layers (RealNVP, NICE), autoregressive flows (MAF, IAF) |
+| Tractable Jacobian | `det(J_f)` must be cheap to compute | Triangular Jacobian → `det` = product of diagonals (`O(d)` instead of `O(d^3)`) |
+
+Without these constraints, the math is right but the training is infeasible. The architectural cleverness of flows is keeping the Jacobian triangular while making the transformation expressive.
+
+## Flows vs the other paradigms
+
+| Property | Autoregressive | Flow | VAE | GAN | Diffusion |
+| --- | --- | --- | --- | --- | --- |
+| Exact `log p(x)` | Yes | **Yes** | Lower bound (ELBO) | No | Indirect |
+| Parallel sampling | No (sequential) | **Yes (one pass)** | Yes | Yes | No (multi-step) |
+| Architectural constraints | Causality (mask) | **Invertibility + tractable Jacobian** | Encoder + decoder | Two-net game | Forward + reverse process |
+| Where used in practice | LLMs, audio | Density estimation, scientific applications | Older image gen, latent encoders | Some image gen, faces | Modern image / video / audio |
+
+The cells in bold are what this lesson adds.
+
+## Why it matters for AI
+
+- **Density estimation** (anomaly detection, scientific likelihood, statistical inverse problems): flows are often the right paradigm precisely because the others cannot give exact `p_model(x)` cheaply.
+- **The change-of-variables formula recurs.** It appears in VAEs (reparameterization), diffusion (ODE view, lesson 14), and beyond. This formula is more foundational than the paradigm built on it.
+
+## Pitfalls to dodge
+
+- **Drop the `| |` on the determinant.** No. The Jacobian determinant can be negative (orientation flip); without absolute value, you can get a negative "probability."
+- **Confuse the two formula forms.** `p_X(x) = p_Z(z) / |det J_f(z)|` and `p_X(x) = p_Z(z) · |det J_{f^{-1}}(x)|` are the same identity (`det J_{f^{-1}} = 1 / det J_f`). Pick whichever is computationally cheaper.
+- **Choose a fancy base distribution.** No need; standard Gaussian works. Expressive power lives in the transformation.
+- **Soft-enforce invertibility.** No. Like causality in autoregressive, invertibility must be architectural; otherwise the formula does not apply.
+
+## The one-line version
+
+A normalizing flow parameterizes `p_model(x)` exactly through an invertible transformation from a simple base, with the Jacobian determinant rescaling density to conserve probability; training is the same forward-KL = NLL minimization, sampling is one forward pass, and the price is invertibility plus a tractable Jacobian.

@@ -1,0 +1,102 @@
+---
+title: "Cheatsheet: Autoregressive models, factoring by the chain rule"
+description: One-page reference. The chain rule of probability, the negative log-likelihood objective, causality via masking, worked numerical example, sampling cost, and the trade-offs.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+tableOfContents: false
+---
+
+## The chain rule (exact identity)
+
+```
+p(x_1, x_2, ..., x_n) = p(x_1) · p(x_2 | x_1) · p(x_3 | x_1, x_2) · ... · p(x_n | x_1, ..., x_{n-1})
+```
+
+True for every joint distribution; no approximation. An autoregressive model models each conditional with a neural network and reassembles the joint by this product.
+
+## The recipe
+
+| Step | Operation |
+| --- | --- |
+| **Pick an ordering** | Choose how to order the pieces (left-to-right for text, raster scan for images) |
+| **Model each conditional** | `p(x_i | x_1, ..., x_{i-1})` as a neural network output |
+| **Enforce causality** | Mask attention / shift convolutions so position `i` cannot see positions `> i` |
+| **Train** | Minimize negative log-likelihood, summed across pieces |
+| **Sample** | Run the model once per piece, sequentially, conditioned on the growing prefix |
+
+## Training objective (NLL)
+
+```
+-log p(x_1, ..., x_n) = -log p(x_1) - log p(x_2 | x_1) - ... - log p(x_n | x_1, ..., x_{n-1})
+```
+
+For text: this is next-token cross-entropy. For pixels: per-pixel log-loss.
+
+## Worked numerical example
+
+Vocabulary `{A, B, C}`, sequence `BAC`. Model gives:
+
+```
+p(B) = 0.4,   p(A | B) = 0.5,   p(C | B, A) = 0.6
+```
+
+Joint probability:
+
+```
+p(BAC) = 0.4 · 0.5 · 0.6 = 0.12
+```
+
+Negative log-likelihood (natural log):
+
+```
+-log p(BAC) ≈ 2.12
+
+per-piece:  -log(0.4) - log(0.5) - log(0.6) ≈ 0.916 + 0.693 + 0.511 ≈ 2.12
+```
+
+Same answer both ways (log of a product = sum of logs).
+
+## Causality is architectural
+
+| Architecture | How it enforces causality |
+| --- | --- |
+| Causal transformer | Mask the attention so position `i` cannot attend to positions `> i` |
+| PixelCNN | Mask the convolution kernel so it only reads upper-left pixels |
+| WaveNet | Causally-shifted dilated convolutions (audio variant) |
+
+Bug class: if the network can peek at the future during training, it learns to copy and breaks at sampling. Causality is enforced in connectivity, not in the loss.
+
+## Sampling cost
+
+- **Each sample = one forward pass per piece.** Inherent to the paradigm.
+- **KV caching** keeps the per-token cost roughly constant in prefix length (instead of growing with the prefix), making total generation linear in output length (rather than quadratic).
+- Long outputs are still slow; this is the autoregressive trade-off.
+
+## Trade-offs vs the other paradigms
+
+| Property | Autoregressive |
+| --- | --- |
+| Likelihood | Exact (good for scoring, perplexity, ranking) |
+| Sampling | Sequential (slow for long outputs) |
+| Training objective | Cleanest in the field (next-token NLL) |
+| Failure mode | Drift on long outputs (early errors compound) |
+
+## Why it matters for AI
+
+- **Every modern LLM** is autoregressive (chain rule + masked transformer + next-token NLL).
+- **Streaming output** falls out of one-piece-at-a-time sampling.
+- **Perplexity / likelihood scoring** is the autoregressive paradigm's exclusive gift among the four paradigms in this track.
+- **Long-context drift** is a paradigm property, not a model bug; grounding mechanisms (retrieval, tools, constrained decoding) mitigate it.
+
+## Pitfalls to dodge
+
+- **The chain rule as approximation.** No, it is an exact identity; only the per-conditional neural network introduces approximation.
+- **Ordering changes the joint.** No, the same joint distribution holds for any ordering (though learnability differs).
+- **Autoregressive = transformer.** No, the paradigm is the math; the architecture is one of many (transformer, RNN, PixelCNN, WaveNet, ...).
+- **Causality enforced in the loss.** No, it must live in the connectivity; otherwise the network learns to peek.
+
+## The one-line version
+
+An autoregressive model factors any joint distribution by the chain rule of probability, learns each conditional with a neural network that respects causality, and trains by minimizing the negative log-likelihood (= next-token cross-entropy on text).

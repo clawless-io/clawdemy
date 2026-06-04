@@ -1,0 +1,177 @@
+---
+title: "Practice: What a generative model is, and the four-paradigm map"
+description: A self-check on the generative-vs-discriminative distinction and the four-paradigm map, a place-the-system exercise on real-world systems, a paradigm-trade-off drill on choosing the right paradigm for a use case, and flashcards built for retrieval.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Six short questions. Answer each one in your head (or on paper) before opening the collapsible. Trying to retrieve the answer is where the learning sticks; rereading feels productive but does much less.
+
+**1. What does "generative" mean technically, and how does it differ from "discriminative"?**
+
+<details>
+<summary>Show answer</summary>
+
+A discriminative model learns `p(y | x)`, the label given an input; it draws a class boundary. A generative model learns `p(x)` (or a conditional `p(x | c)`), the distribution over the data itself. With `p(x)` you can compute the likelihood of an example AND sample new examples; with `p(y | x)` you can only classify.
+
+</details>
+
+**2. Name the four paradigms with a one-line description of each.**
+
+<details>
+<summary>Show answer</summary>
+
+(1) Autoregressive: predict the next piece, one at a time, factoring the joint by the chain rule. (2) Latent-variable: sample a latent `z` from a simple distribution and run a learned decoder. (3) Adversarial (GAN): two networks compete, generator vs discriminator, no likelihood is computed. (4) Score-based / diffusion: denoise step by step from pure noise, with the network learning to predict the noise added at each step.
+
+</details>
+
+**3. For each paradigm, what is the training objective and what is the sampling procedure?**
+
+<details>
+<summary>Show answer</summary>
+
+Autoregressive: maximize next-piece log-likelihood (chain-rule factorization); sample sequentially, one piece at a time. Latent-variable: maximize the ELBO (a lower bound on log-likelihood); sample `z` from `p(z)`, then run the decoder once. GAN: minimax game (generator vs discriminator, no likelihood); sample a latent, then run the generator once. Diffusion: noise-prediction MSE at every timestep; sample by running many denoising steps starting from Gaussian noise.
+
+</details>
+
+**4. Which paradigm gives an exact likelihood? Which gives no likelihood at all?**
+
+<details>
+<summary>Show answer</summary>
+
+Exact likelihood: autoregressive (and normalizing flows, which lesson 4 introduces). Latent-variable models give only a lower bound (the ELBO). GANs give no likelihood at all (they trained against an adversarial loss, not a likelihood). Diffusion models do not compute the data likelihood directly; they relate to it through the score `∇ log p(x)` (lesson 11).
+
+</details>
+
+**5. Which paradigm is fastest at sampling, and which is slowest?**
+
+<details>
+<summary>Show answer</summary>
+
+Fastest: GANs and VAEs sample in one forward pass through the generator / decoder. Slowest: autoregressive at long output length (sequential, one piece at a time) and diffusion at high step counts (typically tens of steps per sample). Sampling speed is a property of the paradigm, not the architecture, so the trade-off is inherited.
+
+</details>
+
+**6. What is a hybrid, and how do you place one on the map?**
+
+<details>
+<summary>Show answer</summary>
+
+A hybrid combines two paradigms in one system. The clearest example is **latent diffusion**: a VAE-style encoder compresses data to a low-dimensional latent, and a diffusion process runs in that latent space (so the generative step is diffusion, but the representation it operates on is latent-variable). Decompose hybrids paradigm by paradigm rather than dropping them off the map; the generative step is usually the paradigm that identifies the system.
+
+</details>
+
+## Try it yourself, part 1: place the system on the map
+
+For each system description, identify the paradigm. Some descriptions are real systems written generically; one is a hybrid. About 8 minutes.
+
+- a) A model generates audio one waveform sample at a time, conditioned on all previous samples; trained to maximize sample-level log-likelihood.
+- b) A model encodes 256x256 images into a 64-dimensional latent vector and decodes back to an image; trained with an objective that combines reconstruction error and a KL term on the latent.
+- c) A model generates 1024x1024 face images from a 512-dimensional random vector in one forward pass; trained against a discriminator network that learns to tell real faces from generated ones.
+- d) A model generates images by iteratively denoising from pure Gaussian noise over 50 steps, with each step trained to predict the noise added at that timestep.
+- e) A model first compresses an image to a latent representation with a learned encoder, then runs an iterative denoising process in latent space, then decodes back to pixels.
+
+<details>
+<summary>Check your work</summary>
+
+- a) **Autoregressive.** "One piece at a time, conditioned on all previous" + "log-likelihood objective" = the chain-rule factorization. WaveNet-family audio generators work this way.
+- b) **Latent-variable.** "Encode to a latent, decode back, reconstruction + KL on the latent" = the VAE/ELBO setup.
+- c) **Adversarial (GAN).** "One forward pass from a random vector" + "trained against a discriminator" = the GAN game. StyleGAN-family face generators work this way.
+- d) **Diffusion.** "Iteratively denoise from Gaussian noise" + "predict noise at each step" = the DDPM-family diffusion paradigm. Modern image generators including Stable Diffusion sit here.
+- e) **Hybrid (latent diffusion).** The encoder/decoder is the latent-variable (VAE-style) component; the iterative denoising in latent space is diffusion. Place hybrids by their generative step (here, diffusion), and note the compression as the inherited latent-variable component.
+
+</details>
+
+## Try it yourself, part 2: pick the paradigm for the use case
+
+For each use case, name the paradigm that fits best given the constraints, and say in one sentence why. About 6 minutes.
+
+1. You are shipping a mobile app that generates a profile-picture-style avatar from a random seed, with a hard latency budget of 50 milliseconds per image.
+2. You are scoring sentences for a language-model-based application by their likelihood (you need a number for `p(sentence)`).
+3. You are building a text-to-image feature for a creative tool where multi-second generation is fine and you want state-of-the-art image quality and prompt fidelity.
+
+<details>
+<summary>Check your work</summary>
+
+1. **GAN (or VAE).** Both sample in one forward pass, fast enough for a 50ms budget. GANs typically give sharper images and were the historic choice for high-resolution face synthesis; VAEs give a more structured latent space at some quality cost. Diffusion is out (multi-step sampling cannot meet 50ms easily); autoregressive over pixels is also too slow.
+
+2. **Autoregressive.** Exact log-likelihood is `p(sentence) = product over tokens of p(token | previous tokens)`, computable in one pass once the model is trained. VAE only gives a lower bound (ELBO is not the actual likelihood). GAN gives no likelihood. Diffusion does not directly give the data likelihood without extra work.
+
+3. **Diffusion.** State-of-the-art image quality with strong prompt conditioning has been the diffusion paradigm's defining strength since around 2022, and a multi-second latency budget accommodates the multi-step sampling. GAN-based text-to-image lags on prompt fidelity at this quality tier; autoregressive on pixels is too slow for high-resolution images.
+
+</details>
+
+## Flashcards
+
+Ten cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay out the full set as one card per page, ready to print or save as a PDF for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="What does 'generative' mean technically, and how does it differ from 'discriminative'?">
+
+Generative learns `p(x)` (or `p(x | c)`), the distribution over data, which lets you sample new examples AND compute likelihoods. Discriminative learns `p(y | x)`, the label given input, and only supports classification.
+
+</Flashcard>
+
+<Flashcard question="Name the four paradigms of generative modeling, one line each.">
+
+Autoregressive (predict the next piece, chain rule); Latent-variable (sample `z`, run decoder); Adversarial / GAN (two-network game, no likelihood); Score-based / diffusion (denoise from pure noise, multi-step).
+
+</Flashcard>
+
+<Flashcard question="What is the autoregressive training objective and sampling procedure?">
+
+Train: maximize next-piece log-likelihood (chain-rule factorization, equivalently next-token cross-entropy). Sample: sequentially, one piece at a time conditioned on all previous.
+
+</Flashcard>
+
+<Flashcard question="What is the latent-variable (VAE) training objective and sampling procedure?">
+
+Train: maximize the ELBO (a lower bound on log-likelihood), a sum of reconstruction error and a KL term on the latent. Sample: draw `z` from a simple prior, run the decoder once.
+
+</Flashcard>
+
+<Flashcard question="What is the GAN training objective and sampling procedure?">
+
+Train: a minimax game where the generator tries to fool a discriminator that distinguishes real from generated samples. Sample: draw a latent, run the generator once. No likelihood is computed.
+
+</Flashcard>
+
+<Flashcard question="What is the diffusion training objective and sampling procedure?">
+
+Train: predict the noise added at each step of a forward noising process (a noise-prediction MSE loss). Sample: start with Gaussian noise and iteratively denoise over many steps.
+
+</Flashcard>
+
+<Flashcard question="Which paradigm gives an exact likelihood? Which gives none?">
+
+Exact: autoregressive (and normalizing flows). Lower bound only: latent-variable (ELBO). None: GANs. Indirectly via the score `∇ log p(x)`: diffusion.
+
+</Flashcard>
+
+<Flashcard question="Which paradigm is fastest at sampling, and which is slowest?">
+
+Fastest: GANs and VAEs sample in one forward pass. Slowest: autoregressive at long output length (sequential) and diffusion at high step counts (multi-step). The trade-off is inherent to the paradigm.
+
+</Flashcard>
+
+<Flashcard question="What is a hybrid like latent diffusion, and how do you place it on the map?">
+
+A combination of two paradigms. Latent diffusion has a VAE-style encoder (latent-variable component) plus a diffusion process in the latent space (the generative step). Place by the generative step (here, diffusion) and note the compression as an inherited latent-variable element.
+
+</Flashcard>
+
+<Flashcard question="Why does identifying a system's paradigm matter when you use it?">
+
+The paradigm fixes the sampling procedure (one pass vs multi-step vs sequential), the kinds of likelihoods you can compute, and the failure modes (mode collapse, drift, step-count sensitivity). Reading the paradigm is reading the inherited trade-offs.
+
+</Flashcard>
+
+</FlashcardSet>

@@ -1,0 +1,157 @@
+---
+title: "Lesson: Autoregressive models, factoring by the chain rule"
+description: An autoregressive model factors any joint distribution into a product of conditionals using the chain rule of probability, then learns each conditional with a neural network that respects causality. This lesson derives the chain rule, builds the training objective (negative log-likelihood, the same loss as next-token prediction), shows the masking trick that keeps the network from peeking, and walks worked examples on text and pixels.
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+Last lesson called autoregressive models paradigm 1 and described them in one line: predict the next piece, one at a time. This lesson opens that one line into actual math. By the end you will be able to write any joint distribution as a product of conditionals (no derivation needed, just the chain rule of probability), state the training objective that every modern large language model uses, and recognize the chain-rule factorization in the architecture of any autoregressive system, on text or on images.
+
+The math here is genuinely easy. The reason autoregressive models work is not a deep theorem; it is one identity from elementary probability, plus a clever architectural move that makes a neural network respect it. The whole lesson hangs on those two pieces.
+
+## The chain rule, formally
+
+Take any joint distribution over a sequence of pieces of data. The chain rule of probability says you can rewrite it as a product of one-piece conditional distributions, in order:
+
+```
+p(x_1, x_2, ..., x_n) = p(x_1) · p(x_2 | x_1) · p(x_3 | x_1, x_2) · ... · p(x_n | x_1, ..., x_{n-1})
+```
+
+The first factor is the marginal probability of the first piece. The second is the conditional probability of the second piece given the first. The third is the conditional given the first two. And so on, each new piece conditioned on everything before it.
+
+This identity holds for any joint distribution. There is nothing to assume, prove, or fit; it is true by the definition of conditional probability (the joint of two variables equals the marginal of the first times the conditional of the second given the first, applied repeatedly). What an autoregressive model does is turn this universal identity into a concrete plan: pick an ordering for the data, learn each of the conditionals as a neural network, and you have a generative model.
+
+## Why this gives you a generative model
+
+The chain-rule factorization is what makes the model **generative**, in the sense of lesson 1, because it lets you do the two things generative models are supposed to do.
+
+**Sampling** runs through the factors in order. Sample the first piece from its marginal. Now sample the second piece from its conditional on the first, plugging in the value you just drew. Now sample the third piece conditioned on both, plugging in both. Continue until you have all the pieces. The chain rule guarantees that the joint sample you end up with is drawn from the full joint distribution.
+
+**Likelihood evaluation** for a specific example sequence is even simpler. Plug the example into each factor and multiply:
+
+```
+p(x_1, x_2, ..., x_n) = p(x_1) · p(x_2 | x_1) · ... · p(x_n | x_1, ..., x_{n-1})
+```
+
+Each factor is a number you can compute by running the relevant conditional on the prefix; the product is the joint probability of the example.
+
+Notice what is happening here. We have not made any modeling assumption yet. The chain rule is an exact identity. What we will model with neural networks are the individual conditionals; the way we glue them back into a joint distribution is fixed by probability theory.
+
+## The training objective: negative log-likelihood
+
+Take a dataset of examples drawn from the true data distribution. The training objective is to make the model's conditionals match the data's conditionals: when you compute the model's probability on a real example, the answer should be large; on a random non-data point, it should be small.
+
+The standard way to phrase this is **maximum log-likelihood**: maximize the sum of the model log-probability over the training set. Equivalently, **minimize the negative log-likelihood** (NLL). Plugging in the chain rule turns the joint log-likelihood into a clean sum over pieces:
+
+```
+log p(x_1, ..., x_n) = log p(x_1) + log p(x_2 | x_1) + ... + log p(x_n | x_1, ..., x_{n-1})
+```
+
+So the NLL of an example becomes a sum of per-piece terms, and the total training loss is the average of this sum over the dataset. For each training example, you ask the model to predict each piece conditioned on its prefix, and the loss is the negative log-probability the model assigned to the actual next piece.
+
+If you have ever heard "language models are trained on next-token prediction" or "the loss is cross-entropy on the next token," what you were hearing was the chain-rule decomposition of NLL, with a categorical conditional over a vocabulary. That is the entire training story for autoregressive models. Nothing else.
+
+## A worked numerical example
+
+To pin the math down, take a tiny vocabulary of three symbols (A, B, and C) and a 3-piece sequence B-A-C. Suppose your trained model gives these conditional probabilities on this sequence:
+
+```
+p(B)         = 0.4
+p(A | B)     = 0.5
+p(C | B, A)  = 0.6
+```
+
+The joint probability the model assigns to the B-A-C sequence is the product of the three:
+
+```
+p(BAC) = 0.4 · 0.5 · 0.6 = 0.12
+```
+
+The negative log-likelihood (using natural logarithm) is:
+
+```
+-log p(BAC) = -log(0.12) ≈ 2.12
+```
+
+Equivalently, summing per-piece:
+
+```
+-log p(B) - log p(A | B) - log p(C | B, A)
+  = -log(0.4) - log(0.5) - log(0.6)
+  ≈ 0.916 + 0.693 + 0.511
+  ≈ 2.12
+```
+
+Same answer both ways, because the chain rule lets us split the log of a product into a sum of logs. Training is the average of the negative log-probability over many examples; sampling is going through the factors in order and drawing one piece at a time.
+
+## The parameterization: a network that respects causality
+
+The chain rule tells us **what** to model: each conditional probability of a piece given its prefix. It does not tell us **how**. In modern autoregressive models, every conditional is a function computed by one neural network, applied to the prefix of the sequence so far.
+
+For text, this is a transformer: the input is the sequence of tokens; at each position, the network outputs a probability distribution (a vector of probabilities over the vocabulary) that represents the conditional probability of the token at that position given the prefix. The same network parameters are reused across all positions, which is what makes training feasible at scale.
+
+The crucial architectural constraint, and the one place autoregressive models can quietly go wrong, is **causality**: when the network predicts a piece, it must use only the prefix (everything before that position), not the piece itself or anything after it. If the model could peek at the piece while predicting it, training would be trivial (the model would just copy) and inference would be impossible (at sampling time, the piece does not exist yet).
+
+The way modern architectures enforce causality is by **masking**. In a causal transformer, the attention mechanism includes a mask that zeros out connections from a position to any later position, so the representation at a position can only depend on tokens at earlier positions (and that position itself, since the prediction target is the next token). In a causal convolution (the move that made PixelCNN and WaveNet work), the convolution kernel is shifted so it never reads to the right of the current position. Either way, the architecture encodes the chain rule's "given the prefix only" structure in the connectivity, not in a runtime check.
+
+That single move, mask the attention or shift the convolution, is what turns a regular neural network into an autoregressive generative model. The rest is just scale.
+
+## Worked architecture: text
+
+To make this concrete, take a small autoregressive language model on a vocabulary size of 50,000 tokens (for a real LLM) or 3 (for the B-A-C example).
+
+- **Input:** a sequence of tokens, each represented as a one-hot vector with one position per vocabulary entry, or equivalently an integer index that gets embedded into a vector.
+- **Network:** a causal transformer with some number of layers. The masked self-attention at each layer ensures the representation at any position depends only on positions up to that position.
+- **Output:** at each position, the network produces a vocabulary-size vector, passed through a softmax to give a probability distribution. This distribution represents the model's prediction of the next token given the prefix.
+- **Training:** compute the softmax distribution at each position, take the log-probability of the actual next token, sum across positions, average across the batch, and minimize. Backprop updates the network parameters.
+- **Sampling:** start with a prompt (or just a start token). Run the network once on the current sequence to get the next-token distribution at the last position. Draw a token from that distribution (greedy, top-k, top-p, temperature, all are ways to draw). Append it to the sequence. Repeat. Stop when you hit a stop token or a maximum length.
+
+The whole sampling loop is one forward pass per token. The latency of a generated paragraph is therefore proportional to its length, which is the autoregressive paradigm's inherent trade-off: exact likelihood, sequential sampling, long outputs are slow.
+
+## Worked architecture: images (PixelCNN-style)
+
+Autoregressive models also work on images, with the same chain rule, just applied to pixels instead of tokens. The trick is picking an ordering.
+
+A common choice is **raster scan order**: number pixels top-to-bottom and left-to-right, treating an image as a long sequence of pixel values. Then for each pixel, the model predicts a distribution conditioned on all earlier pixels in the scan, which means everything above and to the left of the current pixel. The chain rule guarantees the joint distribution over all pixels is the product of these per-pixel conditionals.
+
+The architectural move (PixelCNN) is to use a convolution whose receptive field is masked so it can only see pixels to the upper left of the current position. This is the image-domain analogue of the causal-attention mask in a transformer: the connectivity encodes the chain rule's prefix-only constraint.
+
+PixelCNN-style models give exact likelihoods over images (a number you can compare across models in a way GAN samples cannot be compared) and they generate images one pixel at a time, which is slow for high resolutions. For modern image generation diffusion models are the practical choice, but the pedagogical role of PixelCNN is to show that the autoregressive paradigm is not confined to text. It is the chain rule applied to whatever sequence you can order.
+
+## Sampling cost and the modern picture
+
+The cost of sampling from an autoregressive model is one forward pass per piece. For a 1000-token paragraph, that is 1000 forward passes, each conditioned on a growing prefix. The naive cost is quadratic in the output length (each pass attends to the full prefix), which is why long generations were slow on early transformers.
+
+The modern optimization is **KV caching**: at each step, the keys and values computed by the attention layers for previous tokens are cached, so each new token only requires computing keys and values for itself. With KV caching, the per-token cost is roughly constant in the prefix length, and total generation cost becomes linear in output length. This is what makes interactive chatbots feel fast.
+
+Sampling cost still scales with output length, though. Generating an essay costs more than generating a sentence, in direct proportion. This is the autoregressive paradigm's signature trade-off, traded for the cleanest training objective in the field (next-token cross-entropy) and exact likelihood evaluation.
+
+## Why this matters when you use AI
+
+The autoregressive paradigm is the math under every modern large language model, and most of the per-token behavior of an LLM falls out of three properties of the paradigm.
+
+**Streaming output is natural.** Because the model emits one token at a time, a chatbot can stream tokens to the user as they are generated. The user sees the response unfold word by word because that is genuinely how the model is producing it. Latency to first token is a small number of forward passes; latency to last token is one per output token. This is not a UI choice; it is the chain rule on display.
+
+**Likelihood scores are meaningful.** Because autoregressive models compute an exact log-likelihood per sequence, you can use these scores for downstream tasks: ranking translations, classifying spam by which language model finds it more likely, computing the perplexity of a held-out dataset to compare models. None of the other three paradigms in this track gives a likelihood number you can use this way. (VAEs give a lower bound, GANs nothing, diffusion something computable only with extra work.)
+
+**Long-context behavior compounds.** Because each token is conditioned on the full prefix, an error at position 50 affects every prediction at position 51, 52, and beyond. Autoregressive models can drift on long outputs: a small wrong choice early can cascade into a hallucinated chain of plausible-looking continuations. This is not a bug in any one model; it is a property of the paradigm. It is also why grounding mechanisms (retrieval, tools, constrained decoding) matter for long, high-stakes generations.
+
+## Common pitfalls
+
+**Forgetting the chain rule is exact, not an approximation.** The chain rule is an identity from probability, true for every joint distribution. The approximation only enters when you parameterize each conditional with a finite neural network. The factorization itself adds zero error.
+
+**Thinking the ordering changes the joint.** It does not. The chain rule holds for any ordering of the variables, and a model trained with one ordering represents the same joint distribution (in principle) as a model trained with another. In practice the ordering affects what the model learns easily and what it struggles with, especially for images, but the math underneath is the same joint.
+
+**Treating "autoregressive" as synonymous with "transformer."** A transformer is one architecture for autoregressive modeling; PixelRNN, PixelCNN, WaveNet, and RNN-based language models are autoregressive too. The paradigm is the math (chain-rule factorization + per-piece conditional); the architecture is one of many ways to compute the conditionals.
+
+**Leaving causality up to the optimizer.** If the network can peek at the future during training, it will learn to do so and break at sampling. Causality must be enforced in the connectivity (masking, shifted convolutions), not in the data pipeline or the loss function. A subtle bug here is one of the few ways to silently train a broken autoregressive model.
+
+## What you should remember
+
+- **The chain rule of probability factors any joint distribution into a product of conditionals:** the joint equals the marginal of the first piece, times the conditional of the second given the first, times the conditional of the third given the first two, and so on for every piece. This is an exact identity; an autoregressive model models each conditional and glues them back together with this product.
+- **The training objective is the negative log-likelihood,** which by the chain rule becomes a sum of per-piece terms: each piece's loss is the negative log-probability of the piece given its prefix. For text this is next-token cross-entropy; for pixels it is per-pixel log-loss; in both cases it is the same one-line objective.
+- **Causality must be enforced in the architecture, not after the fact.** Masked attention in causal transformers and shifted (masked) convolutions in PixelCNN/WaveNet are how the network is prevented from peeking at the future. The whole paradigm rests on getting this constraint right.
+
+You now have the math behind every modern LLM in one identity and one architectural constraint. The next lesson lifts up one level: maximum likelihood and the KL divergence, the formal framework that next-token prediction implements, and the perspective that lets you compare training objectives across paradigms.

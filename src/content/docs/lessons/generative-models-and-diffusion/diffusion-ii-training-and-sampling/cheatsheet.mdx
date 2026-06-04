@@ -1,0 +1,88 @@
+---
+title: "Cheatsheet: Diffusion models II, training and sampling"
+description: Quick reference for DDIM (deterministic non-Markovian sampler), classifier-free guidance (conditioning trick), and the latency-quality Pareto frontier. The production-grade diffusion paradigm in one page.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+---
+
+## The DDIM update
+
+Given the current noisy state at timestep `t`, the predicted noise `eps_theta(x_t, t)`, and a target cleaner timestep `s` with `s < t`:
+
+```
+predict the implied clean sample:
+  x_0_hat  =  ( x_t  -  sqrt(1 - alpha_bar_t) · eps_theta(x_t, t) )  /  sqrt(alpha_bar_t)
+
+re-noise to the target cleaner timestep:
+  x_s  =  sqrt(alpha_bar_s) · x_0_hat  +  sqrt(1 - alpha_bar_s) · eps_theta(x_t, t)
+```
+
+The predicted noise is used twice: once to back out the clean sample, once to re-noise to the target. **No fresh stochastic noise term, no Markov constraint.** Trajectory is deterministic given the starting noise.
+
+## DDPM vs DDIM in one table
+
+| Property | DDPM | DDIM |
+|---|---|---|
+| Stochastic | Yes (fresh Gaussian noise per step) | No (deterministic) |
+| Markovian | Yes (next state depends only on current) | No (uses noise predictor at current state to re-noise to any target) |
+| Typical step count | 1000 | 50 (often less) |
+| Sampling cost | 1000 forward passes per sample | 50 forward passes per sample |
+| Trained network | Same noise predictor as DDPM | Same noise predictor as DDPM (no retraining) |
+| Quality at low step count | Degrades quickly | Holds up well |
+
+## Classifier-free guidance
+
+Train one network on both conditional and unconditional generation (during training, randomly drop the conditioning input with some small probability). At inference, blend:
+
+```
+eps_guided  =  eps_uncond  +  guidance_scale · ( eps_cond  -  eps_uncond )
+```
+
+Where `eps_cond` is the noise prediction with conditioning, `eps_uncond` is the noise prediction with the conditioning input dropped (or empty / a special null token).
+
+## Guidance scale ranges
+
+| Scale | Behavior |
+|---|---|
+| 0 | Unconditional sampling (no conditioning at all) |
+| 1 | Naive conditional sampler (no amplification beyond the trained conditional behavior) |
+| 5 to 10 | Production sweet spot for most text-to-image systems (strong prompt adherence, natural variation preserved) |
+| Above 20 | Over-amplified; saturated, stylized samples that follow the prompt rigidly at the cost of natural variation |
+
+## The latency-quality Pareto frontier
+
+| Sampler | Steps | Typical use |
+|---|---|---|
+| DDPM | 1000 | Research baseline; quality asymptote |
+| DDIM | 50 | Production sweet spot for most systems |
+| DPM-Solver, second-order methods | 20 | Fast inference with good quality |
+| Distilled samplers (Consistency Models, LCM) | 1 to 8 | Real-time interactive use |
+
+**Reading rule.** A sampling-step quote without the sampler name is ambiguous. A sampling-time quote without the network size and batch size is also ambiguous. Compare systems by holding the other dimensions fixed.
+
+## Worked anchor: a three-step DDIM trajectory
+
+Start at the final-timestep noise vector. Run the noise predictor three times, each time computing the implied clean sample and re-noising to a target cleaner timestep:
+
+- **Step 1**: from final timestep to two-thirds-along. Predict noise, back out implied clean sample, re-noise to two-thirds-along.
+- **Step 2**: from two-thirds-along to one-third-along. Predict noise at the now-cleaner state, back out clean sample, re-noise to one-third-along.
+- **Step 3**: from one-third-along to clean. Predict noise, back out clean sample, return as the generated sample.
+
+Three steps, three forward passes, deterministic trajectory. With classifier-free guidance turned on, double that count (six forward passes total). Total cost still an order of magnitude below DDPM's thousand-step Markov chain.
+
+## Common pitfalls (one-line each)
+
+- **Confusing DDIM with a different model.** Same trained noise predictor as DDPM; only the inference loop changes.
+- **Treating classifier-free guidance as a separate model.** Same network; the trick is in how it is called at inference (with and without conditioning, then blended).
+- **Reading sampling-step counts without the sampler.** Fifty DDPM steps and fifty DDIM steps produce very different quality outputs.
+- **Pushing guidance scale too high.** Above twenty typically produces over-saturated, stylized samples.
+
+## §6 boundary (carries from L12)
+
+Modern text-to-image generation is the canonical diffusion deployment surface. The six policy categories (use-case appropriateness, provenance and watermarking, sector-specific deployment, training-data IP, likeness and consent, prompt-injection content risks) sit outside this lesson's mechanical scope. Operational evaluation methods for this lesson's scope: FID across step counts, CLIP scores for text-image alignment, sample-quality vs step-count Pareto frontier, perceptual studies, memorization probes.
+
+## Next
+
+Lesson 14 returns to the score-based view from L11 and shows the formal equivalence between L11, L12, and this lesson's DDIM sampler via the continuous-time stochastic differential equation perspective. The capstone at lesson 15 returns to L1's four-paradigm map.

@@ -2860,6 +2860,209 @@ export default defineConfig({
 					],
 				},
 				{
+					label: 'Track 19: Generative Models and Diffusion',
+					items: [
+						{
+							label: 'Phase 1\nGenerative foundations',
+							collapsed: true,
+							items: [
+								{
+									label: 'What a generative model is',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/generative-models-and-diffusion/what-a-generative-model-is/brief' },
+										{ label: 'Lesson', slug: 'lessons/generative-models-and-diffusion/what-a-generative-model-is/lesson' },
+										{ label: 'Practice', slug: 'lessons/generative-models-and-diffusion/what-a-generative-model-is/practice' },
+										{ label: 'Summary', slug: 'lessons/generative-models-and-diffusion/what-a-generative-model-is/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/generative-models-and-diffusion/what-a-generative-model-is/cheatsheet' },
+										{ label: 'References', slug: 'lessons/generative-models-and-diffusion/what-a-generative-model-is/references' },
+									],
+								},
+								{
+									label: 'Autoregressive models',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/generative-models-and-diffusion/autoregressive-models/brief' },
+										{ label: 'Lesson', slug: 'lessons/generative-models-and-diffusion/autoregressive-models/lesson' },
+										{ label: 'Practice', slug: 'lessons/generative-models-and-diffusion/autoregressive-models/practice' },
+										{ label: 'Summary', slug: 'lessons/generative-models-and-diffusion/autoregressive-models/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/generative-models-and-diffusion/autoregressive-models/cheatsheet' },
+										{ label: 'References', slug: 'lessons/generative-models-and-diffusion/autoregressive-models/references' },
+									],
+								},
+								{
+									label: 'Maximum likelihood and KL',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/generative-models-and-diffusion/maximum-likelihood-and-the-kl-view/brief' },
+										{ label: 'Lesson', slug: 'lessons/generative-models-and-diffusion/maximum-likelihood-and-the-kl-view/lesson' },
+										{ label: 'Practice', slug: 'lessons/generative-models-and-diffusion/maximum-likelihood-and-the-kl-view/practice' },
+										{ label: 'Summary', slug: 'lessons/generative-models-and-diffusion/maximum-likelihood-and-the-kl-view/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/generative-models-and-diffusion/maximum-likelihood-and-the-kl-view/cheatsheet' },
+										{ label: 'References', slug: 'lessons/generative-models-and-diffusion/maximum-likelihood-and-the-kl-view/references' },
+									],
+								},
+								{
+									label: 'Normalizing flows',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/generative-models-and-diffusion/normalizing-flows/brief' },
+										{ label: 'Lesson', slug: 'lessons/generative-models-and-diffusion/normalizing-flows/lesson' },
+										{ label: 'Practice', slug: 'lessons/generative-models-and-diffusion/normalizing-flows/practice' },
+										{ label: 'Summary', slug: 'lessons/generative-models-and-diffusion/normalizing-flows/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/generative-models-and-diffusion/normalizing-flows/cheatsheet' },
+										{ label: 'References', slug: 'lessons/generative-models-and-diffusion/normalizing-flows/references' },
+									],
+								},
+							],
+						},
+						{
+							label: 'Phase 2\nLatent and adversarial',
+							collapsed: true,
+							items: [
+								{
+									label: 'Latent variables and the ELBO',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/generative-models-and-diffusion/latent-variables-and-the-elbo/brief' },
+										{ label: 'Lesson', slug: 'lessons/generative-models-and-diffusion/latent-variables-and-the-elbo/lesson' },
+										{ label: 'Practice', slug: 'lessons/generative-models-and-diffusion/latent-variables-and-the-elbo/practice' },
+										{ label: 'Summary', slug: 'lessons/generative-models-and-diffusion/latent-variables-and-the-elbo/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/generative-models-and-diffusion/latent-variables-and-the-elbo/cheatsheet' },
+										{ label: 'References', slug: 'lessons/generative-models-and-diffusion/latent-variables-and-the-elbo/references' },
+									],
+								},
+								{
+									label: 'VAE training',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/generative-models-and-diffusion/vae-training-in-practice/brief' },
+										{ label: 'Lesson', slug: 'lessons/generative-models-and-diffusion/vae-training-in-practice/lesson' },
+										{ label: 'Practice', slug: 'lessons/generative-models-and-diffusion/vae-training-in-practice/practice' },
+										{ label: 'Summary', slug: 'lessons/generative-models-and-diffusion/vae-training-in-practice/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/generative-models-and-diffusion/vae-training-in-practice/cheatsheet' },
+										{ label: 'References', slug: 'lessons/generative-models-and-diffusion/vae-training-in-practice/references' },
+									],
+								},
+								{
+									label: 'GANs: the minimax game',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/generative-models-and-diffusion/gans-the-minimax-game/brief' },
+										{ label: 'Lesson', slug: 'lessons/generative-models-and-diffusion/gans-the-minimax-game/lesson' },
+										{ label: 'Practice', slug: 'lessons/generative-models-and-diffusion/gans-the-minimax-game/practice' },
+										{ label: 'Summary', slug: 'lessons/generative-models-and-diffusion/gans-the-minimax-game/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/generative-models-and-diffusion/gans-the-minimax-game/cheatsheet' },
+										{ label: 'References', slug: 'lessons/generative-models-and-diffusion/gans-the-minimax-game/references' },
+									],
+								},
+								{
+									label: 'WGAN gradient penalty',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/generative-models-and-diffusion/wgan-gradient-penalty/brief' },
+										{ label: 'Lesson', slug: 'lessons/generative-models-and-diffusion/wgan-gradient-penalty/lesson' },
+										{ label: 'Practice', slug: 'lessons/generative-models-and-diffusion/wgan-gradient-penalty/practice' },
+										{ label: 'Summary', slug: 'lessons/generative-models-and-diffusion/wgan-gradient-penalty/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/generative-models-and-diffusion/wgan-gradient-penalty/cheatsheet' },
+										{ label: 'References', slug: 'lessons/generative-models-and-diffusion/wgan-gradient-penalty/references' },
+									],
+								},
+								{
+									label: 'Evaluating generative models',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/generative-models-and-diffusion/evaluating-generative-models/brief' },
+										{ label: 'Lesson', slug: 'lessons/generative-models-and-diffusion/evaluating-generative-models/lesson' },
+										{ label: 'Practice', slug: 'lessons/generative-models-and-diffusion/evaluating-generative-models/practice' },
+										{ label: 'Summary', slug: 'lessons/generative-models-and-diffusion/evaluating-generative-models/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/generative-models-and-diffusion/evaluating-generative-models/cheatsheet' },
+										{ label: 'References', slug: 'lessons/generative-models-and-diffusion/evaluating-generative-models/references' },
+									],
+								},
+							],
+						},
+						{
+							label: 'Phase 3\nEnergy, score, diffusion',
+							collapsed: true,
+							items: [
+								{
+									label: 'Energy-based models',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/generative-models-and-diffusion/energy-based-models/brief' },
+										{ label: 'Lesson', slug: 'lessons/generative-models-and-diffusion/energy-based-models/lesson' },
+										{ label: 'Practice', slug: 'lessons/generative-models-and-diffusion/energy-based-models/practice' },
+										{ label: 'Summary', slug: 'lessons/generative-models-and-diffusion/energy-based-models/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/generative-models-and-diffusion/energy-based-models/cheatsheet' },
+										{ label: 'References', slug: 'lessons/generative-models-and-diffusion/energy-based-models/references' },
+									],
+								},
+								{
+									label: 'Score matching',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/generative-models-and-diffusion/score-matching/brief' },
+										{ label: 'Lesson', slug: 'lessons/generative-models-and-diffusion/score-matching/lesson' },
+										{ label: 'Practice', slug: 'lessons/generative-models-and-diffusion/score-matching/practice' },
+										{ label: 'Summary', slug: 'lessons/generative-models-and-diffusion/score-matching/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/generative-models-and-diffusion/score-matching/cheatsheet' },
+										{ label: 'References', slug: 'lessons/generative-models-and-diffusion/score-matching/references' },
+									],
+								},
+								{
+									label: 'Diffusion I',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/generative-models-and-diffusion/diffusion-i-forward-and-reverse-processes/brief' },
+										{ label: 'Lesson', slug: 'lessons/generative-models-and-diffusion/diffusion-i-forward-and-reverse-processes/lesson' },
+										{ label: 'Practice', slug: 'lessons/generative-models-and-diffusion/diffusion-i-forward-and-reverse-processes/practice' },
+										{ label: 'Summary', slug: 'lessons/generative-models-and-diffusion/diffusion-i-forward-and-reverse-processes/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/generative-models-and-diffusion/diffusion-i-forward-and-reverse-processes/cheatsheet' },
+										{ label: 'References', slug: 'lessons/generative-models-and-diffusion/diffusion-i-forward-and-reverse-processes/references' },
+									],
+								},
+								{
+									label: 'Diffusion II',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/generative-models-and-diffusion/diffusion-ii-training-and-sampling/brief' },
+										{ label: 'Lesson', slug: 'lessons/generative-models-and-diffusion/diffusion-ii-training-and-sampling/lesson' },
+										{ label: 'Practice', slug: 'lessons/generative-models-and-diffusion/diffusion-ii-training-and-sampling/practice' },
+										{ label: 'Summary', slug: 'lessons/generative-models-and-diffusion/diffusion-ii-training-and-sampling/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/generative-models-and-diffusion/diffusion-ii-training-and-sampling/cheatsheet' },
+										{ label: 'References', slug: 'lessons/generative-models-and-diffusion/diffusion-ii-training-and-sampling/references' },
+									],
+								},
+								{
+									label: 'Score-based diffusion (SDEs)',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/generative-models-and-diffusion/score-based-diffusion-via-sdes/brief' },
+										{ label: 'Lesson', slug: 'lessons/generative-models-and-diffusion/score-based-diffusion-via-sdes/lesson' },
+										{ label: 'Practice', slug: 'lessons/generative-models-and-diffusion/score-based-diffusion-via-sdes/practice' },
+										{ label: 'Summary', slug: 'lessons/generative-models-and-diffusion/score-based-diffusion-via-sdes/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/generative-models-and-diffusion/score-based-diffusion-via-sdes/cheatsheet' },
+										{ label: 'References', slug: 'lessons/generative-models-and-diffusion/score-based-diffusion-via-sdes/references' },
+									],
+								},
+								{
+									label: 'The four-paradigm landscape',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/generative-models-and-diffusion/the-four-paradigm-landscape/brief' },
+										{ label: 'Lesson', slug: 'lessons/generative-models-and-diffusion/the-four-paradigm-landscape/lesson' },
+										{ label: 'Practice', slug: 'lessons/generative-models-and-diffusion/the-four-paradigm-landscape/practice' },
+										{ label: 'Summary', slug: 'lessons/generative-models-and-diffusion/the-four-paradigm-landscape/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/generative-models-and-diffusion/the-four-paradigm-landscape/cheatsheet' },
+										{ label: 'References', slug: 'lessons/generative-models-and-diffusion/the-four-paradigm-landscape/references' },
+									],
+								},
+							],
+						},
+					],
+				},
+				{
 					label: 'Track 24: Multimodal AI',
 					items: [
 						{

@@ -1,0 +1,214 @@
+---
+title: "Practice: GAN training in practice, Wasserstein loss and gradient penalty"
+description: A self-check on the Wasserstein objective and the gradient penalty, a Wasserstein-1 computation via the CDF formula on a fresh 1D case, a Lipschitz-constraint verification, and flashcards built for retrieval.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Six short questions. Answer each one in your head (or on paper) before opening the collapsible. Trying to retrieve the answer is where the learning sticks; rereading feels productive but does much less.
+
+**1. State the Earth Mover's intuition for the Wasserstein distance, and contrast it with what JS divergence does on disjoint distributions.**
+
+<details>
+<summary>Show answer</summary>
+
+`W_1(p, q)` is the minimum cost to transport mass from one distribution into the shape of the other, where cost = mass × distance moved. It scales smoothly with geometric distance. JS divergence, by contrast, saturates at its maximum value `log 2` whenever the two distributions have disjoint supports, regardless of how far apart they are. This is why W gives meaningful gradients early in GAN training (when `p_G` barely overlaps `p_data`) and JS does not.
+
+</details>
+
+**2. Write the Kantorovich-Rubinstein duality form of `W_1(p, q)`.**
+
+<details>
+<summary>Show answer</summary>
+
+`W_1(p, q) = sup over 1-Lipschitz f of (E_{x ~ p}[f(x)] − E_{x ~ q}[f(x)])`. The supremum is over functions `f` constrained to be 1-Lipschitz (`|f(x) − f(y)| ≤ ||x − y||` for all `x, y`, equivalently `||∇f(x)|| ≤ 1` almost everywhere). A neural-network critic approximates this supremum during training.
+
+</details>
+
+**3. What is the WGAN critic, and how does it differ from the original GAN's discriminator?**
+
+<details>
+<summary>Show answer</summary>
+
+The critic is a neural network `f` that outputs an unbounded scalar (estimating the Wasserstein-duality term `E_{p_data}[f] − E_{p_G}[f]`), not a probability in `[0, 1]`. It is constrained to be 1-Lipschitz, which the original discriminator was not. The critic maximizes `E_{p_data}[f] − E_{p_G}[f]`; the generator minimizes the same quantity.
+
+</details>
+
+**4. Write the WGAN-GP critic loss with the gradient penalty.**
+
+<details>
+<summary>Show answer</summary>
+
+`critic loss = -[ E_{x ~ p_data}[f(x)] − E_{x ~ p_G}[f(x)] ] + λ · E_{x̂}[ ( ||∇_x f(x̂)|| − 1 )² ]`, where `x̂ = α · x_real + (1 − α) · x_fake` with `α ~ Uniform(0, 1)`. The first bracket is the (negated) Wasserstein duality term; the second is the gradient penalty enforcing the 1-Lipschitz constraint softly. `λ` is typically `10`.
+
+</details>
+
+**5. Why is the gradient penalty evaluated on interpolated samples between real and fake, rather than on real or fake alone?**
+
+<details>
+<summary>Show answer</summary>
+
+Because the Lipschitz constraint needs to hold most strongly along the "transport path" between the two distributions, which is where the optimal transport plan does most of its work. Interpolated samples `α · x_real + (1 − α) · x_fake` cover that path. Penalizing the gradient norm on real or fake alone would not constrain the critic where it matters for the duality result.
+
+</details>
+
+**6. What problems from L7 does WGAN-GP fix, and what does it NOT fix?**
+
+<details>
+<summary>Show answer</summary>
+
+Fixes: vanishing gradients on disjoint distributions (meaningful Wasserstein gradient); no clean stopping criterion (critic loss correlates with sample quality); mode collapse (reduced but not eliminated; Wasserstein penalizes missing mass). Does NOT fix: no likelihood (the critic still outputs a Wasserstein estimate, not a density); still requires careful architecture (the Lipschitz constraint must be respected); adds compute cost (the gradient-penalty term requires `∇_x f(x̂)` at every step).
+
+</details>
+
+## Try it yourself, part 1: Wasserstein-1 via the CDF formula
+
+Take two 1D discrete distributions:
+
+```
+p:  mass 1/3 at x = 0,    mass 1/3 at x = 1,    mass 1/3 at x = 2
+q:  mass 1/3 at x = 2,    mass 1/3 at x = 3,    mass 1/3 at x = 4
+```
+
+About 8 minutes, pen and paper.
+
+**Step 1.** Write out the CDFs `F_p(x)` and `F_q(x)` piecewise.
+
+**Step 2.** Compute `|F_p(x) − F_q(x)|` on each piece.
+
+**Step 3.** Compute `W_1(p, q) = integral |F_p(x) − F_q(x)| dx`.
+
+**Step 4.** Sanity-check with the Earth Mover's interpretation: which masses moved where, and what is the total cost?
+
+<details>
+<summary>Check your work</summary>
+
+**Step 1.** CDFs are step functions:
+
+```
+F_p:  0 for x < 0;  1/3 for 0 ≤ x < 1;  2/3 for 1 ≤ x < 2;  1 for x ≥ 2
+F_q:  0 for x < 2;  1/3 for 2 ≤ x < 3;  2/3 for 3 ≤ x < 4;  1 for x ≥ 4
+```
+
+**Step 2.** `|F_p(x) − F_q(x)|`:
+
+```
+x < 0:        |0 − 0|       = 0
+0 ≤ x < 1:   |1/3 − 0|     = 1/3
+1 ≤ x < 2:   |2/3 − 0|     = 2/3
+2 ≤ x < 3:   |1 − 1/3|     = 2/3
+3 ≤ x < 4:   |1 − 2/3|     = 1/3
+x ≥ 4:        |1 − 1|       = 0
+```
+
+**Step 3.** Each piece has unit width:
+
+```
+W_1 = 0 + 1/3 · 1 + 2/3 · 1 + 2/3 · 1 + 1/3 · 1 + 0  =  1/3 + 2/3 + 2/3 + 1/3  =  2
+```
+
+So `W_1(p, q) = 2`.
+
+**Step 4.** Earth Mover's: each `q` mass is offset from the corresponding `p` mass by 2 units (`q[0] − p[0] = 2 − 0 = 2`, similarly for the others). Moving 1/3 mass from `x=0` to `x=2` costs 2/3; from `x=1` to `x=3` costs 2/3; from `x=2` to `x=4` costs 2/3. Total = `3 · (2/3) = 2`. Matches the CDF computation exactly.
+
+This is the W-1 paradigm property: a uniform shift of 2 units gives `W_1 = 2`, regardless of the distribution's shape. JS would give `log 2` for this case (disjoint supports for the original `{0,1,2}` vs the new `{2,3,4}`... actually they share `x=2`, so JS would not be quite saturated, but it would be near maximum and would not encode the shift magnitude).
+
+</details>
+
+## Try it yourself, part 2: a Lipschitz-constraint check
+
+Take the 1D function `f(x) = a · x` for some constant `a > 0`. About 4 minutes.
+
+**Step 1.** For what range of `a` is `f` 1-Lipschitz?
+
+**Step 2.** What is `|f(x) − f(y)|` in terms of `a` and `|x − y|`?
+
+**Step 3.** What is the gradient `f'(x)`, and what does the 1-Lipschitz constraint require of it?
+
+<details>
+<summary>Check your work</summary>
+
+**Step 1.** `f(x) = a · x` is 1-Lipschitz exactly when `|a| ≤ 1`. Larger slopes produce larger `|f(x) − f(y)|` for the same `|x − y|`, violating the Lipschitz bound.
+
+**Step 2.** `|f(x) − f(y)| = |a · x − a · y| = |a| · |x − y|`. The Lipschitz condition `|f(x) − f(y)| ≤ ||x − y||` becomes `|a| · |x − y| ≤ |x − y|`, which requires `|a| ≤ 1`.
+
+**Step 3.** `f'(x) = a`. The 1-Lipschitz constraint (`||∇f(x)|| ≤ 1` almost everywhere) requires `|a| ≤ 1`. For this linear `f`, the gradient is constant, so the constraint is the same at every point.
+
+This is the simplest case where you can see directly what the Lipschitz constraint does. WGAN-GP's gradient penalty pushes the (non-linear) critic's gradient norm toward 1 at interpolated samples, which softly enforces the same constraint a linear function with `|a| = 1` automatically satisfies. The critic, of course, is not linear (that would be uselessly restrictive), but the penalty keeps it Lipschitz-like in expectation.
+
+</details>
+
+## Flashcards
+
+Ten cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay out the full set as one card per page, ready to print or save as a PDF for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="What is the Earth Mover's intuition for the Wasserstein distance?">
+
+`W_1(p, q)` is the minimum cost to transport mass from `p` into the shape of `q`, where cost = mass × distance moved. Geometric and smooth in distance, unlike JS which saturates at `log 2` on disjoint supports.
+
+</Flashcard>
+
+<Flashcard question="State Kantorovich-Rubinstein duality.">
+
+`W_1(p, q) = sup over 1-Lipschitz f of (E_{x ~ p}[f(x)] − E_{x ~ q}[f(x)])`. The supremum is over `f` satisfying `|f(x) − f(y)| ≤ ||x − y||` (equivalently `||∇f|| ≤ 1` a.e.). A critic network approximates this supremum.
+
+</Flashcard>
+
+<Flashcard question="How does the WGAN critic differ from the original GAN discriminator?">
+
+Critic outputs an unbounded scalar (Wasserstein-duality estimate), not a probability. Maximizes `E_{p_data}[f] − E_{p_G}[f]`. Constrained to be 1-Lipschitz, which the original discriminator was not.
+
+</Flashcard>
+
+<Flashcard question="Write the WGAN-GP critic loss.">
+
+`critic loss = -[E_{p_data}[f] − E_{p_G}[f]] + λ · E_{x̂}[(||∇_x f(x̂)|| − 1)²]`, with `x̂ = α·x_real + (1 − α)·x_fake`, `α ~ Uniform(0, 1)`, `λ ≈ 10`. First term: negated duality. Second term: gradient penalty enforcing the Lipschitz constraint softly.
+
+</Flashcard>
+
+<Flashcard question="Why is the gradient penalty evaluated on interpolated samples between real and fake?">
+
+Because the Lipschitz constraint must hold along the transport path between `p_data` and `p_G`, which is where the optimal transport plan does most of its work. Penalizing the gradient on real or fake alone would not constrain the critic where it matters for the duality result.
+
+</Flashcard>
+
+<Flashcard question="For 1D distributions, what is the closed-form formula for W_1?">
+
+`W_1(p, q) = integral |F_p(x) − F_q(x)| dx`, where `F_p` and `F_q` are CDFs. For discrete distributions: compute the piecewise differences of the step-function CDFs, multiply by each piece's width, sum.
+
+</Flashcard>
+
+<Flashcard question="What problems from L7 does WGAN-GP fix?">
+
+Vanishing gradients on disjoint distributions (Wasserstein gives meaningful gradient signals); no clean stopping criterion (critic loss correlates with sample quality); mode collapse (reduced because Wasserstein penalizes missing mass, though not eliminated).
+
+</Flashcard>
+
+<Flashcard question="What does WGAN-GP NOT fix?">
+
+No likelihood (critic outputs Wasserstein estimate, not density); still requires careful architecture (Lipschitz constraint must be respected); adds compute cost (`∇_x f(x̂)` computation per training step).
+
+</Flashcard>
+
+<Flashcard question="What was the original WGAN's Lipschitz-enforcement method, and what replaced it?">
+
+Original WGAN: weight clipping (clip each critic weight to `[-c, c]` after each step). Replaced by the gradient penalty (WGAN-GP), which softly enforces `||∇_x f(x̂)|| → 1` on interpolated samples. Spectral normalization (SN-GAN) is another alternative.
+
+</Flashcard>
+
+<Flashcard question="Why is WGAN-GP the GAN family member that survived the post-GAN era?">
+
+Because the Wasserstein objective gives meaningful gradients on disjoint distributions (early-training problem) AND the gradient penalty makes training stable enough for production use. Domain-specific high-resolution generation (StyleGAN-family, which uses non-saturating logistic loss with R1 regularization, a different stable-training variant), hybrid systems (image-to-image, super-resolution), and adversarial training as a regularization tool all use a stable training framework rather than the original GAN; ProGAN was the canonical WGAN-GP-trained example.
+
+</Flashcard>
+
+</FlashcardSet>

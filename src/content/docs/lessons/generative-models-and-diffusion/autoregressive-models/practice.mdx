@@ -1,0 +1,187 @@
+---
+title: "Practice: Autoregressive models, factoring by the chain rule"
+description: A self-check on the chain rule, the NLL objective, and causality, a compute-the-joint-and-NLL exercise on a fresh sequence, a spot-the-causality-bug drill on architecture descriptions, and flashcards built for retrieval.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Six short questions. Answer each one in your head (or on paper) before opening the collapsible. Trying to retrieve the answer is where the learning sticks; rereading feels productive but does much less.
+
+**1. State the chain rule of probability for `n` variables.**
+
+<details>
+<summary>Show answer</summary>
+
+`p(x_1, x_2, ..., x_n) = p(x_1) · p(x_2 | x_1) · p(x_3 | x_1, x_2) · ... · p(x_n | x_1, ..., x_{n-1})`. It is an exact identity from probability, true for any joint distribution; no approximation.
+
+</details>
+
+**2. What does an autoregressive model model with neural networks, and how does it reassemble the joint?**
+
+<details>
+<summary>Show answer</summary>
+
+It models each per-piece conditional `p(x_i | x_1, ..., x_{i-1})` with a neural network. The joint distribution is reassembled by multiplying these conditionals together via the chain rule. Only the conditionals are learned; the way to combine them is fixed by probability theory.
+
+</details>
+
+**3. By the chain rule, what does `log p(x_1, ..., x_n)` decompose into, and why is that useful for training?**
+
+<details>
+<summary>Show answer</summary>
+
+`log p(x_1, ..., x_n) = log p(x_1) + log p(x_2 | x_1) + ... + log p(x_n | x_1, ..., x_{n-1})`, a sum of per-piece log-probabilities. This turns the joint negative log-likelihood (NLL) into a sum of per-piece terms, each of which is just "how surprised was the model by the actual next piece given the prefix?" For text, this is next-token cross-entropy.
+
+</details>
+
+**4. Why must causality be enforced in the architecture, not in the loss function?**
+
+<details>
+<summary>Show answer</summary>
+
+If the network can read positions `>= i` while predicting `x_i`, it will learn to do so (the optimization will exploit the leak). Training looks fine, but at sampling time the future positions do not exist yet, so the model breaks. Enforcing causality at the loss only would not stop the gradient from teaching the network to peek; you have to remove the connections architecturally.
+
+</details>
+
+**5. How does a causal transformer enforce causality? How does PixelCNN?**
+
+<details>
+<summary>Show answer</summary>
+
+A causal transformer masks the self-attention so the representation at position `i` cannot attend to positions `> i` (the mask zeros out the upper-triangular entries of the attention matrix). PixelCNN masks the convolution kernel so it can only read pixels to the upper-left of the current position (in raster scan order). Both encode the chain rule's prefix-only constraint in the connectivity itself.
+
+</details>
+
+**6. What is the autoregressive paradigm's signature trade-off?**
+
+<details>
+<summary>Show answer</summary>
+
+Exact likelihood (good for scoring, perplexity, comparisons) in exchange for sequential sampling (one forward pass per piece, so wall-clock cost scales with output length). KV caching brings the per-token cost to roughly constant in prefix length, making total cost linear in output length, but the sequential nature is inherent to the paradigm.
+
+</details>
+
+## Try it yourself, part 1: compute the joint probability and NLL of a sequence
+
+Take a vocabulary `{D, O, G}` and the 3-token sequence `DOG`. Suppose a trained autoregressive model gives the following conditional probabilities on this sequence:
+
+```
+p(D)         = 0.3
+p(O | D)     = 0.5
+p(G | D, O)  = 0.4
+```
+
+About 6 minutes, pen and paper (a calculator helps for the logs).
+
+**Step 1.** Compute the joint probability `p(DOG)` the model assigns to this sequence.
+
+**Step 2.** Compute the negative log-likelihood `-log p(DOG)` (using natural log).
+
+**Step 3.** Verify by computing the per-piece sum `-log p(D) - log p(O | D) - log p(G | D, O)` and confirming it equals Step 2.
+
+<details>
+<summary>Check your work</summary>
+
+**Step 1.** `p(DOG) = 0.3 · 0.5 · 0.4 = 0.06`.
+
+**Step 2.** `-log(0.06) ≈ 2.813`. (Natural log: `log(0.06) = log(6) - log(100) ≈ 1.792 - 4.605 ≈ -2.813`.)
+
+**Step 3.** Per-piece: `-log(0.3) - log(0.5) - log(0.4) ≈ 1.204 + 0.693 + 0.916 ≈ 2.813`. The two answers agree because `log(a · b · c) = log(a) + log(b) + log(c)`, so the negative log of a product is the sum of the negative logs of the factors. The training loss is exactly this per-piece sum, averaged across the dataset.
+
+</details>
+
+## Try it yourself, part 2: spot the causality bug
+
+Each architecture description below is meant for autoregressive next-piece prediction. Identify which ones correctly enforce causality and which ones have a bug. About 6 minutes.
+
+- a) A transformer language model that uses masked self-attention; at every position `i`, the attention mask zeros out positions `> i`, so the representation at position `i` depends only on positions `1` through `i`.
+- b) A bidirectional transformer (BERT-style) that attends freely in both directions, applied to predict the next token at each position by reading the output at that position.
+- c) A PixelCNN with masked convolution kernels: each kernel reads only the pixels above and to the left of the current position in raster scan order.
+- d) A convolutional network with standard (unmasked) 3x3 kernels, applied to predict each pixel from its surrounding context.
+
+<details>
+<summary>Check your work</summary>
+
+- a) **Correct.** Masked self-attention is the canonical way to make a transformer autoregressive; this is the architecture under every modern LLM.
+- b) **Bug.** Bidirectional attention lets position `i` attend to positions `> i`, so the model can peek at the future. Used for representation learning (BERT, encoders), this is correct; used for next-token prediction, the model trivially learns to read off the target it is supposed to predict, and breaks at sampling time when the target does not exist.
+- c) **Correct.** Masked convolution is the PixelCNN move; the upper-left receptive field encodes the chain rule's prefix-only constraint in raster scan order.
+- d) **Bug.** An unmasked 3x3 kernel reads pixels to the right and below the current position, so the prediction for each pixel can see neighbors that, in autoregressive order, come after it. The same issue as (b): training looks fine, sampling breaks.
+
+The pattern: any architecture that lets the network read positions `> i` while predicting `x_i` has a causality bug. Causality must be enforced in the connectivity, not in the loss or the data pipeline.
+
+</details>
+
+## Flashcards
+
+Ten cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay out the full set as one card per page, ready to print or save as a PDF for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="State the chain rule of probability for n variables.">
+
+`p(x_1, ..., x_n) = p(x_1) · p(x_2 | x_1) · p(x_3 | x_1, x_2) · ... · p(x_n | x_1, ..., x_{n-1})`. An exact identity, true for any joint distribution.
+
+</Flashcard>
+
+<Flashcard question="What does an autoregressive model model with neural networks, and how does it reassemble the joint?">
+
+It models each per-piece conditional `p(x_i | prefix)` with a neural network. The joint is reassembled by multiplying these conditionals via the chain rule. The conditionals are learned; the combination rule is fixed by probability theory.
+
+</Flashcard>
+
+<Flashcard question="What is the training objective in one line, and what does it become for text?">
+
+Minimize the negative log-likelihood, summed across pieces: `-log p(x_1, ..., x_n) = -sum_i log p(x_i | prefix)`. For text this is next-token cross-entropy, the loss every modern LLM is trained on.
+
+</Flashcard>
+
+<Flashcard question="By the chain rule, how does log p(joint) decompose, and why does that help?">
+
+`log p(x_1, ..., x_n) = sum_i log p(x_i | x_1, ..., x_{i-1})`: a sum of per-piece log-probabilities. This makes the joint NLL a sum of per-piece terms, each computable by running the conditional on its prefix.
+
+</Flashcard>
+
+<Flashcard question="Why must causality be enforced in the architecture, not in the loss?">
+
+If the network can read positions `> i` while predicting `x_i`, the optimizer will exploit it and the model learns to peek. Training looks fine, but at sampling time the future does not exist yet, so the model breaks. Architectural connectivity is the only place this can be enforced.
+
+</Flashcard>
+
+<Flashcard question="How does a causal transformer enforce causality?">
+
+By masking the self-attention so position `i` cannot attend to positions `> i` (the upper-triangular entries of the attention matrix are zeroed). The mask encodes the prefix-only constraint in the connectivity.
+
+</Flashcard>
+
+<Flashcard question="How does PixelCNN enforce causality?">
+
+By masking the convolution kernel so it only reads pixels above and to the left of the current position (in raster scan order). The masked receptive field encodes the chain rule's prefix-only constraint on images.
+
+</Flashcard>
+
+<Flashcard question="What is the sampling cost of an autoregressive model?">
+
+One forward pass per piece. Wall-clock cost scales with output length; long generations are slow. The cost is inherent to the paradigm, not a property of any one architecture.
+
+</Flashcard>
+
+<Flashcard question="What does KV caching do for autoregressive sampling?">
+
+It caches the keys and values computed by the attention layers for previous tokens, so each new token only computes keys/values for itself. This makes per-token cost roughly constant in prefix length (instead of growing each step), so total generation cost is linear in output length.
+
+</Flashcard>
+
+<Flashcard question="What is the autoregressive paradigm's signature trade-off?">
+
+Exact likelihood (great for scoring, perplexity, ranking) in exchange for sequential sampling (one forward pass per piece, so latency scales with output length). The training objective is the cleanest in the field; the wall-clock cost is the trade.
+
+</Flashcard>
+
+</FlashcardSet>

@@ -1,0 +1,186 @@
+---
+title: "Lesson: Energy-based models, the partition-function problem"
+description: An energy-based model defines an unnormalized density by naming an energy function E(x) and dividing by a normalization constant Z. This lesson derives the model, shows why Z is intractable for any neural-network energy, walks the maximum-likelihood gradient that introduces a "negative-phase" expectation over model samples, and motivates the two ways out (contrastive divergence and score matching), which set up the rest of Phase 3.
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+Phase 3 opens with the most architecturally permissive paradigm in the track. An **energy-based model** (EBM) defines the model density as the exponential of negative energy divided by a normalization constant, where the energy function is any neural network (no causality constraint, no invertibility, no encoder-decoder split). The freedom on the energy function is the appeal; the intractability of the normalization constant (called the partition function) is the entire engineering challenge of the paradigm, and how to work around it sets up the score-matching framework (lesson 11) and the diffusion models that follow.
+
+By the end you will be able to write the EBM density, derive the maximum-likelihood gradient and explain why it contains a "negative-phase" expectation over model samples that is itself hard to estimate, name the two main escape routes (contrastive divergence with MCMC samples, score matching that bypasses the partition function entirely), and see why the score-matching escape leads directly to the diffusion paradigm in the next few lessons.
+
+This lesson is pure technical motivation. There is no §6 watch (energy-based models are paradigm-level math, not directly tied to specific deployment surfaces).
+
+## The model: an unnormalized density
+
+An EBM defines a probability density by naming a real-valued **energy function** (parameterized by the model parameters) and constructing:
+
+```
+p_θ(x)  =  exp( -E_θ(x) )  /  Z(θ)            with    Z(θ) = integral over x of exp(-E_θ(x')) dx'
+```
+
+Two things to notice. First, the exponential of negative energy is non-negative for any choice of energy function, so the construction always gives a valid density (after dividing by the partition function). Second, the sign convention is "low energy equals high probability": where the energy is small, the density is large. This sign is borrowed from physics (the Boltzmann distribution) and is a convention; nothing changes if you flip the sign everywhere.
+
+The energy can be any neural network. There is no architectural constraint analogous to causality in autoregressive models (lesson 2), invertibility in flows (lesson 4), encoder-decoder structure in VAEs (lesson 6), or two-network game in GANs (lesson 7). A vanilla MLP, a CNN, a transformer encoder, even something quite irregular: any function that maps a data point to a real number works. **This architectural freedom is the EBM paradigm's main attraction.** Classical statistical models (Ising models, Boltzmann machines, restricted Boltzmann machines, the energy-based view of conditional random fields) all sit inside this framework as special cases of the energy function.
+
+The problem is the divisor.
+
+## The partition function is intractable
+
+The partition function is the integral of the exponential of negative energy over the entire data space, the normalization constant that turns the unnormalized density into a proper probability distribution that integrates to one. The integral is over the **entire data space**: for a one-dimensional variable it is a one-dimensional integral, easy enough; for a high-dimensional variable (an image, an audio waveform, a token sequence), it is a high-dimensional integral with no closed form for a neural-network energy.
+
+Naive numerical integration is infeasible. A grid over a 32-by-32 grayscale image has astronomically many cells, beyond any computer. Monte Carlo over the data space samples uniformly and hits high-energy (low-probability) regions overwhelmingly often, so the integral estimator has astronomical variance. Importance sampling helps in principle but requires a proposal distribution close to the model density, which is what we are trying to model in the first place.
+
+So **the partition function is unknown and uncomputable in practice for any nontrivial neural-network energy.**
+
+This is a problem because maximum likelihood training requires the model log-density (equal to negative energy minus log partition function), and we cannot compute the second term. The naive maximum-likelihood plan ("evaluate the log-density on training data, minimize the negative") is blocked.
+
+## A worked example where the partition function is tractable
+
+Before walking the workaround, see one case where the partition function works out. Take the one-dimensional quadratic energy:
+
+```
+E_θ(x) = 0.5 · (x - μ)²
+```
+
+with the mean as the only parameter. Then the exponential of negative energy is:
+
+```
+exp(-E_θ(x)) = exp(-0.5 · (x - μ)²)
+```
+
+This is the kernel of a Gaussian density, and the integral is a standard result:
+
+```
+Z(μ) = integral over x of exp(-0.5 · (x - μ)²) dx  =  sqrt(2π)
+```
+
+(independent of the mean, by the translation invariance of the integral). So:
+
+```
+p_θ(x) = exp(-0.5 · (x - μ)²) / sqrt(2π)
+```
+
+which is just a unit-variance Gaussian centered at the chosen mean. The EBM in this special case recovers a Gaussian directly. The partition function was tractable because the quadratic-in-the-input energy combined with the exponential gave us back a Gaussian, whose normalization is a known integral.
+
+Now add a quartic term to the energy, controlled by an extra hyperparameter. The corresponding integral has no closed form for general values of that hyperparameter. The distribution is well-defined (the energy is bounded below, the density is non-negative, the integral converges), but the partition function is not a function we can write down. Replace the quartic with a full neural network energy and the high-dimensional integral is hopeless.
+
+The Gaussian case is the exception: a closed-form partition function requires a very specific energy shape. EBMs that are interesting (because the energy is expressive) are exactly the EBMs where the partition function is intractable.
+
+## The maximum-likelihood gradient (where the trouble shows up)
+
+Start from the model log-density (negative energy minus log partition function). Take the gradient with respect to the model parameters:
+
+```
+∇_θ log p_θ(x) = -∇_θ E_θ(x)  -  ∇_θ log Z(θ)
+```
+
+The first term, the negative gradient of the energy at the data point, is easy: differentiate the energy network at the data point. We can compute it with standard backpropagation.
+
+The second term, the negative gradient of the log partition function, is the troublesome one. Expand:
+
+```
+∇_θ log Z(θ)  =  (1 / Z(θ)) · ∇_θ Z(θ)
+              =  (1 / Z(θ)) · ∇_θ integral over x' of exp(-E_θ(x')) dx'
+              =  integral over x' of (1 / Z(θ)) · ∇_θ exp(-E_θ(x')) dx'
+              =  integral over x' of (1 / Z(θ)) · exp(-E_θ(x')) · ( -∇_θ E_θ(x') ) dx'
+              =  -integral over x' of p_θ(x') · ∇_θ E_θ(x') dx'
+              =  -E_{x' ~ p_θ}[ ∇_θ E_θ(x') ]
+```
+
+(The interchange of integral and gradient is valid under regularity conditions; the reciprocal partition function times exponential of negative energy is the model density itself; the rest is bookkeeping.)
+
+So:
+
+```
+∇_θ log p_θ(x)  =  -∇_θ E_θ(x)  +  E_{x' ~ p_θ}[ ∇_θ E_θ(x') ]
+                   \---positive phase---/   \-----negative phase-----/
+```
+
+Two terms, two intuitions:
+
+**Positive phase**: at the data point, lower the energy (make the model density at the data point larger).
+
+**Negative phase**: at samples drawn from the model itself, raise the energy (make the model density at those samples smaller). The model gets pushed away from its current incorrect guesses, in the direction of where it currently thinks data should be.
+
+Compactly: **pull energy down at the data, push energy up where the model thinks data should be**. The two pieces of the gradient pull in opposite directions, and at equilibrium (when the model matches the data), the expected gradient is zero, which is the maximum-likelihood fixed point.
+
+## The catch: sampling from the model is also hard
+
+The negative-phase expectation requires **samples from the model**. But sampling from an EBM is itself hard, because the model is defined by the exponential-of-negative-energy form with an intractable partition function. We do not have a clean sampling procedure analogous to "draw a latent from a standard Gaussian and run the decoder."
+
+The standard sampling tools are **Markov Chain Monte Carlo (MCMC)** methods. **Langevin dynamics** is the most common choice for EBMs: starting from some initial point, repeatedly take a small step in the direction of the negative gradient of the energy plus a small Gaussian noise term. After many steps, the chain converges to samples from the model:
+
+```
+x_{t+1} = x_t  -  η · ∇_x E_θ(x_t)  +  sqrt(2η) · ε_t,      ε_t ~ N(0, I)
+```
+
+(The step-size hyperparameter is small.) The intuition: the gradient pulls the chain toward low-energy (high-probability) regions; the noise term keeps the chain exploring rather than collapsing onto a single mode. With enough steps, the chain produces approximate samples from the model.
+
+The catch within the catch: MCMC methods are **slow**. Each gradient update of the parameters requires a fresh round of MCMC samples for the negative phase, and convergence of the MCMC chain itself can take thousands of steps for high-dimensional inputs. EBM training with full MCMC at every step is computationally prohibitive for anything more than small toy problems.
+
+**Contrastive divergence** is the practical compromise: run MCMC for only a few steps (typically just one or a few), starting from the data point itself rather than from a random initialization. The resulting samples are not exactly from the model, but they are close enough to give a useful gradient signal, and the cost per training step is bounded.
+
+Contrastive divergence works for some EBMs but has its own pathologies: the gradient is biased (not pure maximum likelihood), training can become unstable, and the MCMC chains can get stuck in modes. EBM training in the pre-2019 era was a difficult engineering problem precisely because of these issues.
+
+## The escape route: bypass the partition function entirely
+
+The cleaner approach, and the one that opens up modern diffusion models, is to **avoid the partition function altogether** by working with a quantity that does not depend on it.
+
+Notice that for any input:
+
+```
+log p_θ(x)  =  -E_θ(x)  -  log Z(θ)
+```
+
+The gradient with respect to **the input** (not the parameters):
+
+```
+∇_x log p_θ(x)  =  -∇_x E_θ(x)  -  ∇_x log Z(θ)
+                =  -∇_x E_θ(x)  -  0
+                =  -∇_x E_θ(x)
+```
+
+The crucial observation: the partition function does not depend on the input, so its input-gradient is zero. **The partition function vanishes under the input-gradient.**
+
+This means the **score function**, the gradient of the log-density with respect to the input, equals the negative gradient of the energy and is computable directly from the energy network, with **no need to know the partition function**. The score function is a vector field on the data space that points in the direction of locally increasing model probability; for any input you can evaluate it with one backward pass through the energy network.
+
+If we can train an EBM by matching the model's score to the data's score (rather than by maximum likelihood on the density), we sidestep the entire partition-function problem. This is **score matching**, and it is the subject of the next lesson. The leap from "EBMs have an intractable normalization that ruins maximum likelihood" to "but the score function does not depend on the normalization and can be trained directly" is what made the modern diffusion paradigm possible. Lesson 11 derives the score-matching objective; lessons 12-14 build diffusion models on top of it.
+
+## Why EBMs are worth knowing even now
+
+Two reasons.
+
+**They unify several classical model families.** Restricted Boltzmann machines, Ising models in statistical physics, Hopfield networks, and the energy-based view of conditional random fields are all EBMs. Reading any of those literatures with the EBM framework in hand makes the connections explicit.
+
+**They are the conceptual bridge to diffusion.** The next three lessons build score-based models from this lesson's score-function observation. Skipping the EBM motivation and jumping straight to score matching is possible but loses the "why does score matching exist?" intuition. Score matching exists because EBMs gave us a paradigm with all the architectural freedom we wanted and one fatal computational obstacle that the score function happens to dissolve.
+
+There is also a current-systems reason EBMs are not the practical winner: training with MCMC or CD is hard and slow compared to autoregressive next-token prediction, flow exact-likelihood, VAE ELBO, or diffusion noise prediction. EBMs are theoretically clean and very flexible, but they pay heavily for that flexibility in training cost. The score-based view recovers the flexibility without the cost, which is why modern systems use the score-based framework rather than direct EBM training.
+
+## Why this matters when you use AI
+
+Two practical implications, both indirect.
+
+**The "energy" framing recurs across deep learning.** Many objectives are described in EBM terms even when no explicit partition function is being computed: contrastive losses (one positive example, several negatives, push positive energy down and negative up) are EBM-flavored; many self-supervised methods are EBMs in disguise; some preference-learning methods (DPO and friends) have an EBM interpretation. Recognizing the EBM structure makes those losses easier to read.
+
+**The partition-function obstacle is the right lens for "why score matching?"** If you have ever wondered why the modern image-generation literature works with the gradient of the log-density rather than the density directly, this lesson is the answer. The score function is the natural quantity to learn precisely because it removes the only intractable piece of the EBM density. Diffusion models inherit this directly.
+
+## Common pitfalls
+
+**Treating the partition function as a hyperparameter.** The partition function depends on the model parameters: every gradient step on the energy network changes it. Treating it as constant during training (or normalizing once and re-using the constant) gives systematically biased gradients.
+
+**Trying to estimate the partition function numerically for a neural-network energy.** This is the path to grief. Naive numerical integration in high dimensions is infeasible; MCMC estimation of the partition function is its own research area and produces unreliable estimates. The practical advice is to use methods that do not require evaluating the partition function explicitly (score matching, noise contrastive estimation, contrastive divergence).
+
+**Forgetting that EBMs sample by MCMC.** Sampling from the model requires running Langevin dynamics or another MCMC method until convergence. This is slow and is the practical reason direct EBM training was never the dominant paradigm despite the theoretical appeal.
+
+**Mistaking the sign convention.** "Low energy equals high probability" is the standard convention (from the Boltzmann distribution in physics). Some papers flip the sign and write the density as proportional to the exponential of positive energy, which inverts the interpretation. Always check the sign convention before reading a derivation.
+
+## What you should remember
+
+- **An energy-based model defines the model density as the exponential of negative energy divided by a partition function,** with the energy being any neural network. The architectural freedom on the energy is the paradigm's main appeal; the partition function (the integral of the exponential of negative energy over the data space) is the entire engineering problem.
+- **Maximum-likelihood training is blocked by the partition function.** The gradient is the negative energy-gradient at the data, plus the expected energy-gradient under the model: lower energy at the data (positive phase), raise energy at samples from the model (negative phase). The negative-phase expectation requires sampling from the model, which is itself hard and is typically approximated by MCMC (Langevin dynamics) or contrastive divergence.
+- **The score function bypasses the partition function entirely.** The input-gradient of the log-density equals the negative input-gradient of the energy: the partition function vanishes under the input-gradient because it does not depend on the input. **This is the conceptual move that opens the door to score matching (next lesson) and the modern diffusion paradigm (lessons 12-14).**
+
+You now have the paradigm whose computational obstacle motivates the score-based view. The next lesson derives the score-matching objective and shows how training a score network bypasses the partition-function problem entirely, recovering the flexibility of EBMs without the MCMC cost.

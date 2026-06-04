@@ -1,0 +1,137 @@
+---
+title: "Lesson: Diffusion models II, training and sampling"
+description: "The previous lesson built the DDPM training and sampling loops with a thousand-step Markov chain. This lesson covers what made diffusion practical for production: DDIM (a deterministic non-Markovian sampler that uses the same trained noise predictor with far fewer steps), classifier-free guidance (the conditioning trick behind every modern text-to-image system), and the latency-quality Pareto frontier that governs the modern stack."
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+The previous lesson left diffusion with a clean training loop and a clean sampling loop, but the sampling loop took a thousand forward passes per generated sample. That is a problem if you want diffusion to power a production system: an image generator that takes a thousand model evaluations per output is too slow for an interactive product and too expensive at scale. This lesson covers the two moves that turned diffusion from research demo into the dominant image-generation paradigm of the modern era.
+
+The first move is **DDIM** (Song et al. 2020), a deterministic, non-Markovian sampler that uses the same trained noise-prediction network as DDPM but produces samples in tens of steps instead of thousands. The second is **classifier-free guidance** (Ho and Salimans 2021), the conditioning trick behind every modern text-to-image system. By the end you will be able to write the DDIM update step in one line, explain why it can take large steps where DDPM cannot, write the classifier-free guidance interpolation, and read the sampling-step / quality Pareto frontier that determines latency budgets in every production diffusion system.
+
+The §6 watch territory from L12 continues into this lesson (modern text-to-image generation is the canonical diffusion deployment surface). The in-body checkpoint at the end carries forward the five-layer scope-test pattern.
+
+## Why DDPM sampling is slow
+
+The DDPM sampler from the last lesson runs the reverse chain in one-step increments, from a pure-noise starting point down to a clean sample, one denoising forward pass per step. With a thousand-step training schedule, that is a thousand network evaluations per generated sample.
+
+The slowness has two roots. First, the reverse chain is **stochastic**: every step injects a small Gaussian noise term, so the trajectory through state space is a random walk. Stochastic chains cannot take large steps without losing fidelity, because the variance of the step compounds. Second, the reverse chain is **Markovian**: each step depends only on the immediately previous state, so the sampler cannot "look ahead" or skip ahead based on broader structure.
+
+What makes the slowness particularly frustrating is that the noise predictor itself, the network trained on the simplified DDPM loss, contains enough information to denoise from any noise level to any cleaner noise level in one shot. The Markov-chain stochastic structure is a constraint of the *sampling procedure*, not a constraint of what the network has learned. The DDIM move is to design a different sampling procedure that uses the same network more efficiently.
+
+## DDIM, a deterministic non-Markovian sampler
+
+The DDIM idea, stripped to one paragraph: replace the stochastic Markov reverse chain with a deterministic non-Markovian one that uses the same trained noise predictor and reaches the same marginal distribution at the final step, but takes far fewer steps to get there.
+
+The mechanism is a reparameterization of the reverse step that, at the limit, removes the stochasticity term entirely. Recall from L12 that the DDPM reverse mean is a function of the current noisy state and the predicted noise. DDIM rewrites the reverse update so that, given the current noisy state at one timestep, you compute the implied clean-sample estimate (by running the closed-form noise relation backwards), then re-noise that clean-sample estimate to the noise level of the *target* (cleaner) timestep, using zero stochasticity. The result is a deterministic mapping from the current noisy state to the cleaner one.
+
+In display form, the DDIM update at step from one timestep to a cleaner timestep is:
+
+```
+predict the original sample:
+  x_0_hat  =  ( x_t  -  sqrt(1 - alpha_bar_t) · eps_theta(x_t, t) )  /  sqrt(alpha_bar_t)
+
+re-noise to the target cleaner timestep s (where s < t):
+  x_s  =  sqrt(alpha_bar_s) · x_0_hat  +  sqrt(1 - alpha_bar_s) · eps_theta(x_t, t)
+```
+
+Two things to notice. First, the predicted noise (the network output) is used twice, once to extract the implied clean sample and once to re-add a target amount of noise. Second, there is no fresh Gaussian noise injection at any step. The trajectory is deterministic: given the starting noise vector at the final timestep, the entire sampling path through state space is fixed.
+
+This is the conceptual move. The same trained noise predictor that was trained on the DDPM stochastic Markov chain is repurposed to drive a deterministic non-Markovian sampler at inference time. No retraining is required.
+
+## Why DDIM can take large steps
+
+The benefit of the deterministic non-Markovian formulation is that the sampler can skip ahead. Instead of stepping from timestep one thousand down to one in single-step increments, the sampler can step from a thousand to, say, nine hundred and eighty, then to nine hundred and sixty, and so on, taking twenty steps total instead of a thousand.
+
+The reason this works is that the noise predictor has been trained to operate at every noise level along the schedule, so it can be called at any subset of timesteps. The non-Markovian deterministic update is consistent with the trained model in the limit of small steps and degrades gracefully as steps get larger. A fifty-step DDIM sampler produces image quality competitive with a thousand-step DDPM sampler on most benchmarks, at twenty times the speed.
+
+A worked anchor for intuition. Start at the final-timestep noise vector. The first DDIM step uses the noise predictor at the final timestep to estimate the noise, computes the implied clean-sample estimate, re-noises to a cleaner timestep (say twenty steps earlier in the schedule), and repeats. After fifty such steps, the sampler arrives at the clean-sample side of the chain. Each step is one forward pass of the same network DDPM used. Twenty-times speedup, comparable quality.
+
+## Classifier-free guidance, the conditioning trick
+
+DDIM handles speed. The other production-grade move is **classifier-free guidance**, which handles conditioning.
+
+The conditioning problem. A real text-to-image system does not sample unconditionally from the image distribution; it samples *conditional on a text prompt*. In the L12 framework, the noise predictor is a function of the current noisy state and the timestep; for conditional generation, it also takes a conditioning input (typically a text embedding). Training is the same as in L12 except that the network sees pairs of (image, text) and learns to predict the noise conditioned on both.
+
+The naive conditional sampler runs DDIM (or DDPM) with the conditioning input passed in at every step. This works, but in practice it produces images that only weakly follow the prompt. The model has learned to predict noise consistent with the conditioning, but its strength of conditioning is what we would call gentle: a "blue car" prompt produces something that is broadly compatible with "blue car" but not necessarily a strong, vivid blue car.
+
+The classifier-free guidance trick is to train the model on *both* conditional and unconditional generation (by randomly dropping the conditioning input during training, with some small probability), then at inference time combine the conditional and unconditional noise predictions in a weighted blend. Specifically:
+
+```
+eps_guided  =  eps_uncond  +  guidance_scale · ( eps_cond  -  eps_uncond )
+```
+
+The conditional prediction is "where the noise points given the prompt"; the unconditional prediction is "where the noise points in general." Their difference is the direction the prompt is pulling. Scaling that difference and adding it back to the unconditional prediction amplifies the conditioning strength.
+
+A guidance scale of one is the naive conditional sampler (no amplification). A guidance scale of zero is unconditional sampling (no conditioning at all). A guidance scale above one (typical production values are between five and ten) amplifies the conditioning: the prompt has more influence on the generated sample. The price of high guidance is sample diversity and sometimes naturalness: too-aggressive guidance produces saturated, overstated images.
+
+Classifier-free guidance requires two network evaluations per sampling step (one conditional, one unconditional), so a guided DDIM sampler at fifty steps does a hundred forward passes per sample. Even with that doubling, the total cost is still an order of magnitude below DDPM's thousand-step Markov chain, and the conditioning fidelity is dramatically better than the naive conditional sampler.
+
+Almost every modern text-to-image system uses some variant of classifier-free guidance. Stable Diffusion, the diffusion models behind major commercial image generators, and modern video generators all combine DDIM-style accelerated sampling with classifier-free guidance to hit the latency-quality budget their products require.
+
+## A worked numerical anchor
+
+To pin down the DDIM update on numbers, take a tiny example with three sampling steps from the final timestep to the first. Pick a simple schedule with cumulative-retention values of approximately zero at the final step, half at the midpoint, and approximately one at the first step (concrete numbers below).
+
+Initial state at the final timestep: a sample from a standard Gaussian, say a value of two.
+
+**Step one** (from the final timestep to the midpoint timestep). Call the noise predictor at the current state, getting a predicted noise value of, say, one-point-five. Compute the implied clean-sample estimate as (two minus the square root of one times one-point-five) divided by the square root of approximately zero, which is large; cap the estimate to a sensible range. Re-noise to the midpoint by combining the clean estimate (weighted by the square root of one-half) with the predicted noise (weighted by the square root of one-half). The result is a smaller-magnitude state, say one-point-three, partway between pure noise and the clean estimate.
+
+**Step two** (from the midpoint to the near-clean timestep). Call the noise predictor again, getting a new predicted noise value at the now-cleaner state. Compute the new clean estimate, re-noise to the cleaner timestep with a small amount of noise. The state becomes closer to the clean-side value.
+
+**Step three** (the final denoising step to the clean side). Call the noise predictor a third time, compute the clean estimate, return it as the generated sample.
+
+Three steps, three forward passes, deterministic trajectory. The numerical details depend on the exact schedule and the network outputs, but the structure is what to remember: each step uses the predicted noise twice, once to back out the implied clean sample and once to re-project to the target noise level.
+
+## The latency-quality Pareto frontier
+
+Reading any modern diffusion-based system release, the practical question is always: how many sampling steps, at what quality, for what latency budget? The answer is the Pareto frontier between sampling steps and a sample-quality metric (typically FID, the Fréchet Inception Distance from L9).
+
+At a thousand DDPM steps, sample quality is at its asymptote and latency is roughly a second per sample on a modern GPU for a moderately sized network. At fifty DDIM steps, quality is comparable (the FID gap is small) and latency drops by twenty. At ten steps, quality starts to degrade visibly but is still usable for many applications. Below ten, dedicated few-step samplers (DPM-Solver, consistency models, distillation) take over with different theoretical frameworks.
+
+The frontier is a real engineering trade-off. A research demo can afford a thousand steps; a real-time creative tool wants tens; a mobile or edge deployment wants single digits. The choice of sampler (DDPM, DDIM, DPM-Solver, distilled) is determined by the application's position on this frontier.
+
+A practical posture: every paper or release that quotes a sampling latency is implicitly making a point on this frontier. When you read "the model samples in zero-point-three seconds on an A100," you are reading a specific (sampler, step-count, network-size, batch-size) combination. Comparing systems requires holding the other dimensions fixed; otherwise you are comparing different points on a multi-dimensional trade-off curve.
+
+## A note on what this lesson does NOT cover
+
+Diffusion-based generation, especially with the production-grade DDIM + classifier-free guidance combination, powers most modern text-to-image and text-to-video systems. The §6 watch territory from L12 carries forward to this lesson with the same six-category structure:
+
+- **Use-case appropriateness**: when generating synthetic faces, voices, or video of identifiable people is appropriate vs not (use-case and consent policy);
+- **Provenance and watermarking**: how to attribute or watermark synthesized content (provenance policy);
+- **Sector-specific deployment**: policies for generated media in journalism, politics, legal evidence, and medical imaging (deployment policy);
+- **Training-data IP and licensing**: claims around training data scraped from named sources (data-licensing policy);
+- **Likeness and consent**: identifiable-person reproduction at the higher quality production diffusion systems achieve;
+- **Prompt-injection content risks**: a category specific to text-conditioned diffusion, because classifier-free guidance amplifies prompt effects, including adversarial prompts.
+
+The relevant evaluation methods for this lesson's scope are sampler-quality instruments: FID across step counts, CLIP scores for text-image alignment, sample-quality vs step-count Pareto frontier, perceptual studies (human preference), and memorization probes. If you are using those instruments, you are in this lesson's scope. If you are using policy-debate methods (stakeholder analysis, legal frameworks, regulatory comment, sectoral standards bodies), you are in a different conversation evaluated by different methods.
+
+The empirical-value split from L12 continues to apply: "Does this sampler produce reproductions of training-image-like content?" is empirical (settled by memorization probes); "Should this sampler ship in a product that targets a specific demographic?" is a value question (engineering data informs, does not settle, the answer).
+
+## Why this matters when you use AI
+
+Two practical implications.
+
+**Reading sampling-step claims.** When a paper or release quotes a sampling-step count, that number determines latency directly. A fifty-step DDIM sampler does fifty forward passes through the network (or a hundred if classifier-free guidance is on). A ten-step distilled sampler does ten. The latency budget for an interactive system is set by this number times the per-pass cost. Choosing between systems with different step counts is choosing between latency budgets.
+
+**Reading classifier-free guidance scales.** Most production text-to-image systems expose a guidance scale (sometimes named differently in the user interface, but the underlying parameter is the same). Higher guidance produces stronger prompt adherence at the cost of sample diversity. Knowing this lets you read product behavior: if a system is producing samples that match the prompt too rigidly (or that look saturated and stylized), the guidance scale is probably too high. If the system is producing samples that ignore the prompt, the guidance scale is too low. Tuning this parameter is one of the few real levers users have over output behavior.
+
+## Common pitfalls
+
+**Confusing DDIM with a different model.** DDIM uses the same trained noise-prediction network as DDPM. It is a different *sampler*, not a different model. The training procedure is identical; only the inference loop changes.
+
+**Treating classifier-free guidance as a separate model.** Classifier-free guidance also uses the same trained network. The trick is in how the network is *called* at inference (with and without the conditioning input, then blended). The training-time change is to randomly drop the conditioning input during training so the network learns both conditional and unconditional behaviors.
+
+**Reading sampling-step counts without the sampler.** Saying "the model uses fifty steps" is ambiguous without naming the sampler. Fifty steps of DDPM and fifty steps of DDIM produce very different quality outputs (DDIM is far better at low step counts because of the deterministic non-Markovian structure).
+
+**Pushing guidance scale too high.** Production systems often default to guidance values between five and ten. Pushing above twenty typically produces oversaturated, stylized samples that follow the prompt rigidly at the cost of natural variation. The trade-off is a property of the guidance mechanism, not a tunable bug.
+
+## What you should remember
+
+- **DDIM is a deterministic non-Markovian sampler** that uses the same trained noise predictor as DDPM. The update extracts the implied clean-sample estimate from the current noisy state and the predicted noise, then re-noises to a cleaner target timestep. No fresh stochastic noise term, no Markov constraint. A fifty-step DDIM sampler matches a thousand-step DDPM sampler in quality on most benchmarks, at twenty times the speed.
+- **Classifier-free guidance** is the conditioning trick behind every modern text-to-image system. Train one network on both conditional and unconditional generation (by randomly dropping the conditioning input during training), then at inference blend the conditional and unconditional noise predictions: the guided prediction is the unconditional prediction plus the guidance scale times the difference. Higher guidance amplifies prompt adherence at the cost of sample diversity. Costs two forward passes per step (one conditional, one unconditional).
+- **The latency-quality Pareto frontier** governs the modern stack. A thousand DDPM steps is the quality asymptote; fifty DDIM steps is the production sweet spot for most systems; ten or fewer steps require distilled or specialized samplers. Reading a sampling-step quote without the sampler name is ambiguous; reading a sampling-time quote without the network size and batch size is also ambiguous.
+
+You now have the production-grade diffusion paradigm: DDIM sampling, classifier-free guidance, and the latency-quality trade-off curve. The next lesson takes the score-based view from L11 and shows the formal equivalence with the L12 DDPM Markov-chain view and this lesson's DDIM sampler, via the continuous-time stochastic differential equation perspective. The capstone lesson after that returns to L1's four-paradigm map and places modern systems (Stable Diffusion, GAN-based face generators, autoregressive language models, latent diffusion hybrids) on it explicitly, closing the track on the same map it opened with.

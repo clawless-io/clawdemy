@@ -1,0 +1,96 @@
+---
+title: "Cheatsheet: Score-based diffusion via SDEs"
+description: Quick reference for the forward and reverse SDEs, the noise-predictor / score function identity, and the probability flow ODE that gives a deterministic sampler with tractable likelihood. The continuous-time framework underlying L11, L12, and L13.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+---
+
+## The forward SDE
+
+```
+forward SDE:
+  dx  =  f(x, t) · dt  +  g(t) · dW
+```
+
+- Drift `f(x, t)`: deterministic part. A state-dependent contraction in the variance-preserving form (DDPM); a zero-drift random walk in the variance-exploding form (NCSN).
+- Diffusion `g(t)`: noise scale per unit time.
+- `dW`: standard Wiener-process increment (continuous-time Gaussian noise).
+
+## The reverse SDE
+
+```
+reverse SDE:
+  dx  =  ( f(x, t)  -  g(t)^2 · score(x, t) )  · dt  +  g(t) · dW_bar
+```
+
+The drift gains a score-function term (Anderson 1982 reverse-time SDE result). `dW_bar` is a reverse-time Wiener increment. Integrating backward in time produces samples from the data distribution.
+
+## The noise predictor IS the score function (up to a scalar)
+
+```
+score(x_t, t)  =  - eps_theta(x_t, t)  /  sqrt(1 - alpha_bar_t)
+```
+
+The L11 training framework and the L12 training framework produce the same network with the same loss; the framing differs.
+
+## The probability flow ODE
+
+```
+probability flow ODE:
+  dx / dt  =  f(x, t)  -  0.5 · g(t)^2 · score(x, t)
+```
+
+No noise term. Deterministic ODE whose marginal distribution at every time matches the reverse SDE's. Integrating backward gives a deterministic sample (the DDIM-style sampler from L13 is approximately this). Integrating forward and tracking the log-determinant of the Jacobian gives a tractable log-likelihood.
+
+## L11 to L14 in one table
+
+| Lesson | What it built | How it discretizes the SDE |
+|---|---|---|
+| L11 | Denoising score matching (score network training) | Trains a network to estimate the score at multiple noise levels (NCSN = variance-exploding SDE) |
+| L12 | DDPM Markov chain (training + sampling) | Discretization of the variance-preserving SDE; sampler integrates the reverse SDE one step at a time with stochastic noise injection |
+| L13 | DDIM deterministic sampler | Approximate discretization of the probability flow ODE for the variance-preserving SDE |
+| L14 | The continuous-time framework | Writes the forward SDE, reverse SDE, and probability flow ODE that L11-L13 are discretizations of |
+
+## Forward SDE choices
+
+| Form | DDPM | NCSN |
+|---|---|---|
+| Drift | State-dependent contraction | Zero |
+| Diffusion | Bounded (variance-preserving) | Grows unboundedly (variance-exploding) |
+| Continuous-time limit of | DDPM Markov chain | NCSN multi-noise-level training |
+| Stationary distribution | Standard Gaussian | Approximately Gaussian with large variance (finite time, growing diffusion) |
+
+## Worked anchor: probability-flow-ODE single-step integration
+
+Take the simplest variance-preserving SDE: linear contraction drift, constant diffusion. Specifically, drift equals negative one-half times the state, diffusion equals one.
+
+Suppose at time one-half the state is 1.2 and the trained noise predictor outputs 0.8. Then:
+
+```
+score  =  - 0.8 / sqrt(1 - exp(-0.5))
+       ≈  - 0.8 / 0.628
+       ≈  - 1.27
+
+dx / dt  =  -0.5 · 1.2  -  0.5 · 1 · (-1.27)
+         =  -0.6  +  0.635
+         =  0.035
+```
+
+A backward time step of magnitude 0.05 updates the state by negative 0.05 times 0.035, which is approximately negative 0.00175. The next state is approximately 1.198. Small, but the structure is what to remember: drift plus score, integrated backward.
+
+## Common pitfalls (one-line each)
+
+- **Confusing the SDE with the ODE.** The reverse SDE is stochastic; the probability flow ODE is deterministic. Same marginals, different trajectories.
+- **Forgetting the sign and scaling on the noise-predictor-to-score conversion.** Score equals NEGATIVE noise prediction divided by cumulative noise standard deviation.
+- **Treating L11 and L12 as competing recipes.** Same training loss derived from two perspectives; the SDE framing makes the equivalence formal.
+- **Skipping the SDE for the discrete recipe.** Fine for production; required for reading score-based literature fluently.
+
+## §6 boundary (carries from L12 and L13)
+
+Modern diffusion-based generation (image, video, audio) is the canonical deployment surface for this paradigm. The six policy categories from L12 (use-case appropriateness, provenance and watermarking, sector-specific deployment incl. medical imaging, training-data IP, likeness and consent, prompt-injection content risks) sit outside this lesson's mechanical scope. Operational evaluation methods: FID across step counts, CLIP scores, sample-quality vs step-count Pareto, perceptual studies, memorization probes. **One addition for L14 specifically:** the tractable likelihood evaluation that the probability flow ODE gives is a new evaluation handle that brings diffusion onto the same likelihood-comparison footing as autoregressive models and normalizing flows.
+
+## Next
+
+The capstone lesson 15 returns to L1's four-paradigm map with all the math filled in. Place Stable Diffusion, GAN-based face generators, autoregressive language models, latent-diffusion hybrids on the map explicitly.

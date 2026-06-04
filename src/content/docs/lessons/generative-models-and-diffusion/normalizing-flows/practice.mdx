@@ -1,0 +1,200 @@
+---
+title: "Practice: Normalizing flows, change of variables for distributions"
+description: A self-check on the change-of-variables formula, a 1D and 2D worked density-transformation exercise, an architectural-constraint diagnostic, and flashcards built for retrieval.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Six short questions. Answer each one in your head (or on paper) before opening the collapsible. Trying to retrieve the answer is where the learning sticks; rereading feels productive but does much less.
+
+**1. Write the multidimensional change-of-variables formula for `X = f(Z)` with `f` invertible.**
+
+<details>
+<summary>Show answer</summary>
+
+`p_X(x) = p_Z(f^{-1}(x)) / |det(J_f(z))|`, where `z = f^{-1}(x)` and `J_f` is the Jacobian matrix of `f`. The `|det J_f|` is the density rescaling factor (the absolute value because density is non-negative).
+
+</details>
+
+**2. Why does the formula divide by `|det J_f|`?**
+
+<details>
+<summary>Show answer</summary>
+
+Total probability must stay equal to 1. The transformation `f` warps `z`-space into `x`-space, and `|det J_f|` is the local volume scaling factor (the same Track-4 determinant that scales areas in 2D and volumes in 3D). Where `f` expands volume, density must dilute; where it contracts, density must concentrate. Dividing by `|det J_f|` is exactly the rescaling that conserves total mass.
+
+</details>
+
+**3. Write the NLL training objective for a flow.**
+
+<details>
+<summary>Show answer</summary>
+
+`NLL(x) = -log p_X(x) = -log p_Z(f^{-1}(x)) + log |det(J_f(z))|`. Two terms per example: the negative log-density of the inverted point under the simple base distribution, plus the log-Jacobian-determinant at that point. Sum over the batch, backpropagate.
+
+</details>
+
+**4. How is the log-determinant of a composition of flow layers computed?**
+
+<details>
+<summary>Show answer</summary>
+
+By the chain rule of determinants, it is the sum of the per-layer log-determinants: for `f = f_K ∘ ... ∘ f_1`, `log |det J_f| = sum_k log |det J_{f_k}|`. Composition is cheap: each new layer adds one tractable log-determinant term, so stacking many simple invertible layers gives a flexible flow at low extra cost.
+
+</details>
+
+**5. What are the two architectural constraints every flow layer must satisfy?**
+
+<details>
+<summary>Show answer</summary>
+
+(1) **Invertibility**: the layer must be a bijection (one-to-one and onto), so `f^{-1}` exists. (2) **Tractable Jacobian determinant**: `det(J_f)` must be cheap to compute (typically `O(d)` rather than the generic `O(d^3)`). Standard solutions: coupling layers (RealNVP, NICE) and autoregressive layers (MAF, IAF), both of which give triangular Jacobians whose determinant is the product of the diagonal entries.
+
+</details>
+
+**6. What is the flow paradigm's main advantage over autoregressive models, and what is its main constraint?**
+
+<details>
+<summary>Show answer</summary>
+
+**Advantage**: parallel sampling. A flow generates a sample with one forward pass through the network, no matter how high-dimensional `x` is; an autoregressive model needs one forward pass per piece. **Constraint**: every layer must be invertible with a tractable Jacobian, which restricts the architectures you can use. Flows cannot use vanilla feedforward networks, standard transformers, or ResNets directly; they must be built out of invertible blocks.
+
+</details>
+
+## Try it yourself, part 1: a 1D change of variables
+
+Take `Z ~ Uniform(0, 1)`, so `p_Z(z) = 1` on `[0, 1]` and 0 elsewhere. Let `f(z) = 4z + 2`, an affine transformation. About 7 minutes, pen and paper (no calculator needed).
+
+**Step 1.** Find `f^{-1}(x)` and the interval on which `p_X` is supported.
+
+**Step 2.** Compute `df/dz` and apply the 1D change-of-variables formula to write `p_X(x)`.
+
+**Step 3.** Verify that `p_X` integrates to 1 over its support.
+
+<details>
+<summary>Check your work</summary>
+
+**Step 1.** Solve `x = 4z + 2` for `z`: `f^{-1}(x) = (x - 2) / 4`. The original support `z ∈ [0, 1]` maps to `x ∈ [f(0), f(1)] = [2, 6]`. So `p_X` is supported on `[2, 6]`.
+
+**Step 2.** `df/dz = 4`, a constant. By the formula:
+
+```
+p_X(x) = p_Z(f^{-1}(x)) / |df/dz| = 1 / 4   on x in [2, 6]
+```
+
+(Since `p_Z = 1` on `[0,1]` and the inverted point `(x-2)/4` lies in `[0,1]` exactly when `x ∈ [2, 6]`.)
+
+**Step 3.** `integral from 2 to 6 of (1/4) dx = 4 · (1/4) = 1`. Total probability is conserved. The unit-length interval `[0, 1]` got stretched to the length-4 interval `[2, 6]`, so the density divided by 4.
+
+</details>
+
+## Try it yourself, part 2: a 2D change of variables (Jacobian as area scaling)
+
+Now do the same in 2D, where the Jacobian determinant is doing real work. Take `Z` uniform on the unit square `[0, 1]^2`, so `p_Z(z) = 1` on the square. Apply the linear map `x = A z` with:
+
+```
+A = [ 3  1 ]
+    [ 0  2 ]
+```
+
+About 8 minutes.
+
+**Step 1.** Compute `det(A)` and explain what it means geometrically.
+
+**Step 2.** Apply the multidimensional change-of-variables formula to write `p_X(x)`. (You do not need to compute the exact image region; just give the density value where it is non-zero.)
+
+**Step 3.** Confirm that `p_X` integrates to 1 by computing the area of the image region (which is the unit square stretched by `A`) and multiplying by the density.
+
+<details>
+<summary>Check your work</summary>
+
+**Step 1.** For a 2x2 matrix `[[a, b], [c, d]]`, `det = ad - bc`. Here `det(A) = 3 · 2 - 1 · 0 = 6`. Geometrically: `A` maps the unit square to a parallelogram whose area is 6 (the absolute value of the determinant). The Track 4 lesson on the determinant says exactly this.
+
+**Step 2.** The Jacobian of the linear map `f(z) = A z` is just the matrix `A` itself (constant, since the map is linear). So `|det(J_f)| = 6`, and:
+
+```
+p_X(x) = p_Z(A^{-1} x) / 6 = 1 / 6   on the image parallelogram
+```
+
+(The image of the unit square under `A` is a parallelogram with corners at `A · [0,0]^T = [0,0]^T`, `A · [1,0]^T = [3,0]^T`, `A · [0,1]^T = [1,2]^T`, and `A · [1,1]^T = [4,2]^T`. Anywhere on this parallelogram, the density is `1/6`.)
+
+**Step 3.** Image area = `|det(A)|` = 6 (from Track 4: the determinant is the area scaling factor for a linear map applied to a unit-area shape). Density on the image is `1/6`. So total probability = `6 · (1/6) = 1`. Conserved, as the change-of-variables formula guarantees.
+
+This worked example is the Track-4 determinant lesson and this lesson's formula meeting in one place: the determinant scales the area, and density divides by the same factor so total mass is preserved.
+
+</details>
+
+## Flashcards
+
+Ten cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay out the full set as one card per page, ready to print or save as a PDF for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="What is the multidimensional change-of-variables formula?">
+
+For `X = f(Z)` with `f : R^d -> R^d` invertible: `p_X(x) = p_Z(f^{-1}(x)) / |det(J_f(z))|`, where `J_f` is the Jacobian of `f`. The `|det J_f|` is the density rescaling factor (the Track-4 determinant doing volume scaling, now for density).
+
+</Flashcard>
+
+<Flashcard question="Why does the formula divide by |det J_f|?">
+
+Total probability must stay equal to 1. `f` warps `z`-space into `x`-space; `|det J_f|` is the local volume scaling factor; where `f` expands volume, density must dilute, and vice versa. Dividing by `|det J_f|` is the exact rescaling that conserves total mass.
+
+</Flashcard>
+
+<Flashcard question="Write the NLL training objective for a flow.">
+
+`NLL(x) = -log p_X(x) = -log p_Z(f^{-1}(x)) + log |det(J_f(z))|`. Two terms: the negative log-density of the inverted point under the simple base, plus the log-Jacobian-determinant. Same forward-KL minimization from L3, applied to this parameterization.
+
+</Flashcard>
+
+<Flashcard question="How is the log-determinant of a composition of K flow layers computed?">
+
+By the chain rule of determinants: `log |det J_f| = sum_k log |det J_{f_k}|`. Each layer adds one tractable log-determinant term; flows get flexible by stacking many simple invertible blocks at low extra cost.
+
+</Flashcard>
+
+<Flashcard question="What are the two architectural constraints every flow layer must satisfy?">
+
+(1) Invertibility (bijection, `f^{-1}` exists). (2) Tractable Jacobian determinant (typically `O(d)` not `O(d^3)`, achieved by triangular Jacobians). Coupling layers (RealNVP, NICE) and autoregressive layers (MAF, IAF) are the standard solutions.
+
+</Flashcard>
+
+<Flashcard question="How is a flow sampled?">
+
+In one forward pass: draw `z ~ p_Z` (e.g. multivariate standard Gaussian), then compute `x = f(z)`. Compare autoregressive's one pass per piece; for high-dim outputs this parallelism is the flow paradigm's main practical advantage.
+
+</Flashcard>
+
+<Flashcard question="What is the flow paradigm's main advantage over autoregressive models? Its main constraint?">
+
+Advantage: parallel sampling (one forward pass instead of one per piece). Constraint: every layer must be invertible with a tractable Jacobian, which restricts the architectures (no vanilla feedforward, no standard transformer; only invertible blocks like coupling and autoregressive layers).
+
+</Flashcard>
+
+<Flashcard question="Why do flows often use a multivariate standard Gaussian as the base distribution?">
+
+Cheap density evaluation (closed-form), cheap sampling (one RNG call per dimension), and well-known properties. The choice of base distribution is structurally not important; almost any tractable density works. The expressive power lives in the invertible transformation, not the base.
+
+</Flashcard>
+
+<Flashcard question="Why must invertibility be architectural, not soft?">
+
+If a layer is not invertible, the change-of-variables formula does not apply and the model's "likelihood" is not a likelihood. Like causality in autoregressive models, invertibility must be enforced by the layer's structure (coupling, autoregressive), not by a regularizer or post-hoc check.
+
+</Flashcard>
+
+<Flashcard question="When in real applications do flows tend to be the right paradigm?">
+
+Density-estimation tasks where exact `p_model(x)` is needed: anomaly detection, scientific likelihood evaluation, statistical inverse problems. Particle physics, astrophysics, and chemistry use flows heavily for this reason, even when other paradigms dominate image generation.
+
+</Flashcard>
+
+</FlashcardSet>

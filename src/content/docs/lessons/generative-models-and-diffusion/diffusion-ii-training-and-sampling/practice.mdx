@@ -1,0 +1,254 @@
+---
+title: "Practice: Diffusion models II, training and sampling"
+description: Six-question self-check, a hand-walked three-step DDIM trajectory, a classifier-free guidance blend at three guidance scales, and ten flashcards. About 16 minutes.
+artifact: practice
+sidebar:
+  order: 4
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check (six questions)
+
+About 6 minutes, pen and paper.
+
+**1. Why is DDPM sampling slow?**
+
+<details>
+<summary>Answer</summary>
+
+Two roots: the reverse chain is **stochastic** (every step injects a small Gaussian noise term, so the trajectory is a random walk and the chain cannot take large steps without losing fidelity); and the reverse chain is **Markovian** (each step depends only on the immediately previous state, so the sampler cannot look ahead or skip ahead). With a thousand-step training schedule, that is a thousand network forward passes per generated sample.
+
+</details>
+
+**2. Write the DDIM update step in two lines, and explain why each line uses the predicted noise.**
+
+<details>
+<summary>Answer</summary>
+
+Given the current noisy state at timestep `t`, the predicted noise `eps_theta(x_t, t)` from the trained network, and a target cleaner timestep `s` with `s < t`:
+
+```
+predict the implied clean sample:
+  x_0_hat  =  ( x_t  -  sqrt(1 - alpha_bar_t) · eps_theta(x_t, t) )  /  sqrt(alpha_bar_t)
+
+re-noise to the target cleaner timestep:
+  x_s  =  sqrt(alpha_bar_s) · x_0_hat  +  sqrt(1 - alpha_bar_s) · eps_theta(x_t, t)
+```
+
+The predicted noise is used twice: once to back out the implied clean sample (line 1, the inverse of the closed-form forward shortcut from L12), and once to re-noise to the target cleaner timestep (line 2, a fresh application of the same closed-form shortcut at the target noise level). There is no fresh stochastic noise term; the trajectory is deterministic given the starting noise vector.
+
+</details>
+
+**3. Why can DDIM take large steps where DDPM cannot?**
+
+<details>
+<summary>Answer</summary>
+
+The reverse step is **deterministic** (no stochastic noise injection that compounds variance across steps) and **non-Markovian** (the update uses the noise predictor at the current state to estimate the implied clean sample, then re-noises to any target cleaner timestep, not just the immediately previous one). The noise predictor was trained at every noise level along the schedule, so it can be called at any subset of timesteps. The non-Markovian deterministic update is consistent with the trained model in the limit of small steps and degrades gracefully as steps get larger; a fifty-step DDIM sampler matches a thousand-step DDPM sampler in quality on most benchmarks, at twenty times the speed.
+
+</details>
+
+**4. Write the classifier-free guidance interpolation. What does each term mean?**
+
+<details>
+<summary>Answer</summary>
+
+```
+eps_guided  =  eps_uncond  +  guidance_scale · ( eps_cond  -  eps_uncond )
+```
+
+`eps_cond` is the noise prediction with the conditioning input passed in (the trained model's "where the noise points given the prompt"); `eps_uncond` is the noise prediction with the conditioning input dropped (the trained model's "where the noise points in general"); their difference is the direction the prompt is pulling. The guidance scale amplifies that difference. Scale 1 is the naive conditional sampler (no amplification); scale 0 is unconditional; production text-to-image systems typically use scales between 5 and 10. Cost: two forward passes per sampling step (one conditional, one unconditional).
+
+</details>
+
+**5. Place the following systems on the latency-quality Pareto frontier: a research baseline using a thousand DDPM steps; a production text-to-image system using fifty DDIM steps with classifier-free guidance; a real-time interactive system using an eight-step distilled sampler. Which has the highest quality? Which has the lowest latency? Which has the best quality-per-step?**
+
+<details>
+<summary>Answer</summary>
+
+**Highest quality**: the thousand-step DDPM research baseline sits at the quality asymptote. The fifty-step DDIM production system is close (the FID gap on most benchmarks is small), and the eight-step distilled sampler degrades visibly.
+
+**Lowest latency**: the eight-step distilled sampler runs the network eight times per sample; the fifty-step DDIM with classifier-free guidance runs the network a hundred times per sample (fifty steps times two evaluations per step); the thousand-step DDPM runs the network a thousand times per sample.
+
+**Best quality-per-step**: the fifty-step DDIM sampler hits the production sweet spot. It reaches near-asymptote quality at twenty times the speed of DDPM. The eight-step distilled sampler has higher quality-per-step in raw terms but produces noticeably lower-quality samples; the comparison depends on what the application can tolerate.
+
+</details>
+
+**6. Why does classifier-free guidance cost two forward passes per step instead of one?**
+
+<details>
+<summary>Answer</summary>
+
+The trained network is called twice at each sampling step: once with the conditioning input passed in (producing `eps_cond`) and once with the conditioning input dropped (producing `eps_uncond`). The two predictions are then blended via the guidance interpolation. A fifty-step guided DDIM sampler does a hundred forward passes per sample; this doubling is the price of stronger prompt adherence. Even with the doubling, the total cost is still an order of magnitude below DDPM's thousand-step Markov chain.
+
+</details>
+
+## Hand-walked DDIM three-step trajectory
+
+About 5 minutes. Run the DDIM sampler for three steps from the final timestep to the clean side.
+
+Suppose the cumulative-retention values at the three timesteps in the schedule are: at the final timestep, `alpha_bar = 0.01` (almost pure noise); at the two-thirds-along timestep, `alpha_bar = 0.30`; at the one-third-along timestep, `alpha_bar = 0.70`. The starting state is a sample from a standard Gaussian, say `x_final = 2.0`.
+
+**Step 1.** The noise predictor at `x_final = 2.0` outputs `eps_theta = 1.8` (a near-pure-noise prediction). Apply the DDIM update:
+
+```
+x_0_hat  =  ( 2.0  -  sqrt(0.99) · 1.8 )  /  sqrt(0.01)
+         =  ( 2.0  -  0.995 · 1.8 )      /  0.1
+         =  ( 2.0  -  1.791 )            /  0.1
+         =  0.209                        /  0.1
+         =  2.09
+```
+
+The implied clean-sample estimate is `2.09`. Re-noise to the two-thirds-along timestep:
+
+```
+x_two_thirds  =  sqrt(0.30) · 2.09  +  sqrt(0.70) · 1.8
+              =  0.548 · 2.09       +  0.837 · 1.8
+              =  1.145              +  1.506
+              =  2.651
+```
+
+The state at the two-thirds-along timestep is `2.65`.
+
+**Step 2.** The noise predictor at the now-cleaner state outputs, say, `eps_theta = 1.4`. Apply the update:
+
+```
+x_0_hat  =  ( 2.65  -  sqrt(0.70) · 1.4 )  /  sqrt(0.30)
+         =  ( 2.65  -  0.837 · 1.4 )       /  0.548
+         =  ( 2.65  -  1.172 )             /  0.548
+         =  1.478                          /  0.548
+         =  2.70
+```
+
+Implied clean sample `2.70`. Re-noise to the one-third-along timestep:
+
+```
+x_one_third  =  sqrt(0.70) · 2.70  +  sqrt(0.30) · 1.4
+             =  0.837 · 2.70       +  0.548 · 1.4
+             =  2.260              +  0.767
+             =  3.027
+```
+
+State at the one-third-along timestep is `3.03`.
+
+**Step 3.** The noise predictor at the now-near-clean state outputs, say, `eps_theta = 0.5`. Apply the update:
+
+```
+x_0_hat  =  ( 3.03  -  sqrt(0.30) · 0.5 )  /  sqrt(0.70)
+         =  ( 3.03  -  0.548 · 0.5 )       /  0.837
+         =  ( 3.03  -  0.274 )             /  0.837
+         =  2.756                          /  0.837
+         =  3.29
+```
+
+The clean-sample estimate is `3.29`; return as the generated sample.
+
+Three steps, three forward passes, deterministic trajectory. Numbers are illustrative (the trained network would produce different predicted-noise values in a real system); the structure is what to remember.
+
+## Classifier-free guidance at three scales
+
+About 3 minutes. Suppose at a particular sampling step the conditional noise prediction is `eps_cond = 1.0` and the unconditional noise prediction is `eps_uncond = 0.6`. Compute the guided noise prediction at three guidance scales.
+
+**Guidance scale 1 (naive conditional):**
+
+```
+eps_guided  =  0.6  +  1.0 · ( 1.0  -  0.6 )
+            =  0.6  +  1.0 · 0.4
+            =  0.6  +  0.4
+            =  1.0
+```
+
+The guided prediction equals the conditional prediction. No amplification beyond what the trained conditional model produces.
+
+**Guidance scale 5 (production sweet spot):**
+
+```
+eps_guided  =  0.6  +  5.0 · ( 1.0  -  0.6 )
+            =  0.6  +  5.0 · 0.4
+            =  0.6  +  2.0
+            =  2.6
+```
+
+The guided prediction is `2.6`, far stronger than the naive conditional. The sampler steps in the direction the prompt is pulling, amplified by five.
+
+**Guidance scale 15 (over-amplified):**
+
+```
+eps_guided  =  0.6  +  15.0 · ( 1.0  -  0.6 )
+            =  0.6  +  15.0 · 0.4
+            =  0.6  +  6.0
+            =  6.6
+```
+
+The guided prediction is `6.6`, deeply over-amplified. In practice this would steer the sampler too aggressively toward the prompt direction, producing saturated, stylized output that may follow the prompt rigidly at the cost of naturalness.
+
+## Flashcards
+
+Ten cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay out the full set as one card per page, ready to print or save as a PDF for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="Why is DDPM sampling slow?">
+
+Two roots: the reverse chain is stochastic (fresh Gaussian noise each step, so the chain cannot take large steps without losing fidelity), and Markovian (each step depends only on the immediately previous state, so the sampler cannot skip ahead). A thousand-step schedule means a thousand network forward passes per sample.
+
+</Flashcard>
+
+<Flashcard question="Write the DDIM update step.">
+
+`x_0_hat = (x_t - sqrt(1 - alpha_bar_t) · eps_theta(x_t, t)) / sqrt(alpha_bar_t)` predicts the implied clean sample; `x_s = sqrt(alpha_bar_s) · x_0_hat + sqrt(1 - alpha_bar_s) · eps_theta(x_t, t)` re-noises to the target cleaner timestep `s`. The predicted noise is used twice, no fresh stochastic noise term.
+
+</Flashcard>
+
+<Flashcard question="Why can DDIM take large steps where DDPM cannot?">
+
+The reverse step is deterministic (no stochastic noise injection that compounds variance across steps) and non-Markovian (the update uses the noise predictor at the current state to estimate the implied clean sample, then re-noises to any target cleaner timestep). The noise predictor was trained at every noise level, so it can be called at any subset of timesteps.
+
+</Flashcard>
+
+<Flashcard question="Does DDIM use the same trained network as DDPM?">
+
+Yes. DDIM is a different sampler, not a different model. The training procedure is identical to DDPM (the simplified noise-prediction loss); only the inference loop changes. No retraining required to use DDIM with a DDPM-trained network.
+
+</Flashcard>
+
+<Flashcard question="Write the classifier-free guidance noise-prediction blend.">
+
+`eps_guided = eps_uncond + guidance_scale · (eps_cond - eps_uncond)`. The conditional and unconditional predictions are both produced by the same trained network (with and without the conditioning input passed in). The guidance scale amplifies the direction the prompt is pulling.
+
+</Flashcard>
+
+<Flashcard question="What does the conditioning-dropped training step look like?">
+
+During training, the conditioning input is randomly replaced with a special null token (or simply dropped) with some small probability (typically 10 percent). The network learns to predict noise both with conditioning (when the prompt is present) and without it (when the prompt is dropped). At inference, both behaviors are called and blended.
+
+</Flashcard>
+
+<Flashcard question="What is the production sweet-spot guidance scale, and what trade-off does it represent?">
+
+Between 5 and 10 for most text-to-image systems. Higher guidance amplifies prompt adherence; sample diversity decreases. Above 20 typically produces saturated, stylized samples that follow the prompt rigidly at the cost of natural variation. Lower than 1 weakens conditioning; 0 is fully unconditional sampling.
+
+</Flashcard>
+
+<Flashcard question="What is the per-sample cost of guided DDIM sampling at fifty steps?">
+
+A hundred forward passes per sample (fifty sampling steps times two forward passes per step, one conditional and one unconditional). Still an order of magnitude below DDPM's thousand-step Markov chain.
+
+</Flashcard>
+
+<Flashcard question="Place these on the latency-quality Pareto frontier: DDPM 1000, DDIM 50, distilled 8.">
+
+DDPM 1000 sits at the quality asymptote, highest cost. DDIM 50 is the production sweet spot, near-asymptote quality at twenty times the speed. Distilled 8 sacrifices visible quality for real-time latency. The frontier is real; the choice of sampler depends on the application's position on it.
+
+</Flashcard>
+
+<Flashcard question="Why is 'the model uses 50 sampling steps' an ambiguous statement on its own?">
+
+Because the sampler matters. Fifty DDPM steps and fifty DDIM steps produce very different quality outputs (DDIM is far better at low step counts because of the deterministic non-Markovian structure). A sampling-step quote without the sampler name does not pin down the inference behavior.
+
+</Flashcard>
+
+</FlashcardSet>

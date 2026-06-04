@@ -1,0 +1,133 @@
+---
+title: "Lesson: What a generative model is, and the four-paradigm map"
+description: A generative model learns a distribution well enough to sample new data from it. Almost every modern AI system that produces something (text, images, audio, video) is one. This lesson defines what generative means precisely, lays out the four paradigms the whole track is organized around, and shows how to place any modern system on that map.
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+You have used a generative model this week. If you asked a chatbot for a paragraph, generated an image from a text prompt, transcribed audio with a voice tool, or even hit autocomplete on a phone keyboard, the system that produced the output was a generative model in the technical sense. The same family of math is behind all of them, and most of the practical work happening in machine learning right now is some variant of it.
+
+That family looks sprawling from the outside. People talk about VAEs and GANs and diffusion models and autoregressive transformers as if they were four different fields. They are not. They are four ways of doing the same job, and the whole point of this opening lesson is to give you a map that places any of them in one of four buckets at a glance. The rest of the track is a tour of those buckets in order, with the math each one runs on. By the end of this lesson you will be able to look at a paper title or a model card and say, in one short sentence, which paradigm the model is and what that implies about its training objective and its sampling procedure.
+
+## What "generative" actually means
+
+Two kinds of model show up in machine learning, and "generative" is one half of a sharp distinction.
+
+A **discriminative** model learns the conditional probability of a label given an input. Spam vs not-spam, cat vs dog, malignant vs benign: the model takes an input and reports a label. It does not need to know what the input looks like in general; it only needs to draw the boundary between classes.
+
+A **generative** model learns the probability distribution over the data itself. (Or a conditional variant, where the model is conditioned on some context, like a text prompt for an image generator.) Knowing the distribution is a strictly stronger thing than knowing a boundary, because once you have the distribution you can do two things you could not do before. You can ask **how likely** a given example is under the distribution (likelihood). And you can **sample** new examples from the distribution that look like the training data without being copies of it.
+
+That second move, sampling, is the part everyone has seen. "Generate an image of a city skyline at sunset" is, in mathematical language, "draw a sample from the conditional distribution of an image given the text city skyline at sunset." Every modern image generator is doing exactly that, with different machinery, and the machinery is what divides the field into paradigms.
+
+A model is generative whenever it can sample. The strictness of how it represents the distribution under the hood, whether it computes the distribution exactly, bounds it, or only learns a way to sample from it, is what splits generative models into the four buckets the rest of this lesson will name.
+
+## The four paradigms
+
+Here is the map. Hold these four names, the one-line description of each, and the kind of system each one shows up in. Almost everything else in this track is detail on one of them.
+
+### 1. Autoregressive: predict the next piece, one at a time
+
+An **autoregressive** model factors a joint distribution into a product of conditionals using the chain rule of probability:
+
+```
+p(x_1, x_2, ..., x_n) = p(x_1) · p(x_2 | x_1) · p(x_3 | x_1, x_2) · ... · p(x_n | x_1, ..., x_{n-1})
+```
+
+Each piece of the data is generated conditioned on everything before it. For text, that means predicting one token at a time conditioned on the tokens generated so far. For images, it can mean one pixel at a time. Sampling is sequential and exact; training maximizes the log-probability of the next piece on real data (this is "next-token prediction," and it is the entire objective behind a modern language model).
+
+The reason this paradigm dominates language: text is naturally sequential, and the chain rule gives you an exact, tractable likelihood. The reason it is slower for images and audio: generating one element at a time is inherently sequential, so the long output is the long wall-clock.
+
+**Where you have seen it:** chat assistants and language models broadly; some early image and audio generators (PixelRNN, WaveNet).
+
+### 2. Latent-variable: compress to a code, sample, decode
+
+A **latent-variable** model introduces a hidden variable, the **latent** (usually a low-dimensional vector), that lies behind the data. Generation runs in two steps. First, sample the latent from a simple distribution (like a Gaussian). Then run the latent through a learned decoder to produce a data point:
+
+```
+z ~ p(z)               (sample a latent, e.g. from a standard Gaussian)
+x = decoder(z)         (run the decoder to get a sample)
+```
+
+Training is harder than autoregressive because the actual data likelihood involves an integral over all possible latents. The classical trick (the **variational autoencoder**, lesson 5) sidesteps that integral with a lower bound called the ELBO, derived in two lines using Jensen's inequality applied to the marginal log-likelihood. The output is a generator that maps any latent to a plausible piece of data.
+
+This paradigm is the natural choice when you want the latent space to mean something: each dimension of the latent can capture a structured factor of variation in the data, which lets you interpolate, edit, and condition in ways the other paradigms make harder.
+
+**Where you have seen it:** image generators in the pre-diffusion era; the encoder-decoder structure of many modern multimodal systems; representation-learning pipelines.
+
+### 3. Adversarial: two networks compete
+
+A **generative adversarial network** (GAN) does not learn a likelihood at all. It learns by playing a game. Two networks train at the same time:
+
+- The **generator** takes a random latent and produces a sample.
+- The **discriminator** takes a sample and tries to decide whether it came from the real data or from the generator.
+
+The two are trained against each other: the discriminator gets better at telling fakes from reals, the generator gets better at fooling the discriminator. At equilibrium the generator's samples become indistinguishable from real data, and you sample by feeding random latents to the generator.
+
+GANs traded a likelihood objective for sample quality. For several years they produced the sharpest images of any generative model, and they made many of the famous early "this person does not exist" demonstrations. They are also notoriously hard to train (the game can collapse, oscillate, or stall), and they brought the modern deepfake category into existence. This track teaches GANs as math and as architecture; the misuse landscape they enabled is real and important but lives outside this track's scope.
+
+**Where you have seen it:** earlier-era high-resolution image generators, face-aging and style-transfer demos, some audio synthesis.
+
+### 4. Score-based / diffusion: denoise step by step from pure noise
+
+A **diffusion model** (and the broader **score-based** family it sits in) generates by reversing a noising process. The setup is:
+
+- **Forward process:** start with a real data point and add a tiny bit of Gaussian noise. Do that many times. After enough steps the data is indistinguishable from pure noise.
+- **Reverse process:** start with pure noise. At each step, ask a neural network: "what tiny noise was added at this step?" Subtract that estimate. Repeat many times. The output is a clean sample.
+
+The network is trained on the forward process (which is cheap to simulate), and it learns to predict the noise added at any step. Sampling runs the reverse process. The whole procedure is, mathematically, an approximation to following the **score** of the data distribution (the gradient of the log probability), which is why this paradigm is also called **score-based generation**.
+
+This is the dominant paradigm for modern image, video, and audio generation. Stable Diffusion, the diffusion models behind major commercial image generators, and recent video generators are all in this family. Their training objectives look very different from a likelihood, but Phase 3 of this track will show you the surprising fact that the diffusion training objective and the likelihood-based score-matching objective are the same equation written two ways.
+
+**Where you have seen it:** Stable Diffusion and other modern text-to-image systems; modern text-to-video; many state-of-the-art audio generators.
+
+## Placing modern systems on the map
+
+The map is only useful if you can actually use it. Take three systems you have heard of, and walk through which paradigm each is.
+
+**A modern chat-style large language model.** Generates text one token at a time. Each token is sampled from a distribution conditioned on all previous tokens. The training objective is next-token log-likelihood. This is autoregressive, paradigm 1. The chain rule is the architecture's organizing principle, and the long sampling time (token by token) is the autoregressive paradigm's signature trade-off.
+
+**A text-to-image system based on Stable Diffusion.** Starts with pure Gaussian noise of the size of an image and runs a learned denoising network many times. The text prompt is fed in as conditioning, so the model is steered toward an image consistent with the prompt. The training objective is noise prediction at each step. This is paradigm 4, diffusion. The denoising step is the architecture's organizing principle, and the multi-step sampling (typically tens of steps) is the diffusion paradigm's signature trade-off.
+
+**A face-generation system like StyleGAN.** A neural generator transforms a latent vector into an image. It was trained adversarially against a discriminator. This is paradigm 3, GAN. The latent-to-image mapping is fast (one forward pass), and the training game is the architecture's organizing principle.
+
+You will not always be able to read the paradigm off a one-paragraph announcement, but you can almost always read it off the abstract of the paper or the architecture diagram in the system card. Look for the training objective (next-token cross-entropy, ELBO, adversarial loss, noise-prediction MSE) and the sampling procedure (sequential token, one decoder pass, one generator pass, multi-step denoising). Each pair points at exactly one paradigm.
+
+## Why the math comes next
+
+Each paradigm has a specific training objective and a specific sampling procedure, and these are tightly coupled to how the paradigm represents the underlying distribution. The whole rest of the track is the math behind those objectives, paradigm by paradigm.
+
+Phase 1 is the likelihood-based family: autoregressive models in lesson 2, then maximum likelihood and KL in lesson 3 (the formal framework that next-token prediction implements), then normalizing flows in lesson 4 (an explicit-density paradigm that uses change-of-variables, with the Jacobian determinant from Track 4 doing the density-rescaling work). Phase 2 builds VAEs, then GANs, and closes with how generative models get evaluated when their objectives are not comparable. Phase 3 builds energy-based and score-based models, then diffusion in detail, then the stochastic differential equation view that ties the discrete diffusion process and the continuous score-based process into one model. Lesson 15 returns to this map and places today's most-used systems on it explicitly.
+
+A useful posture: the map is the spine. Every later lesson is hanging a specific training objective and sampling procedure on one of these four hooks. If you keep the four paradigms in mind as you go, the apparent sprawl of the field collapses into a small number of organizing ideas.
+
+## Why this matters when you use AI
+
+The practical payoff of placing a system on the map is anticipating its behavior.
+
+**Sampling speed** is paradigm-dependent. An autoregressive model is inherently sequential at sampling: it has to produce one token at a time, so its latency scales with output length. A diffusion model is inherently multi-step at sampling: it has to run many denoising passes, so its latency scales with the number of diffusion steps (tens, sometimes hundreds). A GAN samples in one forward pass: fast at inference, but it took a hard training game to get there. If you are building a system on top of a generator, knowing the paradigm tells you which speed trade-offs you have inherited and which you can engineer around (KV caching for autoregressive, distillation and fewer steps for diffusion, and so on).
+
+**Evaluation metrics** are paradigm-dependent too. Likelihood is a meaningful number for autoregressive and flow models, less meaningful for VAEs (only a lower bound), and undefined for GANs. Image-quality metrics like FID are usable across paradigms, but the score interpretation differs. Lesson 9 unpacks this; for now, the takeaway is that comparing models across paradigms requires care, because they are measured on different things.
+
+**Failure modes** track the paradigm. Autoregressive models can drift on long outputs (early errors compound). GANs can collapse to producing only a few output modes. Diffusion models can take an unforgiving number of steps for the last fraction of quality. Each failure mode is a property of the paradigm, not the architecture, so recognizing it lets you go look in the right place.
+
+And, finally, **emerging directions** are easier to read. Most "new model X" announcements are either a refinement inside one paradigm (a better diffusion sampler, a longer-context autoregressive model) or a hybrid (an autoregressive model that uses diffusion as its decoder, a latent diffusion model that compresses with a VAE-style encoder before diffusing). Hybrids stop looking exotic when you can name which two paradigms they are joining.
+
+## Common pitfalls
+
+**Thinking of "generative AI" as one thing.** It is not one thing; it is four mathematical paradigms with shared output behavior (sampling) and very different machinery. The marketing word is a category; the technical word is one of four buckets per system.
+
+**Conflating the paradigm with the modality.** Text is not "the autoregressive modality" and images are not "the diffusion modality." Each modality has been generated by every paradigm at some point; the dominant choice today is a fact about which paradigm currently produces the best samples, not a property of the data. Diffusion does text in some systems; autoregressive does images in others.
+
+**Reading sample quality as the only criterion.** Sampling speed, controllability, latent-space structure, exact likelihood, and ease of conditioning are all real criteria, and different paradigms make different trade-offs across them. A system that picks an "older" paradigm is often picking a controllability or speed property that newer paradigms make harder.
+
+**Mistaking a hybrid for a contradiction.** Latent diffusion models, which run diffusion on a compressed latent representation produced by a VAE-style encoder, combine paradigms 2 and 4. They are still placeable on the map (their generative step is diffusion; the encoder is a learned compression). When you see a hybrid, decompose it; do not throw the map away.
+
+## What you should remember
+
+- **A generative model is one that learns the underlying data distribution well enough to sample new data from it,** which is what makes "generate an image of X" a precise mathematical operation rather than a vague request.
+- **There are four paradigms, and almost every modern generative system is one of them:** autoregressive (predict next piece, sequential sampling, exact likelihood; LLMs), latent-variable (compress to a code, ELBO-trained; VAEs), adversarial (two-network game, no likelihood; GANs), and score-based / diffusion (denoise from noise, multi-step sampling; Stable Diffusion).
+- **Each paradigm has a specific training objective and sampling procedure,** and recognizing the paradigm lets you anticipate the system's sampling speed, evaluation metrics, and failure modes. The rest of this track builds the math behind each one.
+
+You now have the map. The next lesson opens it up at the most familiar paradigm (autoregressive), where every modern large language model lives, and shows that the chain rule of probability, the same one you may have met as a single line in a textbook, is the architecture's whole organizing principle.

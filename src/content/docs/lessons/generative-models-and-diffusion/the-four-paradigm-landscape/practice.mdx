@@ -1,0 +1,247 @@
+---
+title: "Practice: The four-paradigm landscape and where modern systems sit"
+description: Six-question self-check on the four paradigms and their trade-offs, a hands-on placement of five model releases on the four-paradigm map, an identify-the-components exercise on three hybrid systems, and ten capstone flashcards. About 16 minutes.
+artifact: practice
+sidebar:
+  order: 4
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check (six questions)
+
+About 5 minutes, pen and paper.
+
+**1. Name the four paradigms and state each one's training objective in one phrase.**
+
+<details>
+<summary>Answer</summary>
+
+- **Autoregressive**: chain-rule factorization of negative log-likelihood, equivalent to next-token (or next-piece) cross-entropy.
+- **Latent-variable (VAE-family)**: ELBO, a tractable lower bound on the marginal log-likelihood, consisting of a reconstruction term and a KL-divergence term between the encoder posterior and the prior.
+- **Adversarial (GAN-family)**: minimax game between a generator and a discriminator. Original form minimizes the Jensen-Shannon divergence; Wasserstein-GAN variant minimizes the Wasserstein-1 distance.
+- **Score-based / diffusion**: noise-prediction mean-squared error (equivalent to denoising score matching at multiple noise levels). The continuous-time SDE framework from lesson 14 unifies the training and sampling derivations.
+
+</details>
+
+**2. State each paradigm's sampling procedure and the implication for inference latency.**
+
+<details>
+<summary>Answer</summary>
+
+- **Autoregressive**: sequential, one forward pass per output piece. Latency scales linearly with output length. KV caching keeps the per-token cost roughly constant in the prefix length.
+- **Latent-variable**: one prior draw plus one decoder forward pass. Latency is constant in output content (one pass total).
+- **Adversarial**: one generator forward pass. Same constant-latency property as VAE.
+- **Score-based / diffusion**: multi-step. Production samplers run tens of forward passes (DDIM at fifty steps is the production sweet spot; distillation can bring the count to single digits with quality trade-offs). Latency scales linearly with step count.
+
+</details>
+
+**3. Which paradigms give an exact log-likelihood? Which give a bounded or indirect likelihood? Which give no likelihood at all?**
+
+<details>
+<summary>Answer</summary>
+
+- **Exact log-likelihood**: autoregressive (perplexity per token is meaningful) and normalizing flows (the change-of-variables formula gives an exact density).
+- **Bounded or indirect likelihood**: VAEs give the ELBO, a lower bound; diffusion is indirect (the probability flow ODE from lesson 14 gives a tractable log-likelihood, at the cost of an integration pass per evaluated point).
+- **No likelihood at all**: GANs. The minimax training objective does not produce a density anywhere in the pipeline.
+
+</details>
+
+**4. Modern image generation is dominated by diffusion (and diffusion-based hybrids like Stable Diffusion). Why has diffusion taken over from GANs for general-purpose image generation, even though GANs were the dominant paradigm for several years?**
+
+<details>
+<summary>Answer</summary>
+
+Three reasons: (a) **broader mode coverage** (diffusion penalizes missing modes through the noise-prediction loss across all noise levels; GANs are known for mode collapse, which Wasserstein-GAN-style training mitigates but does not eliminate); (b) **easier conditioning at scale** (classifier-free guidance gives strong, controllable text conditioning with one minor training change, while GAN-based conditioning is more constrained); and (c) **scaling properties** (diffusion training is one stable objective, while GAN training is a minimax dynamic that requires more babysitting to scale).
+
+GANs are still competitive in **specific domains** (face generation, where sharpness matters more than coverage; very-low-latency real-time use, where one forward pass beats fifty). The paradigm choice depends on the application's position on the trade-off space.
+
+</details>
+
+**5. Stable Diffusion is described as a "latent diffusion model." Identify the components and state which paradigm each component sits in.**
+
+<details>
+<summary>Answer</summary>
+
+Stable Diffusion is a **hybrid** with two components:
+
+- A **variational-autoencoder-style encoder-decoder** that maps images to a lower-dimensional latent space and back. The encoder compresses an image to a latent; the decoder maps the latent back to pixels. The training objective is the standard VAE loss (reconstruction plus KL term). This is **paradigm 2 (latent-variable)**.
+- A **diffusion model** (typically a U-Net noise predictor with classifier-free guidance) operating in the VAE latent space (not in pixel space). Training objective: noise-prediction MSE. Sampling: DDIM-style deterministic non-Markovian sampler with classifier-free guidance. This is **paradigm 4 (score-based / diffusion)**.
+
+The hybrid composes them: encode an image to a latent, run diffusion training in the latent space (which is computationally feasible because the latent space is much smaller than the pixel space), and at inference decode the diffusion output back to pixels.
+
+</details>
+
+**6. Walk the paradigm-fluency procedure on a new release: a model claims to be "a single-step image generator with classifier-free guidance, trained with consistency-model objectives." Identify the paradigm and the trade-offs.**
+
+<details>
+<summary>Answer</summary>
+
+Single-step sampling AND classifier-free guidance AND consistency-model training puts the model in the **score-based / diffusion family**, specifically a **distilled diffusion model** (consistency models from Song et al. 2023 are a distillation framework for the probability flow ODE from lesson 14). Training is paradigm-4 noise-prediction-derived; sampling is the few-step distillation regime.
+
+Trade-offs to predict: very low latency (one forward pass per sample, possibly two with guidance), some quality degradation compared to a fifty-step DDIM baseline, classifier-free-guidance trade-off (higher guidance amplifies prompt adherence at the cost of sample diversity), no exact likelihood directly (the distilled model loses the probability-flow-ODE likelihood evaluation).
+
+Placement on the map: paradigm 4 (diffusion), distilled-sampler variant.
+
+</details>
+
+## Place these five releases on the four-paradigm map
+
+About 6 minutes. Identify each system's paradigm (or paradigms), training objective, and primary trade-off.
+
+**System A.** A 70-billion-parameter text generation model trained on next-token prediction with a causal transformer architecture. Inference samples one token at a time with KV caching.
+
+<details>
+<summary>Placement</summary>
+
+**Paradigm**: autoregressive. **Training objective**: next-token cross-entropy (the chain-rule negative log-likelihood). **Sampling**: sequential, one forward pass per token (KV cache makes the per-token cost roughly constant in prefix length). **Trade-off**: latency scales with output length; exact log-likelihood (perplexity is comparable across models trained with the same vocabulary).
+
+</details>
+
+**System B.** A text-to-image model that compresses images to an 8x lower spatial resolution latent space via a learned encoder-decoder, then runs a 50-step DDIM sampler with classifier-free guidance in the latent space.
+
+<details>
+<summary>Placement</summary>
+
+**Paradigms**: latent-variable (the encoder-decoder for compression) PLUS score-based / diffusion (the DDIM sampler in latent space). This is a **latent-diffusion hybrid** in the Stable Diffusion family. **Training objectives**: VAE reconstruction-plus-KL for the encoder-decoder; noise-prediction MSE for the diffusion model. **Sampling**: encode a prior noise vector in latent space, run 50 DDIM steps with classifier-free guidance (100 forward passes per sample, accounting for the guidance doubling), decode the final latent to pixels. **Trade-off**: latency scales with the diffusion step count; conditioning is strong with classifier-free guidance; resolution is limited by the encoder-decoder's compression factor.
+
+</details>
+
+**System C.** A face generation model trained with a Wasserstein-GAN-gradient-penalty objective, with a generator that maps a 512-dimensional latent to a 1024-by-1024 image in a single forward pass. The latent space has demonstrable controllability (semantic directions for facial attributes).
+
+<details>
+<summary>Placement</summary>
+
+**Paradigm**: adversarial (GAN-family), specifically WGAN-GP from lesson 8. **Training objective**: Wasserstein-1 critic-vs-generator minimax with gradient penalty enforcing the 1-Lipschitz constraint softly. **Sampling**: one generator forward pass per sample; latency is the per-pass cost. **Trade-off**: no likelihood; sharp samples; latent-space controllability is a well-known property of trained GAN latent spaces and is why this paradigm is still used for face generation specifically.
+
+</details>
+
+**System D.** A text-to-video model that operates on video latents (spatio-temporal) with a transformer-based diffusion noise predictor. Trained with the standard noise-prediction MSE loss; sampling uses a DDIM-style sampler at 25 to 50 steps depending on the quality budget.
+
+<details>
+<summary>Placement</summary>
+
+**Paradigm**: score-based / diffusion, extended to video. **Training objective**: noise-prediction MSE (the same lesson-12 loss extended to spatio-temporal latent tensors). **Sampling**: DDIM at 25 to 50 steps; latency scales with both the step count and the per-step cost (a video latent tensor is much larger than an image latent tensor). **Trade-off**: significant compute per sample; sample quality scales with step count.
+
+</details>
+
+**System E.** A multimodal model that pipes text through an autoregressive language model, uses the language-model output to condition a diffusion image generator, and (in some configurations) feeds generated images back through the language model for iterative refinement.
+
+<details>
+<summary>Placement</summary>
+
+**Paradigms**: autoregressive (the language model) PLUS score-based / diffusion (the image generator). This is a **multimodal hybrid**. **Training objectives**: next-token cross-entropy for the language component; noise-prediction MSE for the image component; an alignment stage that couples them. **Sampling**: language model generates a conditioning representation; diffusion generates an image conditioned on that representation. **Trade-off**: latency is the sum of both components; capabilities reflect both paradigms' strengths.
+
+</details>
+
+## Identify the components in three hybrid systems
+
+About 3 minutes. For each system, name the modeling components and which paradigm each component sits in.
+
+**Hybrid 1.** A consistency-model-distilled latent diffusion model.
+
+<details>
+<summary>Components</summary>
+
+- VAE encoder-decoder for compression to latent space (paradigm 2, latent-variable).
+- Distilled diffusion noise predictor operating in the latent space, trained via consistency-model objectives that approximate the probability flow ODE from lesson 14 (paradigm 4, score-based / diffusion, distilled variant).
+- Classifier-free guidance for conditioning (paradigm 4 mechanism from lesson 13).
+
+</details>
+
+**Hybrid 2.** A research system that uses a normalizing flow to model the prior distribution of a VAE's latent space, then runs a diffusion model in that latent space.
+
+<details>
+<summary>Components</summary>
+
+- Normalizing flow for the prior over the VAE latent space (paradigm within the likelihood-based family from lesson 4).
+- VAE encoder-decoder (paradigm 2, latent-variable).
+- Diffusion model in the latent space (paradigm 4, score-based / diffusion).
+
+Three paradigms composed; the flow gives a richer prior than the standard Gaussian, the VAE compresses, the diffusion model handles the structured sampling.
+
+</details>
+
+**Hybrid 3.** An adversarial fine-tuning regime applied to a diffusion model after its standard training, where a discriminator network distinguishes the diffusion model's outputs from real data, and the diffusion model is fine-tuned to fool the discriminator.
+
+<details>
+<summary>Components</summary>
+
+- Diffusion model with standard noise-prediction MSE training (paradigm 4).
+- Adversarial fine-tuning stage with a discriminator (paradigm 3, GAN-family training applied as a fine-tuning objective).
+
+The base paradigm is diffusion; the adversarial fine-tuning is a paradigm-3 add-on. This kind of composition is common in production work that wants the broad-coverage properties of diffusion with the sharpness properties of adversarial training.
+
+</details>
+
+## Capstone flashcards
+
+Ten cards. Click any card to reveal the answer. Use the **Print flashcards** button to lay out the full set as one card per page, ready to print or save as a PDF for offline review.
+
+<FlashcardSet>
+
+<Flashcard question="Name the four paradigms.">
+
+Autoregressive, latent-variable (VAE-family), adversarial (GAN-family), and score-based / diffusion. Every modern generative-AI system sits in one or a combination of these.
+
+</Flashcard>
+
+<Flashcard question="Which paradigm has sequential sampling?">
+
+Autoregressive. One forward pass per output piece; latency scales with output length. Every other paradigm has parallel or multi-step sampling, not sequential.
+
+</Flashcard>
+
+<Flashcard question="Which paradigm gives no likelihood?">
+
+GAN-family. The training objective is the minimax game; no density is computed anywhere in the pipeline. Autoregressive and flows give exact likelihood; VAEs give a bounded likelihood (ELBO); diffusion is indirect but tractable via the probability flow ODE.
+
+</Flashcard>
+
+<Flashcard question="What is the production sweet spot for diffusion sampling?">
+
+About 50 DDIM steps with classifier-free guidance (lesson 13). This gives near-asymptote quality at 20x the speed of a 1000-step DDPM baseline. Lower step counts require distillation (consistency models, LCM-LoRA) with some quality trade-off.
+
+</Flashcard>
+
+<Flashcard question="Why is Stable Diffusion a hybrid?">
+
+It uses a VAE encoder-decoder for compression to latent space (paradigm 2) AND a diffusion model in the latent space with classifier-free guidance (paradigm 4). The compression makes high-resolution diffusion computationally feasible; the diffusion handles the structured sampling.
+
+</Flashcard>
+
+<Flashcard question="State the paradigm-fluency procedure for reading any new release.">
+
+(1) Identify the training objective. (2) Identify the sampling procedure. (3) Predict the trade-offs from the paradigm's properties. (4) Place the system on the four-paradigm map (or name the components if it is a hybrid).
+
+</Flashcard>
+
+<Flashcard question="What do all four paradigms share?">
+
+A trained network mapping the data domain to a function the paradigm needs approximated; an information-theoretic objective tied to the data distribution; a sampling procedure with paradigm-specific cost; and a set of trade-offs that cannot be jointly optimized.
+
+</Flashcard>
+
+<Flashcard question="Which paradigms can be combined in a hybrid system?">
+
+All four can compose in various ways. Common hybrids: latent diffusion (VAE + diffusion), multimodal (autoregressive language + diffusion image), adversarial fine-tuning of a diffusion model (paradigm 4 + paradigm 3 fine-tuning), flow-prior VAE-plus-diffusion. The four-paradigm map is the vocabulary for naming the components.
+
+</Flashcard>
+
+<Flashcard question="Why has diffusion taken over from GANs for general-purpose image generation?">
+
+Three reasons: broader mode coverage (diffusion penalizes missing modes through the noise-prediction loss); easier strong conditioning at scale (classifier-free guidance is a small training change with large inference effect); better scaling (diffusion is one stable training objective, while GAN training requires more babysitting). GANs are still used in specific domains (face generation, low-latency inference).
+
+</Flashcard>
+
+<Flashcard question="What does the track exist to build?">
+
+Paradigm fluency: the ability to read any new generative-AI system release, identify its training objective and sampling procedure, predict its trade-offs from the paradigm's properties, and place it on the four-paradigm map. The map is the spine; the math is what makes the spine precise.
+
+</Flashcard>
+
+</FlashcardSet>
+
+You have finished Track 19. Generative models are not magic; they are math, and the math is the same math you already have.

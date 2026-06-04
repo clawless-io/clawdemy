@@ -1,0 +1,143 @@
+---
+title: "Lesson: Score-based diffusion via SDEs, the unifying view"
+description: Lesson 11 derived denoising score matching as a noise-prediction MSE. Lesson 12 derived the DDPM training loss as a noise-prediction MSE from a Markov-chain ELBO. They look like the same equation. This lesson shows they are the same equation, formally, via the continuous-time stochastic differential equation (SDE) perspective. The forward chain is a discretization of a forward SDE; the reverse chain is a discretization of a reverse SDE; the noise predictor is the score function up to a fixed scaling. The equivalence unlocks a deterministic ODE sampler and a tractable likelihood evaluation.
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+Three lessons ago you saw denoising score matching reduce to a noise-prediction mean-squared-error loss. Two lessons ago you saw the DDPM Markov-chain ELBO simplify to the same noise-prediction mean-squared-error loss. The previous lesson covered DDIM, a deterministic sampler that uses the trained noise predictor non-Markovianly. Three derivations, one loss, three different samplers. This lesson shows that all of them are discretizations of one continuous-time picture: the **stochastic differential equation** (SDE) view, due to Song et al. 2021. By the end you will be able to write the forward and reverse SDEs that underlie diffusion, explain why the noise predictor and the score function are the same vector up to a scalar, derive the **probability flow ODE** that gives a deterministic sampler and tractable likelihood evaluation, and place L11, L12, and L13 on the unified map this lesson builds.
+
+This is the most theoretically dense lesson in Phase 3, and the smallest practical leap. The math underneath the diffusion paradigm is one continuous-time framework with two discretizations and three samplers. Recognizing this unifies what looked like three independent recipes into one.
+
+## From a discrete Markov chain to a continuous diffusion
+
+Lesson 12 defined the DDPM forward chain as a fixed Markov process that adds a small amount of Gaussian noise per step, scaling the previous state by a small factor and adding fresh Gaussian noise. With a thousand steps, the chain takes the data distribution to approximately a standard Gaussian. As the step count grows and the per-step noise shrinks, the discrete Markov chain approaches a **continuous-time stochastic process**: a random walk in continuous time with a known drift and diffusion structure.
+
+In display form, the limit is a **stochastic differential equation** (SDE):
+
+```
+forward SDE:
+  dx  =  f(x, t) · dt  +  g(t) · dW
+```
+
+where the left-hand side is the infinitesimal change in the state, the drift coefficient (typically a state-dependent contraction that shrinks the state toward zero over time) sets the deterministic part of the change, the time-dependent diffusion coefficient (the standard deviation of the noise per unit time) sets the noise scale, and the Wiener-process increment is the continuous-time analogue of independent Gaussian noise per step. The SDE runs from the data distribution at time zero to approximately a standard Gaussian at the final time.
+
+Two specific forms of the forward SDE recur in the literature:
+
+- **Variance-preserving SDE (VP-SDE):** the continuous-time limit of DDPM. The drift and diffusion are chosen so the total variance of the state stays bounded as the noising progresses.
+- **Variance-exploding SDE (VE-SDE):** the continuous-time limit of the noise-conditional score networks from L11 (NCSN, Song and Ermon 2019). The diffusion grows unboundedly, and the state's total variance grows with it.
+
+Both are valid forward SDEs, and the choice affects the schedule but not the conceptual framework. The DDPM Markov chain is the discretization of the VP-SDE with a particular noise schedule.
+
+## The reverse SDE, where sampling lives
+
+The forward SDE turns data into noise. Sampling reverses that: turn noise back into data. The remarkable result, due to Anderson 1982 and applied to score-based generation by Song et al. 2021, is that the reverse of an SDE is also an SDE, and its drift involves the **score function** of the time-indexed distribution.
+
+The reverse SDE, written in continuous time, is:
+
+```
+reverse SDE:
+  dx  =  ( f(x, t)  -  g(t)^2 · score(x, t) )  · dt  +  g(t) · dW_bar
+```
+
+where the score function is the gradient of the log-density of the noised distribution at the given time (the same quantity L11's denoising score matching trains a network to estimate), and the Wiener-process increment runs in reverse time. The reverse SDE runs from the standard Gaussian at the final time back to the data distribution at time zero. Sampling from the model is sampling a noise vector at the final time and integrating the reverse SDE backward in time.
+
+The score function enters the drift. This is the conceptual hinge of the entire lesson: **to integrate the reverse SDE, you need the score function of the noised distribution at every time**. That is exactly what the L11 score-matching framework trains a network to estimate.
+
+## The noise predictor is the score function (up to a scalar)
+
+The DDPM noise predictor from L12 and the score function from L11 are the same vector up to a fixed scalar. To see this, recall the closed-form forward shortcut from L12: the noised state at any given time is the cumulative-retention coefficient times the original sample plus the cumulative-noise coefficient times a standard Gaussian noise vector. The score of the noised distribution at the noised state, conditioned on the original sample, has the closed-form value of the negative noise vector divided by the cumulative-noise coefficient.
+
+In display form:
+
+```
+score(x_t | x_0)  =  - eps  /  sigma_t
+
+where  sigma_t  =  sqrt(1 - alpha_bar_t)  (the cumulative noise coefficient at time t).
+```
+
+So the noise predictor and the score function are related by a fixed scaling that depends only on the noise schedule, not on the network weights. The same trained network from L12 and L13 can be read either as a noise predictor (the L12 framing) or as an estimator of the negative scaled score (the L11 framing). Same vector, two interpretations.
+
+This is the formal equivalence the previous three lessons hinted at. The L11 derivation (perturb data, train to predict the negative scaled noise) and the L12 derivation (Markov-chain ELBO simplification to a noise-prediction loss) arrive at the same network with the same training objective, viewed through two different mathematical lenses.
+
+## The probability flow ODE, a deterministic sampler with likelihood
+
+The SDE framing also unlocks a clean deterministic sampler. Every SDE has an associated **probability flow ODE**, an ordinary differential equation whose solution trajectory has the same marginal distribution at every time as the SDE's trajectory. The probability flow ODE for the reverse SDE is:
+
+```
+probability flow ODE:
+  dx / dt  =  f(x, t)  -  0.5 · g(t)^2 · score(x, t)
+```
+
+The drift is the forward drift minus half the diffusion-squared times the score. No noise term, no stochasticity. Integrating this ODE backward in time, with the trained score (equivalently, the noise predictor) as the score estimate, produces a deterministic sample whose marginal distribution at every time matches the corresponding noised data distribution.
+
+This is the formal basis of the DDIM sampler from L13. DDIM is approximately a discretization of the probability flow ODE for the variance-preserving SDE. The deterministic non-Markovian structure that made DDIM fast at low step counts is the ODE structure underneath. The continuous-time framing makes it a single object instead of a clever trick.
+
+The probability flow ODE has one more benefit. ODEs allow change-of-variables-style density evaluation: integrating the ODE forward in time from a sample point gives the corresponding noise vector, and the log-determinant of the integrated Jacobian relates the data log-density to the noise log-density. This gives a **tractable log-likelihood** evaluation for diffusion models, the answer to the question lesson 9's cross-paradigm table flagged as "indirect" for diffusion. The cost is the integration itself (an additional pass through the network at each integration step), so the likelihood is computable but not free, and it is one of the few ways to put diffusion on the likelihood-evaluation map with autoregressive models and normalizing flows.
+
+## A worked numerical anchor
+
+Take a simple variance-preserving SDE on a one-dimensional state, with linear drift and constant diffusion. Set the drift to negative half times the state (a contraction toward zero) and the diffusion coefficient to one. The forward SDE becomes:
+
+```
+dx  =  -0.5 · x · dt  +  dW
+```
+
+The stationary distribution of this SDE is a standard Gaussian, so the forward process drives any initial data distribution to standard noise over long enough time.
+
+Suppose a trained noise predictor at a particular noisy state of 1.2 at time one-half outputs the value 0.8. The corresponding score function value is:
+
+```
+score  =  - eps / sigma_t  =  - 0.8 / sqrt(1 - exp(-0.5))  ≈  - 0.8 / 0.628  ≈  -1.27
+```
+
+The probability flow ODE at this point and time becomes:
+
+```
+dx / dt  =  -0.5 · 1.2  -  0.5 · 1 · (-1.27)
+         =  -0.6  +  0.635
+         =  0.035
+```
+
+Integrating backward by a small time step of magnitude 0.05 updates the state by negative 0.05 times 0.035, which is approximately negative 0.00175, so the next state is approximately 1.198. The trajectory moves slowly, as the small numbers suggest, but the structure is what to remember: at each step, the drift and the score (computed from the noise predictor) combine to give a deterministic update to the state, no fresh noise injection required.
+
+A full integration of this ODE backward from time one to time zero with a hundred small steps would produce a deterministic sample from the modeled data distribution. The same network produces a stochastic DDPM sample (with the reverse SDE), a deterministic DDIM-style sample (with the probability flow ODE), and a likelihood evaluation (by integrating the ODE forward and computing the log-determinant of the Jacobian).
+
+## Putting L11, L12, L13, and L14 on one map
+
+The four lessons of Phase 3 build to a single picture:
+
+- **Lesson 11** trained a network to estimate the score of the noised distribution. The denoising-score-matching loss is the practical objective; the conceptual target is the score function of the time-indexed distribution.
+- **Lesson 12** built the DDPM Markov chain, derived its training loss via the ELBO, and arrived at the same noise-prediction loss as L11. The Markov chain is a discretization of the variance-preserving SDE.
+- **Lesson 13** introduced DDIM, a deterministic non-Markovian sampler. DDIM is a discretization of the probability flow ODE associated with the same SDE.
+- **Lesson 14 (this lesson)** writes the continuous-time SDE that L11 estimates, L12 discretizes, and L13 integrates. The score function and the noise predictor are the same vector up to scaling.
+
+The implication for reading diffusion papers: training and sampling are separable. The training objective (the denoising-score-matching loss) determines what the network estimates; the sampler (DDPM, DDIM, DPM-Solver, distillation) determines how the estimate is used at inference. Both are governed by the SDE, but they are decoupled choices.
+
+## Why this matters when you use AI
+
+Two practical implications.
+
+**Reading diffusion-model claims.** When you read that a system uses "the probability flow ODE for likelihood evaluation," you are reading exactly the L14 mechanism. When you read that a system uses "an SDE solver with adaptive step size" or "a higher-order ODE integrator," you are reading a particular discretization of the same continuous-time picture. The framework lets you read these statements as choices within one paradigm, not as disjoint techniques.
+
+**Reading likelihood comparisons.** When a diffusion paper quotes a log-likelihood for image data alongside autoregressive or flow baselines, the diffusion number comes from the probability flow ODE plus a Jacobian integration. The cost is non-negligible (an extra integration pass per evaluated point), but the number is exact and directly comparable to autoregressive and flow likelihoods. This is the answer to the "indirect" entry in L9's cross-paradigm table.
+
+## Common pitfalls
+
+**Confusing the noise predictor with the score, sign and scaling intact.** The relationship is: the score function equals the negative noise prediction divided by the cumulative-noise standard deviation. The sign flip and the scaling matter; using the noise predictor directly as a score estimate will not integrate to the right distribution.
+
+**Conflating the SDE with the ODE.** The reverse SDE has a stochastic noise term; the probability flow ODE does not. Both produce samples from the same marginal distribution, but the SDE trajectories are random and the ODE trajectories are deterministic. They are different objects with the same marginals at every time.
+
+**Treating L11 and L12 as competing recipes.** They are the same loss derived from two perspectives. The L14 SDE framing is what makes the equivalence formal. A diffusion paper claiming "we use denoising score matching" and another claiming "we use the DDPM loss" are describing the same training objective.
+
+**Skipping the SDE for the discrete recipe.** Many practical implementations work entirely with the discretized form (DDPM Markov chain plus DDIM sampler) and never write down an SDE. That is fine for production, but reading papers from the score-based literature requires the SDE framing. Both perspectives are valid; the SDE is the more general language.
+
+## What you should remember
+
+- **The forward and reverse processes are SDEs in continuous time.** The forward SDE has a known drift and diffusion (the variance-preserving choice corresponds to DDPM); the reverse SDE involves the score function of the noised distribution as part of its drift. The DDPM Markov chain is a discretization of the variance-preserving SDE; the L11 NCSN framework is the variance-exploding SDE.
+- **The noise predictor and the score function are the same vector up to a fixed scaling.** The score equals the negative noise prediction divided by the cumulative noise standard deviation. The L11 training framework and the L12 training framework produce the same network with the same loss, viewed through two equivalent mathematical lenses.
+- **The probability flow ODE is the deterministic sampler with tractable likelihood.** Integrating the ODE backward in time with the trained score (the noise predictor with the appropriate scaling) produces a deterministic sample. Integrating it forward and tracking the log-determinant of the Jacobian gives a tractable log-likelihood evaluation, the answer to L9's "indirect" entry for diffusion. DDIM from L13 is an approximate discretization of this ODE.
+
+You now have the continuous-time framework that unifies L11, L12, L13, and L14 into one paradigm. The capstone lesson returns to L1's four-paradigm map with all the math filled in. Every model you have read about across the track gets placed explicitly: autoregressive language models on their chain-rule conditionals, GAN-based face generators on their minimax game, latent-diffusion image generators on their VAE-encoder plus score-based latent sampler, and modern multimodal systems on their hybrid combinations. The map you opened the track with becomes the map you close it with, this time with every paradigm's training objective, sampling procedure, and trade-off characterized in full.

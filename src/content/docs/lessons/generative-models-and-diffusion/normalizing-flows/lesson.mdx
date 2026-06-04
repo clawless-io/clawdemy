@@ -1,0 +1,132 @@
+---
+title: "Lesson: Normalizing flows, change of variables for distributions"
+description: A normalizing flow parameterizes the model distribution exactly through an invertible transformation from a simple base distribution. The math is the multidimensional change-of-variables formula plus a Jacobian determinant that rescales density to keep total probability equal to one. This lesson derives the formula, builds it into a trainable likelihood, and shows what architectural constraints (invertibility, tractable Jacobian) flows must satisfy in exchange for exact likelihood and parallel sampling.
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+The last three lessons gave us the autoregressive paradigm (exact likelihood, sequential sampling) and the formal justification for its training objective (forward KL = empirical NLL). This lesson introduces a different paradigm with a different trade-off: the **normalizing flow**, which keeps the exact-likelihood advantage and trades sequential sampling for parallel sampling, in exchange for an architectural constraint (the transformation between the base distribution and the data must be invertible, with a tractable Jacobian).
+
+The math is one formula you already know from calculus, lifted to many dimensions. By the end you will be able to apply the change-of-variables formula to an invertible transform, read the Jacobian determinant as a density rescaling factor (the same determinant from Track 4, now multiplying probabilities instead of areas), and write the NLL training objective for a flow as one log-likelihood and one log-Jacobian-determinant. The connections to T4 (determinants as signed area/volume scaling) and T8 (derivatives of vector-valued functions) are direct; this lesson is where they pay off in the AI direction.
+
+## What we want, and why flows can give it
+
+Recall the constraints any generative model is up against:
+
+1. We want to evaluate the model log-likelihood to train by NLL (the L3 derivation).
+2. We want to sample from the model efficiently.
+3. We want the model to be flexible enough to fit real data distributions.
+
+The four paradigms hit these constraints differently. Autoregressive models satisfy (1) exactly and (3) flexibly, but sampling under (2) is sequential. GANs satisfy (2) and (3) but fail (1) entirely. VAEs satisfy (2) and approximate (1) through the ELBO bound (lesson 5). Normalizing flows satisfy (1), (2), and (3) all at once, but they pay for it with an architectural constraint that restricts what their networks can do.
+
+The flow recipe in one sentence: start with a simple base distribution (say a multivariate standard Gaussian), pass a latent sample through an **invertible** neural network, and define your model distribution as the distribution of the network's output. Then the model density is exactly computable from the base density and the Jacobian determinant of the transform, sampling is one forward pass through the network, and training is NLL on the resulting expression. Everything follows from the multidimensional change-of-variables formula.
+
+## The change-of-variables formula, one dimension first
+
+Start in 1D, where the picture is concrete. Take a continuous random variable Z with a base density, and let X be the transform of Z through a differentiable, strictly monotonic (hence invertible) function from the reals to the reals. The density of X is:
+
+```
+p_X(x) = p_Z(z) · |dz/dx|       where z = f^{-1}(x)
+       = p_Z(f^{-1}(x)) / |df/dz|
+```
+
+The two forms are the same thing written two ways (using the reciprocal-derivative chain rule for one-variable inverses).
+
+The intuition is mass conservation. Total probability is one; the transform warps the z-axis into the x-axis without losing or creating any. Where the transform stretches the axis (absolute derivative greater than one), probability density gets diluted, so the transformed density is smaller than the base. Where the transform compresses (absolute derivative less than one), density gets concentrated, so the transformed density is larger than the base. The reciprocal-of-absolute-derivative factor is exactly the rescaling that conserves total mass.
+
+**Worked 1D example.** Let the base be Uniform on the interval zero to one, so the base density is one on that interval and zero elsewhere. Let the transform be three-z-plus-one. Then the inverse is x-minus-one divided by three, defined on the interval one to four, and the derivative of the transform is three. By the formula:
+
+```
+p_X(x) = p_Z((x - 1) / 3) / 3 = 1 / 3   for x in [1, 4]
+```
+
+The interval from zero to one got stretched to from one to four, three times wider, so the density got divided by three. Sanity check: the integral of one-third over an interval of width three equals one. Total probability is conserved. The Jacobian factor (here just the number three) is the density rescaling factor.
+
+## The change-of-variables formula, in many dimensions
+
+In multiple dimensions the same idea holds, with one upgrade. The scalar derivative becomes the **Jacobian matrix**, the square matrix of partial derivatives of the transform. The scaling factor is the absolute value of the **determinant** of that Jacobian. The change-of-variables formula is:
+
+```
+p_X(x) = p_Z(z) · |det(J_{f^{-1}}(x))|
+       = p_Z(f^{-1}(x)) / |det(J_f(z))|
+```
+
+The determinant is the same determinant from Track 4, lesson 6: the factor by which a linear transformation scales volume in many dimensions. Here it scales density, with the absolute value because density is non-negative. Where the transformation expands volume (absolute determinant greater than one), density gets diluted; where it contracts (absolute determinant less than one), density gets concentrated. T4's "the determinant is a signed scaling factor" lesson is exactly what is doing the work, lifted from areas to probability densities.
+
+**Worked 2D example.** Let the base be uniform on the unit square, so the base density is one on the square. Apply the linear map that scales the first coordinate by two and leaves the second coordinate alone, a horizontal stretch by two. Then the Jacobian is just this matrix (the Jacobian of a linear map is the matrix itself), and its determinant is two. By the formula:
+
+```
+p_X(x) = p_Z(A^{-1} x) / |det(A)| = 1 / 2   on the image rectangle [0, 2] × [0, 1]
+```
+
+The unit square got stretched into a 2-by-1 rectangle, so the density halved. Total probability is conserved: one half times area two equals one.
+
+## Training: NLL is one line
+
+Apply log to the change-of-variables formula and the training objective writes itself. Take the second form:
+
+```
+log p_X(x) = log p_Z(f^{-1}(x)) - log |det(J_f(z))|
+```
+
+This is the model log-likelihood, exactly computable for any input (assuming the transform is invertible, so the latent corresponding to the input is unique, and the Jacobian is accessible). The training loss is the empirical NLL, same as L3:
+
+```
+NLL(x) = -log p_X(x) = -log p_Z(f^{-1}(x)) + log |det(J_f(z))|
+```
+
+For each training example: invert it to get the corresponding latent, compute the log-density under the base distribution (easy, since the base is something simple like a Gaussian), compute the log-determinant of the Jacobian at that point, sum (with the minus sign in front), backpropagate. Same forward-KL minimization as L3, with this specific parameterization.
+
+## Sampling: one forward pass
+
+To sample from the model: draw a latent from the base distribution (one call to a random number generator) and apply the transform (one forward pass through the network). That is the entire procedure.
+
+Compare to autoregressive sampling, which requires one forward pass per piece (so as many passes as the output has pieces). For a 256-by-256-by-3 image, an autoregressive pixel model needs roughly 200,000 sequential forward passes; a flow needs one. This parallelism is the flow paradigm's main advantage over autoregressive models, paid for by the architectural constraints we will see next.
+
+## The architectural constraints: invertibility and a tractable Jacobian
+
+The two requirements that make a flow tractable are also what restrict what its network can do.
+
+**Invertibility.** The transform must be a bijection (one input, one output, both directions). For a standard feedforward neural network this is not automatic; layers like ReLU are not invertible (they map negative inputs to zero, destroying information), and most layers have rectangular or rank-deficient weight matrices that are not invertible either. Real flow architectures use **coupling layers** (which split the input in half and apply an invertible transformation to one half conditioned on the other) or **autoregressive layers** (which use the chain rule to make each output dimension a function of previous output dimensions, an invertible structure by construction). The canonical references are RealNVP and the NICE paper (in *References*).
+
+**Tractable Jacobian determinant.** The change-of-variables formula needs the Jacobian determinant. In general, the determinant of a square matrix costs time cubic in the dimension, which is infeasible when the dimension is in the thousands (a small image) or millions (a large one). Flow architectures are designed so the Jacobian is **triangular**, which makes its determinant the product of its diagonal entries, a cheap linear-in-dimension operation. Coupling layers achieve triangular structure by their split-and-transform design; autoregressive flows by their per-dimension dependencies. The architectural cleverness is in keeping the Jacobian triangular while making the transformation expressive.
+
+**Composition.** Single coupling or autoregressive layers are not very flexible by themselves. The strength of flows comes from **stacking** many of them. By the chain rule of determinants, the log-determinant of a composition of layers is the sum of the per-layer log-determinants:
+
+```
+log |det J_f| = sum_k log |det J_{f_k}|
+```
+
+So composition is cheap: each new layer adds one tractable log-determinant term. A flow with 20 coupling layers is far more flexible than a single coupling layer, at the cost of 20 cheap log-determinant computations instead of one.
+
+## The trade-off, in summary
+
+A normalizing flow buys all three of (1) exact model log-likelihood, (2) parallel sampling, and (3) flexible modeling, in exchange for the architectural constraint that every layer must be invertible with a tractable Jacobian determinant. This is real: a flow cannot use a vanilla feedforward network, a standard transformer, or a ResNet directly; it must be built out of invertible blocks. The constraint is what restricts flows' use in practice. They are competitive on some image, audio, and tabular tasks; they are not currently dominant on the largest image generation problems (diffusion is), and they are not used for language (autoregressive is). But they are the cleanest paradigm to understand because all three goals are met by direct math, with no bound, no game, and no multi-step procedure.
+
+## Why this matters when you use AI
+
+Two practical implications.
+
+**Density estimation tasks.** When you actually need exact model density for an application (anomaly detection, scientific likelihood evaluation, statistical inverse problems), flows are often the right choice precisely because the other paradigms cannot give you what you need. Diffusion can approximate likelihood through extra computation (the ODE-based "exact log-likelihood" trick from lesson 14), autoregressive models give exact likelihood but only with sequential evaluation, GANs and VAEs cannot give it at all. Flows give it with one forward pass per query. This is why flows are heavily used in particle-physics simulation, astrophysics, and chemistry, even when they are not the dominant paradigm in image generation.
+
+**The change-of-variables formula appears everywhere.** Once you have this formula, you can read it into many other generative-model derivations. The reparameterization trick for VAEs is a change of variables (sample from the base distribution, transform). The ODE-based view of diffusion in lesson 14 is a continuous-time change of variables. Even the autoregressive paradigm can be reinterpreted as a flow under a particular construction (autoregressive flows like MAF and IAF). The formula here is more foundational than the paradigm.
+
+## Common pitfalls
+
+**Forgetting the absolute value on the determinant.** The Jacobian determinant can be negative (a transformation can flip orientation, just like in T4's reflection example). Densities are non-negative; the absolute value ensures the transformed density stays non-negative. Drop the absolute value and you can get a negative "probability," which is nonsense.
+
+**Confusing the two equivalent forms.** The two forms of the change-of-variables formula (one using the forward transform's Jacobian, the other using the inverse transform's Jacobian) are the same identity related by the reciprocal-of-determinants rule. Use whichever is computationally cheaper. For flows where the forward transform is the trained network, the form using the forward Jacobian is the practical choice.
+
+**Thinking the base distribution choice matters much.** It does not, structurally. Almost any flow uses a multivariate standard Gaussian as the base, but you could use Uniform, Logistic, or any other distribution with a tractable density. The expressive power comes from the transformation, not the base.
+
+**Treating "invertible" as a soft constraint.** It is hard. If your network is not invertible, the change-of-variables formula does not apply, and your "likelihood" is not a likelihood. Invertibility must be enforced architecturally, just like causality had to be in autoregressive models. Coupling layers and autoregressive structures are the standard tools.
+
+## What you should remember
+
+- **The change-of-variables formula** is the foundation: the model density equals the base density at the inverted point, divided by the absolute Jacobian determinant of the forward transform. The Jacobian determinant is the density rescaling factor; it is the same Track-4 determinant, multiplying probabilities instead of areas. Where the transformation expands volume, density dilutes; where it contracts, density concentrates; total probability stays one.
+- **The training objective is empirical NLL** (the forward-KL minimization from L3), with the log-model-density equal to the log-base-density at the inverted point, minus the log absolute Jacobian determinant. Two terms: the log-density of the inverted point under the simple base distribution, and the log-Jacobian-determinant of the transformation.
+- **Flows give exact likelihood and parallel sampling at the cost of an architectural constraint:** every layer must be invertible with a tractable (typically triangular) Jacobian. Coupling layers (RealNVP / NICE) and autoregressive layers (MAF / IAF) are the standard building blocks; composition lets you stack many of them, with log-determinants that add by the chain rule.
+
+You now have the second of the four paradigms formally (autoregressive was the first; VAEs and GANs come next, with diffusion arriving in Phase 3 and the synthesis in Phase 4). The next lesson opens Phase 2 with the latent-variable paradigm, where the encoder-decoder structure of a VAE will look surprisingly like a flow whose invertibility constraint has been relaxed and whose likelihood has been replaced by a bound, the ELBO.

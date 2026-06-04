@@ -1,0 +1,25 @@
+---
+title: "Summary: Diffusion models I, the forward and reverse processes"
+description: The 5-minute scan version. The forward Markov chain and closed-form sampling shortcut, the reverse process parameterized as a noise predictor, the simplified DDPM loss that is denoising score matching at the timestep's noise level, training and sampling loops, and the §6 boundary opening for L12-L14.
+artifact: summary
+sidebar:
+  order: 4
+  label: Summary
+---
+
+Phase 3's third lesson opens the diffusion paradigm in its DDPM form. The whole lesson reduces to one line: **diffusion fixes a Markov chain that noises data into Gaussian, learns a reverse chain parameterized as a noise predictor, and trains by a simple MSE on noise prediction that is mathematically the L11 denoising-score-matching loss; the closed-form forward shortcut makes training feasible, the reverse chain runs at inference for T steps, and L13/L14 cover speed-ups and the score-based unification.** This is the scan-it-in-five-minutes version.
+
+## Core ideas
+
+- **Forward process (fixed Markov chain)**: `q(x_t | x_{t-1}) = N(sqrt(1 − β_t)·x_{t-1}, β_t·I)`, with chosen `β`-schedule (typical T = 1000 steps, `β` from `~10⁻⁴` to `~0.02`). No learnable parameters. After T steps, `q(x_T) ≈ N(0, I)`, pure Gaussian noise.
+- **Closed-form forward shortcut**: with `α_t = 1 − β_t` and `ᾱ_t = α_1·α_2·...·α_t`, `x_t = sqrt(ᾱ_t)·x_0 + sqrt(1 − ᾱ_t)·ε` with `ε ~ N(0, I)`. Sample any timestep in one operation; this is the computational hinge that makes training feasible (otherwise, training at timestep `t = 1000` would require 1000 sequential Markov steps per example).
+- **Worked anchor**: T = 2, β = 0.1 → α = 0.9 → ᾱ_2 = 0.81 → `x_2 = 0.9·x_0 + 0.436·ε`. With T = 1000 and growing β, `ᾱ_T → 0`, so `x_T → ε` (pure noise).
+- **Reverse process (learned)**: `p_θ(x_{t-1} | x_t) = N(μ_θ(x_t, t), Σ_θ)`. Σ fixed by schedule; μ_θ reparameterized as a **noise predictor** `ε_θ(x_t, t)` via `μ_θ = (1/sqrt(α_t)) · (x_t − (β_t/sqrt(1 − ᾱ_t)) · ε_θ(x_t, t))`.
+- **Simplified DDPM loss** (Ho et al. 2020): `L_simple = E_{t, x_0, ε}[||ε − ε_θ(x_t, t)||²]`, with `t ~ Uniform{1..T}`, `x_0 ~ p_data`, `ε ~ N(0, I)`, `x_t = sqrt(ᾱ_t)·x_0 + sqrt(1 − ᾱ_t)·ε`. **One MSE on noise prediction per training step**. THIS IS EXACTLY denoising score matching (L11) at noise level `σ = sqrt(1 − ᾱ_t)`. The L11 score-based and L12 Markov-chain derivations are two paths to the same equation.
+- **Training loop**: sample `x_0`, sample `t`, sample `ε`, compute `x_t`, evaluate `ε_θ(x_t, t)`, MSE loss, backprop. Six lines. No adversarial game, no encoder/decoder reparameterization, no Jacobian. The simplicity is why diffusion went from research curiosity (2015-2019) to dominant paradigm (2021+).
+- **Sampling loop**: start with `x_T ~ N(0, I)`, run the reverse chain from `t = T` down to `t = 1` (T forward passes through `ε_θ`). Slow at inference; L13 covers DDIM and step-count reduction.
+- **§6 boundary opens for L12-L14**: six diffusion-specific policy/governance categories outside this mechanical scope (use-case appropriateness, provenance/watermarking, sector-specific deployment incl. NEW medical-imaging, training-data IP, likeness/consent more pronounced, NEW prompt-injection risks). Five-layer pattern applied: categories + named evaluation methods (FID across step counts, IS, CLIP, sample-quality-vs-step-count Pareto, perceptual studies, memorization probes) + operational scope test + domain-specific instruments + inform-not-settle for value questions (empirical "does this reproduce training-like content?" vs value "should this train on scraped corpora?"; defense-in-depth: data curation = engineering, IP licensing = policy).
+
+## What changes for you
+
+Before this lesson, the modern image-generation system was probably a black box with a vague "diffusion model" label and a noise-and-denoise intuition. Now you have the math directly: every modern text-to-image system (Stable Diffusion, DALL-E 3, Midjourney, and others) is running this exact training loop (closed-form `x_t`, noise-prediction MSE, U-Net `ε_θ`) and this exact sampling loop (T forward passes through `ε_θ` starting from Gaussian noise). When you read about a new diffusion architecture, the changes are usually to how `ε_θ` is parameterized (U-Net vs DiT) or to the sampling procedure (DDIM, distillation, lesson 13), not to the underlying framework. The next lesson covers the practical speed-ups that made diffusion deployable at scale; lesson 14 closes Phase 3 by returning to the score-based view and making the equivalence with this lesson's Markov-chain view explicit via stochastic differential equations.
