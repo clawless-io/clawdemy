@@ -1,0 +1,149 @@
+---
+/**
+ * Track 9 (Statistics & Probability for AI), Lesson 12, illustration 1 of 1.
+ *
+ * Twenty 95-percent confidence intervals plotted as horizontal bars
+ * against the true parameter (the fixed central vertical line). Each bar
+ * is one hypothetical replication of the study: a sample mean plus or
+ * minus the margin of error. About one in twenty intervals on average
+ * misses the truth; here exactly one is highlighted in amber to make
+ * that arithmetic concrete. The 95 percent is a long-run frequency
+ * statement: it is about the procedure, not any one interval.
+ */
+
+const cx = 100;
+const cy = 60;
+const PLOT_W = 540;
+const ROW_H = 12;
+const ROW_GAP = 2;
+const N_BARS = 20;
+
+// True parameter and SE-like spread for the intervals
+const TRUE_MU = 5;
+const SE = 1; // margin of error scale
+const Z = 1.96;
+const MARGIN = Z * SE;
+
+const X_MIN = TRUE_MU - 4;
+const X_MAX = TRUE_MU + 4;
+
+const sx = (xVal: number) => cx + ((xVal - X_MIN) / (X_MAX - X_MIN)) * PLOT_W;
+
+// Deterministic LCG for the 20 sample means
+function makeRand(seed: number) {
+	let s = seed;
+	return () => {
+		s = (s * 9301 + 49297) % 233280;
+		return s / 233280;
+	};
+}
+function normSample(rand: () => number): number {
+	let u = 0;
+	let v = 0;
+	while (u === 0) u = rand();
+	while (v === 0) v = rand();
+	return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+}
+
+const rand = makeRand(42);
+
+type Bar = { i: number; mean: number; lo: number; hi: number; misses: boolean };
+const bars: Bar[] = [];
+for (let i = 0; i < N_BARS; i++) {
+	let mean = TRUE_MU + normSample(rand) * SE;
+	// Force exactly one to miss for the pedagogical promise
+	let lo = mean - MARGIN;
+	let hi = mean + MARGIN;
+	let misses = lo > TRUE_MU || hi < TRUE_MU;
+	bars.push({ i, mean, lo, hi, misses });
+}
+
+// Ensure exactly one miss: scan the list, if no natural miss, force one; if multiple, pull all but one back
+const naturalMissCount = bars.filter((b) => b.misses).length;
+if (naturalMissCount === 0) {
+	// pick bar 9 (mid-list) and push it
+	bars[9].mean = TRUE_MU + 2.5 * SE;
+	bars[9].lo = bars[9].mean - MARGIN;
+	bars[9].hi = bars[9].mean + MARGIN;
+	bars[9].misses = true;
+} else if (naturalMissCount > 1) {
+	// keep first miss, pull others back toward the truth
+	let kept = false;
+	for (const b of bars) {
+		if (b.misses && !kept) {
+			kept = true;
+			continue;
+		}
+		if (b.misses) {
+			b.mean = TRUE_MU + (b.mean > TRUE_MU ? 0.6 : -0.6) * SE;
+			b.lo = b.mean - MARGIN;
+			b.hi = b.mean + MARGIN;
+			b.misses = b.lo > TRUE_MU || b.hi < TRUE_MU;
+		}
+	}
+}
+
+const plotTop = cy + 10;
+const plotBottom = plotTop + N_BARS * (ROW_H + ROW_GAP);
+
+const BLUE = '#3b82f6';
+const ACCENT = '#7c3aed';
+const AMBER = '#d97706';
+
+const missCount = bars.filter((b) => b.misses).length;
+---
+
+<figure class="cw-illus">
+	<svg viewBox="0 0 740 360" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="sp-ci-title sp-ci-desc">
+		<title id="sp-ci-title">Twenty 95 percent confidence intervals vs a fixed true parameter, with about one in twenty missing the truth</title>
+		<desc id="sp-ci-desc">A panel showing twenty horizontal bars stacked vertically, each representing a 95 percent confidence interval from one hypothetical study. The true parameter value of 5 is drawn as a vertical purple dashed reference line through the center. Nineteen of the bars cross the true value and are drawn in blue. One bar shown in amber lies entirely to the right of the true value, missing it: that interval did not contain the true parameter. The legend states that 95 percent of intervals would contain the truth in the long run.</desc>
+
+		{/* fixed true value reference line */}
+		<line x1={sx(TRUE_MU)} y1={plotTop - 6} x2={sx(TRUE_MU)} y2={plotBottom + 8} stroke={ACCENT} stroke-width="2" stroke-dasharray="6 4" />
+		<text x={sx(TRUE_MU)} y={plotTop - 12} text-anchor="middle" font-family="ui-monospace, SFMono-Regular, monospace" font-size="12" font-weight="700" fill={ACCENT}>true μ = {TRUE_MU}</text>
+
+		{/* axis (along the bottom for x reference) */}
+		<line x1={cx} y1={plotBottom + 18} x2={cx + PLOT_W} y2={plotBottom + 18} stroke="currentColor" stroke-width="0.8" opacity="0.55" />
+		{[1, 3, 5, 7, 9].map((t) => (
+			<g>
+				<line x1={sx(t)} y1={plotBottom + 14} x2={sx(t)} y2={plotBottom + 22} stroke="currentColor" stroke-width="0.7" opacity="0.55" />
+				<text x={sx(t)} y={plotBottom + 34} text-anchor="middle" font-family="ui-monospace, SFMono-Regular, monospace" font-size="10" fill="currentColor" opacity="0.6">{t}</text>
+			</g>
+		))}
+
+		{/* CI bars */}
+		{bars.map((b) => {
+			const y = plotTop + b.i * (ROW_H + ROW_GAP);
+			const stroke = b.misses ? AMBER : BLUE;
+			const fillOpacity = b.misses ? 0.6 : 0.4;
+			return (
+				<g>
+					<line x1={sx(b.lo)} y1={y + ROW_H / 2} x2={sx(b.hi)} y2={y + ROW_H / 2} stroke={stroke} stroke-width="2" opacity={fillOpacity + 0.2} />
+					<circle cx={sx(b.lo)} cy={y + ROW_H / 2} r="2.6" fill={stroke} />
+					<circle cx={sx(b.hi)} cy={y + ROW_H / 2} r="2.6" fill={stroke} />
+					<circle cx={sx(b.mean)} cy={y + ROW_H / 2} r="2.6" fill={stroke} />
+					<text x={cx - 8} y={y + ROW_H / 2 + 4} text-anchor="end" font-family="ui-monospace, SFMono-Regular, monospace" font-size="8" fill="currentColor" opacity="0.5">{b.i + 1}</text>
+				</g>
+			);
+		})}
+
+		{/* legend */}
+		<g transform="translate(440, 60)">
+			<rect x="0" y="0" width="280" height="100" rx="6" fill="currentColor" opacity="0.04" />
+			<rect x="0" y="0" width="280" height="100" rx="6" fill="none" stroke="currentColor" stroke-width="0.8" opacity="0.3" />
+			<text x="140" y="22" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="currentColor" opacity="0.7">95% confidence interval:</text>
+			<line x1="20" y1="46" x2="60" y2="46" stroke={BLUE} stroke-width="2" />
+			<text x="68" y="50" font-family="ui-monospace, SFMono-Regular, monospace" font-size="11" fill={BLUE}>{N_BARS - missCount} intervals contain μ</text>
+			<line x1="20" y1="68" x2="60" y2="68" stroke={AMBER} stroke-width="2" />
+			<text x="68" y="72" font-family="ui-monospace, SFMono-Regular, monospace" font-size="11" fill={AMBER}>{missCount} interval misses</text>
+			<text x="140" y="92" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, monospace" font-size="11" font-weight="700" fill={ACCENT}>95% is about the procedure</text>
+		</g>
+	</svg>
+	<figcaption>Twenty repetitions of the same study, each producing a 95 percent confidence interval. The truth (purple line) is fixed; the intervals shift around it because the sample means shift. About one in twenty intervals misses by chance. The 95 percent claim is about the long-run behavior of the procedure, not about any single interval being right 95 percent of the time.</figcaption>
+</figure>
+
+<style>
+	.cw-illus { margin: 1.75rem auto; max-width: 100%; }
+	.cw-illus svg { display: block; width: 100%; max-width: 740px; height: auto; margin: 0 auto; }
+	.cw-illus figcaption { text-align: center; font-size: 0.85rem; opacity: 0.75; margin-top: 0.5rem; font-style: italic; }
+</style>
