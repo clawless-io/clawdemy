@@ -1190,6 +1190,215 @@ export default defineConfig({
 					],
 				},
 				{
+					label: 'Track 10: Classical Machine Learning',
+					items: [
+						{
+							label: 'Phase 1\nLearning from data',
+							collapsed: true,
+							items: [
+								{
+									label: 'What ML actually is',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/classical-machine-learning/what-machine-learning-actually-is/brief' },
+										{ label: 'Lesson', slug: 'lessons/classical-machine-learning/what-machine-learning-actually-is/lesson' },
+										{ label: 'Practice', slug: 'lessons/classical-machine-learning/what-machine-learning-actually-is/practice' },
+										{ label: 'Summary', slug: 'lessons/classical-machine-learning/what-machine-learning-actually-is/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/classical-machine-learning/what-machine-learning-actually-is/cheatsheet' },
+										{ label: 'References', slug: 'lessons/classical-machine-learning/what-machine-learning-actually-is/references' },
+									],
+								},
+								{
+									label: 'Linear regression',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/classical-machine-learning/fitting-a-line-linear-regression/brief' },
+										{ label: 'Lesson', slug: 'lessons/classical-machine-learning/fitting-a-line-linear-regression/lesson' },
+										{ label: 'Practice', slug: 'lessons/classical-machine-learning/fitting-a-line-linear-regression/practice' },
+										{ label: 'Summary', slug: 'lessons/classical-machine-learning/fitting-a-line-linear-regression/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/classical-machine-learning/fitting-a-line-linear-regression/cheatsheet' },
+										{ label: 'References', slug: 'lessons/classical-machine-learning/fitting-a-line-linear-regression/references' },
+									],
+								},
+								{
+									label: 'Gradient descent',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/classical-machine-learning/how-models-learn-gradient-descent/brief' },
+										{ label: 'Lesson', slug: 'lessons/classical-machine-learning/how-models-learn-gradient-descent/lesson' },
+										{ label: 'Practice', slug: 'lessons/classical-machine-learning/how-models-learn-gradient-descent/practice' },
+										{ label: 'Summary', slug: 'lessons/classical-machine-learning/how-models-learn-gradient-descent/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/classical-machine-learning/how-models-learn-gradient-descent/cheatsheet' },
+										{ label: 'References', slug: 'lessons/classical-machine-learning/how-models-learn-gradient-descent/references' },
+									],
+								},
+							],
+						},
+						{
+							label: 'Phase 2\nClassification and ensembles',
+							collapsed: true,
+							items: [
+								{
+									label: 'Logistic regression',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/classical-machine-learning/logistic-regression/brief' },
+										{ label: 'Lesson', slug: 'lessons/classical-machine-learning/logistic-regression/lesson' },
+										{ label: 'Practice', slug: 'lessons/classical-machine-learning/logistic-regression/practice' },
+										{ label: 'Summary', slug: 'lessons/classical-machine-learning/logistic-regression/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/classical-machine-learning/logistic-regression/cheatsheet' },
+										{ label: 'References', slug: 'lessons/classical-machine-learning/logistic-regression/references' },
+									],
+								},
+								{
+									label: 'Decision trees',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/classical-machine-learning/decision-trees/brief' },
+										{ label: 'Lesson', slug: 'lessons/classical-machine-learning/decision-trees/lesson' },
+										{ label: 'Practice', slug: 'lessons/classical-machine-learning/decision-trees/practice' },
+										{ label: 'Summary', slug: 'lessons/classical-machine-learning/decision-trees/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/classical-machine-learning/decision-trees/cheatsheet' },
+										{ label: 'References', slug: 'lessons/classical-machine-learning/decision-trees/references' },
+									],
+								},
+								{
+									label: 'Random forests',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/classical-machine-learning/random-forests/brief' },
+										{ label: 'Lesson', slug: 'lessons/classical-machine-learning/random-forests/lesson' },
+										{ label: 'Practice', slug: 'lessons/classical-machine-learning/random-forests/practice' },
+										{ label: 'Summary', slug: 'lessons/classical-machine-learning/random-forests/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/classical-machine-learning/random-forests/cheatsheet' },
+										{ label: 'References', slug: 'lessons/classical-machine-learning/random-forests/references' },
+									],
+								},
+								{
+									label: 'Boosting',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/classical-machine-learning/boosting/brief' },
+										{ label: 'Lesson', slug: 'lessons/classical-machine-learning/boosting/lesson' },
+										{ label: 'Practice', slug: 'lessons/classical-machine-learning/boosting/practice' },
+										{ label: 'Summary', slug: 'lessons/classical-machine-learning/boosting/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/classical-machine-learning/boosting/cheatsheet' },
+										{ label: 'References', slug: 'lessons/classical-machine-learning/boosting/references' },
+									],
+								},
+								{
+									label: 'Support vector machines',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/classical-machine-learning/support-vector-machines/brief' },
+										{ label: 'Lesson', slug: 'lessons/classical-machine-learning/support-vector-machines/lesson' },
+										{ label: 'Practice', slug: 'lessons/classical-machine-learning/support-vector-machines/practice' },
+										{ label: 'Summary', slug: 'lessons/classical-machine-learning/support-vector-machines/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/classical-machine-learning/support-vector-machines/cheatsheet' },
+										{ label: 'References', slug: 'lessons/classical-machine-learning/support-vector-machines/references' },
+									],
+								},
+							],
+						},
+						{
+							label: 'Phase 3\nUnsupervised learning',
+							collapsed: true,
+							items: [
+								{
+									label: 'K-means clustering',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/classical-machine-learning/k-means-clustering/brief' },
+										{ label: 'Lesson', slug: 'lessons/classical-machine-learning/k-means-clustering/lesson' },
+										{ label: 'Practice', slug: 'lessons/classical-machine-learning/k-means-clustering/practice' },
+										{ label: 'Summary', slug: 'lessons/classical-machine-learning/k-means-clustering/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/classical-machine-learning/k-means-clustering/cheatsheet' },
+										{ label: 'References', slug: 'lessons/classical-machine-learning/k-means-clustering/references' },
+									],
+								},
+								{
+									label: 'Hierarchical clustering',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/classical-machine-learning/hierarchical-clustering/brief' },
+										{ label: 'Lesson', slug: 'lessons/classical-machine-learning/hierarchical-clustering/lesson' },
+										{ label: 'Practice', slug: 'lessons/classical-machine-learning/hierarchical-clustering/practice' },
+										{ label: 'Summary', slug: 'lessons/classical-machine-learning/hierarchical-clustering/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/classical-machine-learning/hierarchical-clustering/cheatsheet' },
+										{ label: 'References', slug: 'lessons/classical-machine-learning/hierarchical-clustering/references' },
+									],
+								},
+								{
+									label: 'PCA',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/classical-machine-learning/pca/brief' },
+										{ label: 'Lesson', slug: 'lessons/classical-machine-learning/pca/lesson' },
+										{ label: 'Practice', slug: 'lessons/classical-machine-learning/pca/practice' },
+										{ label: 'Summary', slug: 'lessons/classical-machine-learning/pca/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/classical-machine-learning/pca/cheatsheet' },
+										{ label: 'References', slug: 'lessons/classical-machine-learning/pca/references' },
+									],
+								},
+								{
+									label: 't-SNE',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/classical-machine-learning/t-sne/brief' },
+										{ label: 'Lesson', slug: 'lessons/classical-machine-learning/t-sne/lesson' },
+										{ label: 'Practice', slug: 'lessons/classical-machine-learning/t-sne/practice' },
+										{ label: 'Summary', slug: 'lessons/classical-machine-learning/t-sne/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/classical-machine-learning/t-sne/cheatsheet' },
+										{ label: 'References', slug: 'lessons/classical-machine-learning/t-sne/references' },
+									],
+								},
+							],
+						},
+						{
+							label: 'Phase 4\nModel evaluation',
+							collapsed: true,
+							items: [
+								{
+									label: 'Bias-variance tradeoff',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/classical-machine-learning/bias-variance-tradeoff/brief' },
+										{ label: 'Lesson', slug: 'lessons/classical-machine-learning/bias-variance-tradeoff/lesson' },
+										{ label: 'Practice', slug: 'lessons/classical-machine-learning/bias-variance-tradeoff/practice' },
+										{ label: 'Summary', slug: 'lessons/classical-machine-learning/bias-variance-tradeoff/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/classical-machine-learning/bias-variance-tradeoff/cheatsheet' },
+										{ label: 'References', slug: 'lessons/classical-machine-learning/bias-variance-tradeoff/references' },
+									],
+								},
+								{
+									label: 'Cross-validation',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/classical-machine-learning/cross-validation/brief' },
+										{ label: 'Lesson', slug: 'lessons/classical-machine-learning/cross-validation/lesson' },
+										{ label: 'Practice', slug: 'lessons/classical-machine-learning/cross-validation/practice' },
+										{ label: 'Summary', slug: 'lessons/classical-machine-learning/cross-validation/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/classical-machine-learning/cross-validation/cheatsheet' },
+										{ label: 'References', slug: 'lessons/classical-machine-learning/cross-validation/references' },
+									],
+								},
+								{
+									label: 'Classification metrics',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/classical-machine-learning/classification-metrics/brief' },
+										{ label: 'Lesson', slug: 'lessons/classical-machine-learning/classification-metrics/lesson' },
+										{ label: 'Practice', slug: 'lessons/classical-machine-learning/classification-metrics/practice' },
+										{ label: 'Summary', slug: 'lessons/classical-machine-learning/classification-metrics/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/classical-machine-learning/classification-metrics/cheatsheet' },
+										{ label: 'References', slug: 'lessons/classical-machine-learning/classification-metrics/references' },
+									],
+								},
+							],
+						},
+					],
+				},
+				{
 					label: 'Track 11: Neural Network Intuition',
 					items: [
 						{

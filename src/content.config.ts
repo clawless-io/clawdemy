@@ -44,6 +44,7 @@ export const collections = {
 						'visual-math-linear-algebra', // Track 4: 3Blue1Brown Essence of Linear Algebra
 						'visual-math-calculus', // Track 8: 3Blue1Brown Essence of Calculus
 						'statistics-and-probability', // Track 9: Khan Academy Statistics & Probability (curated for AI)
+						'classical-machine-learning', // Track 10: StatQuest (Josh Starmer) + Microsoft ML-For-Beginners
 						'multimodal-ai', // Track 24: Stanford CS25 "Transformers United" V4/V5/V6
 					])
 					.optional(),
@@ -127,6 +128,11 @@ export const collections = {
 						'probability-foundations',
 						'random-variables-and-distributions',
 						'statistical-inference',
+						// Track 10 (Classical Machine Learning — StatQuest + Microsoft ML-For-Beginners)
+						'learning-from-data',
+						'classification-and-ensembles',
+						'unsupervised-learning',
+						'model-evaluation',
 						// Track 24 (Multimodal AI — Stanford CS25 Transformers United)
 						'multimodal-foundations',
 						'large-multimodal-models',

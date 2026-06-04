@@ -1,0 +1,117 @@
+---
+title: 'Lesson: Train, test, and cross-validation'
+description: "The previous lesson said the diagnostic is to compare training and test error. That depends on having an HONEST test error. This lesson covers how to get one: the simple train/test split, the three-way split with a validation set for tuning, and k-fold cross-validation, the standard way to get a stable test-error estimate from limited data. It also names the data-leakage traps that quietly turn an honest evaluation into an optimistic lie."
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+The previous lesson handed you a sharp diagnostic: compare training error and test error to tell underfitting from overfitting. That diagnostic only works if the **test error is honest**, meaning a real estimate of how the model will perform on data it has never seen.
+
+"Just hold out some data" sounds simple, and the basic version is. But it has subtleties that, done wrong, give you misleadingly optimistic numbers that everyone trusts and that turn out to mean nothing once the model meets fresh data. This lesson is about doing the holdout right: simple splits, validation sets, cross-validation, and the data-leakage traps that quietly invalidate everything.
+
+## Why training accuracy is never the answer
+
+This bears one more pass. A model is fit to the training data; that is what training means. So measuring its accuracy on the same training data tells you how well it **fit**, not whether it **learned the pattern**. An overfit model can achieve perfect training accuracy by memorizing every example and still be useless on anything new.
+
+The minimum honest evaluation is therefore on data the model **did not see during training**. Every claim about a model's performance worth trusting includes something like "evaluated on held-out test data" or "cross-validated"; if neither phrase is present, the number deserves skepticism.
+
+## The simple train/test split
+
+The basic move:
+
+```
+1. Randomly split the dataset into TRAIN (~80%) and TEST (~20%).
+2. Train the model on TRAIN.
+3. Evaluate it once on TEST. Report that score.
+```
+
+The hard rule, simple to state and easy to break, is that the test set must be **untouched** during training and tuning. The moment you look at the test set to decide between two models, or to adjust a hyperparameter, you have contaminated it. It is no longer a fair sample of unseen data; it is data the model has been indirectly tuned to do well on. The honest test score is a **one-shot evaluation**.
+
+## When you need to tune: the validation set
+
+Most real workflows have a knob to tune: tree depth, learning rate, regularization strength, the number of boosting rounds. You cannot tune those by trying them on the test set without breaking the rule above. So introduce a third piece, a **validation set**:
+
+```
+TRAIN (60-70%) -> fit the model.
+VALIDATION (10-20%) -> try different hyperparameter settings; pick the best.
+TEST (20%) -> final, one-shot evaluation of the chosen model.
+```
+
+You search for hyperparameters using train and validation, then evaluate the chosen configuration once on the test set. The test set never touches the tuning process, which is what makes its score believable.
+
+## The problem with a single split
+
+There is still a weakness, especially when you do not have a lot of data. A single random split is itself a sample. You might split into a lucky test set (one your model happens to do well on) or an unlucky one (full of harder cases). Two different splits of the same data can produce noticeably different test scores, and you cannot tell which one is "right." On small datasets this variance gets large enough to mislead model choice.
+
+The fix is to use **many splits and average**. That is cross-validation.
+
+## k-fold cross-validation
+
+The standard recipe is called **k-fold cross-validation**, and it is the central capability of this lesson:
+
+```
+1. Split the data into k equal-sized folds (commonly k = 5 or 10).
+2. For each i from 1 to k:
+     train on the other k - 1 folds;
+     test on fold i;
+     record the score.
+3. Average the k scores.
+```
+
+That average is your cross-validated estimate, and it is far more stable than a single split's score because it averages over k different held-out sets. Every data point gets used for both training and testing (just not at the same time), which is also why CV makes especially good use of small data.
+
+Worked example with k = 5 on 100 data points (folds of 20 each):
+
+```
+Round 1: train on folds 2,3,4,5  (80 points)  test on fold 1  -> score 0.82
+Round 2: train on folds 1,3,4,5             test on fold 2  -> score 0.79
+Round 3: train on folds 1,2,4,5             test on fold 3  -> score 0.85
+Round 4: train on folds 1,2,3,5             test on fold 4  -> score 0.81
+Round 5: train on folds 1,2,3,4             test on fold 5  -> score 0.83
+                                                              ---------
+                                            cross-validated:  0.82 average
+```
+
+The 0.82 average is your honest estimate of how this model performs on unseen data, much more stable than the 0.79 or 0.85 you might have gotten from one unlucky or lucky split.
+
+## Useful variants
+
+A few variants are worth recognizing by name:
+
+- **Stratified k-fold** is the right default for classification, especially when classes are imbalanced. It splits so that each fold has roughly the same class proportions as the whole dataset, preventing folds that accidentally contain almost none of the rare class.
+- **Leave-one-out cross-validation (LOOCV)** sets k equal to the number of data points: each "fold" is a single point. It uses the maximum data for training but is slow and gives high-variance estimates. Useful on very small datasets, awkward otherwise.
+- **Time-series cross-validation** is critical when your data has time order. Random k-fold lets the model "see the future" (train on later data, predict earlier) which is nonsense for time-series. Instead split chronologically: train on the past, test on the next chunk; expand and repeat. Random k-fold on time-series data is the most common silent mistake in this area.
+
+## Data leakage: how honest evaluations go bad
+
+A handful of mistakes can turn an honest setup into an optimistic lie. They share a name: **data leakage**, information from the test set quietly seeping into training.
+
+- **Tuning on the test set.** Picking a hyperparameter because it improves test accuracy uses the test set as a validation set, and the reported number is no longer a real test score.
+- **Preprocessing before splitting.** Standardizing or imputing on the whole dataset, then splitting, lets statistics from the test set (means, variances) inform the preprocessing the training data sees. Always **fit preprocessing on the training data only** and apply the fitted transform to test (and validation).
+- **Using the future to predict the past.** In time-series, random splits let the model train on points that come *after* the points it is predicting, which it would never have access to in deployment. Always split chronologically.
+- **Duplicate or near-duplicate samples** across train and test. The model effectively memorizes them and looks great on test. De-duplicate first.
+
+Each of these inflates test accuracy without making the model any better at its actual job. Knowing where they hide is most of the work.
+
+## Why this matters when you use AI
+
+Almost every claim about a model's performance worth trusting is wrapped in some version of this machinery. "Cross-validated accuracy of 0.92" means something; "92% accuracy" with no setup behind it usually deflates the moment you ask. The right next question when someone reports a number is always: on what data, evaluated how, with what tuning done where? That single habit, asking how a score was produced, is one of the most useful instincts you can carry into reading machine-learning results.
+
+## Common pitfalls
+
+- **Tuning on the test set.** Use a validation set or cross-validation for tuning; the test set is one-shot.
+- **Reporting a CV score as if it were a final test score.** Cross-validation is for model selection and a stable estimate; you can still benefit from a held-out test set for the final, fully-untouched evaluation.
+- **Preprocessing leaks.** Fit scalers, imputers, and any other transformation on training data only; apply (do not refit) to validation and test.
+- **Random k-fold on time-series.** Use chronological splits; otherwise you are training on the future.
+- **Tiny datasets with high-variance CV scores.** When folds are very small, CV estimates wobble; use stratification, more folds, or repeated CV.
+
+## What you should remember
+
+- **Training accuracy is fit, not generalization.** Always evaluate on data the model did not train on.
+- **The basic recipe is train / validation / test.** Train fits the model, validation tunes hyperparameters, test gives the one-shot honest score.
+- **k-fold cross-validation** rotates through k held-out folds and averages the scores, giving a far more stable estimate than a single split.
+- **Data leakage** (tuning on test, preprocessing before split, time-series random folds, duplicates) silently inflates scores. Watch for it.
+
+We now know how to evaluate honestly. But evaluation also means choosing **what** to measure. "Accuracy" is one number, and on imbalanced or asymmetric problems it lies (a 99% accurate fraud detector that flags nothing as fraud is useless). The final lesson of the track covers the right metrics: the confusion matrix, precision, recall, and the ROC curve, which together let you read a classifier's behavior properly and make the movable-threshold tradeoff from lesson 4 precise.

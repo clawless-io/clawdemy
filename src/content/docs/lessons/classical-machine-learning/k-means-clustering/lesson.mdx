@@ -1,0 +1,107 @@
+---
+title: 'Lesson: Grouping without labels: k-means clustering'
+description: "Every model so far needed labels. Clustering drops them: you have data and no answers, and you want to find the natural groups hiding in it. K-means is the workhorse. This lesson walks the assign-and-update loop step by step on a small dataset, shows how to choose the number of clusters, and is honest about when clustering is the right tool and when it will mislead you by inventing groups that are not there."
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+Every model in the first two phases needed an answer key. Someone told it the price of each house or the label on each email, and it learned to reproduce those answers. This phase removes the answer key entirely. You are handed a pile of data with no labels at all, and the question changes: not "what is the answer for this point?" but "what structure is hiding in this data?"
+
+That is **unsupervised learning**, and its most common job is **clustering**: finding the natural groups in unlabeled data. Customers who behave alike, documents on the same topic, pixels of a similar color. The workhorse algorithm for this is k-means, and its appeal is that the whole thing is a short, repeating loop you can run by hand.
+
+## The goal
+
+Given a set of points and a number of clusters *k* that you choose, k-means splits the data into *k* groups so that points within a group are close together and points in different groups are far apart. Each cluster is summarized by its **centroid**, the average position of the points in it. The catch worth flagging up front: you have to pick the cluster count *k* before you start.
+
+## The algorithm: assign, update, repeat
+
+K-means is two steps repeated until nothing changes.
+
+```
+0. Choose k. Place k centroids somewhere (often at random points).
+1. ASSIGN:  put each data point in the cluster of its nearest centroid.
+2. UPDATE:  move each centroid to the average position of its assigned points.
+   Repeat 1 and 2 until the assignments stop changing.
+```
+
+That is the entire method. Assign every point to the closest center, then move each center to the middle of the points that chose it, then reassign, and so on. The centroids drift, step by step, toward the middle of the natural groups, and the process stops when an assignment round changes nothing.
+
+## Worked example: by hand on a line
+
+Take six points on a number line and set *k* to 2:
+
+```
+points: 1, 2, 3, 10, 11, 12
+```
+
+Start with a deliberately poor guess, centroids at 2 and 3, to see the algorithm recover.
+
+```
+ITERATION 1
+  assign (to nearest of 2, 3):
+    1 -> closer to 2 (dist 1 vs 2)      cluster A
+    2 -> closer to 2                    cluster A
+    3 -> closer to 3                    cluster B
+    10, 11, 12 -> closer to 3           cluster B
+  clusters: A = {1, 2},  B = {3, 10, 11, 12}
+  update centroids:
+    A -> mean(1, 2) = 1.5
+    B -> mean(3, 10, 11, 12) = 36 / 4 = 9
+
+ITERATION 2
+  assign (to nearest of 1.5, 9):
+    1, 2, 3 -> closer to 1.5            cluster A
+    10, 11, 12 -> closer to 9           cluster B
+  clusters: A = {1, 2, 3},  B = {10, 11, 12}
+  update centroids:
+    A -> mean(1, 2, 3) = 2
+    B -> mean(10, 11, 12) = 11
+
+ITERATION 3
+  assign (to nearest of 2, 11):  no point changes cluster.  STOP.
+```
+
+Even from a bad start, two rounds were enough. The centroids settled at 2 and 11, the obvious centers of the two groups, and the final clusters are exactly the ones your eye would draw. Notice the only operations were "find the nearest centroid" and "average the assigned points," repeated.
+
+## What it is really minimizing
+
+Under the hood, k-means is optimizing a single quantity: the total squared distance from each point to its own centroid, often called the within-cluster sum of squares (or inertia). It is a measure of how tight the clusters are, smaller meaning tighter. Both steps of the loop only ever lower it: the assign step moves each point to its closest center, and the update step moves each center to the spot that minimizes distance to its points. Because every round reduces this total or leaves it unchanged, the loop is guaranteed to settle rather than wander forever. And this same tightness number is exactly what the elbow method, next, plots against the cluster count *k*.
+
+## Choosing k
+
+K-means makes you commit to a cluster count *k*, but you usually do not know the right number of groups. The common remedy is the **elbow method**: run k-means for *k* equal to 1, 2, 3, and so on, and for each, measure how tight the clusters are (the total spread of points around their centroids). That tightness always improves as *k* grows (more clusters means smaller groups), but there is usually a value of *k* where the improvement suddenly flattens out, an "elbow" in the plot. That bend is a reasonable choice: past it, extra clusters buy you little.
+
+## When clustering is the right tool, and when it lies
+
+Clustering is the tool when you have no labels and want to discover structure: segmenting customers, grouping similar documents, organizing an unlabeled archive, exploring a new dataset. It is exploratory by nature.
+
+But it has a sharp failure mode worth internalizing: **k-means always returns *k* clusters, whether or not real groups exist.** Hand it pure uniform noise and ask for three clusters, and it will confidently carve the noise into three, complete with centroids, as if they meant something. The algorithm cannot tell you whether the groups it found are real; it only finds the best split into the number you demanded. Judging whether clusters are meaningful is your job, not the algorithm's. That is the single most important thing to remember about clustering.
+
+## Limitations to keep in mind
+
+- **You must choose k,** and the choice strongly shapes the result.
+- **It is sensitive to the starting centroids.** A bad initialization can settle into a poor grouping. In practice it is run several times from different starts (and a smarter seeding called k-means++ helps), keeping the best result.
+- **It assumes roughly round, similar-sized clusters.** Elongated, nested, or very unequal groups trip it up, because it judges everything by distance to a center.
+- **It is distance-based, so scale matters.** As with support vector machines, rescale your features first, or the feature with the largest numbers will dominate.
+
+## Why this matters when you use AI
+
+Clustering is the standard first move whenever you face unlabeled data, which is most data. It powers customer segmentation, anomaly grouping, image color quantization, and the organizing of large unlabeled collections. It also connects directly to modern AI: the vector embeddings that language models produce (numeric representations of words, sentences, or documents) are routinely clustered to group items by meaning, so the same assign-and-update loop you just ran by hand is at work behind "find me documents similar to this one." Finding structure without an answer key is a fundamental capability, and k-means is the simplest version of it.
+
+## Common pitfalls
+
+- **Trusting that the clusters are real.** K-means returns *k* groups even in structureless data. Always sanity-check that the clusters mean something.
+- **Picking k carelessly.** The number of clusters is a real decision; use the elbow method or domain knowledge, do not just guess.
+- **Forgetting to scale features.** Distance-based, so unscaled features distort the groups.
+- **Expecting non-round clusters.** K-means draws roughly spherical groups around centers; it struggles with other shapes.
+
+## What you should remember
+
+- **Clustering finds groups in unlabeled data;** k-means is the workhorse.
+- **The loop is assign then update, repeated:** assign each point to its nearest centroid, move each centroid to the mean of its points, until assignments stop changing.
+- **You must choose k,** often with the elbow method, and the result depends on it and on the starting centroids.
+- **K-means always returns k clusters, real or not,** so judging whether they are meaningful is on you.
+
+K-means hands you a flat set of *k* groups and demands you name the cluster count *k* in advance. The next lesson clusters in a completely different way: it builds a whole hierarchy of nested groups, from every point being its own cluster up to one big cluster containing everything, without committing to a number of clusters at all. That is hierarchical clustering, and the tree it produces shows structure at every scale.
