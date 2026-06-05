@@ -14,8 +14,8 @@ import SourceLecture from '../../../../../components/SourceLecture.astro';
 <ReadAlongDim
   src="https://audio.clawdemy.org/lessons/server-side-tools-and-built-ins-lesson.mp3"
   slug="server-side-tools-and-built-ins"
-  cacheVersion="20260605"
-  approxMinutes={21}
+  cacheVersion="20260605b"
+  approxMinutes={20}
 />
 
 <LessonFreshness lastReviewed={frontmatter.last_reviewed} />
@@ -59,7 +59,12 @@ response = client.messages.create(
 )
 ```
 
-Two version strings to know. *web_search_20260209* is the current version with **dynamic filtering** (the model writes code to post-process results before they hit the context window, cutting token spend by often more than half). *web_search_20250305* is the previous version without dynamic filtering. Dynamic filtering uses code execution as the internal substrate; you do not need to declare *code_execution_20260120* separately to get it.
+Two versions of *web_search* matter. The current one adds **dynamic filtering** (the model writes code to post-process results before they hit the context window, cutting token spend by often more than half); the previous one does not. Dynamic filtering uses code execution as the internal substrate, so you do not need to declare *code_execution* separately to get it. The exact version identifiers:
+
+```
+web_search_20260209   current   (dynamic filtering)
+web_search_20250305   previous   (no dynamic filtering)
+```
 
 **Pricing: $10 per 1,000 searches** ($0.01 each), plus standard token costs for the search-generated content. Each web search counts as one use regardless of how many results come back. Errors do not bill.
 
@@ -71,11 +76,11 @@ Two version strings to know. *web_search_20260209* is the current version with *
 
 Run Python and bash in a sandboxed container. The model decides when to execute, writes the code, the platform runs it, results come back in the response. Use for data analysis, calculations, file generation, anything the model needs to actually run rather than reason about.
 
-**Pricing is the key fact.** **Code execution is free when used with *web_search_20260209* or *web_fetch_20260209* in the same request.** When either of those is declared, code-execution tool calls do not carry the per-execution charge beyond standard input and output tokens. Standalone *code_execution_20260120* (without web_search or web_fetch in the request) carries the standard per-execution pricing layer.
+**Pricing is the key fact.** **Code execution is free when used with *web_search* or *web_fetch* in the same request.** When either of those is declared, code-execution tool calls do not carry the per-execution charge beyond standard input and output tokens. Standalone *code_execution* (without web_search or web_fetch in the request) carries the standard per-execution pricing layer.
 
 There are three shapes to recognize:
 
-**Search plus computation, one tool declared.** This is the canonical case from the docs. Declare only *web_search_20260209*; dynamic filtering runs code internally to filter search results and perform the computation:
+**Search plus computation, one tool declared.** This is the canonical case from the docs. Declare only *web_search*; dynamic filtering runs code internally to filter search results and perform the computation:
 
 ```python
 response = client.messages.create(
@@ -86,7 +91,7 @@ response = client.messages.create(
 )
 ```
 
-**Search plus top-level code execution.** If you also want the model to call *code_execution* as a top-level tool for tasks unrelated to filtering search results (plotting, file generation, a calculation that does not flow from search), declare both. The per-execution charge stays waived because *web_search_20260209* is in the request:
+**Search plus top-level code execution.** If you also want the model to call *code_execution* as a top-level tool for tasks unrelated to filtering search results (plotting, file generation, a calculation that does not flow from search), declare both. The per-execution charge stays waived because *web_search* is in the request:
 
 ```python
 tools=[
@@ -95,7 +100,7 @@ tools=[
 ]
 ```
 
-**Computation only, no search.** Declare *code_execution_20260120* alone; standard per-execution pricing applies.
+**Computation only, no search.** Declare *code_execution* alone; standard per-execution pricing applies.
 
 **Not ZDR eligible** (data is retained per the feature's standard retention policy). If your organization has Zero Data Retention requirements, code_execution is the wrong tool. Most applications can use it freely.
 
@@ -103,7 +108,12 @@ tools=[
 
 Retrieve the full content of a specific URL (web page or PDF). Different from *web_search* (which finds pages) in that you give it a URL and it pulls the content. Useful when the model already knows the source (a documentation URL the user shared, a PDF you uploaded).
 
-Two versions: *web_fetch_20260209* is the current version with dynamic filtering; *web_fetch_20250910* is the previous version without. The same pricing rule as web_search applies: code execution is free when *web_fetch_20260209* is in the request (dynamic filtering uses code execution internally; declare *code_execution_20260120* alongside only if your task also needs top-level code execution).
+Two versions of *web_fetch* exist: the current one adds dynamic filtering, the previous one does not. The same pricing rule as web_search applies: code execution is free when the current *web_fetch* is in the request (dynamic filtering uses code execution internally; declare *code_execution* alongside only if your task also needs top-level code execution). The exact version identifiers:
+
+```
+web_fetch_20260209   current   (dynamic filtering)
+web_fetch_20250910   previous   (no dynamic filtering)
+```
 
 ## Anthropic-schema client tools
 
@@ -147,7 +157,7 @@ tools = [
 ]
 ```
 
-**Two variants:** *tool_search_tool_regex_20251119* (Python *re.search* patterns, max 200 characters) and *tool_search_tool_bm25_20251119* (natural-language queries). The regex form is precise; the BM25 form is forgiving.
+**Two variants:** *tool_search_tool_regex* (Python *re.search* patterns, max 200 characters) and *tool_search_tool_bm25* (natural-language queries). The regex form is precise; the BM25 form is forgiving.
 
 **When to reach for it.** The docs are explicit: good use cases are 10+ tools, tool definitions over 10k tokens, selection accuracy issues with large sets, or MCP-powered systems with 200+ tools. Bad use cases are fewer than 10 tools, all of them used frequently, or very small total definitions. The crossover is around 10 tools; below that, standard tool calling is cleaner.
 
@@ -185,16 +195,16 @@ Server tools sometimes loop: the model searches, reads results, decides to searc
 Server tools sit on top of standard token costs. The pieces:
 
 - **Standard tokens**: input + output, billed per model (lesson 3).
-- **Per-tool fee**: web_search at $0.01 per search; code_execution free when used with web_search_20260209 or web_fetch_20260209, standard per-execution pricing otherwise.
+- **Per-tool fee**: web_search at $0.01 per search; code_execution free when used with web_search or web_fetch, standard per-execution pricing otherwise.
 - **Server tool results in context**: search results, code outputs, and fetched pages all count as input tokens on subsequent turns.
 
-The dial: declare *web_search_20260209* and code execution is free (dynamic filtering uses it internally); declare *code_execution_20260120* alongside only when your task also needs top-level code execution; use *max_uses* to cap web_search runaway cost; cache stable tool definitions per lesson 7. The same eval-set discipline from lesson 3 applies: measure whether the server tool actually improves your application's output enough to justify its cost.
+The dial: declare *web_search* and code execution is free (dynamic filtering uses it internally); declare *code_execution* alongside only when your task also needs top-level code execution; use *max_uses* to cap web_search runaway cost; cache stable tool definitions per lesson 7. The same eval-set discipline from lesson 3 applies: measure whether the server tool actually improves your application's output enough to justify its cost.
 
 ## Common pitfalls
 
 **Reaching for a custom client tool when a server tool exists.** Building a web-search wrapper around your own search backend when *web_search* is one declaration away is wasted work for most applications. Use server tools for general capabilities, custom client tools for your domain.
 
-**Reaching for standalone code_execution when web_search_20260209 or web_fetch_20260209 would also be in the request.** The per-execution code-execution charge is waived whenever either is declared. If your task already needs current-information search or page fetch, you get computation for free under the dynamic-filtering substrate; declare *code_execution_20260120* alongside only when the task needs top-level code execution beyond filtering. Pure-computation tasks with no search or fetch declare *code_execution* alone and pay standard pricing.
+**Reaching for standalone code_execution when web_search or web_fetch would also be in the request.** The per-execution code-execution charge is waived whenever either is declared. If your task already needs current-information search or page fetch, you get computation for free under the dynamic-filtering substrate; declare *code_execution* alongside only when the task needs top-level code execution beyond filtering. Pure-computation tasks with no search or fetch declare *code_execution* alone and pay standard pricing.
 
 **Running computer use against a real environment.** Computer use is powerful and unsupervised; in beta, isolated environments are the default discipline. A VM or sandbox, not your desktop or any system with production reach.
 
@@ -215,9 +225,9 @@ The dial: declare *web_search_20260209* and code execution is free (dynamic filt
 ## What you should remember
 
 - **Three categories of Anthropic-provided tools.** Server tools (Anthropic executes: web_search, web_fetch, code_execution); Anthropic-schema client tools (you execute, schema is standard: bash, computer use, memory, text_editor); tool_search (the scale tool for large catalogs).
-- **web_search:** $0.01 per search, real-time results with always-on citations, two versions (20260209 with dynamic filtering, 20250305 without). Optional *max_uses*, *allowed_domains*, *blocked_domains*, *user_location*.
-- **code_execution is free when used with *web_search_20260209* or *web_fetch_20260209*.** Standalone *code_execution_20260120* otherwise. Not ZDR-eligible.
-- **web_fetch** retrieves full content of a specific URL; two versions (*web_fetch_20260209* with dynamic filtering, *web_fetch_20250910* basic); same pricing rule for code_execution applies.
+- **web_search:** $0.01 per search, real-time results with always-on citations, two versions (the current one with dynamic filtering, the previous one without). Optional *max_uses*, *allowed_domains*, *blocked_domains*, *user_location*.
+- **code_execution is free when used with *web_search* or *web_fetch*.** Standalone *code_execution* otherwise. Not ZDR-eligible.
+- **web_fetch** retrieves full content of a specific URL; two versions (a current one with dynamic filtering, a basic one without); same pricing rule for code_execution applies.
 - **Anthropic-schema client tools** (bash, computer use, memory, text_editor) follow the L4 client-tool loop; the schema is standard. Treat them like contractors: minimum access, isolated environment.
 - **Computer use is beta + powerful + high-stakes.** Beta header required. Run in a sandboxed environment, not against real desktop or production.
 - **tool_search** keeps up to 10,000 tools in a catalog; mark each with *defer_loading: true*; the model finds and loads 3-5 per call. Two variants (regex, BM25). Right above ~10 tools; wrong below.
