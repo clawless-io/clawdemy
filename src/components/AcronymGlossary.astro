@@ -1,0 +1,95 @@
+---
+/**
+ * Right-sidebar acronym glossary.
+ *
+ * Auto-detects which acronyms from the global dictionary (src/data/acronyms.ts)
+ * appear on the current page and lists their expansions directly under the
+ * "On this page" table of contents. Build-time, static, no per-lesson config,
+ * no audio impact. Rendered by the PageSidebar override.
+ *
+ * Detection: whole-word, case-sensitive match against the page's raw body.
+ * Hyphens are word boundaries, so "GPT" is found inside "GPT-4V" but "VLM"
+ * inside "CogVLM" is not (correct: that is a product name, not a bare acronym).
+ *
+ * Security: term and expansion are rendered as plain text (Astro escapes
+ * expressions), so a dictionary entry can never inject markup.
+ */
+import { getCollection } from 'astro:content';
+import { ACRONYMS } from '../data/acronyms';
+
+// Kill-switch (CLAUDE.md §3.5): flip to false to remove the glossary from
+// every page at once. The kill-switch path matters more than the enablement
+// path — one constant flip reverts the whole catalog.
+const GLOSSARY_ENABLED = true;
+
+const route = Astro.locals.starlightRoute as any;
+const id: string = route?.id ?? route?.entry?.id ?? '';
+// Starlight blanks `entry.body` in its normalized route data, so read the raw
+// body from the un-normalized collection entry matched by id.
+let body: string = route?.entry?.body ?? '';
+if (GLOSSARY_ENABLED && !body && id) {
+	const all = await getCollection('docs');
+	body = (all.find((e: any) => e.id === id) as any)?.body ?? '';
+}
+
+function firstIndexWholeWord(term: string, text: string): number {
+	const esc = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+	// Letters/digits are "inside a word"; everything else (spaces, hyphens,
+	// punctuation) is a boundary. Case-sensitive by omitting the `i` flag.
+	const re = new RegExp(`(?<![A-Za-z0-9])${esc}(?![A-Za-z0-9])`);
+	return text.search(re);
+}
+
+type Match = { term: string; def: string; at: number };
+let matches: Match[] = [];
+if (GLOSSARY_ENABLED && body) {
+	matches = Object.entries(ACRONYMS)
+		.map(([term, def]) => ({ term, def, at: firstIndexWholeWord(term, body) }))
+		.filter((m) => m.at >= 0)
+		.sort((a, b) => a.at - b.at);
+}
+---
+
+{
+	matches.length > 0 && (
+		<nav class="cw-acronyms" aria-label="Acronyms used on this page">
+			<h2>Acronyms</h2>
+			<ul>
+				{matches.map((m) => (
+					<li>
+						<span class="cw-acronym-term">{m.term}</span>
+						<span class="cw-acronym-def">{m.def}</span>
+					</li>
+				))}
+			</ul>
+		</nav>
+	)
+}
+
+<style>
+	.cw-acronyms {
+		margin-top: 1.5rem;
+		padding-top: 1rem;
+		border-top: 1px solid var(--sl-color-hairline-light);
+	}
+	.cw-acronyms ul {
+		list-style: none;
+		padding: 0;
+		margin: 0;
+	}
+	.cw-acronyms li {
+		margin: 0 0 0.6rem;
+		line-height: 1.3;
+	}
+	.cw-acronym-term {
+		display: block;
+		font-size: var(--sl-text-xs);
+		font-weight: 600;
+		color: var(--sl-color-white);
+	}
+	.cw-acronym-def {
+		display: block;
+		font-size: var(--sl-text-xs);
+		color: var(--sl-color-gray-3);
+	}
+</style>

@@ -3817,6 +3817,10 @@ export default defineConfig({
 				// Adds a legal-links row + parent-company line under Starlight's
 				// default footer (edit-link / last-updated / pagination stay).
 				Footer: './src/components/Footer.astro',
+				// Adds an auto-detected acronym glossary under the right-rail
+				// table of contents. See src/components/overrides/PageSidebar.astro
+				// + src/data/acronyms.ts.
+				PageSidebar: './src/components/overrides/PageSidebar.astro',
 			},
 			// Pagefind index built at build time via package.json build script.
 			// Starlight surfaces it as the search UI.
