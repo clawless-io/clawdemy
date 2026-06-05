@@ -49,6 +49,7 @@ export const collections = {
 						'generative-models-and-diffusion', // Track 19: Stanford CS236 + Berkeley CS294-158
 						'deep-reinforcement-learning', // Track 18: Berkeley CS285 (Sergey Levine)
 						'building-with-claude', // Track 22: Building with Claude (Anthropic docs)
+						'ai-safety-and-alignment', // Track 23: AI Safety, Ethics and Society (CAIS / Hendrycks)
 					])
 					.optional(),
 				course: z.string().optional(),
@@ -154,6 +155,10 @@ export const collections = {
 						'augmentation-patterns',
 						'agent-patterns',
 						'production',
+						// Track 23 (AI Safety, Ethics and Society — CAIS)
+						'the-risks-landscape',
+						'safety-and-alignment',
+						'ethics-and-governance',
 					])
 					.optional(),
 				phase_order: z.number().int().positive().optional(),

@@ -3476,6 +3476,137 @@ export default defineConfig({
 					],
 				},
 				{
+					label: 'Track 23: AI Safety and Alignment',
+					items: [
+						{
+							label: 'Phase 1\nThe risks landscape',
+							collapsed: true,
+							items: [
+								{
+									label: 'AI safety as a field',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/ai-safety-and-alignment/ai-safety-as-a-field/brief' },
+										{ label: 'Lesson', slug: 'lessons/ai-safety-and-alignment/ai-safety-as-a-field/lesson' },
+										{ label: 'Practice', slug: 'lessons/ai-safety-and-alignment/ai-safety-as-a-field/practice' },
+										{ label: 'Summary', slug: 'lessons/ai-safety-and-alignment/ai-safety-as-a-field/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/ai-safety-and-alignment/ai-safety-as-a-field/cheatsheet' },
+										{ label: 'References', slug: 'lessons/ai-safety-and-alignment/ai-safety-as-a-field/references' },
+									],
+								},
+								{
+									label: 'The four catastrophic risk categories',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/ai-safety-and-alignment/four-catastrophic-risk-categories/brief' },
+										{ label: 'Lesson', slug: 'lessons/ai-safety-and-alignment/four-catastrophic-risk-categories/lesson' },
+										{ label: 'Practice', slug: 'lessons/ai-safety-and-alignment/four-catastrophic-risk-categories/practice' },
+										{ label: 'Summary', slug: 'lessons/ai-safety-and-alignment/four-catastrophic-risk-categories/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/ai-safety-and-alignment/four-catastrophic-risk-categories/cheatsheet' },
+										{ label: 'References', slug: 'lessons/ai-safety-and-alignment/four-catastrophic-risk-categories/references' },
+									],
+								},
+							],
+						},
+						{
+							label: 'Phase 2\nSafety and alignment',
+							collapsed: true,
+							items: [
+								{
+									label: 'Monitoring and robustness',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/ai-safety-and-alignment/monitoring-and-robustness/brief' },
+										{ label: 'Lesson', slug: 'lessons/ai-safety-and-alignment/monitoring-and-robustness/lesson' },
+										{ label: 'Practice', slug: 'lessons/ai-safety-and-alignment/monitoring-and-robustness/practice' },
+										{ label: 'Summary', slug: 'lessons/ai-safety-and-alignment/monitoring-and-robustness/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/ai-safety-and-alignment/monitoring-and-robustness/cheatsheet' },
+										{ label: 'References', slug: 'lessons/ai-safety-and-alignment/monitoring-and-robustness/references' },
+									],
+								},
+								{
+									label: 'The alignment problem',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/ai-safety-and-alignment/the-alignment-problem/brief' },
+										{ label: 'Lesson', slug: 'lessons/ai-safety-and-alignment/the-alignment-problem/lesson' },
+										{ label: 'Practice', slug: 'lessons/ai-safety-and-alignment/the-alignment-problem/practice' },
+										{ label: 'Summary', slug: 'lessons/ai-safety-and-alignment/the-alignment-problem/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/ai-safety-and-alignment/the-alignment-problem/cheatsheet' },
+										{ label: 'References', slug: 'lessons/ai-safety-and-alignment/the-alignment-problem/references' },
+									],
+								},
+								{
+									label: 'Safety engineering',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/ai-safety-and-alignment/safety-engineering/brief' },
+										{ label: 'Lesson', slug: 'lessons/ai-safety-and-alignment/safety-engineering/lesson' },
+										{ label: 'Practice', slug: 'lessons/ai-safety-and-alignment/safety-engineering/practice' },
+										{ label: 'Summary', slug: 'lessons/ai-safety-and-alignment/safety-engineering/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/ai-safety-and-alignment/safety-engineering/cheatsheet' },
+										{ label: 'References', slug: 'lessons/ai-safety-and-alignment/safety-engineering/references' },
+									],
+								},
+								{
+									label: 'Complex systems and emergent risk',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/ai-safety-and-alignment/complex-systems/brief' },
+										{ label: 'Lesson', slug: 'lessons/ai-safety-and-alignment/complex-systems/lesson' },
+										{ label: 'Practice', slug: 'lessons/ai-safety-and-alignment/complex-systems/practice' },
+										{ label: 'Summary', slug: 'lessons/ai-safety-and-alignment/complex-systems/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/ai-safety-and-alignment/complex-systems/cheatsheet' },
+										{ label: 'References', slug: 'lessons/ai-safety-and-alignment/complex-systems/references' },
+									],
+								},
+							],
+						},
+						{
+							label: 'Phase 3\nEthics and governance',
+							collapsed: true,
+							items: [
+								{
+									label: 'Beneficial AI and machine ethics',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/ai-safety-and-alignment/beneficial-ai-and-machine-ethics/brief' },
+										{ label: 'Lesson', slug: 'lessons/ai-safety-and-alignment/beneficial-ai-and-machine-ethics/lesson' },
+										{ label: 'Practice', slug: 'lessons/ai-safety-and-alignment/beneficial-ai-and-machine-ethics/practice' },
+										{ label: 'Summary', slug: 'lessons/ai-safety-and-alignment/beneficial-ai-and-machine-ethics/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/ai-safety-and-alignment/beneficial-ai-and-machine-ethics/cheatsheet' },
+										{ label: 'References', slug: 'lessons/ai-safety-and-alignment/beneficial-ai-and-machine-ethics/references' },
+									],
+								},
+								{
+									label: 'Collective action and multi-agent dynamics',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/ai-safety-and-alignment/collective-action-and-multi-agent-dynamics/brief' },
+										{ label: 'Lesson', slug: 'lessons/ai-safety-and-alignment/collective-action-and-multi-agent-dynamics/lesson' },
+										{ label: 'Practice', slug: 'lessons/ai-safety-and-alignment/collective-action-and-multi-agent-dynamics/practice' },
+										{ label: 'Summary', slug: 'lessons/ai-safety-and-alignment/collective-action-and-multi-agent-dynamics/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/ai-safety-and-alignment/collective-action-and-multi-agent-dynamics/cheatsheet' },
+										{ label: 'References', slug: 'lessons/ai-safety-and-alignment/collective-action-and-multi-agent-dynamics/references' },
+									],
+								},
+								{
+									label: 'AI governance',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/ai-safety-and-alignment/ai-governance/brief' },
+										{ label: 'Lesson', slug: 'lessons/ai-safety-and-alignment/ai-governance/lesson' },
+										{ label: 'Practice', slug: 'lessons/ai-safety-and-alignment/ai-governance/practice' },
+										{ label: 'Summary', slug: 'lessons/ai-safety-and-alignment/ai-governance/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/ai-safety-and-alignment/ai-governance/cheatsheet' },
+										{ label: 'References', slug: 'lessons/ai-safety-and-alignment/ai-governance/references' },
+									],
+								},
+							],
+						},
+					],
+				},
+				{
 					label: 'Track 24: Multimodal AI',
 					items: [
 						{

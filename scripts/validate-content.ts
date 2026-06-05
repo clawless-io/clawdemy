@@ -153,6 +153,7 @@ const BLOOM_VERBS = [
 	'dispatch',
 	'submit',
 	'log',
+	'propose', // Track 23 (AI Safety) — Create-level Bloom verb
 	// Track 4 (Visual Math: Linear Algebra) domain verbs, added 2026-05-30
 	'translate', // Understand: move a vector between arrow and coordinate forms
 	'represent', // Understand: represent a polynomial as a coordinate vector
@@ -310,6 +311,12 @@ const TRACK_22_PHASE_SLUGS = [
 	'production',
 ] as const;
 
+const TRACK_23_PHASE_SLUGS = [
+	'the-risks-landscape',
+	'safety-and-alignment',
+	'ethics-and-governance',
+] as const;
+
 const PHASE_SLUGS = [
 	...TRACK_5_PHASE_SLUGS,
 	...TRACK_6_PHASE_SLUGS,
@@ -330,6 +337,7 @@ const PHASE_SLUGS = [
 	...TRACK_19_PHASE_SLUGS,
 	...TRACK_18_PHASE_SLUGS,
 	...TRACK_22_PHASE_SLUGS,
+	...TRACK_23_PHASE_SLUGS,
 ] as const;
 
 const BriefSchema = z.object({
@@ -363,6 +371,7 @@ const BriefSchema = z.object({
 		'generative-models-and-diffusion',
 		'deep-reinforcement-learning',
 		'building-with-claude',
+		'ai-safety-and-alignment',
 	]),
 	difficulty: z.enum(['intro', 'standard', 'deep']),
 	estimated_read_minutes: z.number().int().positive(),

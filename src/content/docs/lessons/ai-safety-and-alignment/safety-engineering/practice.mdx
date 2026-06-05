@@ -1,0 +1,137 @@
+---
+title: "Practice: safety engineering for AI systems"
+description: "Three exercises: pick-a-tool-and-constrain-a-decision on a real-shaped deployment, compute composed reliability with worked nines arithmetic, distinguish thin-tailed from long-tailed risk on five domains. Plus 10 flashcards anchoring the chapter's vocabulary."
+track: ai-safety-and-alignment
+order: 5
+phase: safety-and-alignment
+phase_order: 3
+difficulty: deep
+estimated_practice_minutes: 16
+prerequisites:
+  - lessons/ai-safety-and-alignment/safety-engineering/lesson
+authors:
+  - clawdemy
+published_at: 2026-06-04
+last_reviewed: 2026-06-04
+status: draft
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+tableOfContents: false
+---
+
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+import Flashcard from '../../../../../components/Flashcard.astro';
+
+## Exercise 1: pick a tool, constrain a decision
+
+You are the safety lead for the following deployment. Pick one tool from Hendrycks Ch 4 (defense in depth, nines of reliability, FMEA, separation of duties, least privilege, fail-safe defaults, antifragility, transparency, or any other Ch 4 instrument). Use it to constrain one specific deployment decision. Write three sentences: (1) the tool you picked, (2) the deployment decision it constrains, (3) the constraint itself stated as a "ship/do-not-ship" or "build/do-not-build" criterion.
+
+**Deployment scenario:**
+
+> Your team is deploying an AI-driven legal-document-review assistant for a mid-size corporate-law firm. The system reads contracts and surfaces potentially problematic clauses for human attorney review. The intended workflow is: AI flags clauses; attorney reviews flags; attorney signs off. The deployment will run on 50 to 200 documents per day across roughly 15 attorneys. Failures in scope: missed problematic clauses (false negatives), excessive flagging (false positives), hallucinated clause text or fabricated citations.
+
+Do the exercise. Two example answers below for reference, not as the canonical correct answers (the point is to do the move yourself).
+
+### Example answer (defense in depth)
+
+> Tool: defense in depth. Decision: whether the AI's flagging output is the only signal attorneys see. Constraint: do not ship with the AI as a single layer; require at least two additional layers: (a) a structured checklist the attorney completes on each document regardless of AI flags, and (b) a periodic sampling audit where flagged documents are independently reviewed by a different attorney than the original signer-off. The composition is the safety case; the AI alone, even at 99 percent flag-recall, leaves a one-in-a-hundred miss rate that no individual attorney can compensate for at a 50-document-per-day pace.
+
+### Example answer (fail-safe defaults)
+
+> Tool: fail-safe defaults. Decision: how the system behaves when its confidence on a clause is below a threshold or when the document type is one it has not seen before. Constraint: do not ship the default-to-no-flag behavior; require the system to default to flagging anything below confidence threshold or any unfamiliar document type, and to surface this default-flag-state to the attorney explicitly. The cost is more attorney review time on low-information cases; the benefit is that an unfamiliar document type does not silently pass through unflagged.
+
+## Exercise 2: compute composed reliability
+
+You are designing a three-layer safety stack for the legal-document-review assistant above. Each layer has an independent recall rate (proportion of true problematic clauses it catches). The three layers:
+
+- Layer A: AI flagging at 95 percent recall
+- Layer B: Attorney checklist review at 90 percent recall  
+- Layer C: Periodic independent sampling audit at 80 percent recall (samples 20 percent of flagged documents at random)
+
+For a problematic clause to escape all three layers, it must be missed by Layer A AND missed by Layer B AND either not sampled by Layer C OR missed by Layer C. Compute:
+
+1. The probability a problematic clause is missed by Layers A and B together (assuming independence).
+2. The probability a clause that has been missed by A and B is then either not sampled or missed by Layer C.
+3. The combined miss-through-all-three-layers probability.
+4. The corresponding nines of reliability for the composed system.
+
+### Worked answer
+
+1. Miss-A AND Miss-B: (1 - 0.95) × (1 - 0.90) = 0.05 × 0.10 = 0.005 (one in 200)
+2. Layer C catches a randomly-sampled flagged document with probability 0.80, but only samples 20 percent of flagged documents. A clause already missed by A is not flagged, so it is not in C's sampling pool. C's contribution to catching it is effectively zero on the *missed-by-A* path.
+3. So the combined miss probability is just the Layer A miss × Layer B miss probability: 0.005 (one in 200).
+4. Reliability is 1 - 0.005 = 0.995. Nines = -log(1 - 0.995) = -log(0.005) ≈ 2.30 nines.
+
+The exercise illustrates a non-obvious result: Layer C does not help on the failure path that matters, because it sits downstream of a flag that did not happen. The Swiss-cheese composition rule depends on the layers being *independent* AND on each layer being able to catch the failure mode being analyzed. A layer that operates only on flagged documents cannot catch a missed flag. The fix is structural: build the audit layer to sample from a population that includes unflagged documents too, or insert a layer that operates independently of the AI's flag decision.
+
+This is the operational version of what L3 named in the abstract: a layer is only useful if its holes do not line up with the holes in the layers it depends on.
+
+## Exercise 3: thin-tailed vs long-tailed
+
+For each of the following deployment domains, decide whether the failure distribution is thin-tailed (impact concentrated in many small events) or long-tailed (impact dominated by rare catastrophic events). Give one sentence of reasoning per.
+
+1. Spam-filter false positives in a consumer email service
+2. Autonomous-vehicle decisions in dense urban traffic
+3. AI-driven content recommendation on a video platform
+4. AI-assisted clinical diagnostics in primary care
+5. AI-generated code suggestions in a developer IDE
+
+### Answer key
+
+1. **Thin-tailed.** Many small annoyances (one missed email, one false flag); no single false positive produces catastrophic impact. The total annual cost is roughly proportional to the count of false positives times a roughly-constant per-event cost.
+
+2. **Long-tailed.** Most decisions are routine and low-impact; rare decisions (collision-imminent situations) carry impact that dwarfs the routine total. Tail risk dominates expected harm; the safety case has to be built around the tail, not the mean.
+
+3. **Mixed leaning long-tailed at population scale.** Per-recommendation impact is thin-tailed (any single recommendation is small); aggregate-population effects can be long-tailed (rare cascading harms like extremism amplification or sleep-disruption-at-scale dominate the total societal cost). The mixed character is why content-recommendation safety is harder to reason about than spam filtering.
+
+4. **Long-tailed.** Most diagnostic decisions are routine; rare missed diagnoses of serious conditions (cancer, sepsis) carry impact that dwarfs the routine total. The safety case must address the tail; mean-accuracy reporting is misleading.
+
+5. **Mixed, depends on what the code is doing.** Code suggestions for routine boilerplate are thin-tailed (a wrong suggestion is annoying, the developer catches it). Code suggestions for security-critical or high-stakes infrastructure are long-tailed (a wrong suggestion that makes it into production can produce disproportionate impact). The deployment context determines the tail shape; the same model is in different risk regimes depending on the code being written.
+
+The exercise teaches the operational move: before doing safety analysis on a deployment, decide what tail shape the risk has, because the analysis tools are different. Long-tailed risks need explicit tail planning (worst-plausible-outcome scenarios, tail-event response protocols) that thin-tailed risks do not.
+
+## Flashcards
+
+<FlashcardSet>
+  <Flashcard question="What is the implicit argument of Hendrycks Ch 4 (Safety Engineering)?">
+    A field that needed sixty years to build aviation systems with the failure rates we expect today is a field whose tools were paid for. AI safety is sixty years younger and is not obligated to rediscover defense in depth, fail-safe defaults, or the nines of reliability metric. The honest move is to read what predecessor fields wrote and ask which tools transfer. Chapter 4 does this borrowing explicitly.
+  </Flashcard>
+
+  <Flashcard question="Why are safety-engineering tools transferable to AI even when the technology is different?">
+    Three reasons. They target system-level failure rather than component-level correctness (the level survives technology change). They assume human operators are part of the system (the operator-as-part-of-system framing transfers). They are probabilistic rather than deterministic (the honest version of AI safety is also probabilistic).
+  </Flashcard>
+
+  <Flashcard question="What is the nines of reliability metric, and what is the formula?">
+    A system's nines of reliability indicate the number of consecutive nines at the beginning of its percentage reliability. 99 percent = one nine, 99.9 percent = two nines, 99.99 percent = three nines. Formula: k = -log(1 - p), where p is reliability probability. Key property: an additional nine of reliability means a tenfold increase in expected operations between failures.
+  </Flashcard>
+
+  <Flashcard question="Why does the logarithmic scaling of nines matter operationally?">
+    Because a one-percentage-point improvement is worth very different amounts of safety work depending on starting point. Going from 62 to 63 percent is roughly 0.012 nines (negligible). Going from 98 to 99 percent is 0.301 nines (about twenty-five times more meaningful). Going from 99.9 to 99.99 percent is one full nine (a hundred times more meaningful). The metric formalizes what safety engineers feel: percentage points at the tail are worth more than percentage points in the middle.
+  </Flashcard>
+
+  <Flashcard question="Name Hendrycks' eight safe-design principles (Ch 4.4).">
+    Redundancy (duplicate critical components), separation of duties (distribute critical functions across different actors), least privilege (restrict access to only what is needed), fail-safe defaults (auto-move to safe state on failure), defense in depth (multiple protective layers addressing the same risk in different ways), antifragility (systems that learn from failures), negative feedback mechanisms (self-correction toward stability), transparency (clear information enabling informed decisions and oversight).
+  </Flashcard>
+
+  <Flashcard question="What is defense in depth, and why is it the centerpiece of the safe-design principles?">
+    Multiple protective layers that address the same risk in different ways. The chapter example: boat-travel safety involves checking vessel condition, learning to swim, and wearing a lifejacket; any one is insufficient. It is the centerpiece because the Swiss-cheese composition rule (imperfect layers compose into a useful safety property because their holes do not line up) is the operational form of the principle. Robustness, monitoring, alignment, governance are all slices in a defense-in-depth stack.
+  </Flashcard>
+
+  <Flashcard question="What is the Swiss-cheese composition rule, and what makes it work?">
+    Each safety layer is a slice with holes; the layers are useful because their holes do not line up. Stacking imperfect layers can produce a system with much higher reliability than any individual layer: three layers each catching 99 percent of failure cases, if independent, produce six nines (one in a million). The rule depends on independence; layers whose holes are correlated do not compose this way. Diversity in defense (different teams, different methods, different signals) matters more than depth in any one defense.
+  </Flashcard>
+
+  <Flashcard question="What is the difference between thin-tailed and long-tailed risk distributions?">
+    Thin-tailed: impact concentrated in many small events; total harm is roughly proportional to event count. Example from the chapter: shark attacks. Long-tailed: rare catastrophic events dominate expected impact; the size of the largest plausible event grows roughly without bound. Example: wildfires. Most safety-critical systems (nuclear, aviation, AI) are long-tailed; planning for the mean misses the dominant source of total loss.
+  </Flashcard>
+
+  <Flashcard question="What is the difference between a tail event and a black swan in Hendrycks' usage?">
+    A tail event is a rare, high-impact event in a long-tailed distribution; we know the event class exists and can plan for it even if probability estimates are unreliable. A black swan is a tail event that was also unforeseen in kind; the event class was not catalogued before the event. Wildfires are tail events but not black swans. A novel AI failure mode not yet appearing in the literature is a candidate black swan. The chapter does not recommend predicting black swans; it recommends building systems whose response to surprise is structured (antifragility).
+  </Flashcard>
+
+  <Flashcard question="What is the L5 capability in four parts?">
+    (1) Borrow one safety-engineering tool from Ch 4 and use it to constrain a specific AI deployment decision. (2) Compute or estimate nines of reliability for a system given failure rate; explain what an additional nine costs. (3) Distinguish thin-tailed from long-tailed risk distributions across deployment domains. (4) Apply Swiss-cheese composition: name three independent layers for a deployment and explain why composition is more reliable than any individual layer.
+  </Flashcard>
+</FlashcardSet>
