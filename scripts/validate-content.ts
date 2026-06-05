@@ -127,6 +127,8 @@ const BLOOM_VERBS = [
 	'publish',
 	'place',
 	'situate',
+	'send', // Track 1 (Getting Started) — Apply-level hands-on product action
+	'switch', // Track 1 (Getting Started) — Apply-level hands-on product action
 	'map',
 	'ship',
 	'avoid',
