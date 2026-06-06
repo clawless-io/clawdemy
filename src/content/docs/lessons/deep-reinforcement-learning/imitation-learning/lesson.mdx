@@ -9,17 +9,17 @@ sidebar:
 
 The last lesson introduced reinforcement learning as the third major regime of machine learning. Before we build any RL algorithm proper, it is worth asking a quieter question: do we even need to? If you have access to an expert, a human driver, a chess grandmaster, a skilled robot operator, can you simply *copy* what they do, by treating their demonstrations as labels? That is **imitation learning**, and its most direct form is **behavioral cloning** (BC). It is the simplest approach to producing a policy, and the way it fails is what motivates the rest of the track.
 
-This lesson walks through BC, the reason it is structurally tempting, the quantitative reason it fails (errors compound across long trajectories, an O(epsilon T squared) blow-up), and the standard fix called **DAgger** that brings it back down to O(epsilon T). By the end you will see why imitation learning is both the right place to start a deep-RL course *and* the right place to leave.
+This lesson walks through BC, the reason it is structurally tempting, the quantitative reason it fails (errors compound across long trajectories, an order epsilon T squared blow-up), and the standard fix called **DAgger** that brings it back down to order epsilon T. By the end you will see why imitation learning is both the right place to start a deep-RL course *and* the right place to leave.
 
 ## The setup: an expert and a dataset
 
-Start with a concrete picture. A human driver demonstrates safe driving for ten hours. Sensors on the car record, at each timestep, the **state** s_t (camera frames, lidar, speed, GPS) and the **action** a_t* the human took (steering angle, throttle, brake). After ten hours at 30 frames per second you have a dataset:
+Start with a concrete picture. A human driver demonstrates safe driving for ten hours. Sensors on the car record, at each timestep, the **state** (camera frames, lidar, speed, GPS) and the expert **action** the human took (steering angle, throttle, brake). After ten hours at 30 frames per second you have a dataset:
 
 ```
 D = { (s_1, a_1*), (s_2, a_2*), ..., (s_N, a_N*) }    with N ≈ 1,080,000
 ```
 
-This is the kind of dataset supervised learning was designed for. Train a neural network the policy parameterized by theta(s) to predict the action given the state, by minimizing a standard supervised loss (cross-entropy for discrete actions, mean squared error for continuous). That trained network is your **policy**: feed it the current state, get back an action.
+This is the kind of dataset supervised learning was designed for. Train a neural network the policy parameterized by theta to predict the action given the state, by minimizing a standard supervised loss (cross-entropy for discrete actions, mean squared error for continuous). That trained network is your **policy**: feed it the current state, get back an action.
 
 ```
 θ* = argmin_θ  Σ over (s, a*) in D of  L( π_θ(s),  a* )
@@ -42,18 +42,16 @@ These are not small advantages. For tasks with abundant expert demonstrations an
 
 Here is the failure mode, and it is the central reason genuine RL exists.
 
-The expert demonstrations come from one distribution of states: the states the *expert* visits while driving well. Call this distribution p_expert(s). The learned policy, no matter how well trained, will make occasional small errors: it steers a touch too left, brakes a touch too late. Each such error puts the car in a slightly different state than the one the expert would have been in. Over time, those small errors compound:
+The expert demonstrations come from one distribution of states: the states the *expert* visits while driving well. Call this distribution p-expert. The learned policy, no matter how well trained, will make occasional small errors: it steers a touch too left, brakes a touch too late. Each such error puts the car in a slightly different state than the one the expert would have been in. Over time, those small errors compound:
 
 1. Step 1: the policy makes a small steering error. The car is slightly off the expert's lane center.
 2. Step 2: that off-center state is *not in the training distribution* (the expert never drifted out of lane), so the policy is now making decisions in states it was never trained on. It makes a *bigger* error.
 3. Step 3: the bigger error puts the car further off-distribution. The policy's behavior gets worse.
 4. ... and so on.
 
-The training distribution is p_expert(s); the *test* distribution (the states the policy actually visits) is p_policy(s). These two distributions disagree, and they disagree *more* the longer the trajectory runs. This is called **distribution shift** (or **covariate shift**). In supervised learning you assume training and test data come from the same distribution; in behavioral cloning, the policy you trained *creates* the distribution it is then tested on, and they drift apart.
+The training distribution is p-expert; the *test* distribution (the states the policy actually visits) is p-policy. These two distributions disagree, and they disagree *more* the longer the trajectory runs. This is called **distribution shift** (or **covariate shift**). In supervised learning you assume training and test data come from the same distribution; in behavioral cloning, the policy you trained *creates* the distribution it is then tested on, and they drift apart.
 
-{/* DIAGRAM PLACEHOLDER: a road from above with the expert's trajectory hugging the lane center as a tight band, and the BC policy's trajectory starting near the center and diverging steadily outward, with the off-lane states marked as "not in training data" */}
-
-## The quantitative bound: O(epsilon T squared) versus O(epsilon T)
+## The quantitative bound: order epsilon T squared versus order epsilon T
 
 The intuition above can be made precise. Suppose your trained policy disagrees with the expert on a fraction epsilon of the training-distribution states (its **per-step error rate** on the expert's distribution). What is the expected number of mistakes the policy makes when actually rolled out for T steps?
 
@@ -63,9 +61,9 @@ The classical result (Ross and Bagnell, 2010): in the worst case, the expected n
 total mistakes  =  O( ε · T² )
 ```
 
-That T², the **quadratic** dependence on trajectory length, is the failure mode written down. Each small per-step error has a chance of putting the agent in an off-distribution state, where it will likely make another mistake, putting it further off-distribution, and so on. The number of mistakes grows faster than linearly in the episode length.
+That T squared, the **quadratic** dependence on trajectory length, is the failure mode written down. Each small per-step error has a chance of putting the agent in an off-distribution state, where it will likely make another mistake, putting it further off-distribution, and so on. The number of mistakes grows faster than linearly in the episode length.
 
-**Plug in numbers.** Suppose epsilon = 0.01 (1% per-step error rate on the expert's distribution; quite good for a deep model) and T = 200 (a short episode). The worst-case BC bound is 0.01 · 200² = 400 mistakes over 200 steps, which is to say the bound is not informative once a mistake puts the agent into the off-distribution regime where things compound. If T = 1000, the bound balloons to 10,000. The lesson is qualitative: BC's worst-case performance gets dramatically worse the longer you ask it to act, even with a very accurate per-step model.
+**Plug in numbers.** Suppose epsilon = 0.01 (1% per-step error rate on the expert's distribution; quite good for a deep model) and T = 200 (a short episode). The worst-case BC bound is 0.01 times 200 squared, which is 400 mistakes over 200 steps, which is to say the bound is not informative once a mistake puts the agent into the off-distribution regime where things compound. If T = 1000, the bound balloons to 10,000. The lesson is qualitative: BC's worst-case performance gets dramatically worse the longer you ask it to act, even with a very accurate per-step model.
 
 Compare with an algorithm that has access to corrective data from the policy's own state distribution. The bound becomes
 
@@ -77,7 +75,7 @@ Linear in T. With the same epsilon = 0.01 and T = 200, that is at most 2 mistake
 
 ## DAgger: the standard fix
 
-The simplest algorithm that achieves the O(epsilon T) bound is **DAgger** (Dataset Aggregation), Ross, Gordon, and Bagnell, 2011. The recipe is iterative and intuitive:
+The simplest algorithm that achieves the order epsilon T bound is **DAgger** (Dataset Aggregation), Ross, Gordon, and Bagnell, 2011. The recipe is iterative and intuitive:
 
 1. Train an initial policy the first policy by behavioral cloning on the expert's dataset D_1.
 2. **Run the first policy in the environment** to collect a trajectory of states the policy actually visits, including the off-distribution ones it drifts into.
@@ -85,7 +83,7 @@ The simplest algorithm that achieves the O(epsilon T) bound is **DAgger** (Datas
 4. Add those new (state, expert action) pairs to the dataset, forming D_2 as the union of D_1 with the new pairs.
 5. Retrain on D_2 to get the second policy. Repeat from step 2.
 
-The crucial difference from BC: the dataset eventually contains states from p_policy(s), not just p_expert(s). The policy learns to recover from its own mistakes, because it now has expert labels at the states it tends to drift into. The compounding stops.
+The crucial difference from BC: the dataset eventually contains states from p-policy, not just p-expert. The policy learns to recover from its own mistakes, because it now has expert labels at the states it tends to drift into. The compounding stops.
 
 DAgger's cost is access to the expert: the expert must be available to label every batch of new policy-visited states, which is fine when the expert is a planner running in simulation, awkward when the expert is a human driver. The practical workarounds (have the human disengage and correct only when the policy errs, use a privileged simulator-only policy as the expert) are an active area of research, but the core idea is what matters here: the only general fix for BC's distribution shift is to get training signal from the policy's own state distribution.
 
@@ -111,17 +109,17 @@ And in robotics, every paper that claims a robot has "learned" a manipulation sk
 
 **Thinking BC is "supervised learning, end of story."** It is supervised learning *during training*, but at deployment the policy itself creates the test distribution, and that distribution disagrees with the training distribution by an amount that grows with episode length. The supervised assumption (train and test from one distribution) is broken at exactly the place that matters.
 
-**Mistaking a low training loss for a working policy.** A BC policy can achieve near-zero loss on the expert's data and still fail catastrophically in deployment, because near-zero loss on p_expert(s) says nothing about behavior on p_policy(s). Evaluate on rollouts, not on held-out expert-distribution samples.
+**Mistaking a low training loss for a working policy.** A BC policy can achieve near-zero loss on the expert's data and still fail catastrophically in deployment, because near-zero loss on p-expert says nothing about behavior on p-policy. Evaluate on rollouts, not on held-out expert-distribution samples.
 
 **Confusing imitation with reinforcement.** Imitation copies an expert; it does not optimize a reward. A behavioral-cloned agent is bounded by the expert's performance (it cannot, in general, exceed the demonstrator) and inherits any of the expert's biases. RL can in principle do better than any demonstrator, given a reward that is honestly specified.
 
-**Underestimating DAgger's cost.** DAgger gives O(epsilon T), but requires the expert to label every batch of policy-visited states. In domains where the expert is a human, that labeling cost can dwarf the original demonstration cost. The practical algorithms most labs use are compromises (interactive correction, mixed BC+RL, learned reward models that approximate the expert's preferences); they all derive from the same recognition that BC's distribution shift needs an answer.
+**Underestimating DAgger's cost.** DAgger gives order epsilon T, but requires the expert to label every batch of policy-visited states. In domains where the expert is a human, that labeling cost can dwarf the original demonstration cost. The practical algorithms most labs use are compromises (interactive correction, mixed BC+RL, learned reward models that approximate the expert's preferences); they all derive from the same recognition that BC's distribution shift needs an answer.
 
 ## What you should remember
 
-- **Behavioral cloning is supervised learning on (state, expert action) pairs.** Train a policy the policy parameterized by theta(s) to predict the expert's action by minimizing a standard supervised loss on the expert dataset. No reward, no environment interaction, no exploration during training.
-- **BC fails because of distribution shift.** Small per-step errors put the policy in states the expert never visited; the policy was never trained there; it makes bigger errors; it drifts further. The dataset is from p_expert(s); the test distribution is p_policy(s); they disagree, and they disagree more the longer the trajectory runs.
-- **The quantitative bound:** BC's expected mistakes scale as O(epsilon T squared) in trajectory length T (quadratic), where epsilon is the per-step error rate. DAgger (which trains on states the policy actually visits, with expert labels) brings this down to O(epsilon T) (linear). At epsilon = 0.01 and T = 200, the worst-case BC bound is 400 mistakes; DAgger's is 2.
+- **Behavioral cloning is supervised learning on (state, expert action) pairs.** Train a policy the policy parameterized by theta to predict the expert's action by minimizing a standard supervised loss on the expert dataset. No reward, no environment interaction, no exploration during training.
+- **BC fails because of distribution shift.** Small per-step errors put the policy in states the expert never visited; the policy was never trained there; it makes bigger errors; it drifts further. The dataset is from p-expert; the test distribution is p-policy; they disagree, and they disagree more the longer the trajectory runs.
+- **The quantitative bound:** BC's expected mistakes scale as order epsilon T squared in trajectory length T (quadratic), where epsilon is the per-step error rate. DAgger (which trains on states the policy actually visits, with expert labels) brings this down to order epsilon T (linear). At epsilon = 0.01 and T = 200, the worst-case BC bound is 400 mistakes; DAgger's is 2.
 - **BC is the right starting point, and the wrong final answer for long horizons.** It works for short, error-tolerant tasks with abundant expert data (and is most of LLM supervised fine-tuning). It fails for long-horizon, error-sensitive tasks (driving, surgery, multi-step agentic behavior), and the fix is either DAgger-style on-policy correction or genuine reinforcement learning, which is the rest of this track.
 
 The next lesson goes back to first principles: the formal language of states, actions, rewards, and policies that lets us state precisely what the agent is trying to do. **Markov decision processes**, returns, value functions, and the Bellman idea that organizes all of classical and deep RL.

@@ -7,14 +7,14 @@ sidebar:
   label: Lesson
 ---
 
-The last lesson ended with REINFORCE working but high-variance: on the sigmoid bandit at theta = 0, the single-sample gradient had expectation 0.25 and standard deviation also 0.25, a signal-to-noise ratio of exactly 1. The natural fix is the one the baseline trick already pointed at: subtract a function of the state that cancels the predictable part of the return, leaving a lower-variance "how much better was this action than expected" signal. **Actor-critic** methods make that baseline a learned object, the **critic**, trained alongside the policy (the **actor**). On our bandit they will take the variance from 0.0625 all the way to **zero** with the optimal baseline; in practice the critic is approximated and the **MC actor-critic update remains unbiased** for any state-only V_phi (the baseline identity holds regardless of critic error), with the critic's error costing un-cancelled variance rather than bias. Bias appears once you bootstrap (TD, n-step, GAE with lambda\<1). The bias-variance trade is the central design choice in the actor-critic family, and getting it right is what nearly every modern deep-RL algorithm (A2C, A3C, SAC, PPO, the RLHF training step) is doing.
+The last lesson ended with REINFORCE working but high-variance: on the sigmoid bandit at theta = 0, the single-sample gradient had expectation 0.25 and standard deviation also 0.25, a signal-to-noise ratio of exactly 1. The natural fix is the one the baseline trick already pointed at: subtract a function of the state that cancels the predictable part of the return, leaving a lower-variance "how much better was this action than expected" signal. **Actor-critic** methods make that baseline a learned object, the **critic**, trained alongside the policy (the **actor**). On our bandit they will take the variance from 0.0625 all the way to **zero** with the optimal baseline; in practice the critic is approximated and the **MC actor-critic update remains unbiased** for any state-only V-phi (the baseline identity holds regardless of critic error), with the critic's error costing un-cancelled variance rather than bias. Bias appears once you bootstrap (TD, n-step, GAE with lambda\<1). The bias-variance trade is the central design choice in the actor-critic family, and getting it right is what nearly every modern deep-RL algorithm (A2C, A3C, SAC, PPO, the RLHF training step) is doing.
 
 ## The two networks
 
 An actor-critic algorithm trains two networks together:
 
-- **Actor the policy parameterized by theta(a | s)**: the policy, exactly as in REINFORCE. A neural network with parameters theta that maps states to action distributions.
-- **Critic V_phi(s)** (or Q_phi(s, a)): a learned estimate of the value function under the current policy. A second neural network with its own parameters phi.
+- **Actor (the policy parameterized by theta)**: the policy, exactly as in REINFORCE. A neural network with parameters theta that maps states to action distributions.
+- **Critic V-phi** (a state-value critic, or Q-phi for state-action): a learned estimate of the value function under the current policy. A second neural network with its own parameters phi.
 
 Both are trained jointly: every batch of trajectories supplies a gradient update for the actor and a gradient update for the critic. The actor uses the critic's value estimates to compute lower-variance gradient updates; the critic uses the actor's collected returns to improve its value estimates. They co-evolve.
 
@@ -22,19 +22,19 @@ Both are trained jointly: every batch of trajectories supplies a gradient update
 
 The critic enters the actor's update in one of two places, distinguishing the two main flavors of actor-critic.
 
-**Monte-Carlo (MC) actor-critic** uses the critic as a baseline, replacing REINFORCE's (G_t - b(s_t)) with (G_t - V_phi(s_t)). The full trajectory return G_t is still computed from observed rewards; the critic only subtracts the predictable part. **Unbiased for any state-only V_phi**, perfect or learned: the baseline identity E[V_phi(s) · nabla log pi(a|s)] = 0 holds regardless of how wrong V_phi is. The critic's error costs un-cancelled variance, not bias. Still high variance because G_t is itself a Monte-Carlo estimate over the full trajectory tail.
+**Monte-Carlo (MC) actor-critic** uses the critic as a baseline, replacing REINFORCE's return-minus-baseline with the return minus the critic's value estimate. The full trajectory return is still computed from observed rewards; the critic only subtracts the predictable part. **Unbiased for any state-only V-phi**, perfect or learned: the baseline identity (the expected value of V-phi times the gradient of the log-policy is zero) holds regardless of how wrong V-phi is. The critic's error costs un-cancelled variance, not bias. Still high variance because the return is itself a Monte-Carlo estimate over the full trajectory tail.
 
 ```
 A_MC(s_t, a_t)  =  G_t  -  V_φ(s_t)
 ```
 
-**Temporal-difference (TD) actor-critic** goes further: replace G_t itself with a **bootstrapped** one-step estimate r_t + gamma · V_phi(s_(t+1)). The advantage becomes the **TD error**:
+**Temporal-difference (TD) actor-critic** goes further: replace the return itself with a **bootstrapped** one-step estimate, the reward plus gamma times the critic's value at the next state. The advantage becomes the **TD error**:
 
 ```
 A_TD(s_t, a_t)  =  r_t  +  γ · V_φ(s_(t+1))  -  V_φ(s_t)
 ```
 
-Now the gradient update needs only one step of reward (not the whole trajectory tail), so the variance is far lower. The price: V_phi appears on both sides of the equation, so the estimate is **biased** while V_phi is wrong. As training progresses and V_phi → V^pi, the bias shrinks; at convergence it vanishes.
+Now the gradient update needs only one step of reward (not the whole trajectory tail), so the variance is far lower. The price: V-phi appears on both sides of the equation, so the estimate is **biased** while V-phi is wrong. As training progresses and V-phi approaches V-pi, the bias shrinks; at convergence it vanishes.
 
 **n-step return** generalizes between these two:
 
@@ -42,9 +42,9 @@ Now the gradient update needs only one step of reward (not the whole trajectory 
 A_n(s_t, a_t)  =  ( Σ_(k=0)^(n-1) γ^k · r_(t+k) )  +  γ^n · V_φ(s_(t+n))  -  V_φ(s_t)
 ```
 
-At n = 1: pure TD (high bias, low variance). At n = ∞: pure MC (low bias, high variance). Picking n is a knob.
+At n equal to 1: pure TD (high bias, low variance). At n equal to infinity: pure MC (low bias, high variance). Picking n is a knob.
 
-**Generalized Advantage Estimation (GAE)**, Schulman et al. 2016, blends all n-step advantages with a geometric weight lambda ∈ [0, 1], giving a single estimator that interpolates smoothly between TD (lambda = 0) and MC (lambda = 1). GAE is the standard advantage estimator in PPO and most modern policy-gradient implementations; you do not need its full derivation here, only that "GAE with lambda ≈ 0.95" in a paper means "use a bias-variance trade somewhere closer to MC than to TD."
+**Generalized Advantage Estimation (GAE)**, Schulman et al. 2016, blends all n-step advantages with a geometric weight lambda between 0 and 1, giving a single estimator that interpolates smoothly between TD (lambda 0) and MC (lambda 1). GAE is the standard advantage estimator in PPO and most modern policy-gradient implementations; you do not need its full derivation here, only that "GAE with lambda approximately 0.95" in a paper means "use a bias-variance trade somewhere closer to MC than to TD."
 
 ## The training loop
 
@@ -58,13 +58,13 @@ for each iteration:
     actor update:    θ ← θ + α · ( G_t - V_φ(s_t) ) · ∇_θ log π_θ(a_t | s_t)
 ```
 
-The critic update is just supervised regression: train V_phi(s) to predict G_t on observed states (or r + gammaV_phi(s') for TD-style). The actor update is REINFORCE from the last lesson with G_t - V_phi(s_t) in place of G_t - b(s_t). Two networks, two gradient steps per batch.
+The critic update is just supervised regression: train V-phi to predict the return on observed states (or the reward plus gamma times the critic's next-state value, for TD-style). The actor update is REINFORCE from the last lesson, with the return-minus-critic advantage in place of return-minus-baseline. Two networks, two gradient steps per batch.
 
 ## Worked: variance reduction on the L4 bandit
 
-Take the exact bandit from the last lesson, deterministic rewards: R(a=1) = 1, R(a=2) = 0. Sigmoid policy the policy parameterized by theta(a=1) = sigma(theta). At theta = 0, the policy is equiprobable, sigma(0) = 0.5.
+Take the exact bandit from the last lesson, deterministic rewards: reward 1 for action 1, reward 0 for action 2. Sigmoid policy: the probability of action 1 is sigma of theta. At theta = 0, the policy is equiprobable, sigma of 0 is 0.5.
 
-**REINFORCE recap (from L4).** Single-sample gradient g_REINFORCE = R · nabla-theta log the policy parameterized by theta(a):
+**REINFORCE recap (from L4).** The single-sample REINFORCE gradient is the reward times the gradient of the log-policy with respect to theta:
 
 ```
 a = 1 (prob 0.5): g = 1 · (1 - σ(0)) = 0.5
@@ -74,13 +74,13 @@ Var(g) = E[g²] - E[g]² = (0.5 · 0.25 + 0.5 · 0) - 0.25² = 0.125 - 0.0625 = 
 std(g) = 0.25  (signal-to-noise ratio = 1)
 ```
 
-Now **actor-critic with the optimal state-value baseline V*(s)**, the true mean reward under the current policy. Since the bandit is state-less, V* = E_(a ~ pi)[R(a)]. At theta = 0:
+Now **actor-critic with the optimal state-value baseline V-star**, the true mean reward under the current policy. Since the bandit is state-less, V-star is the expected reward under the policy. At theta = 0:
 
 ```
 V*  =  π(a=1) · R(a=1)  +  π(a=2) · R(a=2)  =  0.5 · 1  +  0.5 · 0  =  0.5
 ```
 
-The advantage-using gradient is g_AC = (R - V*) · nabla-theta log the policy parameterized by theta(a). Compute it for each action:
+The advantage-using gradient is the reward minus V-star, times the gradient of the log-policy. Compute it for each action:
 
 ```
 a = 1 (prob 0.5): g = (1 - 0.5) · (1 - σ(0))  =  0.5 · 0.5  =  0.25
@@ -102,16 +102,16 @@ The optimal baseline collapsed the variance to **zero** on this deterministic pr
 | REINFORCE | 0.25 | 0.0625 | 0.25 | 1.0 |
 | Actor-critic (optimal V*) | 0.25 | 0 | 0 | ∞ |
 
-That is the precise sense in which "the critic reduces variance." On this toy it is exact; on a real problem with a learned V_phi and stochastic rewards, Var(g_AC) > 0 but typically much less than Var(g_REINFORCE).
+That is the precise sense in which "the critic reduces variance." On this toy it is exact; on a real problem with a learned V-phi and stochastic rewards, the actor-critic variance is greater than zero but typically much less than the REINFORCE variance.
 
 ## The bias-variance tradeoff
 
-The catch in the worked example: **V* was given**. In practice the critic V_phi is learned from observed returns and is not exactly equal to V^pi. Important: the **MC actor-critic update remains unbiased** even when V_phi is wrong. The baseline identity E[V_phi(s) · nabla log pi(a|s)] = 0 holds for any state-only function V_phi, so the critic's error cancels in expectation. What the critic's error costs is **variance**: the closer V_phi is to V^pi(s), the more of the random-action variance the baseline subtracts away, and the lower the gradient estimator's variance. A perfect V* drives the variance to zero on a stateless problem (as the worked example showed); a wrong V_phi only fails to drive the variance as far down as it could.
+The catch in the worked example: **V-star was given**. In practice the critic V-phi is learned from observed returns and is not exactly equal to V-pi. Important: the **MC actor-critic update remains unbiased** even when V-phi is wrong. The baseline identity (the expected value of V-phi times the gradient of the log-policy is zero) holds for any state-only function V-phi, so the critic's error cancels in expectation. What the critic's error costs is **variance**: the closer V-phi is to V-pi, the more of the random-action variance the baseline subtracts away, and the lower the gradient estimator's variance. A perfect V-star drives the variance to zero on a stateless problem (as the worked example showed); a wrong V-phi only fails to drive the variance as far down as it could.
 
-**Bias enters once you bootstrap, not when you baseline.** The TD and n-step variants below replace G_t with an estimate that includes V_phi inside the target, and that is the step that breaks unbiasedness. Concretely:
+**Bias enters once you bootstrap, not when you baseline.** The TD and n-step variants below replace the return with an estimate that includes V-phi inside the target, and that is the step that breaks unbiasedness. Concretely:
 
-- **MC actor-critic** (G_t - V_phi(s_t) as advantage): **unbiased** for any state-only V_phi (perfect or learned); the critic only reduces variance. The estimator's bias does not depend on how accurate V_phi is.
-- **TD actor-critic** (r + gammaV_phi(s') - V_phi(s) as advantage): the bootstrap inserts V_phi on **both sides** of the target, so the estimator is biased by gamma · (V_phi(s') - V^pi(s')) - (V_phi(s) - V^pi(s)), which can be large early in training. Variance is much lower; **bias appears here**, driven by the bootstrap, not by the baseline.
+- **MC actor-critic** (return minus V-phi as advantage): **unbiased** for any state-only V-phi (perfect or learned); the critic only reduces variance. The estimator's bias does not depend on how accurate V-phi is.
+- **TD actor-critic** (the reward plus gamma times the critic's next-state value, minus its current-state value, as advantage): the bootstrap inserts V-phi on **both sides** of the target, so the estimator is biased by gamma times the critic's next-state error minus its current-state error, which can be large early in training. Variance is much lower; **bias appears here**, driven by the bootstrap, not by the baseline.
 - **n-step / GAE**: tune n (or lambda) to trade. Typical PPO settings use GAE with lambda = 0.95, which is closer to MC than TD: most of the variance reduction comes from the partial-bootstrap value-function targets, with a little un-bootstrapped tail to keep most of the bias controlled.
 
 The dominant practical answer is "use GAE with a moderate lambda." That choice is the entire point of the lesson: a small, deliberate bias (from bootstrapping) buys enormous variance reduction.
@@ -120,9 +120,9 @@ The dominant practical answer is "use GAE with a moderate lambda." That choice i
 
 Two clarifications that catch people.
 
-**Q-critic variants** (DDPG, SAC, twin-delayed DDPG) learn Q_phi(s, a) instead of V_phi(s). The actor update uses Q_phi directly (often nabla-theta Q_phi(s, the policy parameterized by theta(s)) for deterministic policies, or expectations under stochastic policies). The critic is then trained against the Bellman optimality equation rather than the policy-evaluation equation. This is the family that dominates continuous control (SAC in particular).
+**Q-critic variants** (DDPG, SAC, twin-delayed DDPG) learn a state-action critic Q-phi instead of V-phi. The actor update uses Q-phi directly (often the gradient through Q-phi at the policy's chosen action, for deterministic policies, or expectations under stochastic policies). The critic is then trained against the Bellman optimality equation rather than the policy-evaluation equation. This is the family that dominates continuous control (SAC in particular).
 
-**The baseline must depend only on the state, not on the action being taken.** That is what makes the baseline subtraction unbiased: E_(a ~ pi)[b(s) · nabla-theta log the policy parameterized by theta(a|s)] = b(s) · E_(a ~ pi)[nabla-theta log the policy parameterized by theta(a|s)] = b(s) · 0 = 0. If you tried to use A_phi(s, a) as the baseline (or any action-dependent quantity), the gradient nabla-theta log the policy parameterized by theta(a|s) would not cleanly factor out, and the estimator would bias. V_phi(s) is fine. Q_phi(s, a) is **not** a valid baseline (though it can replace G_t in other ways, as in the Q-critic variants).
+**The baseline must depend only on the state, not on the action being taken.** That is what makes the baseline subtraction unbiased: a state-only baseline factors out of the expectation over actions and multiplies the expected gradient of the log-policy, which is zero. If you tried to use an action-dependent quantity like A-phi as the baseline, the gradient of the log-policy would not cleanly factor out, and the estimator would bias. A state-only V-phi is fine. Q-phi, which depends on the action, is **not** a valid baseline (though it can replace the return in other ways, as in the Q-critic variants).
 
 ## Why this matters when you use AI
 
@@ -137,19 +137,19 @@ So when you read about an RL-trained system, the first decomposition is "what is
 
 ## Common pitfalls
 
-**Forgetting the critic is learned.** V_phi has its own approximation error, separate from the policy's. Early in training the critic is wrong, the bootstrapped advantage is biased, and the actor's updates can go in directions that are right only with respect to the critic's current (wrong) value estimates. This is one of the reasons deep RL is harder than supervised learning.
+**Forgetting the critic is learned.** V-phi has its own approximation error, separate from the policy's. Early in training the critic is wrong, the bootstrapped advantage is biased, and the actor's updates can go in directions that are right only with respect to the critic's current (wrong) value estimates. This is one of the reasons deep RL is harder than supervised learning.
 
-**Using Q_phi(s, a) as the baseline.** This is the most common subtle bug. Q_phi(s, a) depends on the action being taken, so subtracting it from the return biases the gradient estimator. V_phi(s) (state only) is the legitimate baseline; Q_phi(s, a) can replace G_t entirely in some variants but is not itself a baseline.
+**Using Q-phi as the baseline.** This is the most common subtle bug. Q-phi depends on the action being taken, so subtracting it from the return biases the gradient estimator. V-phi (state only) is the legitimate baseline; Q-phi can replace the return entirely in some variants but is not itself a baseline.
 
-**Bootstrapping early and aggressively.** TD(0) actor-critic is the lowest-variance, highest-bias choice. When V_phi is wrong (which it always is at first), TD bootstrapping propagates the error. Most production methods use GAE with a moderate lambda (closer to MC than to TD), accepting some variance to control the bootstrap-induced bias.
+**Bootstrapping early and aggressively.** TD(0) actor-critic is the lowest-variance, highest-bias choice. When V-phi is wrong (which it always is at first), TD bootstrapping propagates the error. Most production methods use GAE with a moderate lambda (closer to MC than to TD), accepting some variance to control the bootstrap-induced bias.
 
-**Confusing the actor and critic objectives.** They are trained against different losses. Critic loss: supervised regression to the target (G_t for MC; r + gammaV_phi(s') for TD), minimized with respect to phi. Actor loss: the policy gradient with the critic's advantage estimate, maximized with respect to theta. Two networks, two losses, two gradient flows; people get the gradient signs wrong if they conflate them.
+**Confusing the actor and critic objectives.** They are trained against different losses. Critic loss: supervised regression to the target (the return for MC; the reward plus gamma times the critic's next-state value for TD), minimized with respect to phi. Actor loss: the policy gradient with the critic's advantage estimate, maximized with respect to theta. Two networks, two losses, two gradient flows; people get the gradient signs wrong if they conflate them.
 
 ## What you should remember
 
-- **Actor-critic trains two networks jointly:** the policy parameterized by theta (actor) and V_phi or Q_phi (critic). The critic supplies lower-variance signal for the actor's policy gradient, either as a baseline (G_t - V_phi(s_t), MC) or as part of a bootstrapped target (r + gammaV_phi(s') - V_phi(s), TD). **n-step return** and **GAE** interpolate; PPO uses GAE with lambda ≈ 0.95 by default.
-- **Variance reduction is the central gain, and it is quantitative.** On the L4 sigmoid bandit at theta = 0, REINFORCE has Var(g) = 0.0625 (std = 0.25, SNR = 1); actor-critic with the optimal baseline V*(s) = 0.5 gives Var(g) = 0, SNR = ∞. The critic subtracts out the predictable part of the return, leaving only the action-conditional signal.
-- **The cost is bias.** In practice V_phi is learned and not equal to V^pi; TD bootstrapping inserts the error on both sides of the advantage. MC actor-critic and high-lambda GAE keep the bias small; pure TD(0) trades the most bias for the most variance reduction. The right lambda is the design choice the actor-critic family lives or dies on.
+- **Actor-critic trains two networks jointly:** the policy parameterized by theta (actor) and V-phi or Q-phi (critic). The critic supplies lower-variance signal for the actor's policy gradient, either as a baseline (the return minus V-phi, MC) or as part of a bootstrapped target (the reward plus gamma times the next-state value, minus the current-state value, TD). **n-step return** and **GAE** interpolate; PPO uses GAE with lambda approximately 0.95 by default.
+- **Variance reduction is the central gain, and it is quantitative.** On the L4 sigmoid bandit at theta = 0, REINFORCE has variance 0.0625 (standard deviation 0.25, signal-to-noise ratio 1); actor-critic with the optimal baseline V-star equal to 0.5 gives variance 0, signal-to-noise ratio infinity. The critic subtracts out the predictable part of the return, leaving only the action-conditional signal.
+- **The cost is bias.** In practice V-phi is learned and not equal to V-pi; TD bootstrapping inserts the error on both sides of the advantage. MC actor-critic and high-lambda GAE keep the bias small; pure TD(0) trades the most bias for the most variance reduction. The right lambda is the design choice the actor-critic family lives or dies on.
 - **Actor-critic is the template behind nearly every modern deep-RL algorithm.** PPO (RLHF for LLMs), SAC (continuous-control robotics), A2C/A3C, and most of what you read in deep-RL papers. The two-network split, the advantage estimator, the bias-variance trade: those are the building blocks.
 
-Phase 1 of this track now has the full policy-gradient picture: imitation learning (L2), the MDP formalism (L3), REINFORCE (L4), and actor-critic (L5). Phase 2 turns to the **other branch of the dispatch table**: value-based RL. The next lesson derives **Q-learning** directly from the Bellman optimality equation and shows what changes when the network learns Q_theta(s, a) and acts greedily, with no explicit policy network at all.
+Phase 1 of this track now has the full policy-gradient picture: imitation learning (L2), the MDP formalism (L3), REINFORCE (L4), and actor-critic (L5). Phase 2 turns to the **other branch of the dispatch table**: value-based RL. The next lesson derives **Q-learning** directly from the Bellman optimality equation and shows what changes when the network learns Q-theta and acts greedily, with no explicit policy network at all.
