@@ -13,8 +13,8 @@ The dispatch table from Lesson 3 named five things any RL algorithm can estimate
 
 By the end of this lesson you can:
 
-- Explain why model-based RL achieves 10× to 100× better sample efficiency than model-free on continuous control benchmarks, and why this matters more for robotics than for Atari.
-- Fit a **linear-Gaussian dynamics model** P(s' | s, a) = N(As + Ba + c, Sum) to a small dataset by ordinary least squares, and verify that the fit recovers the true parameters exactly when the data is noise-free.
+- Explain why model-based RL achieves 10 to 100 times better sample efficiency than model-free on continuous control benchmarks, and why this matters more for robotics than for Atari.
+- Fit a **linear-Gaussian dynamics model** (a Gaussian whose mean is a linear function of state and action) to a small dataset by ordinary least squares, and verify that the fit recovers the true parameters exactly when the data is noise-free.
 - Compute the **one-step prediction error** for a small model bias and trace how that error **compounds** over a multi-step rollout. Quantify why "small 1-step error" does not mean "small N-step error."
 - Pick a model class (linear, deterministic neural net, probabilistic ensemble) appropriate to the problem.
 - Decide when model-based RL is the right family (samples are precious, the dynamics are learnable, you have time to plan).
@@ -25,20 +25,20 @@ Model-free methods like DQN and PPO treat the environment as a black box. Every 
 
 When samples are expensive, it is catastrophic. A real robot collecting a hundred thousand contact-rich manipulation trials takes weeks. A self-driving car cannot crash a hundred thousand times to learn lane-keeping. A surgical robot has no exploration budget at all. For these settings, **sample efficiency** is the binding constraint.
 
-The model-based pitch: learn a dynamics model P̂(s' | s, a) and a reward model R̂(s, a) from a small number of real-world transitions. Then use the model in two ways:
+The model-based pitch: learn a dynamics model P-hat and a reward model R-hat from a small number of real-world transitions. Then use the model in two ways:
 
 - **Plan with the model.** For each control decision, run the model forward over candidate action sequences, score them by predicted reward, and execute the best one. Model Predictive Control (MPC) style. Re-plan every step.
 - **Imagine rollouts to train a policy.** Use the model to generate cheap "imagined" trajectories. Train a policy on the imagined data the same way you would train it on real data. The Dyna family (Sutton, 1991) is the canonical formulation.
 
 Either way, the real-environment sample cost has been **transferred** to the model. If the model is cheaper to query than the real environment, you save samples.
 
-The headline number from the field: on continuous-control benchmarks where SAC (a strong model-free actor-critic algorithm) needs 1M environment steps to reach a target performance, PETS (a model-based method based on probabilistic ensembles) reaches the same performance in about 50K to 100K steps. That is a 10× to 20× sample-efficiency win (Chua et al., 2018). For real-robot work, this margin is the difference between "tractable" and "intractable."
+The headline number from the field: on continuous-control benchmarks where SAC (a strong model-free actor-critic algorithm) needs 1M environment steps to reach a target performance, PETS (a model-based method based on probabilistic ensembles) reaches the same performance in about 50K to 100K steps. That is a 10 to 20 times sample-efficiency win (Chua et al., 2018). For real-robot work, this margin is the difference between "tractable" and "intractable."
 
 The catch, foreshadowed: this savings is only real if your model is good. The next sections work out the math of how models can be good, and where they fail.
 
 ## The model-learning problem
 
-Suppose you have a dataset D = \{(s_i, a_i, s_i')\} of N transitions collected by some exploration policy. You want to estimate P(s' | s, a). This is supervised learning: the inputs are (s, a) pairs, the targets are s'.
+Suppose you have a dataset D of N transitions, each a state, action, and resulting next state, collected by some exploration policy. You want to estimate the dynamics P (the next-state distribution given state and action). This is supervised learning: the inputs are state-action pairs, the targets are next states.
 
 The choice of model class depends on the problem.
 
@@ -50,7 +50,7 @@ The simplest non-trivial model:
 P(s' | s, a) = N( A s + B a + c, Σ )
 ```
 
-A is a dim_s × dim_s matrix, B is dim_s × dim_a, c is a bias vector, Sum is a covariance matrix (often diagonal, sometimes tied to the dataset variance).
+A is a state-by-state matrix, B is a state-by-action matrix, c is a bias vector, and Sigma is a covariance matrix (often diagonal, sometimes tied to the dataset variance).
 
 This is exact for genuinely linear systems (linearized quadrotors near hover, LQR control problems) and surprisingly good as a **local** approximation for nonlinear systems: many continuous-control problems are well-approximated by linearizations within a single planning horizon. The classic iterative LQR (iLQR) algorithm exploits this: linearize, plan, relinearize at the new state.
 
@@ -72,7 +72,7 @@ The network outputs both a mean and a covariance. Train with negative log likeli
 
 ### Ensemble of probabilistic networks (PETS)
 
-Train K independent probabilistic networks. The variance across the ensemble captures **epistemic** uncertainty (how much you do not know because the data is sparse), separate from the per-network Sum_theta capturing aleatoric uncertainty (noise that even infinite data would not remove). Use the epistemic uncertainty to reject high-risk plans during MPC.
+Train K independent probabilistic networks. The variance across the ensemble captures **epistemic** uncertainty (how much you do not know because the data is sparse), separate from the per-network covariance capturing aleatoric uncertainty (noise that even infinite data would not remove). Use the epistemic uncertainty to reject high-risk plans during MPC.
 
 For this lesson, the linear-Gaussian case is the worked example because the math is closed-form. The same fit logic applies to the neural network cases with stochastic gradient descent instead of matrix inversion.
 
@@ -84,7 +84,7 @@ Suppose the true dynamics is one-dimensional in state and one-dimensional in act
 s' = A_true · s + B_true · a + ε,   ε ~ N(0, σ²)
 ```
 
-with A_true = 0.5, B_true = 1.0. We collect five transitions. To make the arithmetic clean, take sigma = 0 (no noise). The samples are:
+with A-true = 0.5 and B-true = 1.0. We collect five transitions. To make the arithmetic clean, take sigma = 0 (no noise). The samples are:
 
 | i | s_i | a_i | s_i' (= 0.5·s + 1·a) |
 |---|-------|-------|------------------------|
@@ -94,49 +94,49 @@ with A_true = 0.5, B_true = 1.0. We collect five transitions. To make the arithm
 | 4 | -1 | 1 | 0.500 |
 | 5 | 2 | -0.5 | 0.500 |
 
-The least-squares estimator finds [Â, B̂] minimizing Sum_i (s_i' - Â·s_i - B̂·a_i)². Setting derivatives to zero gives the normal equations:
+The least-squares estimator finds A-hat and B-hat minimizing the sum of squared prediction errors over the dataset. Setting derivatives to zero gives the normal equations:
 
 ```
 [Â, B̂]^T = (X^T X)^{-1} X^T Y
 ```
 
-where X is the N × 2 matrix of (s_i, a_i) rows and Y is the N × 1 vector of s_i'.
+where X is the N by 2 matrix of state-action rows and Y is the N by 1 vector of next states.
 
-### Compute X^T X
+### Compute X-transpose X
 
-The (1, 1) entry is Sum_i s_i² = 0 + 1 + 0.25 + 1 + 4 = 6.25.
+The (1, 1) entry is the sum of s squared over the data: 0 + 1 + 0.25 + 1 + 4 = 6.25.
 
-The (2, 2) entry is Sum_i a_i² = 1 + 0 + 1 + 1 + 0.25 = 3.25.
+The (2, 2) entry is the sum of a squared over the data: 1 + 0 + 1 + 1 + 0.25 = 3.25.
 
-The off-diagonal Sum_i s_i a_i = (0)(1) + (1)(0) + (0.5)(-1) + (-1)(1) + (2)(-0.5) = -2.5.
+The off-diagonal, the sum of s times a, equals zero times 1, plus 1 times 0, plus 0.5 times minus 1, plus minus 1 times 1, plus 2 times minus 0.5, which is minus 2.5.
 
-So X^T X = [[6.25, -2.5], [-2.5, 3.25]]. The determinant is 6.25 · 3.25 - (-2.5)² = 20.3125 - 6.25 = 14.0625.
+So X-transpose X is the matrix with first row 6.25 and minus 2.5, second row minus 2.5 and 3.25. The determinant is 6.25 times 3.25 minus minus-2.5 squared, which is 20.3125 minus 6.25, or 14.0625.
 
-### Invert X^T X
+### Invert X-transpose X
 
-For a 2 × 2 matrix [[a, b], [c, d]], the inverse is (1/det) · [[d, -b], [-c, a]]:
+For a 2 by 2 matrix with rows a, b and c, d, the inverse is one over the determinant times the matrix with rows d, minus b and minus c, a:
 
 ```
 (X^T X)^{-1} = (1/14.0625) · [[3.25, 2.5], [2.5, 6.25]]
 ```
 
-### Compute X^T Y
+### Compute X-transpose Y
 
-The first entry is Sum_i s_i · s_i':
+The first entry is the sum of s times the next state:
 
 ```
 0·1 + 1·0.5 + 0.5·(-0.75) + (-1)·0.5 + 2·0.5
 = 0 + 0.5 - 0.375 - 0.5 + 1.0 = 0.625
 ```
 
-The second entry is Sum_i a_i · s_i':
+The second entry is the sum of a times the next state:
 
 ```
 1·1 + 0·0.5 + (-1)·(-0.75) + 1·0.5 + (-0.5)·0.5
 = 1 + 0 + 0.75 + 0.5 - 0.25 = 2.0
 ```
 
-So X^T Y = [0.625, 2.0].
+So X-transpose Y is the vector 0.625, 2.0.
 
 ### Solve
 
@@ -148,9 +148,9 @@ So X^T Y = [0.625, 2.0].
        = [0.5, 1.0]
 ```
 
-The fit recovers the true parameters **exactly**. With zero noise and full-rank features, least squares is an unbiased estimator that achieves zero error when given enough samples. This is the dual-path verification: the fit returns 0.5 and 1.0, which were the true A_true and B_true we started with.
+The fit recovers the true parameters **exactly**. With zero noise and full-rank features, least squares is an unbiased estimator that achieves zero error when given enough samples. This is the dual-path verification: the fit returns 0.5 and 1.0, which were the true A-true and B-true we started with.
 
-With noise (any sigma > 0), the fit becomes noisy too. The estimator is still unbiased (E[Â] = A_true), but the variance scales as sigma² · (X^T X)^(-1). More data shrinks the variance; better-conditioned designs ((X^T X) further from singular) shrink it faster.
+With noise (any sigma > 0), the fit becomes noisy too. The estimator is still unbiased (its expected value equals A-true), but the variance scales as sigma squared times the inverse of X-transpose X. More data shrinks the variance; better-conditioned designs (X-transpose X further from singular) shrink it faster.
 
 This is the easy part. The hard part is what happens when the fit is **slightly wrong**.
 
@@ -158,9 +158,9 @@ This is the easy part. The hard part is what happens when the fit is **slightly 
 
 A useful model has to make accurate predictions over a **multi-step horizon**, not just one step. Planning runs forward 5, 10, 50 steps. Imagined rollouts can be longer still. Errors compound.
 
-Consider a slightly expansive 1D system with A_true = 1.1, B_true = 1.0. Suppose our fit returned Â = 1.05 (a 5% underestimate of A) and B̂ = 1.0 (correct).
+Consider a slightly expansive 1D system with A-true = 1.1 and B-true = 1.0. Suppose our fit returned A-hat = 1.05 (a 5% underestimate of A) and B-hat = 1.0 (correct).
 
-Roll forward from s_0 = 1 with action a = 0 for five steps. True dynamics: s_(t+1) = 1.1 · s_t. Model dynamics: ŝ_(t+1) = 1.05 · ŝ_t. Both start from s_0 = 1.
+Roll forward from the initial state 1 with action 0 for five steps. True dynamics: the next state is 1.1 times the current state. Model dynamics: the model's next state is 1.05 times its current state. Both start from 1.
 
 | t | True s_t | Model ŝ_t | Absolute error |
 |---|-------------|--------------|----------------|
@@ -171,15 +171,15 @@ Roll forward from s_0 = 1 with action a = 0 for five steps. True dynamics: s_(t+
 | 4 | 1.4641 | 1.2155 | 0.2486 |
 | 5 | 1.6105 | 1.2763 | 0.3342 |
 
-Five percent one-step bias → about twenty-one percent relative error after five steps (computed as 1 - (1.05/1.1)^5 ≈ 0.208). The error grows geometrically; each step the model accumulates fresh error on top of a starting point that is already biased. By step ten the relative error grows to 1 - (1.05/1.1)^10 ≈ 37% of the true state.
+Five percent one-step bias leads to about twenty-one percent relative error after five steps (computed as 1 minus the ratio 1.05 over 1.1, raised to the fifth power, about 0.208). The error grows geometrically; each step the model accumulates fresh error on top of a starting point that is already biased. By step ten the relative error grows to 1 minus that same ratio raised to the tenth power, about 37% of the true state.
 
-The lesson: a model with one-step error of five percent is **useless for planning over more than a few steps** in expansive dynamics. Even for contractive dynamics (|A| \< 1), errors compound additively from the noise and bias terms, just less catastrophically.
+The lesson: a model with one-step error of five percent is **useless for planning over more than a few steps** in expansive dynamics. Even for contractive dynamics (the magnitude of A below 1), errors compound additively from the noise and bias terms, just less catastrophically.
 
 There are a handful of standard mitigations:
 
 - **Short rollout horizons.** Limit the model to N-step predictions where N is small enough that compounding error stays bounded. MBPO (Janner et al., 2019) uses model rollouts of 1 to 5 steps, then trains an SAC policy on the resulting imagined data.
 - **Ensemble disagreement as uncertainty.** When the K-network ensemble disagrees about s_(t+1), you are in a region the model does not know. Reject those rollouts (PETS). The variance across the ensemble is a usable epistemic uncertainty estimate.
-- **Probabilistic rollouts.** Instead of a single deterministic forward pass, sample from P̂(s' | s, a) at each step and propagate the distribution. The variance grows visibly; you can see when the model becomes unreliable.
+- **Probabilistic rollouts.** Instead of a single deterministic forward pass, sample from the probabilistic model P-hat at each step and propagate the distribution. The variance grows visibly; you can see when the model becomes unreliable.
 - **Re-plan often.** MPC re-plans every control step using the latest real state. The model only needs to be accurate for the H-step horizon used in planning, not for the full episode.
 
 ## The Dyna architecture
@@ -198,7 +198,7 @@ For each step:
   4. Continue.
 ```
 
-The key parameter is K: how many imagined updates per real update. K = 0 recovers model-free RL. K = ∞ recovers pure planning (use only the model, never the real environment). Real systems pick a K that balances real-data fidelity against imagined-data abundance.
+The key parameter is K: how many imagined updates per real update. K = 0 recovers model-free RL. K equal to infinity recovers pure planning (use only the model, never the real environment). Real systems pick a K that balances real-data fidelity against imagined-data abundance.
 
 Modern Dyna-style algorithms (MBPO, PETS, Dreamer) are sophisticated descendants of this skeleton. The common thread: a learned model amplifies a small amount of real data into a large amount of training signal.
 
@@ -218,7 +218,7 @@ Notice that LLM-based agents almost never use model-based RL: the dynamics are t
 ## Common pitfalls
 
 - **Believing the fit when the validation error is high.** A linear-Gaussian model fits anything (it never refuses), but the fit may be poor. Always check held-out one-step prediction error before using the model for rollouts.
-- **Ignoring the data distribution.** A model fit on slow trajectories will not extrapolate to fast ones, no matter how flexible the function class. Cover the (s, a) regions the policy will visit.
+- **Ignoring the data distribution.** A model fit on slow trajectories will not extrapolate to fast ones, no matter how flexible the function class. Cover the state-action regions the policy will visit.
 - **Running rollouts past where the model is reliable.** The compounding-error argument is not theoretical; it bites every model-based RL implementation. Cap rollouts at the horizon where validation error stays bounded.
 - **Conflating epistemic and aleatoric uncertainty.** A probabilistic neural net captures aleatoric noise (the dynamics genuinely include randomness). An ensemble captures epistemic uncertainty (you do not know because the data is sparse). They are different and call for different mitigations.
 - **Using a single deterministic model for stochastic dynamics.** Real-world contact dynamics are stochastic; deterministic predictions average them out and lose the variance. Use a probabilistic model whenever the variance matters for planning.
@@ -238,9 +238,9 @@ The L3 dispatch table predicted this: pick your algorithmic family by what is ea
 
 ## What you should remember from this lesson
 
-- **The P-branch of the dispatch table** is model-based RL: learn P(s' | s, a), then use it for planning or for generating imagined rollouts (Dyna).
-- **Sample efficiency** is the main reason: 10× to 100× fewer real-world interactions for the same asymptotic performance. Matters most when samples are expensive (real robots, scarce data).
-- **Least-squares fit of a linear-Gaussian dynamics model** is closed-form and tractable. Zero-noise data recovers the true parameters exactly. The lesson worked through this on A_true = 0.5, B_true = 1.0 with five samples and got [Â, B̂] = [0.5, 1.0] to the digit.
+- **The P-branch of the dispatch table** is model-based RL: learn the dynamics P (the next-state distribution given state and action), then use it for planning or for generating imagined rollouts (Dyna).
+- **Sample efficiency** is the main reason: 10 to 100 times fewer real-world interactions for the same asymptotic performance. Matters most when samples are expensive (real robots, scarce data).
+- **Least-squares fit of a linear-Gaussian dynamics model** is closed-form and tractable. Zero-noise data recovers the true parameters exactly. The lesson worked through this on A-true = 0.5 and B-true = 1.0 with five samples and got A-hat and B-hat equal to 0.5 and 1.0 to the digit.
 - **Compounding error** is the dominant failure mode: 5% one-step bias becomes 21% relative error in five steps and 37% in ten under expansive dynamics. Mitigate via short rollout horizons, ensemble uncertainty, and frequent re-planning.
 - **Pick model-based** when samples are expensive and the dynamics are learnable; **pick model-free** when samples are cheap and you want asymptotic performance.
 

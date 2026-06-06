@@ -17,6 +17,10 @@ const SUBS = [
 	[/pi_theta/g, 'pi-theta'], [/pi_phi/g, 'pi-phi'],
 	[/V\^pi/g, 'V-pi'], [/Q\^pi/g, 'Q-pi'], [/A\^pi/g, 'A-pi'],
 	[/V\^\\pi/g, 'V-pi'], [/Q\^\\pi/g, 'Q-pi'],
+	// soft-RL tokens (control-as-inference): prose-only spelled forms; fences use
+	// the same spelled forms too, but this pass is fence-aware so only prose changes.
+	[/Q_soft/g, 'Q-soft'], [/V_soft/g, 'V-soft'], [/pi_soft/g, 'pi-soft'],
+	[/pi_pretrained/g, 'pi-pretrained'],
 ];
 const lines = readFileSync(file, 'utf8').split('\n');
 let fc = false, dashes = 0, n = 0;

@@ -15,8 +15,8 @@ By the end of this lesson you can:
 
 - Walk the three-stage **InstructGPT pipeline** (Ouyang et al., 2022): supervised fine-tuning (SFT), reward modeling on preference pairs, and PPO with a KL penalty to the SFT model.
 - Write the **Bradley-Terry reward-modeling objective** for preference pairs.
-- Derive the **optimal RLHF policy** pi-star(y|x) ∝ pi_pretrained(y|x) · exp(R(x,y)/beta) from the variational framework you built in Lessons 11-12. The PPO + KL objective is the variational ELBO.
-- Compute the optimal RLHF policy by hand on a 2-response example with beta = 0.5. Verify limits: beta → 0 recovers the deterministic reward-maximizer; beta → ∞ recovers the pretrained model unchanged.
+- Derive the **optimal RLHF policy** (proportional to the pretrained policy times the exponential of the reward divided by beta) from the variational framework you built in Lessons 11-12. The PPO + KL objective is the variational ELBO.
+- Compute the optimal RLHF policy by hand on a 2-response example with beta = 0.5. Verify limits: beta approaching 0 recovers the deterministic reward-maximizer; beta approaching infinity recovers the pretrained model unchanged.
 - Name the operational instruments that detect a **reward-hacking** failure: reward-model test accuracy, measured KL-from-base, win-rate against base, harm-bench scores, sycophancy benchmarks.
 
 This lesson is a synthesis. You already have PPO (Lesson 8) and the variational framework (Lessons 11-12). RLHF wires them together and applies them to a specific production problem.
@@ -44,7 +44,7 @@ The L12 framing said: the variational solution to this constrained optimization 
 
 Ouyang et al. (2022) introduced the three-stage pipeline used in essentially every commercial RLHF system since:
 
-### Stage 0: pretrained model pi_pretrained
+### Stage 0: pretrained model pi-pretrained
 
 Standard next-token-prediction training on a large text corpus. Out of scope for this lesson; treat as the starting point.
 
@@ -56,15 +56,15 @@ Train the pretrained model on a curated dataset of (prompt, ideal_response) pair
 L_SFT(θ) = E_{(x, y*) ~ D_SFT} [ - log π_θ(y* | x) ]
 ```
 
-The dataset D_SFT is human-written demonstrations, typically 10,000 to 100,000 examples. Result: pi_SFT, a model that follows the format of demonstrations and starts producing instruction-following outputs.
+The dataset D_SFT is human-written demonstrations, typically 10,000 to 100,000 examples. Result: pi-SFT, a model that follows the format of demonstrations and starts producing instruction-following outputs.
 
 SFT alone is insufficient: humans cannot write enough demonstrations to cover the long tail of inputs, and writing demonstrations is more expensive than ranking model outputs. The next stages address this.
 
 ### Stage 2: Reward modeling on preference pairs
 
-Collect a dataset D_RM = \{(x, y_w, y_l)\} of preference pairs: for each prompt x, two model-generated responses y_w and y_l with a human judgment that y_w is preferred to y_l.
+Collect a dataset of preference pairs: for each prompt x, two model-generated responses, a winner and a loser, with a human judgment that the winner is preferred to the loser.
 
-Train a reward model R_phi(x, y), typically initialized from pi_SFT with a new linear head, using the **Bradley-Terry** preference model:
+Train a reward model R-phi, typically initialized from pi-SFT with a new linear head, using the **Bradley-Terry** preference model:
 
 ```
 P(y_w preferred over y_l | x) = σ(R_φ(x, y_w) - R_φ(x, y_l))
@@ -82,7 +82,7 @@ Typical dataset sizes: 10,000 to 1,000,000 preference pairs. Each pair is cheap 
 
 ### Stage 3: PPO with KL to the SFT model
 
-Now the RL stage. Treat pi_SFT as the prior. Use the reward model R_phi as the reward signal. Optimize the policy the policy parameterized by theta (initialized from pi_SFT):
+Now the RL stage. Treat pi-SFT as the prior. Use the reward model R-phi as the reward signal. Optimize the policy parameterized by theta (initialized from pi-SFT):
 
 ```
 J_RLHF(θ) = E_{x ~ D, y ~ π_θ(·|x)} [ R_φ(x, y) ] - β · KL(π_θ(·|x) || π_SFT(·|x))
@@ -96,9 +96,9 @@ The optimization uses **PPO** from Lesson 8 to handle the gradient stably:
 L_RLHF(θ) = L^CLIP(θ) - β · KL(π_θ(·|x) || π_SFT(·|x))
 ```
 
-L^CLIP is the clipped surrogate from L8. The KL term is computed in closed form (token-level KL between the policy parameterized by theta and pi_SFT, summed over the response).
+The clipped surrogate is from L8. The KL term is computed in closed form (token-level KL between the policy parameterized by theta and pi-SFT, summed over the response).
 
-After several thousand PPO iterations, the policy the policy parameterized by theta produces outputs that score well under R_phi while staying near pi_SFT. This is the deployable instruction-tuned model.
+After several thousand PPO iterations, the policy parameterized by theta produces outputs that score well under R-phi while staying near pi-SFT. This is the deployable instruction-tuned model.
 
 ## The variational view: this is the soft Bellman backup
 
@@ -110,26 +110,26 @@ The L11-L12 framework predicts the optimal policy for the RLHF objective:
 
 This is **exactly the soft Bellman posterior** from L12 with:
 
-- **Latent**: response y
-- **Prior**: pi_SFT(y | x)
-- **Likelihood**: exp(R_phi(x, y) / beta) (the soft-Boltzmann weighting)
+- **Latent**: the response y
+- **Prior**: the SFT model pi-SFT
+- **Likelihood**: the exponential of the reward R-phi divided by beta (the soft-Boltzmann weighting)
 - **Temperature**: beta
 
-The partition function Z(x) = Sum_y pi_SFT(y | x) · exp(R_phi(x, y) / beta) is, up to scale, the sequence-level analog of V_soft(s) from L12: strictly, the sequence-level soft value is beta · log Z(x), so Z(x) = exp(V_soft(x) / beta).
+The partition function Z, the sum over responses of the SFT probability times the exponential of the reward divided by beta, is, up to scale, the sequence-level analog of the soft value from L12: strictly, the sequence-level soft value is beta times log Z, so Z equals the exponential of the soft value divided by beta.
 
-PPO is the practical optimizer for this variational target. The closed-form pi-star is intractable to compute directly (sum over all possible responses), so we run gradient descent on the surrogate L_RLHF(theta) instead.
+PPO is the practical optimizer for this variational target. The closed-form pi-star is intractable to compute directly (sum over all possible responses), so we run gradient descent on the RLHF surrogate loss instead.
 
-The variational lens says something useful about beta: it is the **information rate** at which the reward model drives the policy. Small beta = strong reward signal, policy drifts far from pi_SFT. Large beta = weak reward signal, policy stays close to pi_SFT. The optimal beta depends on how well-calibrated the reward model is (next section).
+The variational lens says something useful about beta: it is the **information rate** at which the reward model drives the policy. Small beta = strong reward signal, policy drifts far from pi-SFT. Large beta = weak reward signal, policy stays close to pi-SFT. The optimal beta depends on how well-calibrated the reward model is (next section).
 
 ## Worked example: 2-response RLHF on a single prompt
 
 Set up the smallest non-trivial case. Single prompt x. Two possible responses y_1, y_2.
 
-- pi_SFT(y_1 | x) = 0.6, pi_SFT(y_2 | x) = 0.4
-- R_phi(x, y_1) = 1.0, R_phi(x, y_2) = 0.0
+- the SFT probabilities are 0.6 for response 1 and 0.4 for response 2
+- the rewards are 1.0 for response 1 and 0.0 for response 2
 - beta = 0.5
 
-The reward model prefers y_1. The SFT model also prefers y_1 but less strongly. The RLHF policy should concentrate more mass on y_1.
+The reward model prefers response 1. The SFT model also prefers response 1 but less strongly. The RLHF policy should concentrate more mass on response 1.
 
 ### Compute the un-normalized weights
 
@@ -151,13 +151,13 @@ Z(x) = 4.434 + 0.400 = 4.834
 π*(y_2 | x) = 0.400 / 4.834 = 0.0827
 ```
 
-Sum: 0.9173 + 0.0827 = 1.0000 ✓.
+Sum: 0.9173 + 0.0827 = 1.0000, as required.
 
-The RLHF policy puts 91.7% on y_1, up from the SFT prior's 60%. The KL penalty kept it from going to 100% (which is what the unconstrained reward-model optimizer would do).
+The RLHF policy puts 91.7% on response 1, up from the SFT prior's 60%. The KL penalty kept it from going to 100% (which is what the unconstrained reward-model optimizer would do).
 
 ### Verify the two beta limits
 
-**beta → 0** (no KL penalty, pure reward maximization):
+**beta approaching 0** (no KL penalty, pure reward maximization):
 
 ```
 exp(R / β) blows up for y_1, stays at 1 for y_2.
@@ -166,9 +166,9 @@ Numerator for y_1: 0.6 · exp(100), dominates Z.
 π*(y_1) → 1, π*(y_2) → 0.
 ```
 
-The policy collapses to deterministic argmax of R. **Reward maximizer; no SFT anchoring.**
+The policy collapses to the deterministic reward-maximizing response. **Reward maximizer; no SFT anchoring.**
 
-**beta → ∞** (KL penalty dominates):
+**beta approaching infinity** (KL penalty dominates):
 
 ```
 exp(R / β) → 1 for any finite R.
@@ -178,25 +178,25 @@ exp(R / β) → 1 for any finite R.
 
 The policy collapses to the SFT prior. **No reward-model influence.** The RL stage is a no-op.
 
-**Real systems pick beta ∈ [0.01, 0.1]**: enough to extract value from the reward model, not enough to lose the SFT prior's language fluency. The exact choice depends on reward-model quality.
+**Real systems pick beta between 0.01 and 0.1**: enough to extract value from the reward model, not enough to lose the SFT prior's language fluency. The exact choice depends on reward-model quality.
 
 ## Reward hacking and why beta matters
 
-The dominant practical failure mode of RLHF is **reward hacking** (also called specification gaming, reward gaming, or Goodhart's law in this context). The reward model R_phi is an imperfect proxy for true human preferences. It was trained on ~100K preference pairs. It has blind spots, biases, and overconfident regions.
+The dominant practical failure mode of RLHF is **reward hacking** (also called specification gaming, reward gaming, or Goodhart's law in this context). The reward model R-phi is an imperfect proxy for true human preferences. It was trained on ~100K preference pairs. It has blind spots, biases, and overconfident regions.
 
-When beta is too low, the policy optimizes the reward model so aggressively that it **finds adversarial responses** scoring high on R_phi but reading as nonsense to actual humans. Classic symptoms:
+When beta is too low, the policy optimizes the reward model so aggressively that it **finds adversarial responses** scoring high on R-phi but reading as nonsense to actual humans. Classic symptoms:
 
 - Repetitive output ("The answer is yes yes yes yes yes...") that scores high because the reward model has a weakness on confidence.
 - Sycophancy: agreeing with the user regardless of the prompt's actual content.
 - Length hacking: longer responses score higher because human raters had a length bias.
 - Refusal hacking: never answering, because over-cautious responses score higher than ones with any risk of being wrong.
 
-The KL penalty beta · KL(the policy parameterized by theta || pi_SFT) is the **structural defense** against these failure modes. By forcing the policy parameterized by theta to stay near pi_SFT (a fluent, instruction-following but not yet reward-optimized model), the policy cannot drift far enough to find adversarial reward-model exploits.
+The KL penalty, beta times the KL divergence from the policy to pi-SFT, is the **structural defense** against these failure modes. By forcing the policy parameterized by theta to stay near pi-SFT (a fluent, instruction-following but not yet reward-optimized model), the policy cannot drift far enough to find adversarial reward-model exploits.
 
 Operationally:
 
-- If beta is too low → reward hacking, policy degrades.
-- If beta is too high → no improvement over SFT, no value from RL stage.
+- If beta is too low, reward hacking, policy degrades.
+- If beta is too high, no improvement over SFT, no value from RL stage.
 - Empirical sweet spot: beta = 0.01 to 0.1, calibrated to reward-model quality.
 
 ## Variants and successors
@@ -240,25 +240,25 @@ How do you know if your RLHF run is working? Naming the **operational instrument
 
 | Instrument | What it measures | Pass criterion (heuristic) |
 |------------|------------------|-----------------------------|
-| **Reward-model test accuracy** | Held-out preference-pair accuracy of R_phi | > 65% (chance is 50%; good RMs reach 70-80%) |
-| **Measured KL-from-base** | Token-level KL KL(the policy parameterized by theta || pi_SFT) averaged over a held-out prompt set | 5 to 50 nats per response, depending on training intensity |
-| **Win-rate against base** | Human (or LLM-judge) preference between the policy parameterized by theta and pi_SFT on a held-out prompt set | > 50% means the RL stage improved over SFT |
+| **Reward-model test accuracy** | Held-out preference-pair accuracy of R-phi | > 65% (chance is 50%; good RMs reach 70-80%) |
+| **Measured KL-from-base** | Token-level KL KL(the policy parameterized by theta || pi-SFT) averaged over a held-out prompt set | 5 to 50 nats per response, depending on training intensity |
+| **Win-rate against base** | Human (or LLM-judge) preference between the policy parameterized by theta and pi-SFT on a held-out prompt set | > 50% means the RL stage improved over SFT |
 | **HarmBench / RedTeam** | Adversarial-prompt evaluation suite | Higher refusal rate on harmful prompts is the operational signal |
 | **Sycophancy benchmarks** (Perez et al., 2023; Sharma et al., 2023) | Whether the model changes its answer to match the user's expressed opinion | Lower sycophancy score is better |
 | **Capability evals** (MMLU, GSM8K, HumanEval, etc.) | Whether RLHF degraded general capability | Should not drop significantly from SFT baseline |
 
 These instruments **operationalize** the question "is RLHF working?" into specific measurements. Empirical questions are different in kind from value/policy questions like "what should the model refuse?" or "whose preferences are aligned?"; this lesson focuses on the empirical operational side, which is what you can directly verify.
 
-For example, if reward-model test accuracy is \< 60%, the RM is barely better than chance and any RLHF run on top of it will be unreliable. That is an operational observation independent of what the model should ultimately learn to do. If the measured KL-from-base is > 100 nats but win-rate against base is \< 50%, the policy drifted from SFT without improvement, suggestive of reward hacking. That is an operational observation independent of what "good behavior" means.
+For example, if reward-model test accuracy is below 60%, the RM is barely better than chance and any RLHF run on top of it will be unreliable. That is an operational observation independent of what the model should ultimately learn to do. If the measured KL-from-base is above 100 nats but win-rate against base is below 50%, the policy drifted from SFT without improvement, suggestive of reward hacking. That is an operational observation independent of what "good behavior" means.
 
 The split is what keeps RLHF productive: engineering instruments tell you what is happening; value alignment is a separate, broader conversation that those instruments inform but do not settle.
 
 ## Common pitfalls
 
 - **Setting beta by feel without measuring KL.** The right beta depends on reward-model quality, which varies per RLHF run. Always measure the achieved KL and check it against win-rate before deploying.
-- **Believing the reward model.** The reward model is a small neural network fit on ~100K preference pairs. It has known failure modes (length bias, sycophancy bias, refusal bias). Run reward hacking analyses (gradient ascent on R_phi to find adversarial inputs) periodically.
+- **Believing the reward model.** The reward model is a small neural network fit on ~100K preference pairs. It has known failure modes (length bias, sycophancy bias, refusal bias). Run reward hacking analyses (gradient ascent on R-phi to find adversarial inputs) periodically.
 - **Skipping SFT.** Trying to run RLHF directly on a pretrained-only model is unstable. The SFT stage anchors the model in instruction-following format before the RL stage adds preference signal. Both stages are necessary.
-- **Comparing across reward-model normalizations.** Bradley-Terry only constrains differences in R_phi. The absolute scale is arbitrary. Two reward models with the same preferences will have different beta sweet spots if their reward scales differ. Always check the achieved KL, not the literal beta value.
+- **Comparing across reward-model normalizations.** Bradley-Terry only constrains differences in R-phi. The absolute scale is arbitrary. Two reward models with the same preferences will have different beta sweet spots if their reward scales differ. Always check the achieved KL, not the literal beta value.
 - **Treating DPO as "just RLHF without the reward model."** DPO has its own failure modes (overfitting to preference data, smaller effective KL budget per iteration). The implementation is simpler; the conceptual content is the same; the empirical performance differs.
 - **Using human-rater agreement as a proxy for truth.** Human raters disagree systematically. The training data inherits the rater distribution. Documenting this distribution is operational hygiene; pretending it is "ground truth" is a category error.
 
@@ -277,8 +277,8 @@ The operational instruments named above address what RLHF can verify. The broade
 ## What you should remember from this lesson
 
 - **The InstructGPT pipeline** is three stages: SFT (cross-entropy on demonstrations), reward modeling (Bradley-Terry on preference pairs), PPO with KL-to-SFT (variational policy optimization).
-- **The full RLHF objective** is J(the policy parameterized by theta) = E[R_phi(x, y)] - beta · KL(the policy parameterized by theta || pi_SFT). This is the soft Bellman backup at the sequence level with pi_SFT as the prior and beta as the temperature.
-- **The optimal RLHF policy** is pi-star(y|x) ∝ pi_SFT(y|x) · exp(R_phi(x, y) / beta). PPO is the practical optimizer for this variational target. The worked example: pi_SFT = (0.6, 0.4), R = (1, 0), beta = 0.5 gives pi-star = (0.917, 0.083). Limits verified: beta → 0 gives the reward maximizer (1, 0); beta → ∞ gives the SFT prior (0.6, 0.4).
+- **The full RLHF objective** is the expected reward R-phi minus beta times the KL divergence from the policy to pi-SFT. This is the soft Bellman backup at the sequence level with pi-SFT as the prior and beta as the temperature.
+- **The optimal RLHF policy** is proportional to pi-SFT times the exponential of R-phi divided by beta. PPO is the practical optimizer for this variational target. The worked example: pi-SFT of 0.6 and 0.4, rewards of 1 and 0, beta of 0.5 gives pi-star of 0.917 and 0.083. Limits verified: beta approaching 0 gives the reward maximizer, 1 and 0; beta approaching infinity gives the SFT prior, 0.6 and 0.4.
 - **Reward hacking** is the dominant failure mode. Setting beta too low lets the policy find adversarial reward-model exploits. The KL penalty is the structural defense.
 - **Variants**: Constitutional AI (RLAIF with constitutional principles), DPO (variational shortcut skipping the reward model), GRPO (group-normalized advantage; subtract group mean, divide group std), IPO (theoretical generalization of DPO).
 - **Operational instruments**: reward-model test accuracy, measured KL-from-base, win-rate against base, harm-bench scores, sycophancy benchmarks. These operationalize "is RLHF working" into specific empirical measurements. Distinct from broader value-alignment questions which the instruments inform but do not settle.
