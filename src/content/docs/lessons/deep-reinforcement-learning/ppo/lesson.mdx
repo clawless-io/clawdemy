@@ -18,23 +18,23 @@ By the end of this lesson you can:
 - Explain why naively reusing on-policy data across multiple gradient steps breaks the unbiasedness argument of REINFORCE (Lesson 4).
 - Write the **importance-sampled surrogate objective** that allows controlled reuse, and the **TRPO trust-region constraint** that bounds the policy change per step.
 - Derive the **PPO clipped surrogate** as the practical workhorse approximation to TRPO's constrained optimization.
-- Compute L^CLIP for a worked example with positive and negative advantages, and identify where the gradient saturates.
+- Compute the clipped objective for a worked example with positive and negative advantages, and identify where the gradient saturates.
 - Explain why PPO won out over alternatives for RLHF (vocabulary action space, on-policy rollouts, simplicity of implementation).
 
 ## Recap: why you'd want to do this differently
 
 DQN solved deep RL by adding engineering. Replay buffer, target network, double-Q, frame stacking, reward clipping; the recipe needs all of them, and the failure modes if you skip any one are well-documented. Two costs that DQN's recipe pays:
 
-- **Discrete actions only.** The argmax_a is a brute-force scan over the action space. With continuous actions, this becomes its own optimization problem (DDPG addresses this with a deterministic actor, but at that point you have written half of an actor-critic algorithm anyway).
+- **Discrete actions only.** The argmax over actions is a brute-force scan over the action space. With continuous actions, this becomes its own optimization problem (DDPG addresses this with a deterministic actor, but at that point you have written half of an actor-critic algorithm anyway).
 - **Memory and bookkeeping.** 1M-transition replay buffer, target-network copy, double-Q logic; not heavy by 2026 standards, but real engineering.
 
-Policy-gradient methods (Lesson 4: REINFORCE; Lesson 5: actor-critic) sidestep both costs. The policy is continuous and stochastic (the policy parameterized by theta(a | s) can be a Gaussian over continuous actions, or a softmax over a large vocabulary). The gradient ∇_theta J(theta) = E_(τ ~ the policy parameterized by theta)[ ∇_theta log the policy parameterized by theta(τ) · A(τ) ] is an expectation under the **current** policy. So far so good, except for the cost: every gradient update needs **fresh trajectories sampled from the current policy**. Throw the data away after one update. Sample efficiency is terrible.
+Policy-gradient methods (Lesson 4: REINFORCE; Lesson 5: actor-critic) sidestep both costs. The policy is continuous and stochastic (the policy parameterized by theta can be a Gaussian over continuous actions, or a softmax over a large vocabulary). The policy-gradient is an expectation, under the **current** policy, of the gradient of the log-policy times the advantage. So far so good, except for the cost: every gradient update needs **fresh trajectories sampled from the current policy**. Throw the data away after one update. Sample efficiency is terrible.
 
 PPO is the question: can you reuse on-policy data for a **few** gradient updates without it falling apart? The answer turns out to be yes, if you constrain how much the policy can change per update.
 
 ## The on-policy stability problem
 
-The REINFORCE gradient is unbiased exactly when the trajectories were sampled from the policy parameterized by theta. If you collect a batch under the old policy, then take one gradient step to get the new policy, then try to take a **second** gradient step on the same batch, the second step is computing an expectation over trajectories sampled from the old policy of the gradient of log-pi-new times the advantage under the old policy, which is **not** the gradient of the true objective J(theta). The further the new theta drifts from the old theta, the worse the approximation gets.
+The REINFORCE gradient is unbiased exactly when the trajectories were sampled from the policy parameterized by theta. If you collect a batch under the old policy, then take one gradient step to get the new policy, then try to take a **second** gradient step on the same batch, the second step is computing an expectation over trajectories sampled from the old policy of the gradient of log-pi-new times the advantage under the old policy, which is **not** the gradient of the true objective J. The further the new theta drifts from the old theta, the worse the approximation gets.
 
 The fix is **importance sampling**. The true expectation under the policy parameterized by theta is:
 
@@ -48,9 +48,9 @@ For the policy-gradient case, the analogous correction at the per-action level g
 L(θ) = E_{(s, a) ~ π_{θ_old}} [ (π_θ(a|s) / π_{θ_old}(a|s)) · A^{π_old}(s, a) ]
 ```
 
-Define the **probability ratio** r_t as the new-policy probability of the action divided by the old-policy probability of the same action. At the start (when theta equals theta_old), r equals 1 and the surrogate equals the standard policy-gradient objective. As theta moves, r changes; the surrogate accounts for the mismatch via the importance ratio.
+Define the **probability ratio** r as the new-policy probability of the action divided by the old-policy probability of the same action. At the start (when theta equals theta-old), r equals 1 and the surrogate equals the standard policy-gradient objective. As theta moves, r changes; the surrogate accounts for the mismatch via the importance ratio.
 
-The surrogate is correct when theta is close to theta_old. The further theta drifts, the worse the variance of the importance-weighted estimator becomes. **You cannot let the policy change too much per gradient step.** That is the stability problem PPO solves.
+The surrogate is correct when theta is close to theta-old. The further theta drifts, the worse the variance of the importance-weighted estimator becomes. **You cannot let the policy change too much per gradient step.** That is the stability problem PPO solves.
 
 ## TRPO: solve it with a hard constraint
 
@@ -61,7 +61,7 @@ maximize_θ   E_{(s, a) ~ π_{θ_old}} [ r_t(θ) · A^{π_old}(s, a) ]
 subject to   E_{s ~ π_{θ_old}} [ KL(π_{θ_old}(· | s) || π_θ(· | s)) ] ≤ δ
 ```
 
-The KL constraint says: the new policy must be close to the old one in expected KL divergence, with threshold δ (typically 0.01).
+The KL constraint says: the new policy must be close to the old one in expected KL divergence, with threshold delta (typically 0.01).
 
 TRPO works. It is also annoying to implement: you need to compute the natural gradient using a conjugate-gradient solver, with a backtracking line search to enforce the KL constraint. Reference implementations exist (the OpenAI baselines, Spinning Up), but the algorithm has 50 to 100 lines of subtle linear algebra.
 
@@ -77,25 +77,25 @@ L^CLIP(θ) = E_t [ min( r_t(θ) · A_t,  clip(r_t(θ), 1 - ε, 1 + ε) · A_t ) 
 
 where epsilon is a hyperparameter, typically 0.2. Take this objective apart piece by piece.
 
-The **inner clip** clip(r, 1 - epsilon, 1 + epsilon) returns r if r ∈ [1 - epsilon, 1 + epsilon], otherwise the nearer boundary. With epsilon = 0.2, the boundaries are [0.8, 1.2].
+The **inner clip** keeps the ratio r if it lies within 1 minus epsilon to 1 plus epsilon, otherwise it returns the nearer boundary. With epsilon = 0.2, the boundaries are 0.8 and 1.2.
 
-The **outer min** picks between the unclipped surrogate r · A and the clipped version clip(r) · A. The intent: the clip should kick in when it would **dampen** an over-eager update, but not when it would **encourage** a beneficial one.
+The **outer min** picks between the unclipped surrogate (r times the advantage A) and the clipped version (the clipped ratio times A). The intent: the clip should kick in when it would **dampen** an over-eager update, but not when it would **encourage** a beneficial one.
 
 Pull this apart by sign of advantage.
 
-### Case 1: A > 0 (good action)
+### Case 1: A greater than 0 (good action)
 
-The policy gradient wants to **increase** the policy parameterized by theta(a | s), which increases r. Two regions:
+The policy gradient wants to **increase** the policy parameterized by theta, which increases r. Two regions:
 
-- r ≤ 1 + epsilon: the policy hasn't moved too much. L^CLIP = r · A (the standard surrogate). Gradient encourages further increase.
-- r > 1 + epsilon: the policy is trying to push r past the trust boundary. clip(r) = 1 + epsilon, so clip(r) · A = (1 + epsilon) · A. The min picks the **smaller** of r · A and (1 + epsilon) · A. Since A > 0 and r > 1 + epsilon, the smaller is (1 + epsilon) · A. The objective saturates at (1 + epsilon) · A. **Gradient with respect to r is zero** (clip is locally constant), so no further update happens for this action this epoch.
+- When r is at most 1 plus epsilon: the policy hasn't moved too much. The clipped objective equals r times A (the standard surrogate). Gradient encourages further increase.
+- When r is greater than 1 plus epsilon: the policy is trying to push r past the trust boundary. The clip caps the ratio at 1 plus epsilon, so the clipped term is 1 plus epsilon, times A. The min picks the **smaller** of (r times A) and (1 plus epsilon, times A). Since A is positive and r is greater than 1 plus epsilon, the smaller is (1 plus epsilon) times A. The objective saturates there. **The gradient with respect to r is zero** (the clip is locally constant), so no further update happens for this action this epoch.
 
-### Case 2: A \< 0 (bad action)
+### Case 2: A less than 0 (bad action)
 
-The policy gradient wants to **decrease** the policy parameterized by theta(a | s), which decreases r. Two regions:
+The policy gradient wants to **decrease** the policy parameterized by theta, which decreases r. Two regions:
 
-- r ≥ 1 - epsilon: standard surrogate L^CLIP = r · A (which is negative). Gradient encourages further decrease.
-- r \< 1 - epsilon: policy already moved too far down. clip(r) = 1 - epsilon. clip(r) · A = (1 - epsilon) · A (more negative than r · A since r \< 1 - epsilon and A \< 0). The min picks the **smaller** (more negative) value: (1 - epsilon) · A. The objective saturates at (1 - epsilon) · A. **Gradient with respect to r is zero**, so no further decrease this epoch.
+- When r is at least 1 minus epsilon: the standard surrogate, the clipped objective equals r times A (which is negative). Gradient encourages further decrease.
+- When r is below 1 minus epsilon: the policy already moved too far down. The clip floors the ratio at 1 minus epsilon, so the clipped term is 1 minus epsilon, times A (more negative than r times A, since r is below 1 minus epsilon and A is negative). The min picks the **smaller** (more negative) value, 1 minus epsilon times A. The objective saturates there. **The gradient with respect to r is zero**, so no further decrease this epoch.
 
 ### The asymmetry that prevents over-rewarding bad updates
 
@@ -103,11 +103,11 @@ Notice the design: for a good action, the min caps the **upside** of pushing r f
 
 This is approximately what TRPO's KL constraint achieves, without the KL constraint. PPO trades mathematical purity (a hard, principled constraint) for engineering simplicity (a clipped scalar). Empirically, it works almost as well as TRPO and is much easier to implement and tune.
 
-## Worked example: compute L^CLIP for a single (s, a) pair
+## Worked example: compute the clipped objective for a single state-action pair
 
 Suppose you collect one transition (s, a) under the old policy. After collecting trajectory data and fitting a critic, you compute the advantage under the old policy for this state-action pair as A = +1 (a good action).
 
-You take one gradient step toward the new theta. The new policy at state s differs from the old. Compute L^CLIP for various values of r (the new-policy probability over the old-policy probability for the action at state s) with epsilon = 0.2:
+You take one gradient step toward the new theta. The new policy at state s differs from the old. Compute the clipped objective for various values of r (the new-policy probability over the old-policy probability for the action at state s) with epsilon = 0.2:
 
 | r | r · A (unclipped) | clip(r, 0.8, 1.2) | clip · A | L^CLIP = min(…) |
 |-----|--------------------|--------------------|------------|-------------------|
@@ -119,9 +119,9 @@ You take one gradient step toward the new theta. The new policy at state s diffe
 | 1.5 | 1.5 | 1.2 | 1.2 | **1.2** ← clipped |
 | 2.0 | 2.0 | 1.2 | 1.2 | **1.2** ← clipped |
 
-For A = +1, the objective rises linearly with r up to 1.2, then flattens. Gradient is zero for r > 1.2. No matter how far the optimizer pushes r, it gets no more than 1.2 credit per epoch.
+For A = +1, the objective rises linearly with r up to 1.2, then flattens. Gradient is zero for r above 1.2. No matter how far the optimizer pushes r, it gets no more than 1.2 credit per epoch.
 
-Now suppose A^(π_old)(s, a) = -1 (a bad action):
+Now suppose the advantage under the old policy is -1 (a bad action):
 
 | r | r · A (unclipped) | clip(r, 0.8, 1.2) | clip · A | L^CLIP = min(…) |
 |-----|--------------------|--------------------|------------|-------------------|
@@ -133,7 +133,7 @@ Now suppose A^(π_old)(s, a) = -1 (a bad action):
 | 1.5 | -1.5 | 1.2 | -1.2 | -1.5 (unclipped) |
 | 2.0 | -2.0 | 1.2 | -1.2 | -2.0 (unclipped) |
 
-For A = -1, the objective floors at -0.8 when r drops below 0.8. The gradient is zero in that region, so the optimizer stops trying to push r further down. Note the **asymmetric** behavior in the r > 1.2 rows: the unclipped term -r is more negative, so the min picks it. The clip does **not** cap losses from increasing r for a bad action; it only caps the **reward** for decreasing r beyond the trust boundary.
+For A = -1, the objective floors at -0.8 when r drops below 0.8. The gradient is zero in that region, so the optimizer stops trying to push r further down. Note the **asymmetric** behavior in the rows where r is above 1.2: the unclipped term, minus r, is more negative, so the min picks it. The clip does **not** cap losses from increasing r for a bad action; it only caps the **reward** for decreasing r beyond the trust boundary.
 
 The asymmetry is the design choice that makes PPO work. The optimizer can still **register losses** from clearly bad moves (a bad action whose probability went up); it just cannot **earn rewards** from over-shooting in either direction. This is why PPO is conservative without being timid.
 
@@ -152,33 +152,33 @@ For each iteration:
   4. θ_old ← θ for the next iteration
 ```
 
-The key insight: after the K epochs of inner-loop optimization, **theta and theta_old have drifted apart**, but only as far as the clip allows. The next iteration starts fresh with new on-policy data; the importance-sampling approximation never gets pushed past where it stops being reliable.
+The key insight: after the K epochs of inner-loop optimization, **theta and theta-old have drifted apart**, but only as far as the clip allows. The next iteration starts fresh with new on-policy data; the importance-sampling approximation never gets pushed past where it stops being reliable.
 
-Hyperparameters that matter: K (number of epochs per batch, typically 4 to 10), epsilon (clip parameter, 0.1 to 0.3), N (timesteps per iteration, problem-dependent), and the GAE λ (typically 0.95 from Lesson 5).
+Hyperparameters that matter: K (number of epochs per batch, typically 4 to 10), epsilon (clip parameter, 0.1 to 0.3), N (timesteps per iteration, problem-dependent), and the GAE lambda (typically 0.95 from Lesson 5).
 
 ## Why PPO became the RLHF workhorse
 
 RLHF (reinforcement learning from human feedback) is the technique behind the canonical post-training recipe for modern finetuned language models, with InstructGPT (Ouyang et al., 2022) as the published reference example. Methods now vary across systems: Claude's published alignment uses Constitutional AI / RLAIF (AI-generated preferences); DPO and GRPO have emerged as direct-preference or grouped-PPO successors to the explicit reward-model + PPO sandwich. The canonical InstructGPT setup:
 
-1. **Reward model.** Collect human preference data (prompt → response A, response B → which is preferred?). Train a reward model R_theta_R(prompt, response) to predict the preferences. Freeze it.
-2. **Policy optimization.** Treat the language model as a policy the policy parameterized by theta(response | prompt). Optimize against the frozen reward model with PPO.
+1. **Reward model.** Collect human preference data (prompt → response A, response B → which is preferred?). Train a reward model on prompt-and-response pairs to predict the preferences. Freeze it.
+2. **Policy optimization.** Treat the language model as a policy, the policy parameterized by theta. Optimize against the frozen reward model with PPO.
 
 PPO is the right algorithm for this for several reasons:
 
-- **Vocabulary-sized action space.** Each token choice is an action over the full vocabulary (50K to 250K tokens). DQN's argmax_a is infeasible at this scale.
+- **Vocabulary-sized action space.** Each token choice is an action over the full vocabulary (50K to 250K tokens). DQN's argmax over actions is infeasible at this scale.
 - **On-policy data is easy to collect.** Generate completions, run them through the reward model, optimize. No replay buffer needed.
 - **Limited off-policy reuse is the right trade.** Generating a full completion is expensive (autoregressive decoding). Doing a few PPO epochs on the same batch amortizes the rollout cost.
 - **Trust region matters for safety.** RLHF is fine-tuning a pretrained model. Letting the policy drift far from the pretrained distribution is exactly the failure mode that produces "reward hacking" (the policy finds adversarial responses that score high on the reward model but read as nonsense to humans). The PPO clip keeps the policy near the pretrained distribution, which constrains reward hacking.
 
-In practice, RLHF uses a **KL penalty against the original pretrained model** in addition to the PPO clip: L = L^CLIP - β · KL(the policy parameterized by theta || π_pretrained). The clip controls how far theta moves per epoch; the KL penalty controls how far theta moves over the entire fine-tuning run. Lesson 13 covers RLHF as its own topic.
+In practice, RLHF uses a **KL penalty against the original pretrained model** in addition to the PPO clip: the loss is the clipped objective minus beta times the KL divergence between the current policy and the pretrained model. The clip controls how far theta moves per epoch; the KL penalty controls how far theta moves over the entire fine-tuning run. Lesson 13 covers RLHF as its own topic.
 
 Other modern RL algorithms in the same family (Group Relative Policy Optimization, GRPO, used in DeepSeek-R1) are variants of the PPO core idea, sometimes dropping the value network and computing advantages from group-relative ranks. The clipped surrogate persists.
 
 ## Common pitfalls
 
-- **Setting epsilon too high.** With epsilon = 0.5, the trust region is wide; the policy can move a lot per epoch; the importance-sampling approximation gets unreliable; you are back to vanilla PG with extra steps. The original PPO paper recommends epsilon ∈ [0.1, 0.3].
-- **Too many epochs K.** After the first epoch, the policy has shifted; the surrogate is now an approximation to an approximation. Beyond K ≈ 10, the approximation degrades quickly. Most implementations use K = 4 to 10.
-- **Forgetting the entropy bonus.** Without + c_2 · S[the policy parameterized by theta], the policy collapses to deterministic too quickly and stops exploring. The original paper used c_2 = 0.01.
+- **Setting epsilon too high.** With epsilon = 0.5, the trust region is wide; the policy can move a lot per epoch; the importance-sampling approximation gets unreliable; you are back to vanilla PG with extra steps. The original PPO paper recommends epsilon between 0.1 and 0.3.
+- **Too many epochs K.** After the first epoch, the policy has shifted; the surrogate is now an approximation to an approximation. Beyond K around 10, the approximation degrades quickly. Most implementations use K = 4 to 10.
+- **Forgetting the entropy bonus.** Without the entropy bonus, the policy collapses to deterministic too quickly and stops exploring. The original paper used an entropy coefficient of 0.01.
 - **Confusing PPO with TRPO.** TRPO is the constrained-optimization version (hard KL bound, conjugate-gradient solver). PPO is the clipped-surrogate version (soft, easy). Both are by Schulman et al.; both work; PPO is the practical workhorse.
 - **Reading the min as a regularizer.** It is not. The min is what makes the asymmetric clipping behavior work: cap the upside, not the downside, so the optimizer still registers losses on clearly bad moves.
 
@@ -193,12 +193,12 @@ When picking an RL algorithm for a new problem, the dispatch table from Lesson 3
 ## What you should remember from this lesson
 
 - **PPO is the on-policy alternative to DQN's off-policy engineering.** Same goal (stable updates with function approximation), different mechanism.
-- **The importance-sampled surrogate L(theta) = E[r_t(theta) · A_t]** lets you reuse on-policy data for a few gradient steps. The approximation degrades as theta drifts from theta_old.
-- **TRPO** enforces the trust region with a hard KL constraint. **PPO** replaces it with a clipped surrogate L^CLIP = E[min(r · A, clip(r, 1 - epsilon, 1 + epsilon) · A)], typically epsilon = 0.2.
-- **The clip's asymmetry**: for good actions (A > 0), reward saturates above 1 + epsilon. For bad actions (A \< 0), reward saturates below 1 - epsilon. The optimizer still registers losses on clearly bad moves (unclipped tail for A \< 0, r > 1 + epsilon).
+- **The importance-sampled surrogate** (the expected probability ratio times the advantage) lets you reuse on-policy data for a few gradient steps. The approximation degrades as theta drifts from theta-old.
+- **TRPO** enforces the trust region with a hard KL constraint. **PPO** replaces it with a clipped surrogate: the expected minimum of (r times A) and (the clipped ratio times A), typically with epsilon = 0.2.
+- **The clip's asymmetry**: for good actions (A positive), reward saturates above 1 plus epsilon. For bad actions (A negative), reward saturates below 1 minus epsilon. The optimizer still registers losses on clearly bad moves (the unclipped tail when A is negative and r is above 1 plus epsilon).
 - **PPO is the RLHF workhorse** because vocabulary-sized action spaces make DQN infeasible, on-policy rollouts fit the autoregressive generation pattern, and the trust region constrains reward hacking by keeping the policy near the pretrained distribution.
 
-Next lesson: **model-based RL**, the **P-branch** of the L3 dispatch table. Instead of estimating pi or Q directly from data, learn a model of the dynamics P(s' | s, a) and use it for planning. Lessons 9 and 10 cover the two halves: learning the model and planning with it.
+Next lesson: **model-based RL**, the **P-branch** of the L3 dispatch table. Instead of estimating pi or Q directly from data, learn a model of the dynamics (the probability of the next state given the current state and action) and use it for planning. Lessons 9 and 10 cover the two halves: learning the model and planning with it.
 
 ## References
 

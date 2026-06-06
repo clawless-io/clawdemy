@@ -13,9 +13,9 @@ Lessons 4 through 10 covered the algorithmic families of deep RL through the len
 
 Variational inference (VI) is the machinery for that reformulation. By the end of this lesson you can:
 
-- Derive the **evidence lower bound (ELBO)** from Jensen's inequality applied to log p(x).
-- Compute the ELBO for a small linear-Gaussian latent-variable model by hand. Verify the "ELBO gap" log p(x) - ELBO equals the KL between the variational posterior and the true posterior, two ways.
-- Explain the **reparameterization trick**: writing z = g(epsilon, x) with epsilon ~ N(0, I) (or another fixed distribution) lets you sample z while letting gradients flow through g.
+- Derive the **evidence lower bound (ELBO)** from Jensen's inequality applied to log p of x.
+- Compute the ELBO for a small linear-Gaussian latent-variable model by hand. Verify the "ELBO gap" log p of x - ELBO equals the KL between the variational posterior and the true posterior, two ways.
+- Explain the **reparameterization trick**: writing the latent z as a deterministic function of a noise variable epsilon and the input x, with epsilon drawn from a fixed distribution such as a standard normal, lets you sample z while letting gradients flow through that function.
 - Identify the two main places VI shows up in modern RL: **latent-state world models** (Dreamer's RSSM, PlaNet) for partial observability, and **maximum-entropy RL** (SAC) where the entropy bonus is a KL regularizer toward a uniform action prior.
 - Anticipate the **L12 framing** (control as inference): the entire RL problem is variational inference in a graphical model where "the trajectory was optimal" is the evidence we condition on.
 
@@ -25,9 +25,9 @@ This lesson is conceptual scaffolding. It does not introduce a new algorithm; it
 
 Two specific RL settings need approximate inference, and the same machinery works for both.
 
-**Setting 1: latent-state world models.** Real-world dynamics are partially observable: you see camera frames, not the full physical state. The "true" state s_t is latent. To plan or learn a policy you need a representation of that latent state. The canonical algorithms (PlaNet, Hafner et al. 2019; Dreamer, Hafner et al. 2019/2020/2021/2023) treat the world model as a sequential latent-variable model and train it by maximizing the ELBO. This is the modern engine behind continuous-control model-based RL.
+**Setting 1: latent-state world models.** Real-world dynamics are partially observable: you see camera frames, not the full physical state. The "true" state is latent. To plan or learn a policy you need a representation of that latent state. The canonical algorithms (PlaNet, Hafner et al. 2019; Dreamer, Hafner et al. 2019/2020/2021/2023) treat the world model as a sequential latent-variable model and train it by maximizing the ELBO. This is the modern engine behind continuous-control model-based RL.
 
-**Setting 2: maximum-entropy RL.** Algorithms like SAC (Haarnoja et al., 2018) add an entropy bonus to the policy objective: max_pi E[r(s, a) + alpha · H(pi(·|s))]. The bonus is usually presented as "exploration regularization." It is actually a **variational** quantity: maximizing H(pi) = -E[log pi(a|s)] is equivalent to minimizing KL(pi(·|s) || uniform) (up to a constant). The whole MaxEnt-RL family is variational inference with the prior set to the uniform action distribution.
+**Setting 2: maximum-entropy RL.** Algorithms like SAC (Haarnoja et al., 2018) add an entropy bonus to the policy objective: maximize the expected reward plus alpha times the policy entropy. The bonus is usually presented as "exploration regularization." It is actually a **variational** quantity: maximizing the policy entropy (the negative expected log-probability of the actions) is equivalent to minimizing the KL divergence from the policy to a uniform distribution (up to a constant). The whole MaxEnt-RL family is variational inference with the prior set to the uniform action distribution.
 
 Lesson 12 generalizes this: pick a different prior, get a different objective, and the full Bellman recursion follows from variational inference in the right graphical model.
 
@@ -35,11 +35,11 @@ Both settings require deriving and computing the ELBO. That is what this lesson 
 
 ## The latent-variable model
 
-A latent-variable model relates observations x and unobserved latent variables z through a joint distribution p(x, z) = p(x | z) · p(z). The marginal p(x) = ∫ p(x | z) · p(z) dz is what you actually want (the model likelihood given the data), and is generally intractable: the integral is over a continuous z, with no closed form.
+A latent-variable model relates observations x and unobserved latent variables z through a joint distribution: p of x and z equals p of x given z times p of z. The marginal, p of x, is the integral over z of p of x given z times p of z, which is what you actually want (the model likelihood given the data), and is generally intractable: the integral is over a continuous z, with no closed form.
 
-The maximum-likelihood objective log p(x) is also intractable. You cannot compute log p(x) directly; you can only bound it.
+The maximum-likelihood objective log p of x is also intractable. You cannot compute log p of x directly; you can only bound it.
 
-The variational trick: introduce a tractable proposal distribution q(z | x) (the variational posterior). Then:
+The variational trick: introduce a tractable proposal distribution q of z given x (the variational posterior). Then:
 
 ```
 log p(x) = log ∫ p(x, z) dz
@@ -47,7 +47,7 @@ log p(x) = log ∫ p(x, z) dz
         = log E_{z ~ q(z | x)} [ p(x, z) / q(z | x) ]
 ```
 
-Jensen's inequality says log E[Y] ≥ E[log Y] for concave log. Apply it:
+Jensen's inequality says the log of an expectation is at least the expectation of the log, for the concave log function. Apply it:
 
 ```
 log p(x) ≥ E_{z ~ q(z | x)} [ log p(x, z) - log q(z | x) ]
@@ -56,8 +56,8 @@ log p(x) ≥ E_{z ~ q(z | x)} [ log p(x, z) - log q(z | x) ]
 
 This is the **evidence lower bound (ELBO)**. Two terms:
 
-- **Reconstruction**: E_q [log p(x | z)], the expected log-likelihood of the data under the variational posterior.
-- **KL regularizer**: KL(q(z | x) || p(z)), how far the variational posterior deviates from the prior on z. Acts as a regularization term keeping q from over-fitting to a single training point.
+- **Reconstruction**: the expectation under q of log p of x given z, the expected log-likelihood of the data under the variational posterior.
+- **KL regularizer**: the KL divergence from q of z given x to the prior p of z, how far the variational posterior deviates from the prior on z. Acts as a regularization term keeping q from over-fitting to a single training point.
 
 ### The ELBO gap
 
@@ -67,7 +67,7 @@ The Jensen-inequality step has a known gap. Specifically:
 log p(x) - ELBO = KL(q(z | x) || p(z | x))
 ```
 
-The ELBO is tight (equal to log p(x)) when q(z | x) exactly matches the true posterior p(z | x). Since the true posterior is generally intractable, the gap is generally positive; minimizing the gap (or equivalently, maximizing the ELBO) over q brings the variational posterior closer to the truth.
+The ELBO is tight (equal to log p of x) when q of z given x exactly matches the true posterior p of z given x. Since the true posterior is generally intractable, the gap is generally positive; minimizing the gap (or equivalently, maximizing the ELBO) over q brings the variational posterior closer to the truth.
 
 This is the central identity of variational inference:
 
@@ -79,18 +79,18 @@ Maximizing the ELBO simultaneously maximizes the model likelihood (left side) an
 
 ## Worked example: linear-Gaussian by hand
 
-Take the simplest non-trivial latent-variable model. Latent z ∈ R, observation x ∈ R:
+Take the simplest non-trivial latent-variable model. Latent z is a real number, observation x is a real number:
 
 ```
 p(z)    = N(0, 1)          (prior)
 p(x | z) = N(z, 1)          (likelihood)
 ```
 
-Conjugate Gaussians admit a closed-form true posterior. The marginal p(x) is also closed-form: the convolution of two Gaussians.
+Conjugate Gaussians admit a closed-form true posterior. The marginal p of x is also closed-form: the convolution of two Gaussians.
 
-### Closed-form true posterior p(z | x)
+### Closed-form true posterior p of z given x
 
-By Bayes' rule, p(z | x) ∝ p(x | z) · p(z). The product of two Gaussians in z is another Gaussian; complete the square:
+By Bayes' rule, p of z given x is proportional to p of x given z times p of z. The product of two Gaussians in z is another Gaussian; complete the square:
 
 ```
 p(x | z) · p(z) ∝ exp(-(x - z)²/2) · exp(-z²/2)
@@ -98,17 +98,17 @@ p(x | z) · p(z) ∝ exp(-(x - z)²/2) · exp(-z²/2)
               = exp(-(z - x/2)²) · exp(-x²/4)
 ```
 
-The exponential exp(-(z - x/2)²) is a Gaussian in z with mean x/2 and variance 1/2. So:
+The exponential term is a Gaussian in z with mean x over 2 and variance one-half. So:
 
 ```
 p(z | x) = N(x/2, 1/2)
 ```
 
-For x = 1: true posterior is N(0.5, 0.5). Standard deviation sigma_true = √0.5 ≈ 0.707.
+For x = 1: the true posterior is a Gaussian with mean 0.5 and variance 0.5. Its standard deviation is the square root of 0.5, about 0.707.
 
-### Closed-form marginal p(x)
+### Closed-form marginal p of x
 
-The marginal is N(0, 1+1) = N(0, 2) (sum of two Gaussians' variances). For x = 1:
+The marginal is a Gaussian with mean 0 and variance 1 plus 1, that is, variance 2 (the sum of the two Gaussians' variances). For x = 1:
 
 ```
 log p(x = 1) = -0.5 · log(2π · 2) - 0.5 · (1²/2)
@@ -119,17 +119,17 @@ log p(x = 1) = -0.5 · log(2π · 2) - 0.5 · (1²/2)
 
 ### Pick a deliberately mismatched variational posterior
 
-Suppose we use a poor variational fit: q(z | x = 1) = N(0.3, 1). The mean is wrong (0.3 instead of 0.5) and the variance is wrong (1 instead of 0.5). What ELBO do we get?
+Suppose we use a poor variational fit: q of z given x, at x = 1, is a Gaussian with mean 0.3 and variance 1. The mean is wrong (0.3 instead of 0.5) and the variance is wrong (1 instead of 0.5). What ELBO do we get?
 
-#### Term 1: E_q[log p(x | z)]
+#### Term 1: the expectation under q of log p of x given z
 
-log p(x | z) = log N(x; z, 1) = -0.5 log(2pi) - 0.5 · (x - z)². For x = 1:
+The log-likelihood log p of x given z equals minus 0.5 times log of 2-pi, minus 0.5 times the squared error between x and z. For x = 1:
 
 ```
 log p(1 | z) = -0.5 log(2π) - 0.5 · (1 - z)²
 ```
 
-Take the expectation over z ~ q = N(0.3, 1). The squared term (1 - z)² has expectation:
+Take the expectation over z drawn from q, the Gaussian with mean 0.3 and variance 1. The squared term, one minus z, squared, has expectation:
 
 ```
 E_q [(1 - z)²] = (1 - μ_q)² + σ_q² = (1 - 0.3)² + 1 = 0.49 + 1 = 1.49
@@ -142,7 +142,7 @@ E_q [log p(1 | z)] = -0.5 log(2π) - 0.5 · 1.49
                  = -0.5 log(2π) - 0.745
 ```
 
-#### Term 2: KL(q || p) where p = N(0, 1)
+#### Term 2: the KL divergence from q to p, where p is a standard normal
 
 For two univariate Gaussians:
 
@@ -151,7 +151,7 @@ KL(N(μ_q, σ_q²) || N(μ_p, σ_p²))
   = log(σ_p / σ_q) + (σ_q² + (μ_q - μ_p)²) / (2 σ_p²) - 1/2
 ```
 
-With q = N(0.3, 1), p = N(0, 1):
+With q the Gaussian of mean 0.3 and variance 1, and p the standard normal:
 
 ```
 KL(q || p) = log(1) + (1 + 0.09) / 2 - 0.5
@@ -170,11 +170,11 @@ ELBO = E_q [log p(x | z)] - KL(q || p)
     = -1.709
 ```
 
-(Numerically, -0.5 log(2pi) ≈ -0.919.)
+(Numerically, minus 0.5 times log of 2-pi is about minus 0.919.)
 
 #### The ELBO gap
 
-Carefully expand log p(x = 1) = -0.5 log(4pi) - 0.25 term by term:
+Carefully expand log p of x at x = 1, which is minus 0.5 times log of 4-pi, minus 0.25, term by term:
 
 ```
 log p(x = 1) = -0.5 · log(2π) - 0.5 · log 2 - 0.25
@@ -182,7 +182,7 @@ log p(x = 1) = -0.5 · log(2π) - 0.5 · log 2 - 0.25
            = -1.516
 ```
 
-And from above, ELBO ≈ -0.919 - 0.790 = -1.709. The gap:
+And from above, the ELBO is about minus 0.919 minus 0.790, which is minus 1.709. The gap:
 
 ```
 log p(x) - ELBO ≈ -1.516 - (-1.709) = 0.193
@@ -190,9 +190,9 @@ log p(x) - ELBO ≈ -1.516 - (-1.709) = 0.193
 
 Positive, as Jensen's inequality requires. The variational fit is below the true log-marginal by 0.193 nats.
 
-#### Dual-path verification: compute KL(q(z|x) || p(z|x)) directly
+#### Dual-path verification: compute the KL from q of z given x to p of z given x directly
 
-Now compute the KL between the variational q = N(0.3, 1) and the true p(z | x) = N(0.5, 0.5):
+Now compute the KL between the variational q, the Gaussian of mean 0.3 and variance 1, and the true posterior p of z given x, the Gaussian of mean 0.5 and variance 0.5:
 
 ```
 KL(N(0.3, 1) || N(0.5, 0.5))
@@ -202,11 +202,11 @@ KL(N(0.3, 1) || N(0.5, 0.5))
   = 0.193
 ```
 
-Both paths arrive at KL = 0.193. The ELBO-gap identity log p(x) - ELBO = KL(q(z|x) || p(z|x)) holds to the digit. This is the dual-path verification of the ELBO machinery: compute the gap two ways (via the ELBO definition vs the analytic KL between the variational and true posterior), they match.
+Both paths arrive at a KL of 0.193. The ELBO-gap identity, that log p of x minus the ELBO equals the KL from q of z given x to p of z given x, holds to the digit. This is the dual-path verification of the ELBO machinery: compute the gap two ways (via the ELBO definition vs the analytic KL between the variational and true posterior), they match.
 
 ## The reparameterization trick
 
-When q(z | x) is part of a deep-learning pipeline, you need gradients to flow through the sampling step z ~ q(z | x). Naively, sampling is non-differentiable: there is no gradient of "draw a random number" with respect to the parameters of q.
+When q of z given x is part of a deep-learning pipeline, you need gradients to flow through the sampling step z ~ q of z given x. Naively, sampling is non-differentiable: there is no gradient of "draw a random number" with respect to the parameters of q.
 
 The reparameterization trick (Kingma & Welling, 2014) writes:
 
@@ -214,7 +214,7 @@ The reparameterization trick (Kingma & Welling, 2014) writes:
 z = g_φ(ε, x)    where ε ~ p(ε)   (a fixed distribution, typically N(0, I))
 ```
 
-g_phi is a deterministic function of epsilon, x, and the variational parameters phi. For a Gaussian q_phi(z | x) = N(mu_phi(x), sigma_phi²(x)), the standard choice is g_phi(epsilon, x) = mu_phi(x) + sigma_phi(x) · epsilon with epsilon ~ N(0, 1). The randomness is "pushed out" into epsilon, which has no parameters. The expression mu_phi(x) + sigma_phi(x) · epsilon is differentiable in phi.
+The mapping g-phi is a deterministic function of epsilon, x, and the variational parameters phi. For a Gaussian variational posterior with mean mu-phi and variance sigma-phi squared, the standard choice sets z equal to the mean mu-phi plus the standard deviation sigma-phi times epsilon, with epsilon drawn from a standard normal. The randomness is "pushed out" into epsilon, which has no parameters. That expression, mu-phi plus sigma-phi times epsilon, is differentiable in phi.
 
 The ELBO then becomes:
 
@@ -222,7 +222,7 @@ The ELBO then becomes:
 ELBO = E_{ε ~ N(0, I)} [ log p(x | g_φ(ε, x)) ] - KL(q_φ(z | x) || p(z))
 ```
 
-The expectation is now over a fixed distribution p(epsilon), so the gradient ∂ELBO/∂phi passes through g_phi. This is what makes variational autoencoders (VAEs) trainable by backpropagation.
+The expectation is now over a fixed distribution over epsilon, so the gradient of the ELBO with respect to phi passes through the mapping g-phi. This is what makes variational autoencoders (VAEs) trainable by backpropagation.
 
 For Gaussian q and p (the common case), the KL term has a closed-form expression (the formula above), so only the reconstruction term needs Monte-Carlo estimation.
 
@@ -230,14 +230,14 @@ For Gaussian q and p (the common case), the KL term has a closed-form expression
 
 ### Latent-state world models
 
-A partially observable RL problem has observations o_t (camera frames, sensor readings) but latent state s_t. A world model parameterizes the latent dynamics as:
+A partially observable RL problem has observations (camera frames, sensor readings) but a latent state. A world model parameterizes the latent dynamics as:
 
 ```
 p(s_1, ..., s_T, o_1, ..., o_T, r_1, ..., r_T)
   = p(s_1) · Π_t p(s_{t+1} | s_t, a_t) · p(o_t | s_t) · p(r_t | s_t, a_t)
 ```
 
-Train this by maximizing the variational ELBO over sequences. The variational posterior q(s_t | o_(1:t), a_(1:t-1)) runs forward through the trajectory; the prior p(s_t | s_(t-1), a_(t-1)) is the latent dynamics.
+Train this by maximizing the variational ELBO over sequences. The variational posterior, the latent state given the observations and actions up to that time, runs forward through the trajectory; the prior, the latent state given the previous state and action, is the latent dynamics.
 
 This is exactly what **PlaNet** (Hafner et al., 2019; https://arxiv.org/abs/1811.04551) and **Dreamer** (Hafner et al., 2019, 2020, 2021, 2023) do. The "world model" is a sequential latent-variable model trained with the ELBO. The latent representation is then used for planning or for training a model-free policy on imagined latent rollouts.
 
@@ -251,7 +251,7 @@ Soft Actor-Critic (SAC, Haarnoja et al., 2018) optimizes:
 J_SAC(π) = E_{s, a ~ π} [ Σ_t γ^t · (r(s_t, a_t) + α · H(π(·|s_t))) ]
 ```
 
-The entropy bonus alpha · H(pi) is presented in the SAC paper as an exploration regularizer. The variational view: maximum entropy is equivalent to minimum KL to a uniform prior on actions. The full SAC objective is:
+The entropy bonus, alpha times the policy entropy, is presented in the SAC paper as an exploration regularizer. The variational view: maximum entropy is equivalent to minimum KL to a uniform prior on actions. The full SAC objective is:
 
 ```
 J(π) = E [ r(s, a) ] - α · KL(π(·|s) || uniform)
@@ -259,7 +259,7 @@ J(π) = E [ r(s, a) ] - α · KL(π(·|s) || uniform)
 
 (up to constants). This is the same shape as an ELBO: reward term + KL regularizer toward a fixed prior. SAC is variational policy optimization with the uniform prior.
 
-Picking a different prior gives a different objective. **KL-regularized PPO** in RLHF (Lesson 8) uses KL(the policy parameterized by theta || pi_pretrained) instead: the prior is the pretrained model, not uniform. Same variational structure, different prior.
+Picking a different prior gives a different objective. **KL-regularized PPO** in RLHF (Lesson 8) uses the KL divergence from the policy to the pretrained model instead: the prior is the pretrained model, not uniform. Same variational structure, different prior.
 
 Lesson 12 generalizes this all the way: the **full** RL problem (not just the entropy bonus) is variational inference in the right graphical model.
 
@@ -285,9 +285,9 @@ Lesson 12 builds on this language to recast the full RL problem as inference in 
 
 ## What you should remember from this lesson
 
-- **The ELBO** is a tractable lower bound on log p(x): ELBO = E_q[log p(x | z)] - KL(q(z|x) || p(z)). Derived by applying Jensen's inequality to the log-marginal.
-- **The ELBO gap** log p(x) - ELBO = KL(q(z|x) || p(z|x)) measures how far the variational posterior is from the true posterior. Worked example: linear-Gaussian model with x = 1, mismatched q = N(0.3, 1), true posterior N(0.5, 0.5). Both paths to the KL gave 0.193.
-- **Reparameterization** writes z = g_phi(epsilon, x) with epsilon from a fixed distribution. Lets gradients flow through samples. Makes VAEs (and many RL algorithms) trainable by backpropagation.
+- **The ELBO** is a tractable lower bound on log p of x: the expectation under q of log p of x given z, minus the KL from q of z given x to the prior p of z. Derived by applying Jensen's inequality to the log-marginal.
+- **The ELBO gap**, log p of x minus the ELBO, equals the KL from q of z given x to p of z given x, and measures how far the variational posterior is from the true posterior. Worked example: linear-Gaussian model with x = 1, a mismatched q (mean 0.3, variance 1), true posterior (mean 0.5, variance 0.5). Both paths to the KL gave 0.193.
+- **Reparameterization** writes the latent z as a deterministic mapping g-phi of a noise variable epsilon and the input x, with epsilon from a fixed distribution. Lets gradients flow through samples. Makes VAEs (and many RL algorithms) trainable by backpropagation.
 - **Two main RL uses**: latent-state world models (Dreamer, PlaNet) trained with the ELBO; MaxEnt RL (SAC) where the entropy bonus is a KL regularizer to uniform.
 - **L12 will generalize**: the full RL problem can be cast as variational inference in a graphical model with "optimality" as the conditioning evidence.
 
