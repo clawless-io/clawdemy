@@ -242,6 +242,20 @@ export function mdxToProse(mdx: string): string {
 	// Import statements
 	text = text.replace(/^\s*import\s+.+?from\s+['"][^'"]+['"];?\s*$/gm, '');
 
+	// References / bibliography section: drop from the "## References" heading to
+	// the end of the document. Bibliography entries are URLs, arXiv IDs, author
+	// lists, DOIs, and venue names that the TTS mispronounces ("arXiv:1805.00909"
+	// reads as garbage); they are made to be read and clicked, not narrated.
+	// Founder rule 2026-06-06 (applies to every render from here on; shipped
+	// lessons keep their existing ref-inclusive audio because their MP3 + timing
+	// JSON are frozen and are not re-rendered). Safe against the ReadAlongDim
+	// walker: References is the LAST section of every lesson, so the timing JSON
+	// simply ends earlier and the walker's N = min(words, spans) clamp leaves the
+	// still-visible, clickable reference DOM un-highlighted (no mid-document
+	// drift, since nothing follows References). Heading-anchored + exact-match so
+	// a mid-prose mention of "references" is never caught.
+	text = text.replace(/^#{2,3}[ \t]+References[ \t]*$[\s\S]*/m, '');
+
 	// Code blocks (fenced)
 	text = text.replace(/```[\s\S]*?```/g, '');
 
