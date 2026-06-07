@@ -46,6 +46,13 @@ export default defineConfig({
 			title: 'Clawdemy',
 			description:
 				'Free AI literacy for everyday users. From zero to autonomous, one lesson at a time.',
+			// Brand wordmark replaces the plain-text title (brand-integration spec
+			// 2026-06-07). Light/dark variants; sizing in src/styles/global.css.
+			logo: {
+				light: './src/assets/brand/Clawdemy-wordmark.png',
+				dark: './src/assets/brand/Clawdemy-wordmark-white.png',
+				replacesTitle: true,
+			},
 			customCss: ['./src/styles/global.css'],
 			social: [
 				{
@@ -3831,7 +3838,7 @@ export default defineConfig({
 			// PRs before we can handle them well creates noise for the
 			// non-technical primary reader (Doc/strategy.md §1).
 			lastUpdated: true,
-			favicon: '/favicon.svg',
+			favicon: '/favicon-32.png',
 		}),
 	],
 });
