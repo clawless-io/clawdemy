@@ -3807,7 +3807,7 @@ export default defineConfig({
 					const __top = __groups.filter((g) => !/^Track \d+/.test(g.label));
 					const __tracks = __groups
 						.filter((g) => /^Track \d+/.test(g.label))
-						.sort((a, b) => parseInt(a.label.match(/Track (\d+)/)[1], 10) - parseInt(b.label.match(/Track (\d+)/)[1], 10));
+						.sort((a, b) => parseInt(a.label.match(/Track (\d+)/)?.[1] ?? '0', 10) - parseInt(b.label.match(/Track (\d+)/)?.[1] ?? '0', 10));
 					return [...__top, ...__tracks];
 				})(),
 			components: {
