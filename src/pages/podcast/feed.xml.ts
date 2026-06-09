@@ -34,10 +34,12 @@ const FEED_DESCRIPTION =
 const AUTHOR = 'Clawdemy';
 const OWNER_EMAIL = 'hello@clawdemy.org';
 const FEED_LANGUAGE = 'en';
-// TODO Phase 9.5 polish: replace with a dedicated 1400x1400 square PNG
-// (Apple Podcasts requires 1400x1400+; Spotify, 3000x3000). The OG image
-// works as a placeholder so the feed validates today.
-const COVER_ART = `${SITE_URL}/og-default.png`;
+// Dedicated square podcast cover art (3000x3000 JPG, navy + white Clawdemy
+// claw/wordmark) satisfying Apple Podcasts (>=1400x1400, square, RGB, <10MB,
+// no text overlays) and Spotify (3000x3000). Replaces the 1200x630 OG image,
+// which Apple rejects for being landscape. Added 2026-06-09 to unblock the
+// Apple Podcasts submission.
+const COVER_ART = `${SITE_URL}/podcast/cover.jpg`;
 
 interface AudioMeta {
 	url: string;
