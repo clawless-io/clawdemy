@@ -317,6 +317,17 @@ export function mdxToProse(mdx: string): string {
 	// Trailing backslashes (markdown line breaks)
 	text = text.replace(/\\$/gm, '');
 
+	// Pronunciation: ElevenLabs Flash v2.5 sometimes normalizes standalone "AI"
+	// to the word "eye" (heard on how-ai-reads-tokens, 2026-06-08). Spelling it
+	// "A.I." forces letter-by-letter narration. Word-boundary anchored so it
+	// never touches "AI" inside another word (maintain, Hussain, email); the
+	// optional ('s|s) group keeps possessive "AI's" and plural "AIs" intact.
+	// The second pass collapses "A.I.." (when "AI" ended a sentence) back to a
+	// single terminal period. Narration-only: the page still displays "AI".
+	// Demo-verified by ear before any R2 regen (CLAUDE.md §8.5).
+	text = text.replace(/\bAI('s|s)?\b/g, 'A.I.$1');
+	text = text.replace(/A\.I\.\./g, 'A.I.');
+
 	// Collapse whitespace
 	text = text.replace(/\n{3,}/g, '\n\n');
 	text = text.split('\n').map((l) => l.trim()).join('\n');
