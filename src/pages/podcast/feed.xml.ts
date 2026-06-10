@@ -47,17 +47,26 @@ interface AudioMeta {
 }
 
 async function probeAudio(url: string): Promise<AudioMeta | null> {
-	try {
-		const r = await fetch(url, { method: 'HEAD' });
-		if (!r.ok) return null;
-		const len = r.headers.get('content-length');
-		if (!len) return null;
-		const bytes = parseInt(len, 10);
-		if (!Number.isFinite(bytes) || bytes <= 0) return null;
-		return { url, bytes };
-	} catch {
-		return null;
+	// Retry transient failures (network error / 5xx / 429) so a one-off R2 hiccup
+	// during the build can't silently drop an episode from the feed. A genuine
+	// 404 (no audio yet) returns immediately — it's not retryable.
+	for (let attempt = 0; attempt < 3; attempt++) {
+		try {
+			const r = await fetch(url, { method: 'HEAD' });
+			if (r.ok) {
+				const len = r.headers.get('content-length');
+				if (!len) return null;
+				const bytes = parseInt(len, 10);
+				if (!Number.isFinite(bytes) || bytes <= 0) return null;
+				return { url, bytes };
+			}
+			if (r.status === 404) return null;
+		} catch {
+			// network error — fall through to retry
+		}
+		if (attempt < 2) await new Promise((res) => setTimeout(res, 300 * (attempt + 1)));
 	}
+	return null;
 }
 
 function formatDuration(minutes: number | undefined): string {

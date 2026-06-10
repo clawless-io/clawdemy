@@ -38,12 +38,21 @@ interface Finding {
 }
 
 async function hasAudio(slug: string): Promise<boolean> {
-	try {
-		const r = await fetch(`${AUDIO_BASE}/${slug}-lesson.mp3`, { method: 'HEAD' });
-		return r.ok;
-	} catch {
-		return false; // fail-safe: don't block CI on a transient network error
+	const url = `${AUDIO_BASE}/${slug}-lesson.mp3`;
+	// Retry transient failures so a one-off R2 hiccup doesn't make the check miss
+	// a genuinely-missing lesson. A 404 (no audio) returns immediately. After
+	// retries, fail safe to false (don't block CI on a persistent network error).
+	for (let attempt = 0; attempt < 3; attempt++) {
+		try {
+			const r = await fetch(url, { method: 'HEAD' });
+			if (r.ok) return true;
+			if (r.status === 404) return false;
+		} catch {
+			// network error — fall through to retry
+		}
+		if (attempt < 2) await new Promise((res) => setTimeout(res, 300 * (attempt + 1)));
 	}
+	return false;
 }
 
 async function main(): Promise<number> {
