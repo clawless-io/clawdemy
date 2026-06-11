@@ -1,0 +1,619 @@
+---
+title: 'Lesson: Multi-agent integration patterns'
+description: Three patterns for integrating work from parallel AI agents. Shared origin (simplest, most common). Per-agent fork (strongest isolation). Shared worktrees (fastest iteration, lead controls everything). How the lead orchestrates a fleet, runs integration, catches semantic conflicts that git cannot see, and produces a clean integration branch. By the end of L14 you can launch a multi-agent fleet, choose the right integration pattern, and avoid the failure modes that bite teams new to AI-collaborative development.
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+### The lesson where the worktree foundation becomes a working fleet
+
+L13 gave you the substrate: multiple parallel working directories, one per agent, sharing one git database. You can launch 6 agents in 6 worktrees in under a minute. Each agent works on its own branch. Their commits flow into the shared `.git/`. The lead (you, an orchestrator script, or another AI agent) can watch all six branches simultaneously.
+
+Now the hard question: when the agents are done, how do you turn six branches into a clean main?
+
+Sometimes it's easy. Each agent worked on a separate part of the codebase. No two agents touched the same file. You merge them in sequence. Done.
+
+Often it's not easy. Two agents touched related code. One agent made a change the other was implicitly counting on. An agent committed work that builds locally but fails the test suite when merged with another's work. Three agents all added similar utility functions, each unaware. The git-level merges all succeed, but the integrated codebase behaves wrong.
+
+L14 is about navigating this. Three patterns for organizing the fleet. The lead's role inside each pattern. The class of failure (semantic conflicts) that git will not catch for you. And the practical orchestration moves: the sequence in which you integrate, what to test at each step, when to abort and re-run agents.
+
+This is the lesson that decides whether multi-agent AI development feels like a 10x speedup or a debugging nightmare. The patterns matter.
+
+### What "integration" means in a multi-agent context
+
+In single-developer work, "integration" is what happens when you merge your feature branch into main. One person's work being added to the shared trunk.
+
+In multi-agent work, integration is the same idea but happens N times, often near-simultaneously, often with overlapping changes. The lead is integrating:
+- Agent 1's branch into a clean integration branch
+- Agent 2's branch into the same integration branch (now with Agent 1's work in it)
+- Agent 3's branch into that integration branch (now with Agent 1 + 2's work)
+- ... and so on
+
+Each integration step can:
+- Succeed cleanly (no conflicts, tests pass, behavior is correct).
+- Hit a git-level conflict (two branches touched the same lines, classic merge conflict, L7 process).
+- Compile cleanly but fail tests (semantic conflict, the new failure mode).
+- Compile cleanly, pass tests, but behave subtly wrong in production (the worst failure mode, sometimes only caught later).
+
+The lead's job is to make integration steps succeed in BOTH the syntactic sense (git is happy) AND the semantic sense (the integrated code actually does the right thing).
+
+### Pattern 1: Shared origin (the default)
+
+The simplest pattern. The team has ONE remote repository. All agents push to it. The lead pulls from it. Integration happens on the lead's machine.
+
+**Setup:**
+
+```bash
+# Lead creates the fleet
+cd ~/projects/myrepo
+git checkout main && git pull
+git worktree add -b agent-1/feature ../agent-1 main
+git worktree add -b agent-2/feature ../agent-2 main
+# ... etc
+```
+
+**Agents push to shared remote:**
+
+Each agent works in its worktree. When an agent reaches a stable point, it commits and pushes:
+
+```bash
+cd ../agent-1
+git push -u origin agent-1/feature
+```
+
+The shared remote now sees `agent-1/feature` (and similarly each agent's branch).
+
+**Lead integrates:**
+
+When all agents have pushed (or some subset that's ready to integrate):
+
+```bash
+cd ~/projects/myrepo
+git checkout main && git pull
+git checkout -b integration/<feature-name> main
+
+git merge agent-1/feature        # or fetch first if branches are on remote only
+# resolve any conflicts
+# run tests
+
+git merge agent-2/feature
+# resolve conflicts
+# run tests
+
+# ... and so on
+```
+
+After all merges succeed and tests pass:
+
+```bash
+git checkout main
+git merge integration/<feature-name>     # fast-forward if possible
+git push origin main
+```
+
+**Tradeoffs:**
+
+- **Pro:** simplest workflow. One remote, one push destination, one pull source. Agents and lead use the same git protocol.
+- **Pro:** branches are visible to the whole team. Other humans can review agent branches before integration.
+- **Pro:** uses standard tooling. No special configuration.
+- **Con:** the remote sees all the agent branches, which can clutter the branch list. Mitigation: delete agent branches after integration.
+- **Con:** if an agent goes off the rails and pushes bad work, the bad work is on the shared remote (until the lead cleans up). Mitigation: don't push agent branches to the shared remote until they're reasonably clean, OR push to a "staging" remote that's separate from the main one.
+
+**When to use:** the default for nearly all multi-agent workflows. Start here. Move to the more isolated patterns only when you have a specific reason.
+
+### Pattern 2: Per-agent fork
+
+A pattern borrowed from the open-source world. Each agent has its OWN remote (a fork). The lead pulls from each fork. The main remote stays clean.
+
+**Setup:**
+
+Each agent operates in a worktree but pushes to its OWN remote, not the shared one:
+
+```bash
+cd ../agent-1
+git remote add origin git@example.com:agents/agent-1.git
+git push -u origin agent-1/feature
+```
+
+The shared remote (your team's main remote) does NOT see `agent-1/feature`. It lives only on agent-1's fork.
+
+**Lead integrates:**
+
+The lead adds each agent's fork as a remote:
+
+```bash
+cd ~/projects/myrepo
+git remote add agent-1 git@example.com:agents/agent-1.git
+git remote add agent-2 git@example.com:agents/agent-2.git
+
+git fetch agent-1
+git fetch agent-2
+
+git checkout -b integration/<feature-name> main
+git merge agent-1/agent-1/feature
+git merge agent-2/agent-2/feature
+# ... etc
+```
+
+After integration succeeds, push integration branch (or main) to the SHARED remote:
+
+```bash
+git push origin main      # or integration/<feature-name>
+```
+
+**Tradeoffs:**
+
+- **Pro:** strongest isolation. Bad agent work cannot pollute the shared remote. Agent branches are quarantined on each agent's fork.
+- **Pro:** matches the forking workflow from L8/L9, your team likely knows it.
+- **Pro:** good fit for "untrusted" agents (e.g. agents authored by external parties, agents you're not 100% sure of, agents whose code you want to vet thoroughly before it touches the shared remote).
+- **Con:** more setup. Each agent needs its own remote. The lead needs to add each agent as a named remote.
+- **Con:** slower iteration. The "push to my fork, lead fetches" cycle adds latency vs the shared-origin "everything is one remote" pattern.
+
+**When to use:** when you need hard isolation between agents and the shared codebase. Common cases: external contributors using AI agents, AI agents you're piloting and don't want to trust with push-to-main rights, security-sensitive contexts. Also useful when you want the OPTION to discard an agent's work entirely without leaving a trace on the shared remote.
+
+### Pattern 3: Shared worktrees, local-only integration
+
+The tightest iteration loop. All worktrees are on the lead's machine. NO remote push happens until integration is final. The lead does everything locally.
+
+**Setup:**
+
+```bash
+cd ~/projects/myrepo
+git checkout main && git pull       # the only remote pull
+git worktree add -b agent-1/feature ../agent-1 main
+git worktree add -b agent-2/feature ../agent-2 main
+# ... etc
+```
+
+**Agents work in their worktrees.** Each agent COMMITS locally but does NOT push.
+
+**Lead integrates locally:**
+
+```bash
+cd ~/projects/myrepo
+git checkout -b integration/<feature-name> main
+
+git merge agent-1/feature       # local merge, no remote involved
+git merge agent-2/feature
+# ... etc
+
+# Run tests, iterate
+```
+
+If integration goes wrong, the lead can iterate freely:
+
+```bash
+git reset --hard main         # back to clean state
+# re-run merges with different order
+# OR abandon and reset agent worktrees, re-spawn agents
+```
+
+Only after integration is clean and tests pass does ANYTHING get pushed:
+
+```bash
+git checkout main
+git merge integration/<feature-name>
+git push origin main
+```
+
+**Tradeoffs:**
+
+- **Pro:** smallest blast radius. Nothing leaves the lead's machine until the work is verified. If an agent goes wrong, the bad work never leaves.
+- **Pro:** fastest iteration. Re-running integration is a local `git reset` and re-merge. No "force-push to fork" awkwardness.
+- **Pro:** total lead control. The lead can rebase agent commits, cherry-pick portions, drop bad commits, all without any remote-side cleanup.
+- **Con:** agent work is only on the lead's machine. If the laptop dies during the sprint, the work is gone (mitigation: periodically push a snapshot to a backup remote even if not the main one).
+- **Con:** no visibility for other humans during the work. If a teammate wants to see what an agent is doing, they can't, it's only on the lead's machine.
+- **Con:** doesn't scale to teams with multiple lead orchestrators working concurrently.
+
+**When to use:** when you (and possibly you alone) are running a fast-iteration multi-agent sprint and you want maximum control with minimum cleanup overhead. Common case: a focused 2-4 hour session where the lead is hands-on, agents are rapid, and the lead just wants the final integrated result on main.
+
+### Choosing between patterns
+
+A decision tree:
+
+- **Do you need other humans to review agent work in-flight (before integration)?** Use Pattern 1 (shared origin). Agent branches must be on the shared remote.
+- **Are the agents untrusted or external?** Use Pattern 2 (per-agent fork). Quarantine them on separate forks until vetted.
+- **Are you in a tight iteration loop where you control the whole sprint?** Use Pattern 3 (shared worktrees, local-only). Fastest, smallest blast radius.
+- **None of the above clearly applies?** Use Pattern 1 (shared origin). It's the safe default.
+
+Most teams new to multi-agent work start with Pattern 1, occasionally drop into Pattern 3 for focused sprints, and rarely need Pattern 2 (unless they're working with external contributors).
+
+### The lead orchestrator's role
+
+Across all three patterns, the lead plays the same role. The differences are how the artifacts (branches, commits) move around. The lead's responsibilities:
+
+**1. Planning the fleet.** Decide what each agent should work on. Define agent scope tightly (one agent, one part of the codebase). Avoid agents whose scope overlaps in messy ways (they'll fight in integration).
+
+**2. Spawning the fleet.** Create the worktrees and branches. Launch the agent sessions. Brief each agent on its scope (in a prompt or instruction file).
+
+**3. Watching the fleet during work.** Periodically run `git log --all --oneline --graph` to see what each agent is committing. Catch agents that are going off-script early (before they pile up a lot of bad work).
+
+**4. Integrating.** When agents reach stable points, merge or cherry-pick their work into an integration branch. Run tests at each step. Resolve conflicts.
+
+**5. Catching semantic conflicts.** This is the unique multi-agent challenge, see the next section.
+
+**6. The push gate.** The lead is the only one who pushes the integrated work to main (or the shared remote, depending on the pattern). Agents do not push to main directly. The push gate is where final review happens.
+
+**7. Cleanup.** Remove worktrees. Delete agent branches. Reset the workspace for the next fleet.
+
+The lead is not just "another developer who happens to coordinate." The lead is specifically responsible for the quality of the integrated output. The lead reads the integrated diff before pushing. The lead catches the things agents miss.
+
+This role can be played by a human, by a more capable AI agent (a "lead agent"), or by a script that automates the mechanical parts and escalates the judgment calls to a human. Different teams set this up differently.
+
+### The semantic-conflict failure mode (the one git cannot catch for you)
+
+Here's the failure mode that takes new multi-agent teams by surprise.
+
+Agent A modifies `models/user.py`. It adds a new field called `last_login_timestamp`.
+
+Agent B modifies `services/email.py`. It adds a new function that sends an email using fields from the User model, including (in B's understanding of the model) a field called `last_login_time` (note the different name).
+
+Both agents committed. Both branches merged cleanly, they touched different files. Git sees no conflict. Tests run...
+
+If you have good unit tests, B's email function tries to access `user.last_login_time` and gets `AttributeError`. The test fails. Conflict detected, late but catchable.
+
+If you DON'T have good unit tests covering that interaction, the merged code passes tests (because nothing exercised the broken path) and the bug ships. A user signs up, eventually their last_login_time is checked somewhere, and the app crashes.
+
+This is a **semantic conflict**. Git's merge is correct (the diffs apply cleanly to different files). The CODE is broken (because A and B had inconsistent models of how things were named).
+
+Other examples:
+- Two agents add the same utility function (different files, different names), git is happy, but you have duplicate logic.
+- Agent A renames a function. Agent B (working in parallel) calls the OLD function name. Git merges fine; the merged code has a name error.
+- Agent A and Agent B both add database migrations. Each one is correct in isolation. Run in the wrong order, they fail.
+- Agent A changes a function's behavior subtly. Agent B's code depends on the OLD behavior. Git is happy; the integrated behavior is wrong.
+
+**Why this happens with agents more than with humans:**
+
+Humans on a team usually have side-channel context. They sit in standups. They chat in Slack. They know roughly what the others are working on. They notice when their work has implicit dependencies on something a teammate is changing.
+
+Agents in parallel don't have that side-channel by default. Each agent reads its scope, reads the code as it is at the start of the sprint, and writes its work. The agents don't see each other's drafts. They can't notice "huh, my work assumes the function name `X`, but the other agent is renaming it to `Y`."
+
+The mitigation isn't to make agents talk to each other (that adds latency and complexity). The mitigation is **process at the lead's integration step**.
+
+### How the lead catches semantic conflicts
+
+Three layers of defense, used in combination:
+
+**Layer 1: Tight agent scope.** Reduce overlap. If Agent A is working in `models/`, Agent B in `services/`, and Agent C in `templates/`, the chance of semantic conflict is low (different mental models for different concerns).
+
+If overlap is unavoidable (e.g. two agents both need to touch a shared utility module), have ONE agent own the shared piece and have the others CONSULT the shared piece in their prompts.
+
+**Layer 2: Comprehensive integration tests.** Run them after EACH merge in the integration sequence. If Agent A's branch merges into integration cleanly and tests pass, then Agent B's branch is merged, if tests fail, you know the failure is at the A+B boundary.
+
+This is why integration tests are valuable in a multi-agent workflow even when the individual agents already wrote unit tests. Unit tests pass independently. Integration tests catch the seams.
+
+**Layer 3: The lead reads the integrated diff.** Before pushing to main, the lead reads `git diff main..integration/<feature-name>` and looks for the semantic seams. This is judgment work; no test framework can fully substitute. The lead looks for:
+- Renamings (does a function name change in one agent's branch that's called by another?)
+- New shared utilities (did two agents add similar functions?)
+- Subtle behavior changes (did an agent change a function's return type or error behavior?)
+- Migrations or schema changes (do migrations in two branches need to run in a specific order?)
+
+This step is non-negotiable for production work. Skipping it is how multi-agent integrations ship bugs.
+
+### The Clawless 2026-06-04 sprint, a real-world example
+
+In a documented multi-agent sprint, Clawless ran six agents in parallel for several hours, producing roughly 300 commits across the fleet. The first pass of integration looked clean, git merges all succeeded, individual agent tests passed.
+
+A lead-stage `bun astro build` (the lead's authoritative full-system build, after all integration merges) caught roughly 300 latent breakers that the per-agent tests had missed. The breakers fell into a handful of classes:
+- ~266 MDX autolink errors (a class of brace-handling pattern git could not see).
+- ~20 inequality syntax errors (similar, a parsing edge case).
+- ~15 YAML colon-space errors.
+- ~5 Bloom-taxonomy gaps (lesson structure rules that weren't enforced at the agent level).
+
+The root cause across the board: each agent was working with a SLIGHTLY different mental model of the project's parsing rules. Individually, each agent's diff looked fine. Integrated, the cumulative effect of small mismatches surfaced as a wave of build errors.
+
+The fix wasn't to make the agents smarter (they were already capable). The fix was the LEAD'S BUILD GATE, running the full system build at the integration step caught issues no per-agent test could see.
+
+The takeaway for L14: the lead's integration build is the most important guardrail in a multi-agent workflow. Treat it as the primary gate, not a "we'll run it eventually" check.
+
+### Worked example 1: Shared-origin pattern, 3-agent feature
+
+You're building a "user profile page" feature. Three agents: data model, API endpoint, UI form.
+
+**Lead setup:**
+
+```bash
+cd ~/projects/myrepo
+git checkout main && git pull
+
+git worktree add -b agent-data/profile ../agent-data main
+git worktree add -b agent-api/profile ../agent-api main
+git worktree add -b agent-ui/profile ../agent-ui main
+```
+
+**Agent prompts (briefly):**
+
+- agent-data: "Extend the User model with profile fields: bio, avatar_url, social_links. Write a migration. Write model-level tests."
+- agent-api: "Add REST endpoints GET /api/profile and PUT /api/profile. Assume the User model has fields bio, avatar_url, social_links. Write endpoint tests."
+- agent-ui: "Build a profile-edit form at /profile/edit. Wire it to the API endpoints. Cover the same fields. Write component tests."
+
+Each agent works in its worktree. After 45 minutes, each has committed and pushed:
+
+```bash
+git push -u origin agent-data/profile     # from ../agent-data
+git push -u origin agent-api/profile      # from ../agent-api
+git push -u origin agent-ui/profile       # from ../agent-ui
+```
+
+**Lead integration:**
+
+```bash
+cd ~/projects/myrepo
+git checkout -b integration/profile main
+
+git merge agent-data/profile       # clean
+bun test                            # passes, data model is internally consistent
+
+git merge agent-api/profile        # clean
+bun test                            # FAILS, API endpoint expects `avatar` but model has `avatar_url`
+
+# Inspect the failure
+# The API agent's code: user.avatar
+# The data agent's code: user.avatar_url
+# Classic semantic conflict, different field names
+
+# Resolve: edit api/profile.py to use the correct field name
+# Commit the fix
+git add api/profile.py
+git commit -m "fix integration: align API field name with model"
+bun test                            # passes
+
+git merge agent-ui/profile         # clean
+bun test                            # passes
+```
+
+**The semantic conflict was caught at the integration step.** The lead noticed because tests failed. Without integration tests covering the api/model boundary, the bug would have shipped.
+
+**Lead read of integrated diff:**
+
+```bash
+git diff main..integration/profile
+```
+
+Lead scans for other semantic seams. Notices that agent-ui added a `validate_bio()` function and agent-api added a different `validate_bio_field()` function. Both do the same thing. Lead decides to keep the agent-ui version (more thorough) and refactor agent-api to use it.
+
+After the cleanup commit:
+
+```bash
+git checkout main
+git merge integration/profile
+git push origin main
+```
+
+Done. The feature is shipped. Total elapsed: 60-90 min for agent work, 30 min for lead integration including semantic-conflict catch.
+
+### Worked example 2: Per-agent fork pattern, untrusted external agent
+
+You're piloting an external contributor (a third-party AI agent) on a small feature. You want to keep their work quarantined until vetted.
+
+**Setup:**
+
+Your repo has a main remote at `origin` (your team's). The external agent has their own remote at `external-agent-1`.
+
+```bash
+# Lead's main repo
+git remote add external-agent-1 git@external.example.com:agents/agent-1.git
+```
+
+**External agent works.** They push to their own remote, not yours.
+
+**Lead vets the work BEFORE integrating:**
+
+```bash
+git fetch external-agent-1
+git checkout -b inspect-external-1 external-agent-1/main
+# Read the commits, check the code, run their tests
+git log --oneline                # see what they committed
+git diff main..HEAD               # see the full diff
+```
+
+If the work looks good:
+
+```bash
+# Cherry-pick into a clean integration branch (so any cruft from the external repo doesn't come along)
+git checkout -b integration/external-1-work main
+git cherry-pick external-agent-1/main~3..external-agent-1/main    # or whatever range
+# Run tests, lead integration build
+# If clean, merge to main and push to origin
+git checkout main
+git merge integration/external-1-work
+git push origin main
+```
+
+If the work has problems but salvageable parts:
+
+```bash
+git cherry-pick <just-the-good-commits>
+# Drop the rest. The external agent's work that didn't make it never touches origin.
+```
+
+The key: the external agent's work was on a separate remote until the lead vetted it. The team's main remote was protected throughout.
+
+### Worked example 3: Shared-worktrees pattern, fast solo sprint
+
+You're a solo lead orchestrating a 90-minute multi-agent sprint to add a "weekly digest email" feature.
+
+**Setup (no remote push until final):**
+
+```bash
+cd ~/projects/myrepo
+git checkout main && git pull
+git worktree add -b agent-1/digest-data ../agent-1 main
+git worktree add -b agent-2/digest-job ../agent-2 main
+git worktree add -b agent-3/digest-email ../agent-3 main
+```
+
+**Agents work and commit locally:**
+
+Each agent commits to its branch. NONE push.
+
+**Lead integrates LOCALLY:**
+
+```bash
+cd ~/projects/myrepo
+git checkout -b integration/digest main
+
+git merge agent-1/digest-data
+bun test
+git merge agent-2/digest-job
+bun test
+git merge agent-3/digest-email
+bun test
+```
+
+Two tests fail. Investigate: it's a semantic conflict between agent-1's model and agent-3's email template. Easy fix locally.
+
+```bash
+# Edit, commit, retest
+git add <files>
+git commit -m "fix integration: align template field names with model"
+bun test    # passes
+```
+
+**Lead reads the integrated diff,** spots one more semantic issue (agent-2 added a configuration constant that agent-3's template also defined with a different value). Resolve.
+
+```bash
+bun test    # passes
+# Lead-stage build
+bun astro build   # passes
+```
+
+Now push:
+
+```bash
+git checkout main
+git merge integration/digest
+git push origin main
+```
+
+Total elapsed: 90 min agent work, 30 min integration. NOTHING was on the remote until the final push. If anything had gone wrong, the lead could have aborted with no cleanup beyond local reset.
+
+### Worked example 4: When to abort and re-run agents
+
+Sometimes integration fails badly enough that the right move is to abort and re-run one or more agents.
+
+**Setup:** you ran 4 agents. Integration of agent-1, agent-2, agent-3 went fine. Agent-4's branch has many conflicts AND many semantic issues. Investigation reveals agent-4 misunderstood the spec.
+
+**Options:**
+
+A. Try to repair agent-4's branch by hand. Time-intensive. Lead has to understand what agent-4 was trying to do and fix it.
+
+B. Drop agent-4's branch. Re-run agent-4 with a clearer prompt that addresses the misunderstanding.
+
+```bash
+# Discard agent-4's branch
+git worktree remove --force ../agent-4
+git branch -D agent-4/<task>
+
+# Spawn a fresh agent-4 with corrected prompt
+git worktree add -b agent-4/<task> ../agent-4 main
+# Launch new agent session with refined prompt
+```
+
+C. Drop agent-4 entirely (the feature can ship without that piece, or postpone that piece).
+
+Option B is often the right move when:
+- The bad agent's work is salvageable in concept but messy in execution
+- The refined prompt would be clearer than the original
+- The work is small enough that re-running is cheap
+
+Don't sink hours into rescuing a confused agent's output when 20 minutes of re-running would produce cleaner work.
+
+### A note for experienced developers
+
+The multi-agent patterns above will feel familiar if you've worked on:
+- **Large open-source projects** where many contributors submit PRs in parallel and maintainers integrate. Shared-origin is "contributors push to upstream branches"; per-agent-fork is "contributors push to their own forks" (the canonical OSS pattern).
+- **Microservice teams** where each service is independently developed but periodically integrated. The lead-build pattern for catching semantic conflicts maps directly to "integration testing across service boundaries."
+- **Long-term feature branches** where many engineers contribute and someone has to integrate. The "lead reads the integrated diff" step is what the integration engineer does manually.
+
+The new piece, and it's a real one, is the SCALE and FREQUENCY at which this happens with AI agents. A team might integrate 6 agent branches in a 90-minute window. Five hours later, another 6. Five hours later, another. The patterns that were "once-a-quarter" with humans become daily with agents. That changes what's worth automating, what's worth scripting, and what the lead's full-time role looks like.
+
+### A useful frame for managers and technical product managers
+
+When your team is starting multi-agent AI workflows, here's what's useful to know:
+
+- **The lead role is real and unstaffed by default.** Teams that just "launch some agents and see what they produce" without explicit lead orchestration get inconsistent quality. The lead role can be a human, a more capable AI agent, or a hybrid script-plus-human. Whatever the staffing model, recognize it as a role and resource it.
+- **Semantic-conflict catching is the differentiating skill.** Anyone can run agents. Catching the subtle cross-agent issues is what separates a productive fleet from a fleet that ships bugs. This skill grows with experience, leads who have integrated 50+ fleets are dramatically better at this than first-timers.
+- **The build gate is non-negotiable.** The Clawless 2026-06-04 sprint experience is canonical: per-agent tests are necessary but not sufficient. A full-system build at the integration step catches things nothing else will. Schedule and budget for this step.
+- **Per-agent fork patterns are appropriate for vendor-managed agents.** If your team is contracting with an external AI services provider, per-agent fork is the right isolation pattern. It maps directly to "vendor pushes to their delivery branch; you pull and integrate."
+- **Multi-agent integration doesn't replace code review.** The lead reading the integrated diff IS code review (just done after integration instead of before). A separate human reviewer can also be in the loop if your team requires it.
+
+**For TPMs specifically:** when scoping work for a multi-agent sprint, the most important upstream choice is agent scope partitioning. Tight, non-overlapping scopes (e.g. "agent 1: data model only; agent 2: API only") minimize semantic-conflict risk. Loose, overlapping scopes (e.g. "agent 1 and agent 2 both work on the user-facing feature") maximize it. The TPM's value-add is in scope design before the sprint starts.
+
+### A foreshadowing note for L15-L16
+
+L15 (AI-authored commits and PRs) zooms in on what changes when an AI is the one typing the code. Co-authorship conventions. The "Generated with Claude Code" marker. What the human review changes when the diff was authored by an AI. How release notes evolve.
+
+L16 (The future of git in an AI world) closes the track with a speculative look at where the primitives might evolve.
+
+L13 (worktrees) + L14 (integration patterns) gave you the substrate and the orchestration. L15 fills in the commit-author details. L16 zooms out to the long view.
+
+### Concrete scenarios across team scales
+
+**Solo developer running a personal multi-agent fleet:**
+
+Shared-worktrees pattern is dominant. The developer is the lead, the agents are tools, nothing leaves the laptop until the integrated result is verified. Fastest iteration, smallest cleanup overhead.
+
+Common pattern: a 2-3 hour focused session with 3-6 agents, ending with one clean push to main.
+
+**Startup, 3-person team, beginning to use agents:**
+
+Shared-origin pattern. The team has one repo, agents push their branches to it, the lead (often the founder or tech lead) integrates. Other team members can review agent branches before integration.
+
+The lead role is sometimes rotated (whoever's running the current fleet). Critical to document the integration procedure so the rotation works.
+
+**Mid-size company, 50-person team, multi-fleet operations:**
+
+Shared-origin with platform automation. Often a "fleet coordinator" script handles the mechanical bits (worktree setup, agent prompt delivery, branch tracking). Lead humans focus on the judgment-heavy integration steps. The platform tracks fleet metrics: agent success rates, integration time, semantic-conflict frequency.
+
+Larger teams sometimes run multiple fleets concurrently. Each fleet has its own lead. Fleet coordination becomes part of the engineering org's standing practice.
+
+**Open-source project accepting AI-assisted contributions:**
+
+Per-agent fork pattern, mapped onto the existing contributor workflow. External contributors using AI agents push to their forks; project maintainers integrate as they would for human contributions. Some projects label AI-assisted PRs explicitly; others don't distinguish.
+
+The project's normal review process applies. The "lead" role is the maintainer who would have reviewed the PR anyway.
+
+**Multi-agent team running production fleets:**
+
+The full pattern. Multiple fleets per day. Lead role is well-defined and resourced. Build gates are automated and reliable. Semantic-conflict catching is a measured skill with feedback loops. Worktree setup is scripted. Cleanup is scripted. The mechanical overhead is near-zero; the human value-add is concentrated in scope planning and integration judgment.
+
+This is where multi-agent AI development reaches "10x productivity" territory, when the patterns are mature, automated where they can be, and the humans focus on the parts the machines genuinely can't do.
+
+### The stay-calm psychology for multi-agent integration
+
+The first time you run a multi-agent fleet, integration will be messy. You'll hit semantic conflicts you didn't expect. Tests will fail in surprising ways. You'll spend more time debugging than you thought.
+
+This is normal. The lead skill grows with reps. After 5-10 fleets, you start anticipating common semantic-conflict patterns. After 20-30, you start preventing them in agent prompts. After 50+, you're spotting issues in seconds that took 30 minutes the first time.
+
+The thing to internalize early: **the patterns are real, the failure modes are predictable, and the skill is learnable.** Multi-agent integration isn't black magic; it's a workflow with rules.
+
+The thing to NOT internalize: that the agents are going to magically get smart enough to not need lead orchestration. They might (eventually). They aren't yet. Lead orchestration is the difference between "AI agents help me" and "AI agents help me ship bugs fast."
+
+The most important habit: **always run the lead-stage build before pushing.** Even when integration looks clean. Even when all per-agent tests passed. The build gate is your last line of defense and the most important one.
+
+### What you can do now
+
+You can:
+
+- Choose between shared-origin, per-agent fork, and shared-worktrees integration patterns based on the situation
+- Apply the shared-origin pattern as the default starting point
+- Recognize when per-agent fork is the right choice (untrusted agents, external contributors, hard isolation)
+- Use shared worktrees for fast solo iteration where the lead controls everything
+- Play the lead role: plan agent scope, spawn the fleet, watch progress, integrate, catch semantic conflicts, push gate, cleanup
+- Identify semantic conflicts as a distinct failure class from git-level conflicts, and put process guardrails (tight scope, integration tests, lead-stage build, diff review) in place
+- Decide when to abort and re-run an agent vs repair its branch by hand
+
+### What's next in Phase 4
+
+L15 (AI-authored commits and PRs) covers what changes when an AI is the author. Co-authorship conventions. The "Generated with Claude Code" marker line and others like it. Release-note treatment. What human review changes when the diff was AI-typed.
+
+L16 (The future of git in an AI world) closes the track speculatively-but-grounded. Where might git primitives evolve. How to stay calm as the tooling shifts.
+
+### Voice anchor (carried from L1-L13)
+
+> Git stores snapshots. Every other command is just navigating those snapshots.
+
+Multi-agent integration is just merging or cherry-picking snapshots from N branches into one. Each agent's branch is a sequence of snapshots. The lead's job is to combine them into a coherent integration snapshot. Git's merge engine handles the syntactic combination. The lead handles the semantic combination, making sure the snapshots fit together not just at the line level but at the meaning level.

@@ -1034,6 +1034,60 @@ export default defineConfig({
 								},
 							],
 						},
+						{
+							label: 'Phase 4\nMulti-agent teams',
+							collapsed: true,
+							items: [
+								{
+									label: 'Worktrees and parallel agents',
+									collapsed: true,
+									items: [
+									{ label: 'Brief', slug: 'lessons/git-workflow/worktrees-and-parallel-agents/brief' },
+									{ label: 'Lesson', slug: 'lessons/git-workflow/worktrees-and-parallel-agents/lesson' },
+									{ label: 'Practice', slug: 'lessons/git-workflow/worktrees-and-parallel-agents/practice' },
+									{ label: 'Summary', slug: 'lessons/git-workflow/worktrees-and-parallel-agents/summary' },
+									{ label: 'Cheatsheet', slug: 'lessons/git-workflow/worktrees-and-parallel-agents/cheatsheet' },
+									{ label: 'References', slug: 'lessons/git-workflow/worktrees-and-parallel-agents/references' },
+									],
+								},
+								{
+									label: 'Multi-agent integration patterns',
+									collapsed: true,
+									items: [
+									{ label: 'Brief', slug: 'lessons/git-workflow/multi-agent-integration-patterns/brief' },
+									{ label: 'Lesson', slug: 'lessons/git-workflow/multi-agent-integration-patterns/lesson' },
+									{ label: 'Practice', slug: 'lessons/git-workflow/multi-agent-integration-patterns/practice' },
+									{ label: 'Summary', slug: 'lessons/git-workflow/multi-agent-integration-patterns/summary' },
+									{ label: 'Cheatsheet', slug: 'lessons/git-workflow/multi-agent-integration-patterns/cheatsheet' },
+									{ label: 'References', slug: 'lessons/git-workflow/multi-agent-integration-patterns/references' },
+									],
+								},
+								{
+									label: 'AI-authored commits and PRs',
+									collapsed: true,
+									items: [
+									{ label: 'Brief', slug: 'lessons/git-workflow/ai-authored-commits-and-prs/brief' },
+									{ label: 'Lesson', slug: 'lessons/git-workflow/ai-authored-commits-and-prs/lesson' },
+									{ label: 'Practice', slug: 'lessons/git-workflow/ai-authored-commits-and-prs/practice' },
+									{ label: 'Summary', slug: 'lessons/git-workflow/ai-authored-commits-and-prs/summary' },
+									{ label: 'Cheatsheet', slug: 'lessons/git-workflow/ai-authored-commits-and-prs/cheatsheet' },
+									{ label: 'References', slug: 'lessons/git-workflow/ai-authored-commits-and-prs/references' },
+									],
+								},
+								{
+									label: 'The future of git',
+									collapsed: true,
+									items: [
+									{ label: 'Brief', slug: 'lessons/git-workflow/the-future-of-git-in-an-ai-world/brief' },
+									{ label: 'Lesson', slug: 'lessons/git-workflow/the-future-of-git-in-an-ai-world/lesson' },
+									{ label: 'Practice', slug: 'lessons/git-workflow/the-future-of-git-in-an-ai-world/practice' },
+									{ label: 'Summary', slug: 'lessons/git-workflow/the-future-of-git-in-an-ai-world/summary' },
+									{ label: 'Cheatsheet', slug: 'lessons/git-workflow/the-future-of-git-in-an-ai-world/cheatsheet' },
+									{ label: 'References', slug: 'lessons/git-workflow/the-future-of-git-in-an-ai-world/references' },
+									],
+								},
+							],
+						},
 					],
 				},
 				{
