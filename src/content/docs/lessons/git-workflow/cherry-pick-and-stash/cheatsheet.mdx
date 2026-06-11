@@ -1,0 +1,246 @@
+---
+title: 'Cheatsheet: Cherry-pick and stash'
+description: Quick reference plus model answers for L11 self-check questions and drills.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+---
+
+### Voice anchor
+
+> Git stores snapshots. Every other command is just navigating those snapshots.
+
+### Cherry-pick command reference
+
+| Goal | Command |
+| --- | --- |
+| Pick one commit onto current branch | `git cherry-pick <sha>` |
+| Pick with traceability | `git cherry-pick -x <sha>` |
+| Pick multiple commits | `git cherry-pick <sha1> <sha2> <sha3>` |
+| Pick a range (exclusive start) | `git cherry-pick <sha-from>..<sha-to>` |
+| Pick a range (inclusive start) | `git cherry-pick <sha-from>^..<sha-to>` |
+| Pick without auto-committing | `git cherry-pick --no-commit <sha>` |
+| Resume after resolving conflict | `git cherry-pick --continue` |
+| Skip current commit during range | `git cherry-pick --skip` |
+| Abort entire cherry-pick | `git cherry-pick --abort` |
+| Pick a merge commit | `git cherry-pick -m 1 <sha>` (rare) |
+
+### Stash command reference
+
+| Goal | Command |
+| --- | --- |
+| Save with descriptive message | `git stash push -m "WIP description"` |
+| Save including untracked files | `git stash push -u -m "WIP description"` |
+| List all stashes | `git stash list` |
+| Show summary of a stash | `git stash show stash@{0}` |
+| Show diff of a stash | `git stash show -p stash@{0}` |
+| Apply most recent and remove | `git stash pop` |
+| Apply specific stash and remove | `git stash pop stash@{2}` |
+| Apply most recent, keep on stack | `git stash apply` |
+| Apply specific, keep on stack | `git stash apply stash@{2}` |
+| Drop a specific stash | `git stash drop stash@{1}` |
+| Drop ALL stashes (dangerous) | `git stash clear` |
+| Create branch from a stash | `git stash branch <branch> stash@{0}` |
+
+### Cherry-pick vs merge, when to use which
+
+| Situation | Tool |
+| --- | --- |
+| One specific commit needed on another branch | cherry-pick |
+| Backport a hotfix to a release branch | cherry-pick |
+| All of branch X should land on branch Y | merge |
+| Forward-port a release fix to main going forward | cherry-pick (small fix) or merge (entire release) |
+| Salvage one good commit from an abandoned experiment | cherry-pick |
+| Both branches will be merged later anyway | wait for merge, don't cherry-pick |
+| Commits depend on each other in subtle ways | merge (all of them) or rebase the group |
+
+### Stash vs WIP commit, when to use which
+
+| Situation | Tool |
+| --- | --- |
+| Need to swap branches for 15 minutes | stash |
+| Need to pull latest, then continue | stash |
+| Trying a quick experiment | stash |
+| Going home for the day with half-done work | WIP commit + push |
+| Handing off to a teammate | WIP commit + push |
+| Multi-day project, not ready to commit cleanly | WIP commit on a feature branch (squash later) |
+| Anything you'd be sad to lose if your laptop died | WIP commit + push |
+
+### Self-check question model answers
+
+**1. What does `git cherry-pick abc1234` do, mechanically? What's the SHA of the resulting commit?**
+
+It takes the diff that commit abc1234 introduced (the difference between abc1234 and its parent), applies that diff to your current branch's HEAD, and creates a NEW commit on your current branch with that diff. The new commit has the same author info and message as abc1234 but a DIFFERENT SHA (because the parent is different, the content is different, the SHA is computed fresh).
+
+**2. What does the `-x` flag add to a cherry-picked commit, and why is it useful?**
+
+It adds a line to the commit message: `(cherry picked from commit abc1234)`. This is useful for traceability, six months later, when someone is debugging the cherry-picked commit and wonders where it came from, they can find the original. Many teams require `-x` on all cherry-picks as policy.
+
+**3. You start a cherry-pick and hit a conflict. What are your three options?**
+
+`git cherry-pick --continue` (after resolving the conflict markers and running `git add` on the resolved files), `git cherry-pick --skip` (skip this particular commit if you were cherry-picking multiple), or `git cherry-pick --abort` (give up entirely and restore the working tree to its pre-cherry-pick state).
+
+**4. Why does `git cherry-pick abc1234..def5678` NOT include commit abc1234?**
+
+Git's range syntax `A..B` is exclusive of A and inclusive of B by convention, it means "commits reachable from B but not from A," so A itself is excluded. To include abc1234, use `abc1234^..def5678` (the caret means "the parent of," so the range starts just before abc1234, making abc1234 the first included commit).
+
+**5. What's the difference between `git stash pop` and `git stash apply`?**
+
+`pop` applies the most recent stash AND removes it from the stack. `apply` applies the most recent stash but LEAVES it on the stack. Use `apply` when you want to keep the stash as a safety net (in case the apply doesn't go as expected). Use `pop` when you're confident the apply will work cleanly.
+
+**6. When would you reach for `git stash branch <name>` instead of `git stash pop`?**
+
+When the working tree (or `main`) has moved on significantly since you stashed, and popping the stash would create messy conflicts. `git stash branch` creates a new branch starting from the commit you were on when you stashed, then applies the stash there. You get a clean branch with your stashed work in its original context, no conflicts with divergent main.
+
+**7. What's the danger of cherry-picking the same commit twice onto the same branch?**
+
+You get two commits with the same content but different SHAs. The duplicates don't break anything immediately, but they confuse anyone reading history later ("why is the same fix here twice?") and may cause merge conflicts down the road. If you accidentally double-pick, fix with `git reset --hard HEAD~1` to drop the second copy.
+
+**8. Why is committing WIP to a branch usually safer than stashing for multi-day work?**
+
+Stashes are LOCAL ONLY, they don't push, they're not visible to teammates, and if your laptop dies they're gone. WIP commits on a branch can be pushed to remote, visible to teammates, recoverable from any machine, and survive disk failure. Stash is appropriate for short context switches (minutes to a few hours); for longer pauses or any high-value WIP, commit and push.
+
+### Cherry-pick drill, model walk-through
+
+```bash
+# Step 1-2: setup
+echo "line 1" > notes.txt
+git add notes.txt
+git commit -m "initial notes"
+MAIN_SHA=$(git rev-parse HEAD)
+
+git checkout -b feature/extra
+echo "line 2" >> notes.txt
+git add notes.txt
+git commit -m "add line 2"
+FEATURE_SHA=$(git rev-parse HEAD)
+
+# Step 3: switch back and cherry-pick
+git checkout main
+git cherry-pick $FEATURE_SHA
+# notes.txt now has line 1 and line 2
+
+# Step 4-5: verify
+cat notes.txt          # should show both lines
+git log main --oneline  # should show 2 commits, with the cherry-pick on top
+
+# Step 6-8: reverse direction
+echo "line 3" >> notes.txt
+git add notes.txt
+git commit -m "add line 3"
+THIRD_SHA=$(git rev-parse HEAD)
+
+git checkout feature/extra
+git cherry-pick $THIRD_SHA
+cat notes.txt          # should show all three lines
+```
+
+### Cherry-pick conflict drill, model walk-through
+
+The conflict in step 4-5 will look like:
+
+```
+<<<<<<< HEAD
+port=8443
+=======
+port=9090
+>>>>>>> abc1234... (your cherry-picked commit)
+```
+
+Resolving by keeping `port=8443` and running `git cherry-pick --skip` (rather than `--continue`) means the cherry-pick is abandoned for THIS commit. The cherry-pick exits without producing a new commit. If you were picking multiple commits and only this one conflicted, the others would still be picked normally.
+
+### Stash branch drill, model walk-through
+
+```bash
+# Setup: stash and then advance main
+echo "stashed work" > old-file.txt
+git add old-file.txt
+git stash push -u -m "old stash"
+
+# Advance main with unrelated commits
+echo "unrelated 1" > other.txt
+git add other.txt
+git commit -m "unrelated 1"
+
+# ... a few more ...
+
+# Now create the branch from the stash
+git stash branch revive-old-work stash@{0}
+
+# You're now on `revive-old-work`, starting from where you stashed
+# The stash is applied cleanly (no conflict with main's drift)
+# The stash is dropped from the stack
+git status            # shows the stashed changes as modifications
+```
+
+### Scenario reflection model answers
+
+**Scenario A, CVE backport to v2.4 (clean) and v1.8 (conflict):**
+
+For v2.4: standard backport flow. `git checkout release/v2.4`, `git pull`, create a backport branch `git checkout -b backport/cve-X-v2.4`, `git cherry-pick -x <fix-sha>` (clean apply), run tests locally, push, open PR against release/v2.4 with reviewer who knows that codebase. After merge, cut a v2.4.N+1 release.
+
+For v1.8: same setup, but the cherry-pick conflicts. Read the conflict markers carefully. Don't try to mechanically resolve line-by-line; understand what the original fix is DOING conceptually (sanitizing input, fixing a race, etc.) and re-apply that concept using v1.8's code structure. Add a comment in the code referencing the original fix SHA for future debuggers. Tests on v1.8 must pass. PR with extra-careful review (a reviewer familiar with both v1.8 and the original fix). After merge, cut a v1.8.N+1 release.
+
+**Scenario B, 90 minutes into a feature, lead pings for 15-min context switch:**
+
+```bash
+# Before the switch
+git stash push -m "WIP feature/X - 90 min in, three files mid-edit"
+git checkout main
+git pull  # get latest in case the bug fix needs to start from current main
+# ... do the 15-20 minute help / debugging ...
+# ... maybe make a hotfix commit on a branch and push ...
+
+# After
+git checkout feature/X
+git stash pop
+# back where you were, three files modified, exactly as before
+```
+
+**Scenario C, stash from a month ago, branch deleted:**
+
+```bash
+# Inspect what's in it
+git stash list                  # see the stash entry
+git stash show -p stash@{N}     # see the full diff
+
+# Decide: is this still relevant?
+# If yes, create a branch from where you were when stashed
+# (even though the branch is deleted, the commit SHA in the stash header still exists)
+git stash branch recover-old-feature stash@{N}
+
+# If no, drop it
+git stash drop stash@{N}
+```
+
+**Scenario D, two-day experiment with one good commit:**
+
+```bash
+git log experiment/X --oneline           # list all commits
+# Identify the one good one (call it 7f9a44b)
+
+git checkout main
+git cherry-pick -x 7f9a44b              # land just that one commit on main
+
+# Verify it works
+# Run tests, commit any needed adjustments
+
+git branch -D experiment/X              # safe to delete the rest of the experiment
+```
+
+### Common mistakes and fixes
+
+| Mistake | Fix |
+| --- | --- |
+| Cherry-picked the same commit twice | `git reset --hard HEAD~1` to drop the second copy |
+| Cherry-pick stuck mid-conflict, want to give up | `git cherry-pick --abort` |
+| Stash pop gave conflict, don't want to deal with it | `git checkout -- .` to discard conflict state, stash still on stack |
+| Stashed and immediately forgot the message | `git stash show -p stash@{0}` to see the diff |
+| Lost a stash with `git stash drop` | Recovery via reflog is possible but tricky: `git fsck --lost-found` then inspect dangling commits |
+| Cherry-pick should have been a merge | `git reset --hard <pre-pick-sha>` then `git merge` instead |
+| Cherry-pick a commit and then realize you need its whole branch | Same fix: reset, then merge the source branch |
+
+### What's in L12
+
+Rebase, deeper. Interactive rebase (`git rebase -i HEAD~5`) lets you reorder, squash, fixup, edit, or drop commits in a range. Used for cleaning up history before opening a PR (collapsing "WIP" commits into one clean commit). The lesson covers when rebase is safe (your local branch, not yet pushed) and when it's dangerous (published commits other people have pulled). Closes Phase 3.

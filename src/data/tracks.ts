@@ -400,7 +400,7 @@ export const TRACKS: Track[] = [
 		blurb: 'Version control as collaboration infrastructure, from your first commit to coordinating AI agent teams on parallel branches.',
 		theme: 'production',
 		level: 'Beginner',
-		lessons: 8,
+		lessons: 12,
 		status: 'live',
 		href: '/lessons/git-workflow/why-git-exists/lesson/',
 	},

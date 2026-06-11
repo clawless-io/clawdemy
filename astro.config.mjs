@@ -980,6 +980,60 @@ export default defineConfig({
 								},
 							],
 						},
+						{
+							label: 'Phase 3\nWorkflows in the wild',
+							collapsed: true,
+							items: [
+								{
+									label: 'Team workflows',
+									collapsed: true,
+									items: [
+									{ label: 'Brief', slug: 'lessons/git-workflow/team-workflows/brief' },
+									{ label: 'Lesson', slug: 'lessons/git-workflow/team-workflows/lesson' },
+									{ label: 'Practice', slug: 'lessons/git-workflow/team-workflows/practice' },
+									{ label: 'Summary', slug: 'lessons/git-workflow/team-workflows/summary' },
+									{ label: 'Cheatsheet', slug: 'lessons/git-workflow/team-workflows/cheatsheet' },
+									{ label: 'References', slug: 'lessons/git-workflow/team-workflows/references' },
+									],
+								},
+								{
+									label: 'Releases and tags',
+									collapsed: true,
+									items: [
+									{ label: 'Brief', slug: 'lessons/git-workflow/releases-and-tags/brief' },
+									{ label: 'Lesson', slug: 'lessons/git-workflow/releases-and-tags/lesson' },
+									{ label: 'Practice', slug: 'lessons/git-workflow/releases-and-tags/practice' },
+									{ label: 'Summary', slug: 'lessons/git-workflow/releases-and-tags/summary' },
+									{ label: 'Cheatsheet', slug: 'lessons/git-workflow/releases-and-tags/cheatsheet' },
+									{ label: 'References', slug: 'lessons/git-workflow/releases-and-tags/references' },
+									],
+								},
+								{
+									label: 'Cherry-pick and stash',
+									collapsed: true,
+									items: [
+									{ label: 'Brief', slug: 'lessons/git-workflow/cherry-pick-and-stash/brief' },
+									{ label: 'Lesson', slug: 'lessons/git-workflow/cherry-pick-and-stash/lesson' },
+									{ label: 'Practice', slug: 'lessons/git-workflow/cherry-pick-and-stash/practice' },
+									{ label: 'Summary', slug: 'lessons/git-workflow/cherry-pick-and-stash/summary' },
+									{ label: 'Cheatsheet', slug: 'lessons/git-workflow/cherry-pick-and-stash/cheatsheet' },
+									{ label: 'References', slug: 'lessons/git-workflow/cherry-pick-and-stash/references' },
+									],
+								},
+								{
+									label: 'Rebase, deeper',
+									collapsed: true,
+									items: [
+									{ label: 'Brief', slug: 'lessons/git-workflow/rebase-deeper/brief' },
+									{ label: 'Lesson', slug: 'lessons/git-workflow/rebase-deeper/lesson' },
+									{ label: 'Practice', slug: 'lessons/git-workflow/rebase-deeper/practice' },
+									{ label: 'Summary', slug: 'lessons/git-workflow/rebase-deeper/summary' },
+									{ label: 'Cheatsheet', slug: 'lessons/git-workflow/rebase-deeper/cheatsheet' },
+									{ label: 'References', slug: 'lessons/git-workflow/rebase-deeper/references' },
+									],
+								},
+							],
+						},
 					],
 				},
 				{
