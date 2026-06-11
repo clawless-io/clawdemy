@@ -1,0 +1,270 @@
+---
+title: 'Lesson: Undoing things'
+description: The lesson that closes Phase 1. You learn to recover from mistakes safely. Discard working changes. Unstage staged changes. Undo commits without losing work. The reflog as your safety net. By the end you have confident solo git workflow.
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+### The lesson that lets you experiment without fear
+
+You can commit (L2). You can commit well (L3). Now learn what to do when you make a mistake, because the speed at which you can recover from mistakes is the speed at which you can experiment.
+
+Five scenarios you will hit within your first month of regular git use:
+
+1. You edit a file. Halfway through, you realize you should not have changed it. You want the working copy back to what it was.
+2. You stage a file with `git add`. Then you realize you should not have. You want to unstage without losing your edits.
+3. You commit something. Then you realize the message was wrong or you forgot a file. You want to fix the commit.
+4. You commit something. Then you realize you should not have (the change itself was wrong). You want to undo the commit.
+5. You run something destructive (`git reset --hard` is the classic), then look in horror at what just disappeared. You want it back.
+
+This lesson covers all five. Each has a different right answer because each involves a different area of the three-area model. The map is mechanical once you know it.
+
+### The three-area model is the recovery map
+
+L2 introduced this:
+
+```
++------------------+         +------------------+         +------------------+
+|     Working      |  ---->  |     Staging      |  ---->  |   Repository     |
+|    Directory     |  add    |       Area       |  commit |    (history)     |
++------------------+         +------------------+         +------------------+
+```
+
+Each scenario maps to one area, and each area has its own undo command:
+
+| Scenario | Area to recover | Command |
+|---|---|---|
+| 1. Discard working changes | Working directory | `git restore <file>` |
+| 2. Unstage a staged file | Staging area | `git restore --staged <file>` |
+| 3. Fix the last commit | Repository (last commit only) | `git commit --amend` |
+| 4. Undo a commit, history not pushed | Repository (movable history) | `git reset` |
+| 5. Undo a commit, history already pushed | Repository (immutable history) | `git revert` |
+| 6. Recover from a destructive operation | Reflog (god mode) | `git reflog` + `git reset --hard <hash>` |
+
+Read that table once. The rest of the lesson is just learning each command with a concrete example.
+
+### Scenario 1: Discard working changes (`git restore`)
+
+You opened `notes.md`, made some edits, and now want to throw them away. The file should look like its most recent committed state.
+
+```bash
+git restore notes.md
+```
+
+That is it. `git restore` reaches into the staging area (or the last commit if there's nothing staged) and copies that version back to your working directory. Your edits are gone, discarded, not recoverable.
+
+**One critical thing to know:** `git restore` on a working-directory file is destructive. The discarded changes are not saved anywhere. There is no Undo for the Undo. Verify with `git status` before you discard, especially with multiple files at once:
+
+```bash
+git restore .   # discards ALL working-directory changes
+```
+
+That command is fast and easy to type. It is also a way to lose work. Run `git status` first. Always.
+
+### Scenario 2: Unstage a file (`git restore --staged`)
+
+You ran `git add notes.md`. Now you realize you do not want it in the next commit. You want to unstage it without losing your edits.
+
+```bash
+git restore --staged notes.md
+```
+
+This moves the file from staging back to working directory. Your edits stay intact in the working copy; they just are not queued for the next commit anymore. Run `git status` to confirm.
+
+If you have been using git for a while, you may also have seen `git reset HEAD <file>` for this. That command still works and does the same thing. `git restore --staged` is the modern, more explicit version that git's documentation now recommends. Either works; use whichever your hands remember.
+
+### Scenario 3: Fix the last commit (`git commit --amend`)
+
+You committed something. Then you realize:
+- The commit message has a typo
+- You forgot to include a file
+- You meant to fix one more line
+
+If the commit has NOT been pushed yet, you can edit it in place:
+
+**To fix the message only:**
+
+```bash
+git commit --amend -m "Better commit message"
+```
+
+**To add a forgotten file to the same commit:**
+
+```bash
+git add forgotten-file.js
+git commit --amend --no-edit
+```
+
+The `--no-edit` keeps the original commit message. Without it, git opens your editor to let you edit the message too.
+
+**Important: `--amend` rewrites history.** The "amended" commit has a different SHA-1 hash from the original (git treats it as a brand new commit that happens to look similar). If the original commit was already pushed to a shared branch, amending creates a divergence between your local history and the remote. Don't amend pushed commits unless you are sure no one has pulled them.
+
+The rule of thumb: `--amend` is fine for commits that are still local. Once pushed, treat the commit as immutable.
+
+### Scenario 4: Undo a commit, history is local (`git reset`)
+
+The commit is wrong. It is your most recent commit. It has NOT been pushed yet. You want to undo it.
+
+`git reset` is the tool. It moves the current branch's pointer backward by N commits, effectively saying "pretend that commit never happened." But it has three modes, and they differ in what they leave behind:
+
+**Mode 1: `--soft`, undo the commit, keep everything in staging.**
+
+```bash
+git reset --soft HEAD~1
+```
+
+- The commit pointer moves back one
+- The files that were in the commit are now in your staging area
+- Your working directory is unchanged
+- Use case: "I committed too soon. I want to redo the commit with different message or include more files."
+
+**Mode 2: `--mixed` (the default), undo the commit, keep changes in working directory.**
+
+```bash
+git reset HEAD~1    # --mixed is implicit
+```
+
+- The commit pointer moves back one
+- The staging area is cleared
+- Your working directory keeps the changes
+- Use case: "I committed too soon. I want to re-stage piece by piece, maybe as multiple smaller commits."
+
+**Mode 3: `--hard`, undo the commit AND throw away the changes.**
+
+```bash
+git reset --hard HEAD~1
+```
+
+- The commit pointer moves back one
+- The staging area is cleared
+- Your working directory is reset to the previous commit's state
+- **The changes from the undone commit are gone from your working files.**
+- Use case: "I committed something I wanted to throw away entirely."
+
+**`--hard` is the destructive one.** Use it deliberately. Pause and run `git status` before, so you know what is in your working directory that you might accidentally lose. The files are not unrecoverable (we will get to `git reflog` in a minute), but the recovery takes effort.
+
+**`HEAD~1` means "one commit before HEAD."** `HEAD~3` means three before. `HEAD` alone means "the current commit." So:
+- `git reset HEAD~3` undoes the last three commits
+- `git reset --hard HEAD~3` undoes the last three commits and discards their working changes
+
+**The hard rule on `git reset`:** never use it on commits that have been pushed to a shared branch. `git reset` rewrites your local history. Pushing the rewritten history forces other team members into ugly merge situations. For pushed commits, use `git revert` instead (next scenario).
+
+### Scenario 5: Undo a commit that has been pushed (`git revert`)
+
+The commit is on the remote. Other people may have already pulled it. Rewriting history is not safe anymore. You need to undo without rewriting.
+
+`git revert` is the tool. It does NOT modify the existing commit. It creates a NEW commit whose changes are the EXACT INVERSE of the commit you want to undo. The history grows forward; it doesn't go backward.
+
+```bash
+git revert abc1234
+```
+
+- `abc1234` is the commit you want to undo
+- Git opens your editor with a pre-filled message (`Revert <original commit message>`); accept or edit, then save and close
+- A new commit lands on your branch, undoing `abc1234`'s changes
+- Push the new commit normally; collaborators pull it normally
+
+**Why this is safe for pushed commits:** the original commit is still in history. The revert commit is just another step forward. Anyone who has pulled the original sees both the original and the revert; the net effect on their working tree is zero.
+
+**Why you should ALMOST ALWAYS use revert for pushed commits:** it preserves the audit trail. Three months from now when you wonder "did we ever ship that change?" the history shows the original commit AND the revert. The team's institutional memory is intact. If you had reset instead, the original would have vanished from public history, leaving a gap nobody can investigate.
+
+### Scenario 6: Recover from a destructive operation (`git reflog`)
+
+You ran `git reset --hard`. Or you force-pushed the wrong branch. Or you ran `git checkout <old-branch>` and lost track of where you were. Your commits seem to have vanished.
+
+They have not. **Almost nothing in git is truly lost.** Git keeps an internal log of every place HEAD has been over the past 90 days (configurable). That log is the `reflog`.
+
+```bash
+git reflog
+```
+
+You will see output like:
+
+```
+abc1234 HEAD@{0}: reset: moving to HEAD~3
+def5678 HEAD@{1}: commit: Add feature X
+ghi9012 HEAD@{2}: commit: Refactor parser
+jkl3456 HEAD@{3}: commit: Fix bug
+mno7890 HEAD@{4}: commit: Initial implementation
+```
+
+Each line is a previous HEAD position. The hashes on the left are the commit SHAs at each point. To recover:
+
+```bash
+git reset --hard HEAD@{1}   # restore HEAD to where it was before the bad reset
+```
+
+OR using the commit SHA directly:
+
+```bash
+git reset --hard def5678
+```
+
+The "lost" commits are back. Your branch now points where it did before the destructive operation.
+
+**The reflog is local.** It only exists on your machine. It is not shared with collaborators. If you destroyed history on a remote, the reflog on your machine still has the local record, but the reflog cannot reach commits that were never on your machine.
+
+**The reflog ages out.** By default, 90 days for reachable entries, 30 days for unreachable. If you need to recover something old, do it soon.
+
+**The discipline:** before you panic, run `git reflog`. The previous state is almost certainly there. Recovery is one command away.
+
+### A note for experienced developers
+
+If you came from SVN or Mercurial, the variety of git's undo commands probably feels excessive. Git's design philosophy is that each command should do ONE thing, and you compose them. So:
+
+- `restore` only touches files (working directory, staging area)
+- `reset` only touches the branch pointer (and optionally cascades to staging or working dir based on mode)
+- `revert` only creates new commits (and never modifies existing ones)
+- `reflog` only reads history (and never modifies it)
+- `commit --amend` rewrites the last commit (and nothing else)
+
+Each command has a narrow job. The complexity is in choosing the right combination. After a few weeks of regular use, the choice becomes automatic.
+
+### A useful frame for managers and technical product managers
+
+Two observations worth carrying to non-engineering conversations.
+
+**First**, the existence of `git reflog` is the reason engineering teams can move fast without fear. The unspoken contract is: even if you mess up, you can probably recover. Junior developers who haven't internalized this fact are afraid to experiment. Senior developers run experiments freely because they know the worst case is "look at reflog, recover." Helping your team internalize "almost nothing is truly lost" is a leadership move that compounds for years.
+
+**Second**, the choice between `reset` and `revert` is a team-culture choice masquerading as a technical one. Teams that always revert (never rewrite history) have transparent audit trails; anyone can reconstruct "what was tried, what was reverted, and why." Teams that occasionally reset have cleaner-looking history at the cost of audibility. Most mature teams converge on: rewrite freely on personal branches, never rewrite on shared branches. This is not a rule you should impose; it is a norm worth nudging your team toward.
+
+**For technical product managers specifically:** if your engineering team is reluctant to ship a risky change, ask what their rollback plan is. If the answer is "revert the commit," they have one. If the answer is hesitation and a long pause, the team doesn't have a confident undo path, and that fear is leaking into product velocity. The fix is usually education (training the team on `revert`) plus process (a clear rollback runbook), not deferring the risky change.
+
+### A foreshadowing note for Phase 4
+
+In Phase 4 (multi-agent teams), you will see the recovery patterns from this lesson in higher-stakes contexts:
+
+- The Clawless 2026-06-04 sprint hit a worktree race where one agent clobbered another's checkout. The recovery path was the reflog on the clobbered agent's worktree. The "lost" work was recoverable; the fix was banked as the worktree-from-day-1 rule.
+- Open-source maintainers regularly use `git revert` to undo bad PR merges without losing the history of what was tried. A culture of revert-not-reset is what makes open-source contribution archeology possible years later.
+- Multi-agent dispatches that produce wrong commits get reverted, not reset, so the audit trail of "agent tried X, was wrong, fixed via Y" is intact.
+
+The discipline scales from solo developer to maintainer to AI-agent coordinator. The commands are the same; the stakes go up.
+
+### What you can do now
+
+By the end of L4 you can:
+- Discard unwanted working-directory changes (`git restore`)
+- Unstage files from staging (`git restore --staged`)
+- Fix the last commit's message or contents (`git commit --amend`)
+- Undo a local-only commit with `git reset` (soft / mixed / hard)
+- Undo a pushed commit safely with `git revert`
+- Recover lost work with `git reflog`
+- Choose the right command based on which area of the three-area model is involved + whether history has been pushed
+
+You have closed **Phase 1**. You have confident solo git workflow.
+
+### What's next in Phase 2
+
+L5 introduces **branches**, parallel sequences of snapshots. This is where the snapshot mental model from L1 starts to pay off most. Once you can branch, you can collaborate. Phase 2 covers branches (L5), pull requests (L6), merge conflicts (L7), and remotes (L8), the full two-person collaboration workflow.
+
+After Phase 2, you can collaborate with one other person. Phase 3 covers production team workflows (GitHub Flow, GitFlow, Trunk-based, releases, hotfixes, rebase vs merge). Phase 4 covers multi-agent teams, the unique angle of this track.
+
+### Voice anchor (carried from L1 + L2 + L3)
+
+> Git stores snapshots. Every other command is just navigating those snapshots.
+
+`git restore` navigates to the snapshot of one file. `git reset` navigates the branch pointer to an earlier snapshot. `git revert` adds a snapshot that is the inverse of an earlier one. `git reflog` reveals snapshots you forgot existed. Every undo is just choosing a different snapshot to make current.
+
+Almost nothing is truly lost. Internalize that.

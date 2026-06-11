@@ -870,6 +870,65 @@ export default defineConfig({
 					],
 				},
 				{
+					label: 'Track 7: Git Workflow',
+					items: [
+						{
+							label: 'Phase 1\nFoundations',
+							collapsed: true,
+							items: [
+								{
+									label: 'Why git exists',
+									collapsed: true,
+									items: [
+									{ label: 'Brief', slug: 'lessons/git-workflow/why-git-exists/brief' },
+									{ label: 'Lesson', slug: 'lessons/git-workflow/why-git-exists/lesson' },
+									{ label: 'Practice', slug: 'lessons/git-workflow/why-git-exists/practice' },
+									{ label: 'Summary', slug: 'lessons/git-workflow/why-git-exists/summary' },
+									{ label: 'Cheatsheet', slug: 'lessons/git-workflow/why-git-exists/cheatsheet' },
+									{ label: 'References', slug: 'lessons/git-workflow/why-git-exists/references' },
+									],
+								},
+								{
+									label: 'Your first repo',
+									collapsed: true,
+									items: [
+									{ label: 'Brief', slug: 'lessons/git-workflow/your-first-repo/brief' },
+									{ label: 'Lesson', slug: 'lessons/git-workflow/your-first-repo/lesson' },
+									{ label: 'Practice', slug: 'lessons/git-workflow/your-first-repo/practice' },
+									{ label: 'Summary', slug: 'lessons/git-workflow/your-first-repo/summary' },
+									{ label: 'Cheatsheet', slug: 'lessons/git-workflow/your-first-repo/cheatsheet' },
+									{ label: 'References', slug: 'lessons/git-workflow/your-first-repo/references' },
+									],
+								},
+								{
+									label: 'Commit hygiene',
+									collapsed: true,
+									items: [
+									{ label: 'Brief', slug: 'lessons/git-workflow/commit-hygiene/brief' },
+									{ label: 'Lesson', slug: 'lessons/git-workflow/commit-hygiene/lesson' },
+									{ label: 'Practice', slug: 'lessons/git-workflow/commit-hygiene/practice' },
+									{ label: 'Summary', slug: 'lessons/git-workflow/commit-hygiene/summary' },
+									{ label: 'Cheatsheet', slug: 'lessons/git-workflow/commit-hygiene/cheatsheet' },
+									{ label: 'References', slug: 'lessons/git-workflow/commit-hygiene/references' },
+									],
+								},
+								{
+									label: 'Undoing things',
+									collapsed: true,
+									items: [
+									{ label: 'Brief', slug: 'lessons/git-workflow/undoing-things/brief' },
+									{ label: 'Lesson', slug: 'lessons/git-workflow/undoing-things/lesson' },
+									{ label: 'Practice', slug: 'lessons/git-workflow/undoing-things/practice' },
+									{ label: 'Summary', slug: 'lessons/git-workflow/undoing-things/summary' },
+									{ label: 'Cheatsheet', slug: 'lessons/git-workflow/undoing-things/cheatsheet' },
+									{ label: 'References', slug: 'lessons/git-workflow/undoing-things/references' },
+									],
+								},
+							],
+						},
+					],
+				},
+				{
 					label: 'Track 8: Visual Math: Calculus',
 					items: [
 						{

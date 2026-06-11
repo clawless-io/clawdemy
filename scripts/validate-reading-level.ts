@@ -40,6 +40,7 @@ const THRESHOLDS: Record<string, number> = {
 	'pain-point-library': 60,
 	'openclaw-deep-dive': 40,
 	'ai-foundations': 40,
+	'git-workflow': 40,
 };
 
 interface ScoreRow {
