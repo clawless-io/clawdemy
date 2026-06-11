@@ -926,6 +926,60 @@ export default defineConfig({
 								},
 							],
 						},
+						{
+							label: 'Phase 2\nBranching and collaboration',
+							collapsed: true,
+							items: [
+								{
+									label: 'Branches',
+									collapsed: true,
+									items: [
+									{ label: 'Brief', slug: 'lessons/git-workflow/branches/brief' },
+									{ label: 'Lesson', slug: 'lessons/git-workflow/branches/lesson' },
+									{ label: 'Practice', slug: 'lessons/git-workflow/branches/practice' },
+									{ label: 'Summary', slug: 'lessons/git-workflow/branches/summary' },
+									{ label: 'Cheatsheet', slug: 'lessons/git-workflow/branches/cheatsheet' },
+									{ label: 'References', slug: 'lessons/git-workflow/branches/references' },
+									],
+								},
+								{
+									label: 'Pull requests',
+									collapsed: true,
+									items: [
+									{ label: 'Brief', slug: 'lessons/git-workflow/pull-requests/brief' },
+									{ label: 'Lesson', slug: 'lessons/git-workflow/pull-requests/lesson' },
+									{ label: 'Practice', slug: 'lessons/git-workflow/pull-requests/practice' },
+									{ label: 'Summary', slug: 'lessons/git-workflow/pull-requests/summary' },
+									{ label: 'Cheatsheet', slug: 'lessons/git-workflow/pull-requests/cheatsheet' },
+									{ label: 'References', slug: 'lessons/git-workflow/pull-requests/references' },
+									],
+								},
+								{
+									label: 'Merge conflicts',
+									collapsed: true,
+									items: [
+									{ label: 'Brief', slug: 'lessons/git-workflow/merge-conflicts/brief' },
+									{ label: 'Lesson', slug: 'lessons/git-workflow/merge-conflicts/lesson' },
+									{ label: 'Practice', slug: 'lessons/git-workflow/merge-conflicts/practice' },
+									{ label: 'Summary', slug: 'lessons/git-workflow/merge-conflicts/summary' },
+									{ label: 'Cheatsheet', slug: 'lessons/git-workflow/merge-conflicts/cheatsheet' },
+									{ label: 'References', slug: 'lessons/git-workflow/merge-conflicts/references' },
+									],
+								},
+								{
+									label: 'Remotes and forks',
+									collapsed: true,
+									items: [
+									{ label: 'Brief', slug: 'lessons/git-workflow/remotes-and-forks/brief' },
+									{ label: 'Lesson', slug: 'lessons/git-workflow/remotes-and-forks/lesson' },
+									{ label: 'Practice', slug: 'lessons/git-workflow/remotes-and-forks/practice' },
+									{ label: 'Summary', slug: 'lessons/git-workflow/remotes-and-forks/summary' },
+									{ label: 'Cheatsheet', slug: 'lessons/git-workflow/remotes-and-forks/cheatsheet' },
+									{ label: 'References', slug: 'lessons/git-workflow/remotes-and-forks/references' },
+									],
+								},
+							],
+						},
 					],
 				},
 				{

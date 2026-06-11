@@ -1,0 +1,613 @@
+---
+title: 'Lesson: Merge conflicts'
+description: Merge conflicts are mechanical, not catastrophic. You learn why they happen, how to read git's conflict markers, the step-by-step resolution process, the five conflict types (textual, logical, semantic, delete-modify, rename-edit), and when to abort and retry. By the end you can resolve any conflict you'll encounter in two-person collaboration.
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+### The lesson that turns a panic moment into a 5-minute task
+
+Picture a developer two months into their first job. They are on a branch. They run `git merge main` to pull in the latest changes from their teammates. The terminal prints:
+
+```
+Auto-merging src/payment-flow.ts
+CONFLICT (content): Merge conflict in src/payment-flow.ts
+Automatic merge failed; fix conflicts and then commit the result.
+```
+
+For most new developers, this is a "stop everything and ask the senior engineer" moment. Anxiety, suspicion that you've broken something irrecoverable, sometimes a desire to throw the branch away and start over.
+
+That reaction is unnecessary. A merge conflict is **git asking you a question.** Specifically: "two branches changed these same lines in different ways; I don't know which version you want; please tell me." That is the entire transaction.
+
+By the end of L7, you will read conflict markers fluently, walk through the resolution, and ship the merge in five minutes. The mechanics are simple. The fear comes from not having a roadmap. This lesson is the roadmap.
+
+### Why merge conflicts happen
+
+Recall the snapshot graph from L1. Every commit is a snapshot of the entire codebase at one point in time. A merge takes two snapshots (the tips of two branches) and produces a third snapshot (the merge result).
+
+When git produces the merge snapshot, it goes line by line through every file. For each line, it asks: "did this line change in either branch since the common ancestor?"
+
+- If neither branch changed the line: keep the original.
+- If only one branch changed the line: keep that change.
+- If both branches changed the line in the same way: keep that change.
+- **If both branches changed the line in DIFFERENT ways: git stops and asks you.** This is the conflict.
+
+The common ancestor is the snapshot that was the most recent commit on both branches before they diverged. In the L5 diagram:
+
+```
+A ---- B ---- C ---- D
+                     |\
+                     | \
+                     E  F
+                     ^  ^
+                     |  |
+                  feature main
+```
+
+D is the common ancestor. If you merge `main` into `feature` (or vice versa), git compares: D vs E vs F. For any line that was the same in D, E, and F, no conflict. For any line that differs across E and F in incompatible ways, conflict.
+
+**This is mechanical.** Git is not making a judgment about which change is "better." It is identifying lines where it cannot mechanically decide and is handing the decision to you.
+
+### What git actually does when there's no conflict
+
+Most merges are conflict-free. You merge main into your feature branch, git prints "Auto-merging" for some files, "Already up to date" for others, and commits the merge result. No drama.
+
+Conflict-free merges happen when:
+- The two branches touched different files
+- The two branches touched the same files but different regions
+- The two branches happened to make compatible changes (e.g., both added the same new line)
+
+When you read the git output and see only "Auto-merging" lines, the merge succeeded. You're done. No action needed except verifying the result builds and tests pass.
+
+When you see "CONFLICT" in the output, git needs your help on specific files. The conflict is localized; only the conflicting regions need attention. The rest of the files were merged automatically.
+
+### Reading conflict markers
+
+When git can't auto-merge a section, it writes BOTH versions into the file with markers around them. Here is what that looks like:
+
+```
+function calculateTotal(cart) {
+  let total = 0;
+  for (const item of cart) {
+<<<<<<< HEAD
+    total += item.price * item.quantity;
+=======
+    total += item.price * item.qty;
+>>>>>>> feature/cart-refactor
+  }
+  return total;
+}
+```
+
+Three marker lines structure the conflict:
+
+- `<<<<<<< HEAD` is the start of "your" version (whatever branch you're currently on)
+- `=======` is the separator between the two versions
+- `>>>>>>> feature/cart-refactor` is the end of the other version, with the other branch's name
+
+**Reading the markers:**
+- Everything between `<<<<<<< HEAD` and `=======` is your branch's version of these lines
+- Everything between `=======` and `>>>>>>>` is the other branch's version
+- Everything outside the markers is the parts of the file where merge succeeded automatically
+
+**Your job:** decide what the final version should be, then DELETE the marker lines and write the resolved code.
+
+The final version might be:
+- Just your version (delete the other branch's version + delete the markers)
+- Just their version (delete your version + delete the markers)
+- A combination of both (write a new version that includes pieces of each, then delete all the markers)
+- Something completely new (replace the whole conflict region with the right code, then delete all markers)
+
+That's it. The marker lines are not magic; they're text you can edit like any other text. The conflict is "resolved" when:
+1. The conflict markers are gone from the file
+2. The file content is what you want it to be
+3. You stage the file with `git add <file>` to tell git "I've resolved this one"
+
+### The diff3 conflict style (turn this on)
+
+The default conflict format above shows "your version" and "their version." It does NOT show what the line LOOKED LIKE BEFORE either branch touched it. Often, seeing the original (the common ancestor) makes the right resolution obvious.
+
+Git has a built-in setting that adds the ancestor to the conflict markers. Turn it on once, globally:
+
+```bash
+git config --global merge.conflictstyle diff3
+```
+
+After this setting, the same conflict above will look like:
+
+```
+function calculateTotal(cart) {
+  let total = 0;
+  for (const item of cart) {
+<<<<<<< HEAD
+    total += item.price * item.quantity;
+||||||| ancestor
+    total += item.price * item.amount;
+=======
+    total += item.price * item.qty;
+>>>>>>> feature/cart-refactor
+  }
+  return total;
+}
+```
+
+Now you can see what was there before. The ancestor used `item.amount`. Your branch renamed `amount` to `quantity`. The other branch renamed `amount` to `qty`. Now you know: this isn't really "which version do I want?"; it's "the other developer and I both renamed the same field, and we picked different names; we need to pick one."
+
+The diff3 format is strictly more informative than the default. There is no reason not to enable it. If you're learning git in 2026, the modern alternative `zdiff3` is also available; it removes duplicate context lines from the diff3 view and is even cleaner:
+
+```bash
+git config --global merge.conflictstyle zdiff3
+```
+
+Either is better than the default. Pick one and never go back.
+
+### The step-by-step resolution process
+
+Every textual conflict follows the same six steps. Internalize them and conflicts become routine.
+
+**Step 1: Recognize you're in a merge state.**
+
+After a failed auto-merge, your repo is in a "merging" state. Run `git status`:
+
+```
+On branch feature/cart-refactor
+You have unmerged paths.
+  (fix conflicts and run "git commit")
+  (use "git merge --abort" to abort the merge)
+
+Unmerged paths:
+  (use "git add <file>..." to mark resolution)
+        both modified:   src/payment-flow.ts
+
+no changes added to commit (use "git add" and/or "git commit -a")
+```
+
+The "Unmerged paths" section lists every file with a conflict. `both modified` means both branches changed the file in conflicting ways.
+
+**Step 2: Open each conflicting file and find the markers.**
+
+Search for `<<<<<<<` (or use your editor's built-in "next conflict" navigation). Each marker block is one conflict region. A single file might have multiple conflict regions; each one independently needs resolving.
+
+**Step 3: Read both versions and decide on the resolution.**
+
+For each conflict region, ask:
+- What does my version do?
+- What does their version do?
+- (With diff3) What did the ancestor look like?
+- What is the correct final state? (Often: "both changes, combined." Sometimes: "just one." Rarely: "neither; rewrite both.")
+
+**Step 4: Edit the file to the resolution.**
+
+Delete the marker lines (`<<<<<<<`, `|||||||`, `=======`, `>>>>>>>` lines, all of them). Write the resolved content where the conflict was. The result should look like normal code, no leftover markers.
+
+**Step 5: Stage the resolved file.**
+
+```bash
+git add src/payment-flow.ts
+```
+
+This tells git "I've resolved this file." Repeat for every file with a conflict.
+
+**Step 6: Commit the merge.**
+
+```bash
+git commit
+```
+
+Git opens an editor with a pre-filled merge commit message ("Merge branch 'main' into feature/cart-refactor"). Accept or edit; save; close. The merge is complete.
+
+That is the entire process. Six steps. The only step with judgment is Step 3 (the decision). Everything else is mechanical.
+
+### Worked example 1: Trivial conflict (pick one)
+
+You're on `feature/login-redesign`. Your teammate updated the same page's heading on main. You both changed `<h1>` to different things.
+
+After `git merge main`, the file shows:
+
+```html
+<div class="login-container">
+<<<<<<< HEAD
+  <h1>Welcome back</h1>
+||||||| ancestor
+  <h1>Login</h1>
+=======
+  <h1>Sign in to your account</h1>
+>>>>>>> main
+  <form>
+```
+
+Both you and your teammate renamed the original "Login" heading. You picked "Welcome back." They picked "Sign in to your account."
+
+**Resolution decision:** the teammate's version is from main (production), and product approved that copy in a recent design review. Yours was a guess. Take theirs.
+
+**Result after editing:**
+
+```html
+<div class="login-container">
+  <h1>Sign in to your account</h1>
+  <form>
+```
+
+`git add login.html` and `git commit`. Done. Total time: 30 seconds once you've practiced.
+
+### Worked example 2: Logical combine (both changes needed)
+
+You're on `feature/cart-improvements`. You added support for discount codes. Your teammate on main added support for gift cards. Both changes touched the same `calculateTotal` function.
+
+After `git merge main`:
+
+```typescript
+function calculateTotal(cart) {
+  let total = 0;
+  for (const item of cart) {
+    total += item.price * item.quantity;
+  }
+<<<<<<< HEAD
+  if (cart.discountCode) {
+    total = applyDiscount(total, cart.discountCode);
+  }
+||||||| ancestor
+=======
+  if (cart.giftCardBalance) {
+    total = Math.max(0, total - cart.giftCardBalance);
+  }
+>>>>>>> main
+  return total;
+}
+```
+
+The ancestor was empty in that region (neither feature existed before). Your branch added discount handling. Their branch added gift card handling. Both are real features that should ship.
+
+**Resolution decision:** combine both. Discount code applies first (off the line item subtotal), then gift card balance reduces what's left (because gift cards are essentially prepaid cash).
+
+**Result after editing:**
+
+```typescript
+function calculateTotal(cart) {
+  let total = 0;
+  for (const item of cart) {
+    total += item.price * item.quantity;
+  }
+  if (cart.discountCode) {
+    total = applyDiscount(total, cart.discountCode);
+  }
+  if (cart.giftCardBalance) {
+    total = Math.max(0, total - cart.giftCardBalance);
+  }
+  return total;
+}
+```
+
+`git add cart.ts`. Then before committing, write a test that covers a cart with BOTH a discount code and a gift card balance. The test is what proves you combined them correctly. Then commit.
+
+**Notice the pattern:** when both branches added different behavior, the resolution is usually "combine, in the right order, then add a test covering the combination." The combination is the place where bugs hide. Tests catch them.
+
+### Worked example 3: Renamed function, complicated by edits
+
+You're on `feature/auth-cleanup`. You renamed the function `authenticateUser` to `signIn` for consistency with the rest of the codebase. Meanwhile on main, your teammate added a new parameter (`requireMfa: boolean`) to the old `authenticateUser`.
+
+After `git merge main`, the file shows two distinct regions of conflicts, one for the function declaration and one for every call site.
+
+The declaration conflict:
+
+```typescript
+<<<<<<< HEAD
+function signIn(email: string, password: string): User {
+||||||| ancestor
+function authenticateUser(email: string, password: string): User {
+=======
+function authenticateUser(email: string, password: string, requireMfa: boolean): User {
+>>>>>>> main
+```
+
+The call sites (multiple files):
+
+```typescript
+<<<<<<< HEAD
+  const user = signIn(form.email, form.password);
+||||||| ancestor
+  const user = authenticateUser(form.email, form.password);
+=======
+  const user = authenticateUser(form.email, form.password, false);
+>>>>>>> main
+```
+
+**Resolution decision:** keep your rename to `signIn`, AND adopt their new `requireMfa` parameter. Both changes are correct; they're orthogonal.
+
+**Result for the declaration:**
+
+```typescript
+function signIn(email: string, password: string, requireMfa: boolean): User {
+```
+
+**Result for each call site:**
+
+```typescript
+  const user = signIn(form.email, form.password, false);
+```
+
+`git add` all the affected files. Note: this conflict could have been avoided. If you'd communicated with your teammate before starting the rename (or rebased onto main daily, see L12), you'd have caught their new parameter early and incorporated it cleanly. Conflict prevention is a topic; conflict resolution is a skill. Build the skill so you can ship through prevention failures.
+
+### Worked example 4: Delete-modify conflict
+
+You're on `feature/remove-deprecated-helpers`. You deleted `src/utils/legacy-formatter.ts` because it was unused. Meanwhile on main, your teammate added a bug fix to that exact file.
+
+After `git merge main`:
+
+```
+CONFLICT (modify/delete): src/utils/legacy-formatter.ts deleted in HEAD and modified in main. Version main of src/utils/legacy-formatter.ts left in tree.
+```
+
+This is a **delete-modify conflict.** Git left the modified version in your working directory (so you can see what the teammate's change was) and is asking: do you want the file to exist (their modification) or not (your deletion)?
+
+**Resolution decision options:**
+
+Option A: your delete wins (the file was genuinely dead code, the teammate didn't know):
+```bash
+git rm src/utils/legacy-formatter.ts
+git status     # confirms the file is staged for deletion
+```
+
+Option B: their modify wins (the file is needed for the bug fix, your delete was wrong):
+```bash
+git add src/utils/legacy-formatter.ts
+git status     # confirms the file is staged with their changes
+```
+
+Option C: partial reconciliation (the file should be deleted EVENTUALLY but their bug fix is needed right now):
+- Take their version for now (`git add`)
+- File a follow-up to remove the file in a future PR once the bug fix is unneeded
+
+Most "should we delete this?" conflicts get resolved in conversation, not in the editor. Ping the teammate; ask what their fix was for; decide together.
+
+### Worked example 5: Semantic conflict (the dangerous kind)
+
+You're on `feature/payment-validation`. You added strict validation to the payment service: payment amounts must be positive. Your teammate on main added a refund feature that calls the payment service with NEGATIVE amounts to represent refunds.
+
+Both branches touched completely DIFFERENT files. There is NO textual conflict. Git's auto-merge succeeds:
+
+```
+Auto-merging src/payments/validation.ts
+Auto-merging src/payments/refunds.ts
+Merge made by the 'recursive' strategy.
+```
+
+You merge clean. You commit. You push. CI runs. CI passes (because no test covered "refund flow + validation" together). Code ships to production. The next refund attempt fails with "Payment amount must be positive."
+
+This is a **semantic conflict.** Git cannot detect it. The two changes are textually compatible but semantically incompatible. They depend on each other for correctness, and neither knows about the other.
+
+**Why this matters:** git tells you about TEXTUAL conflicts. It cannot tell you about SEMANTIC conflicts. The discipline that catches semantic conflicts is:
+1. **Tests that exercise the integration points.** A test of "refund flow with validation" would have caught it.
+2. **Code review that thinks about the merged result.** A reviewer noticing "the refund PR adds negative amounts; the validation PR rejects them" can call it out before merge.
+3. **CI that runs the full test suite, not just the changed-file tests.** Per-file test runs miss cross-cutting interactions.
+4. **Short-lived branches that merge often.** A branch merged daily has fewer chances to accumulate semantic divergence.
+
+L7 mostly covers textual conflicts (git makes them visible). But the semantic conflict category is the more dangerous one; it ships to production without anyone noticing. Build the discipline above; it's how mature teams ship safely.
+
+### Worked example 6: Rename-edit conflict (subtle)
+
+You're on `feature/restructure-utils`. You moved `src/utils/format.ts` to `src/lib/format.ts`. Meanwhile on main, your teammate edited the contents of `src/utils/format.ts` (in the old location).
+
+After `git merge main`, you might see various things depending on git's rename detection (which is heuristic):
+
+If git detected the rename:
+```
+Auto-merging src/lib/format.ts
+```
+The teammate's content edits were transferred to the new location. No conflict. Git handled it.
+
+If git did NOT detect the rename:
+```
+CONFLICT (modify/delete): src/utils/format.ts deleted in HEAD and modified in main.
+Auto-merging src/lib/format.ts
+```
+Now you have both a delete-modify (the old path) AND an unwanted file at the new path. You need to merge their content edits into your new location manually.
+
+**Resolution process for the un-detected case:**
+
+1. Look at what they changed in `src/utils/format.ts` (use `git show main -- src/utils/format.ts`)
+2. Apply the same edits to `src/lib/format.ts` (manually)
+3. `git rm src/utils/format.ts` to remove the old path
+4. `git add src/lib/format.ts` to confirm the new path with their edits
+
+**Prevention:** rename + edit together in one commit, rather than rename-only or edit-only. Git's rename detection works better when the rename is a single atomic change. If you rename and then edit in two separate commits, the rename detection still works for the rename commit but may miss it when merging.
+
+### Tools for resolution
+
+You can resolve conflicts in any text editor. The marker syntax is plain text. But several tools make the experience smoother.
+
+**VS Code's built-in merge editor.** When VS Code detects conflict markers in a file, it shows three buttons above the conflict: "Accept Current Change" (your version), "Accept Incoming Change" (their version), "Accept Both Changes" (concatenate). For most simple conflicts, one click resolves. For complex ones, VS Code also offers a 3-pane merge editor that shows the ancestor, both versions, and the merge result, better than reading the markers in your head.
+
+To open the dedicated merge editor: when conflicts exist, the file in the Source Control panel shows a "Resolve in Merge Editor" button.
+
+**JetBrains IDEs (IntelliJ, WebStorm, etc.) merge tool.** Similar three-pane view, often considered the gold standard for visual merge resolution. Useful for complex multi-region conflicts.
+
+**Command-line `git mergetool`.** Launches an external merge tool you've configured. Many developers go a whole career without using it; the built-in markers + an editor are usually enough.
+
+**GitHub's web-based conflict resolver.** For simple conflicts on a PR, GitHub offers an in-browser editor with the conflict markers visible. You can resolve and commit without ever leaving the browser. Useful for one-line conflicts. Inadequate for anything complex (no syntax highlighting, no test runner).
+
+**The "no tool" approach.** Open the file in any editor. Read the markers. Edit. Save. Stage. Commit. This is how most senior engineers handle merge conflicts; tools are nice but not essential.
+
+**Pick the tool that fits.** For day-to-day work, VS Code's merge editor is the highest-leverage choice. For complex three-way merges, JetBrains. For one-line PR conflicts, GitHub's UI. For everything else, plain text editing.
+
+### When to abort and start over
+
+Sometimes the right answer to a merge conflict is "abort the merge and try a different approach."
+
+```bash
+git merge --abort
+```
+
+This puts your repo back exactly as it was before you started the merge. Branch is unchanged, working directory is unchanged, no files staged. As if the merge never happened.
+
+**When to abort:**
+
+- The conflicts are so extensive that resolving them line-by-line would take hours and the result would be unreviewable
+- You realize you should have merged the OTHER direction (your branch into theirs, not vice versa)
+- You discover the wrong branch is checked out and you were about to merge into the wrong thing
+- Your teammate's branch contains commits you didn't expect (maybe they force-pushed) and the merge surface is confusing
+- You're tired or distracted and aren't going to make good resolution decisions
+
+**What to do instead after aborting:**
+
+- Pull more frequently to avoid massive divergence
+- Rebase your branch onto main (L12) instead of merging main into your branch; rebase produces smaller conflict surfaces because it replays your commits one at a time
+- Break your branch into smaller PRs that each merge cleanly
+- Communicate with the teammate to coordinate big refactors
+
+**The pattern:** `git merge --abort` is not failure. It is taking a do-over after you've gathered information you didn't have before. Free yourself to use it.
+
+### When NOT to abort (the trap)
+
+If you're in the middle of a complex merge and you've already resolved several conflicts, aborting throws away all that work. You start from scratch.
+
+**Don't abort if:**
+- You've already invested significant resolution work
+- The remaining conflicts are mechanical (you just haven't gotten to them yet)
+- The team is depending on the merge landing soon
+
+**Alternative for "I'm tired" mid-merge:** stash your in-progress resolutions, take a break, come back. Git's merge state persists across editor sessions and even reboots. You can leave a half-merged repo and resume hours later. The merge state isn't going anywhere.
+
+### Conflict prevention is better than resolution
+
+The best merge conflict is the one that doesn't happen. Five disciplines that reduce conflict rates:
+
+**1. Rebase often.**
+
+Instead of letting your branch sit while main accumulates 30 commits, rebase your branch onto main daily. Each rebase resolves one day of divergence at a time. The conflict surface stays small. (Rebase mechanics covered in L12.)
+
+**2. Small PRs.**
+
+Short-lived branches (1-3 days) have less time to diverge. A 200-line PR rarely conflicts with anything; a 2,000-line PR almost always does. The discipline from L6 (small PRs) pays off here.
+
+**3. Communicate big refactors.**
+
+If you're about to rename a heavily-used function or restructure a directory, post in your team's channel: "I'm about to rename `authenticateUser` to `signIn` across the codebase; if anyone has a branch touching auth, let me know first." Five minutes of communication prevents days of conflict resolution.
+
+**4. Avoid long-lived branches.**
+
+A branch that lives for 3 weeks will have dozens of conflicts when it tries to merge. A branch that lives for 3 days will have one or two. Even for big features, prefer "merge a feature flag, then iterate on the feature in small PRs" over "branch lives until the feature is done."
+
+**5. Use clear ownership boundaries.**
+
+If two engineers are working on the same module simultaneously, conflict rate is high. If they work on different modules, conflict rate is low. Where possible, structure work so engineers naturally touch different files.
+
+These five disciplines reduce, they don't eliminate, conflicts. When a conflict does happen, you have L7's process for resolving it. Skill at both is what mature engineering teams look like.
+
+### A note for experienced developers
+
+If you came from SVN or Perforce, you're used to "checkout = lock the file so nobody else can edit it." Git rejects that model entirely; multiple developers edit the same files in parallel, and merge resolves the divergence at integration time.
+
+This is a strict trade-off:
+- **SVN/Perforce style:** zero conflicts at merge time (because nobody could touch a locked file), but blocked teammates while a file is checked out, and serialization of work.
+- **Git style:** conflicts at merge time (sometimes), but no blocked teammates, full parallelism, faster iteration.
+
+Modern engineering has converged on git's model because the cost of merge conflicts (resolvable in minutes with practice) is much less than the cost of serialization (engineers blocked indefinitely on files locked by other engineers). L7 is the lesson that makes the trade-off pay off.
+
+If you came from Mercurial, the conflict model is essentially identical. Skip to the multi-agent foreshadowing section.
+
+### A useful frame for managers and technical product managers
+
+Four observations worth carrying to non-engineering conversations.
+
+**First**, merge conflict rate is a leading indicator of branch hygiene. Teams with frequent painful conflicts almost always have process issues underneath: branches living too long, no clear ownership boundaries, big refactors uncoordinated. Asking "how often is the team dealing with conflicts?" can surface real process gaps.
+
+**Second**, conflict resolution time is mostly fear, not technical difficulty. Engineers who have resolved a hundred conflicts find them mechanical. Engineers who have resolved three are visibly anxious. The fix is not faster tools; the fix is exposure. A team where senior engineers occasionally pair on a conflict resolution (showing the junior the process) accelerates everyone's conflict skill rapidly.
+
+**Third**, semantic conflicts are invisible to git, invisible to most CI, and the leading cause of "two PRs that both passed review broke production." Mature teams invest in integration tests that exercise the boundaries between PRs. Asking "how do we catch semantic conflicts?" is a leading question for engineering culture.
+
+**Fourth**, the "abort and retry" option is underused on most teams. Junior engineers feel that aborting a merge is admitting failure; in reality, aborting and re-approaching is often the correct call. Managers can model this by aborting their own merges visibly: "I aborted that merge because the conflict surface was too big; I'm going to rebase first and try again."
+
+**For technical product managers specifically:** when engineering tells you "the merge is taking longer than expected," that often means the team is working through a conflict-heavy merge. Asking "is the conflict count high?" sometimes uncovers that the work isn't actually delayed by complexity; it's delayed by the team having neglected branch hygiene. The fix isn't more time; it's more frequent rebases going forward.
+
+### Concrete scenarios across team scales
+
+The same conflict resolution mechanics work at every scale. The surrounding workflow differs.
+
+**Scenario A: Two-person startup, daily communication.**
+
+You and your co-founder. Branches typically live 1-2 days. Conflicts are rare because you can ping each other in 30 seconds. When a conflict happens, you either resolve it solo (90% of cases) or pair-resolve it together (the complex cases). The fix is conversational: "Hey, I see you also touched the cart code; should we sync on the resolution?"
+
+The discipline at this scale: merge to main daily. Even half-finished work on a feature flag. The cost of merge conflicts grows nonlinearly with branch lifetime.
+
+**Scenario B: 50-person engineering team, multiple sub-teams.**
+
+Branches typically live 3-7 days. Conflicts are more common because more engineers touch shared code (config files, schema definitions, shared utilities). Most teams adopt:
+- Mandatory PR review with at least 1 approver (L6 discipline)
+- A "rebase before merge" policy (L12) so each PR comes to main on top of latest main
+- Clear module ownership: "the auth module is owned by team B; ping them before big changes"
+- Migrations land separately from feature code, with explicit coordination
+
+At this scale, semantic conflicts become a real risk. Teams invest in integration tests that exercise the boundaries.
+
+**Scenario C: Open-source project, distributed contributors.**
+
+Branches can live for weeks or months between contributor activity. Conflicts are essentially guaranteed by the time a PR is reviewed. The discipline:
+- Maintainers respond to PRs promptly, BEFORE conflicts accumulate
+- Contributors rebase their PR onto latest main before resubmitting after review feedback
+- Long-stale PRs that no longer apply cleanly are either closed-with-explanation or maintainer-assisted (the maintainer rebases on behalf of the contributor)
+- Merge conflicts ON the PR itself (GitHub's "this branch has conflicts" indicator) signal "this PR is going stale; needs attention"
+
+The maintainer's job partially is conflict resolution traffic-management: keeping the queue moving so PRs don't accumulate divergence.
+
+**Scenario D: Multi-agent AI workflow.**
+
+Multiple AI agents working on different branches in parallel. Each agent's branch lives hours, not days. Conflicts at merge time are inevitable but recoverable:
+- Each agent works in its own git worktree (L15) so they don't even step on each other's working directories
+- The orchestrating layer (a human, or another agent) reviews each branch and merges in sequence
+- Semantic conflicts (one agent assumes the API contract another agent is changing) are the dominant failure mode; integration tests at the orchestrator level catch them
+- The Clawless 2026-06-04 multi-track sprint hit this: six dev terminals authored six different tracks in parallel; the Lead merged each one in sequence; semantic conflicts on shared infrastructure (the lesson contract format) were caught at Lead's review step
+
+The discipline you build at the two-person scale carries forward to AI-agent scale. The mechanics are the same. The frequency goes up. The orchestration layer absorbs the coordination cost.
+
+### A foreshadowing note for Phase 4
+
+In Phase 4 (multi-agent teams), every conflict resolution pattern from L7 becomes routine. Agents will produce textual conflicts (multiple agents editing the same file). Agents will produce semantic conflicts (one agent's change breaks another's assumption). The orchestrator (human or agent) does the same six-step resolution.
+
+What changes at multi-agent scale:
+- **Frequency:** more agents means more conflicts per day. The skill needs to be fluent, not painful.
+- **Diversity:** agents make different KINDS of changes than humans (massive refactors, sweeping renames). The conflict surfaces are larger.
+- **Communication cost:** you can't ping an agent for a 30-second discussion. Conflicts are resolved at the orchestrator, often without re-engaging the agent that produced the branch.
+- **Audit trail:** every resolution becomes part of the institutional memory of which agent's approach won. This matters when debugging "why did the codebase end up this way?" six months later.
+
+L15 covers the worktree mechanic that makes multi-agent parallelism tractable. L7's resolution skills are the prerequisite. Build them at the solo/two-person scale; they'll carry forward.
+
+### The stay-calm psychology
+
+Three principles for staying calm during a merge conflict:
+
+**1. The conflict is not destruction.** Your work and your teammate's work are both safe, both in their respective commits, both in git's history. The conflict is just a question about how to combine them. Nothing has been lost.
+
+**2. The merge can be undone.** `git merge --abort` takes you back to exactly where you were. No matter how badly you mess up the resolution, you can start over. There is no "ruined" state.
+
+**3. The mechanics are mechanical.** Read the markers. Decide. Edit. Stage. Commit. Six steps. If a step feels confusing, slow down and re-read the relevant section of this lesson.
+
+The fear comes from not having a roadmap. You now have one.
+
+### What you can do now
+
+By the end of L7 you can:
+- Recognize when git is in a merge state (`git status`)
+- Read default and diff3 conflict markers fluently
+- Walk through the six-step resolution process on any textual conflict
+- Identify the five conflict types (textual, logical, semantic, delete-modify, rename-edit) and apply the correct fix for each
+- Choose between aborting (`git merge --abort`) and resolving forward
+- Articulate why semantic conflicts are the dangerous category git cannot detect
+- Apply five conflict prevention disciplines (rebase often, small PRs, communicate refactors, short-lived branches, ownership boundaries)
+- Stay calm through any merge conflict you'll hit in two-person collaboration
+
+You have built the conflict-resolution skill. L8 covers the final Phase 2 topic: remotes and forks. After L8, you can collaborate end-to-end with another developer, including across repositories.
+
+### What's next in Phase 2
+
+- **L8 Remotes and forks**: the difference between local and remote branches, how `origin` and `upstream` work, the fork-based contribution model
+
+L8 closes Phase 2. After Phase 2 you can collaborate with one other person on a real project. Phase 3 covers production team workflows.
+
+### Voice anchor (carried from L1 + L2 + L3 + L4 + L5 + L6)
+
+> Git stores snapshots. Every other command is just navigating those snapshots.
+
+A merge conflict is git asking you to reconcile two snapshots that disagree. The resolution is choosing the next snapshot: your version, their version, both combined, or something new. The conflict markers are just text describing the disagreement. Read them, decide, write the answer.
