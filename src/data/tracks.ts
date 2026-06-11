@@ -126,7 +126,7 @@ export const THEME_ORDER: ThemeMeta[] = Object.values(THEMES).sort(
 );
 
 // ---------------------------------------------------------------------------
-// The tracks. 21 live + 3 planned (T2 / T3 / T7) = the 24-track curriculum.
+// The tracks. 22 live + 2 planned (T2 / T3) = the 24-track curriculum.
 // href values are verified against the live sidebar entry per track.
 // ---------------------------------------------------------------------------
 export const TRACKS: Track[] = [
@@ -395,14 +395,14 @@ export const TRACKS: Track[] = [
 	},
 	{
 		id: 7,
-		slug: 'pain-point-library',
-		title: 'Pain Point Library',
-		blurb: 'One clear answer per recurring question from the AI community.',
-		theme: 'specialized',
+		slug: 'git-workflow',
+		title: 'Git Workflow: From Solo to Multi-Agent Teams',
+		blurb: 'Version control as collaboration infrastructure, from your first commit to coordinating AI agent teams on parallel branches.',
+		theme: 'production',
 		level: 'Beginner',
-		lessons: 0,
-		status: 'planned',
-		href: '',
+		lessons: 4,
+		status: 'live',
+		href: '/lessons/git-workflow/why-git-exists/lesson/',
 	},
 ];
 

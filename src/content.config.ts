@@ -31,6 +31,7 @@ export const collections = {
 						'ai-foundations',
 						'privacy-local-first',
 						'pain-point-library',
+						'git-workflow', // Track 7: Git Workflow (Pro Git + Atlassian; multi-agent angle)
 						// Mirror tracks (structural mirrors of external open courses)
 						'intro-to-deep-learning', // Track 12: MIT 6.S191 (Amini and Amini)
 						'build-nns-from-scratch', // Track 13: Karpathy Neural Networks Zero to Hero
@@ -159,6 +160,11 @@ export const collections = {
 						'the-risks-landscape',
 						'safety-and-alignment',
 						'ethics-and-governance',
+						// Track 7 (Git Workflow: From Solo to Multi-Agent Teams)
+						'foundations',
+						'branching-and-collaboration',
+						'workflows-in-the-wild',
+						'multi-agent-teams',
 					])
 					.optional(),
 				phase_order: z.number().int().positive().optional(),
