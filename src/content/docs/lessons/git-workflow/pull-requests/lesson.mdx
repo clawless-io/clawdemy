@@ -1,0 +1,333 @@
+---
+title: 'Lesson: Pull requests'
+description: Pull requests are where modern engineering culture lives. You learn the mechanical flow (push branch, open PR, address review, merge), how to write a PR description that respects the reviewer's time, the three merge strategies, and the etiquette of giving and receiving code review.
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+### The most consequential surface in the developer experience
+
+You have a branch with work on it. The work is good. Now you need to get it into `main` so the team can build on it, deploy it, and benefit from it.
+
+You could merge the branch yourself, locally, and push the result to the remote. On a solo project that is exactly what you do. On a team project that is almost never what you do.
+
+Instead, you open a **pull request**. A pull request is a proposal: "I'd like to merge my branch into main; please review and approve." It is a piece of UI on GitHub (or GitLab, or Bitbucket; they all have the same primitive with slightly different names). It is also a piece of culture: the place where review happens, where decisions get recorded, where the team agrees on what is shipping.
+
+If you ask experienced engineers what they spend most of their time on, "writing code" is rarely the top answer. "Reviewing pull requests" usually is. PRs are where engineering culture lives. They are the single most consequential surface in the developer experience. L6 is about doing them well.
+
+### The mechanical flow (memorize this; everything else is style)
+
+The basic loop, every time:
+
+1. **Branch.** Create a feature branch off `main` (L5). Do the work. Commit with discipline (L3).
+2. **Push the branch.** `git push -u origin feature/payment-flow`. The `-u` sets the upstream so future `git push` calls know where to send commits.
+3. **Open a PR.** On GitHub's web UI, a banner appears: "Recent pushes... Compare & pull request." Click it. Or navigate to the repo, click "Pull requests" tab, click "New pull request," pick your branch.
+4. **Write the description.** The most important step. We dedicate a whole section to this below.
+5. **Request reviewers.** GitHub suggests reviewers based on git blame. Pick the right humans (or the right code-owners group). Most teams require at least 1 approval.
+6. **Address review comments.** Reviewers leave comments inline or as a top-level review. Respond to each. Push fixes as new commits on the same branch (the PR updates automatically). For requested changes, push the fix and mark the comment "resolved" or reply with the rationale.
+7. **Get approval.** When the reviewer hits "Approve," the PR is mergeable (assuming CI passes).
+8. **Merge.** Click the merge button. Choose merge strategy (next section). The PR closes; the branch is now part of main.
+9. **Delete the branch.** GitHub offers a "Delete branch" button after merge. Click it. Branch hygiene from L5.
+
+That's the loop. Steps 4 and 6 are where craft matters most. Everything else is mechanics.
+
+### Writing a PR description
+
+The PR description is read by:
+- The reviewer (right now, deciding whether to approve)
+- Future engineers debugging an issue six months from now (`git blame` to commit to linked PR to description)
+- Product managers tracking what shipped
+- Auditors verifying changes against tickets
+- Possibly an LLM summarizing the changelog for a release notes page
+
+Five audiences. Three minutes of writing on your end. Hours of saved time over the lifetime of the PR.
+
+The canonical structure (used by Stripe, GitHub itself, the Linux kernel, most mature open-source projects):
+
+```
+## What this changes
+Brief description of what the diff does. One paragraph max. Bullet points if multiple distinct changes.
+
+## Why this matters
+The motivation. What problem this solves, what value this delivers. Link to the ticket, design doc, or customer report if relevant.
+
+## How it was tested
+What you ran, what you observed. Manual testing steps if applicable. Automated test coverage if added.
+
+## Notes for the reviewer
+Anything the reviewer should pay extra attention to. Tradeoffs you considered. Alternatives you ruled out. Things you're unsure about.
+```
+
+Optional sections (add when relevant):
+
+```
+## Screenshots / videos
+For UI changes.
+
+## Breaking changes
+For API or schema changes that downstream consumers need to know about.
+
+## Migration plan
+For schema migrations or anything that needs coordinated deploy.
+
+## Rollback plan
+For anything risky.
+```
+
+Two examples worth studying:
+
+**Example A, small bug fix:**
+
+```
+## What this changes
+Fixes the login redirect bug where users who signed in via Google were being sent to /dashboard instead of their original destination URL.
+
+## Why this matters
+~12% of Google sign-ins were landing on the wrong page (per analytics, the past two weeks). Customer feedback in #support-channel referenced this.
+
+## How it was tested
+Reproduced the bug in dev with three test accounts. Verified the fix sends users back to their original destination for direct sign-ins, OAuth callback flows, and the password-reset flow. Added a unit test for the redirect URL builder.
+
+## Notes for the reviewer
+The fix lives in auth/oauth-callback.ts. The original bug was that we were dropping the state parameter mid-flow. I considered storing the destination in the user session instead, but that would require a schema change. The state-parameter approach is the minimal fix.
+```
+
+**Example B, larger feature:**
+
+```
+## What this changes
+Adds a "Saved Drafts" feature to the document editor. Users can save a draft, see a list of their drafts on a new /drafts page, and resume editing from any draft.
+
+## Why this matters
+Per the Q2 user research (link: notion.so/...), 23% of users start documents and never finish them. Drafts let users pause without losing work. Targeted lift: 15% reduction in abandonment.
+
+## How it was tested
+- Manual: created drafts, navigated away, returned, resumed. Verified across Chrome, Firefox, Safari.
+- Automated: added 8 unit tests for the draft-save service, 3 integration tests for the /drafts page, 1 E2E test for the full flow.
+- Migrations: ran the new schema migration locally; rolled back; ran forward again. No data loss.
+
+## Notes for the reviewer
+- The new /drafts page is server-rendered. I chose SSR over client-rendered because it loads faster on the initial visit (drafts are usually a small list).
+- I introduced a new "draft_state" enum (draft / autosaved / abandoned). The autosaved state is for the future autosave feature; it's not used in this PR but the schema accommodates it.
+- The DraftService.save() method has a TODO about race conditions when two tabs save the same draft simultaneously. I think it's safe (last-write-wins is acceptable for drafts), but flag it for review.
+
+## Screenshots
+[before screenshot] / [after screenshot]
+
+## Migration plan
+The schema migration creates the drafts table. It is additive (no destruction). Safe to run before or after deploy.
+```
+
+Both examples follow the same structure. Both respect the reviewer's time. Both leave a paper trail that is useful six months from now.
+
+### The three merge strategies (and when to use each)
+
+When you click "Merge," GitHub gives you three options. They produce visually different histories.
+
+**Merge commit:**
+
+```
+A ---- B ---- C ---- D ----------- M (main)
+                      \           /
+                       E ---- F (feature)
+```
+
+A new "merge commit" `M` is created on main with two parents: the last main commit (D) and the last feature commit (F). All feature commits are preserved. The merge is explicit in history.
+
+**Squash:**
+
+```
+A ---- B ---- C ---- D ---- S (main)
+                      \
+                       E ---- F (feature, abandoned)
+```
+
+Feature commits E and F are combined into a single new commit S on main. The original feature commits are not on main; they exist only on the (now-deleted) feature branch. Main has a clean, linear history.
+
+**Rebase:**
+
+```
+A ---- B ---- C ---- D ---- E' ---- F' (main)
+```
+
+Feature commits E and F are replayed on top of main as new commits E' and F'. No merge commit. Linear history with all commits preserved. This is the most aggressive history-rewriting option.
+
+**Choose merge commit when:**
+- The branch represents a meaningful unit of work that should be visible as a unit in history
+- The branch's individual commits are well-crafted and worth preserving
+- The team values explicit merge points (release branches, long-lived features)
+
+**Choose squash when:**
+- The branch has messy WIP commits ("wip", "fix tests", "more wip") that aren't worth preserving
+- The team wants linear history but doesn't want to rebase
+- The PR is small enough that the entire change is one logical unit
+- This is the most common choice for short-lived feature branches in modern teams
+
+**Choose rebase when:**
+- The team explicitly wants linear history with all commits preserved
+- The branch's commits are individually clean and meaningful
+- Everyone on the team understands rebase (it has edge cases; covered in L12)
+
+**The decision in practice:** most teams default to squash for feature PRs. The clean-up of WIP commits is welcome; the linear history is easier to read; the single-commit-per-PR mapping is auditable. Some teams prefer merge commits for the explicit visibility. Rebase is a power-user choice that needs team buy-in.
+
+**The discipline:** pick one default, document it, follow it. Switching merge strategies mid-team is the source of subtle history confusion that costs days of debugging later.
+
+### Code review etiquette, as the author
+
+You wrote code. You opened a PR. Reviewers will read your code. Here is how to make that better for both of you.
+
+**Before you request review:**
+- Read your own diff. Catch the typos, the leftover `console.log`s, the things you can fix without a reviewer's eyes. The PR description above is the contract; if you read your own diff and the contract is wrong, fix the contract.
+- Run the tests locally. Don't make the reviewer find broken tests for you.
+- Self-review the diff. Add comments on your own PR explaining things that are non-obvious. "I went with X here instead of Y because of Z" preempts the reviewer's question.
+
+**When review comments come in:**
+- Respond to every comment. Even "good catch, fixed in `<commit-sha>`." Silence on a comment looks like avoidance.
+- For comments you disagree with, explain your reasoning. Don't dismiss without explanation. "I think X is actually safer here because..." is a conversation; "no, I want it this way" is not.
+- Push fixes as new commits, not as force-pushes during review. Force-pushing mid-review destroys the reviewer's ability to see "what changed since my last review." Squash at merge time, not during review.
+- Don't take it personally. Review feedback is on the code, not on you. Even when phrased poorly. (See "as the reviewer" below for the flip side.)
+
+**When you disagree:**
+- Disagreement is fine. Disagreement without explanation is not.
+- If you and the reviewer can't resolve a disagreement in 2-3 rounds of comments, take it to a synchronous conversation (video call, hallway, Slack DM). Async disagreement loops are where engineering culture sours.
+- Lean on principles, not preferences. "I prefer X" is weak; "X is better because of [specific reason]" is a real argument.
+
+### Code review etiquette, as the reviewer
+
+You were asked to review someone's PR. They are waiting for you. Here is how to do this well.
+
+**Respond promptly.**
+- Within one business day for normal PRs. Within hours for urgent ones.
+- If you genuinely can't review for several days, say so explicitly. Suggest another reviewer. Don't just sit on it.
+- Slow reviews cost more than slow code. A PR that sits for a week has a 50/50 chance of becoming irrelevant by the time it gets attention.
+
+**Review the code, not the person.**
+- "This function is hard to follow" is review feedback.
+- "You always make functions hard to follow" is performance feedback in the wrong forum.
+- Stick to the diff. Bring patterns to 1:1s.
+
+**Be specific.**
+- "Consider using X" is helpful.
+- "This isn't great" is not.
+- If you can't articulate what's wrong specifically, you're probably not ready to leave the comment yet. Sit with it; come back; be specific.
+
+**Distinguish blocking from non-blocking.**
+- Many teams use prefix conventions: `nit:` (style preference, not blocking), `suggestion:` (consider this), `question:` (asking for clarification), `blocking:` (must be addressed before merge).
+- Without prefixes, authors can't tell what holds up the merge. Tag your comments.
+- A reviewer who blocks on every preference burns trust with authors fast.
+
+**Approve when good enough, not perfect.**
+- The bar for approval is "this code is safe to merge." Not "this code is exactly how I would have written it."
+- If your concerns are non-blocking, approve with comments. Don't withhold approval for style preferences.
+- Withholding approval is a real cost on team velocity. Reserve it for blocking concerns.
+
+**When you can't approve in the first round:**
+- Say so explicitly: "Leaving comments; will re-review after fixes."
+- Don't just "request changes" silently. The author needs to know what would unblock approval.
+
+### The "PR as institutional memory" principle
+
+A merged PR is a permanent record. Six months from now, someone will git-blame a line of code, find a commit, find the PR linked from the commit message, and read your PR description to understand what was happening.
+
+Optimize for that reader. They have a question your PR description should answer: "Why does this code exist?"
+
+A good PR description is the answer to that question. It tells the future debugger:
+- What the code does (so they can confirm the bug they're chasing is or isn't related)
+- Why the code exists (so they understand the constraint)
+- What was considered and rejected (so they don't waste time re-evaluating those options)
+- Where to look for context (linked ticket, design doc, customer report)
+
+A bad PR description ("fix login bug") forces the future debugger to read every line of the diff, then guess at intent, then ask around. That guessing is hours of team time, repeated for every future debugger of every line in the PR.
+
+The investment in good PR descriptions pays off slowly but compounds. Teams that take PR descriptions seriously have institutional memory that survives turnover. Teams that don't accumulate "what does this code do?" tax on every future investigation.
+
+### Common PR anti-patterns (and why they hurt)
+
+These are the patterns that erode team velocity quietly. Recognize them.
+
+**1. The mega-PR.** Thousands of lines, dozens of files. Reviewers cannot meaningfully review it. They either rubber-stamp it (review is fake) or refuse to engage with it (PR stalls for weeks). Fix: break into logical units. A 200-300 line PR is the sweet spot.
+
+**2. The unrelated changes PR.** "I fixed the login bug AND refactored the auth module AND updated three dependencies." Each change is reasonable individually. Together, the PR is unreviewable and any future revert affects all three. Fix: one PR per logical change.
+
+**3. The PR with no description.** Title only. Reviewer has to read every line plus git history plus Slack scrollback to understand intent. Multiply this by 30 PRs per week per team. Fix: spend three minutes on the description.
+
+**4. The PR that updates over time without re-summarizing.** Initial scope was X; over five rounds of review it ballooned to X+Y+Z; the original description still says X. The merge ships Y and Z without anyone explicitly acknowledging it. Fix: update the description as scope changes. Or close and open a new PR if scope expanded too much.
+
+**5. The PR that includes generated code in the diff.** Lock files, build artifacts, generated client SDKs. Reviewers can't tell what's hand-written and what's machine-generated. Fix: move generated artifacts to a separate path; add to `.gitignore` if they shouldn't be tracked; structure the PR so the hand-written changes are inspectable.
+
+**6. The PR with no tests.** Reviewer has to either trust the author or manually verify. Both options waste reviewer time. Fix: tests with the code, in the same PR. (Exception: well-documented spikes / experiments that are explicitly not for production.)
+
+**7. The PR opened on Friday at 5pm.** The author goes offline; the reviewer reviews Monday morning; the author addresses Monday afternoon; the PR merges Tuesday. A two-day chain on what could have been a 30-minute conversation. Fix: time PRs for when you can engage with review.
+
+**8. The "I'll just merge it myself" PR.** Author approves their own PR, bypassing review. Sometimes legitimate (config tweak, single-author project) but often a habit that erodes the review culture. Fix: if review is being skipped routinely, the team has a process gap, not a one-PR gap.
+
+### A note for experienced developers
+
+The PR workflow looks like overhead until you've experienced what its absence costs.
+
+If you came from a "commit straight to main" culture (some smaller teams, some open-source projects in their pre-popular phase), the PR overhead can feel like ceremony. It is, until the team grows past 2-3 people, or you ship something that breaks production, or you onboard a new engineer who needs to learn the codebase by reading PR history.
+
+If you came from a corporate "everything blocked by review boards" culture (some larger enterprises), modern PRs probably feel lightweight. They are: the goal is async, fast, focused review, not multi-day approval committees. If your team's PRs are starting to feel committee-like, that's a process drift worth correcting.
+
+The PR primitive is the same everywhere; the culture around it differs. Watch for the culture, not just the mechanic.
+
+### A useful frame for managers and technical product managers
+
+Five observations worth carrying to non-engineering conversations.
+
+**First**, PRs are the unit of legible change for the engineering organization. When you ask "what shipped this week?" the answer is "these PRs merged." This 1:1 mapping (PR to shipped change) is what makes engineering velocity tractable to measure and communicate.
+
+**Second**, PR review time is the most under-measured productivity tax in most engineering organizations. If your team's average PR sits for 3 days waiting for review, that's not 3 days of one engineer's time; it's 3 days of context-switching, lost momentum, and parallel pressure on every other in-flight PR. Reducing review time is one of the highest-leverage process improvements available.
+
+**Third**, the quality of PR descriptions predicts how much "what does this code do" debt your codebase will accumulate. Teams with thoughtful PR descriptions can answer "why does line 47 exist?" in minutes. Teams without can take hours per investigation. Multiply by every investigation over the codebase's lifetime; the compounding cost is enormous.
+
+**Fourth**, the choice of merge strategy is a real decision worth getting right early. Switching from "merge commit" to "squash" mid-team is a culture migration, not a checkbox change. If you're starting a new repo or project, pick the default and stick with it.
+
+**Fifth**, code review is leadership development. Reviewers who give specific, kind, principled feedback grow into the engineering leaders of the future. Reviewers who block on style preferences or fail to explain their reasoning do not. If you manage engineers, the quality of their review comments is a leading indicator of their leadership trajectory.
+
+**For technical product managers specifically:** if engineering tells you a feature will ship "after review," that's typically 1-3 days of latency on top of the actual implementation time. Asking "what's the bottleneck on review?" sometimes uncovers that the team has 12 PRs sitting open while everyone codes new things. Visible team-wide PR queues are an artifact PMs can usefully advocate for.
+
+### A foreshadowing note for Phase 4
+
+In Phase 4 (multi-agent teams), PRs become the integration point between human and AI work.
+
+The pattern that's emerging:
+- An AI agent works on a branch (just like a human developer)
+- The agent opens a PR with a description
+- A human reviewer reads the PR and approves, requests changes, or rejects
+- The agent addresses review comments by pushing fixes
+- The human merges when satisfied
+
+This pattern works because PRs are the standard integration surface. An AI agent that produces a PR is legible to the team's existing review culture. An AI agent that commits directly to main is not.
+
+The discipline you build in L6 (small PRs, clear descriptions, prompt review) scales directly to AI-coauthored code. The same patterns work, the same anti-patterns hurt.
+
+L13-L16 cover the specifics of multi-agent workflows (worktrees, branch coordination, AI-driven PRs). The PR primitive itself is the same.
+
+### What you can do now
+
+By the end of L6 you can:
+- Open a pull request from a feature branch on GitHub
+- Write a PR description with the canonical structure (what / why / how tested / notes)
+- Choose between merge / squash / rebase merge strategies based on context
+- Give code review that is specific, kind, and principled
+- Receive code review without taking it personally
+- Recognize the 8 common PR anti-patterns and explain why each erodes velocity
+- Treat PR descriptions as institutional memory that compounds over time
+
+You have built the bridge from solo work (Phase 1) to two-person collaboration (Phase 2). The next two lessons cover the edge cases that two-person collaboration produces: merge conflicts (L7) and remotes / forks (L8).
+
+### What's next in Phase 2
+
+- **L7 Merge conflicts**: what happens when two branches both modified the same lines, and how to resolve calmly
+- **L8 Remotes and forks**: the difference between local and remote branches, how `origin` and `upstream` work, the fork-based contribution model
+
+By the end of Phase 2 you can collaborate with one other person on a real project. Phase 3 covers production team workflows.
+
+### Voice anchor (carried from L1 + L2 + L3 + L4 + L5)
+
+> Git stores snapshots. Every other command is just navigating those snapshots.
+
+A pull request is a proposal to merge one set of snapshots into another. Review is the conversation about whether to accept the proposal. Merging is the moment the proposal becomes part of the main snapshot graph. The mechanics are different on each platform (GitHub vs GitLab vs Bitbucket); the primitive is the same.

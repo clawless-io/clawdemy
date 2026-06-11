@@ -1,0 +1,159 @@
+---
+title: 'Practice: Multi-agent integration patterns'
+description: Self-check questions, drills, scenario reflections, and flashcards for L14. Model answers in the cheatsheet.
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+### Self-check questions
+
+**Q1.** Describe the three integration patterns in one sentence each.
+
+**Q2.** Which pattern is the default starting point for most multi-agent workflows, and why?
+
+**Q3.** Why is per-agent fork the right choice when working with untrusted or external agents?
+
+**Q4.** What's the disadvantage of shared-worktrees vs the other two patterns?
+
+**Q5.** List the seven responsibilities of the lead orchestrator role.
+
+**Q6.** What's a semantic conflict, and why can git not detect it?
+
+**Q7.** List the three layers of defense against semantic conflicts.
+
+**Q8.** What did the Clawless 2026-06-04 sprint teach about per-agent tests vs the lead-stage build?
+
+**Q9.** When should you abort and re-run an agent vs repair its branch by hand?
+
+**Q10.** Why is the build gate at integration time "non-negotiable"?
+
+### Pattern selection drill
+
+For each situation, identify the right integration pattern and justify the choice:
+
+1. A solo developer running 4 agents on their laptop for a 2-hour focused sprint
+2. A 10-person engineering team where one engineer at a time runs a multi-agent fleet and the team wants to peer-review agent work before integration
+3. A team piloting agents from an external AI services provider whose code quality is not yet trusted
+4. A startup where the founder runs nightly multi-agent fleets and other team members occasionally inspect the agent branches in the morning before final integration
+5. A maintainer of a large open-source project receiving AI-assisted PRs from external contributors
+
+### Semantic-conflict spotting drill
+
+For each scenario, identify the type of semantic conflict and propose how the lead might catch it:
+
+1. Agent A renames `compute_average` to `compute_mean`. Agent B writes a new function that calls `compute_average`.
+2. Agent A adds a new field `created_at` to the User model. Agent B adds a new endpoint that returns User with field `creation_time`.
+3. Agent A adds a database migration adding column X. Agent B adds a database migration dropping column Y. The migrations must run in a specific order; the agents' code assumes their own migration runs first.
+4. Agent A adds a utility `format_currency(amount, code)`. Agent B adds a different utility `format_money(value, currency)` doing the same thing.
+5. Agent A changes the return type of `get_user()` from User to `Optional<User>`. Agent B writes new code calling `get_user()` and using the result directly without null-checking.
+
+### Mock fleet integration drill
+
+Simulate a 3-agent fleet locally:
+
+1. Create a fresh repo. Make an initial commit on main.
+2. Create 3 worktrees with new branches:
+
+```bash
+git worktree add -b agent-1/x ../wt-1 main
+git worktree add -b agent-2/y ../wt-2 main
+git worktree add -b agent-3/z ../wt-3 main
+```
+
+3. In each worktree, deliberately introduce changes:
+   - `wt-1`: Add a file `lib.py` defining function `add(a, b)` returning `a + b`.
+   - `wt-2`: Add a file `app.py` that imports from lib and uses `add`. (Note: lib.py exists only on wt-1's branch right now; wt-2's worktree won't see it until merged.)
+   - `wt-3`: Add a file `tests.py` that tests the integration.
+4. Commit in each worktree.
+5. From main repo, integrate:
+
+```bash
+git checkout -b integration main
+git merge agent-1/x
+git merge agent-2/y       # should succeed
+git merge agent-3/z       # should succeed
+```
+
+6. Run the tests. Did everything work?
+7. Now make a SEMANTIC conflict: edit one of the agent branches' files to use a slightly-different name (e.g. `wt-1` calls it `add` but `wt-2` calls it `sum_two`). Re-do the integration. Tests fail. Catch it.
+
+### Scenario reflections
+
+**Scenario A:** Your team is starting multi-agent workflows for the first time. What's your recommended starting pattern, and what process discipline do you put in place from day one?
+
+**Scenario B:** You're integrating 6 agent branches. Three integrate cleanly with passing tests. The fourth merges cleanly but fails 12 tests. Walk through your decision process.
+
+**Scenario C:** Your team has been doing multi-agent fleets for 3 months. You're seeing a recurring pattern of duplicate utility functions across agent branches. How do you address this at the process level?
+
+**Scenario D:** A non-technical stakeholder asks why the integration step takes so long when "the agents do the work in minutes." How do you explain the lead's role?
+
+### Flashcards
+
+<FlashcardSet>
+
+<Flashcard question="Pattern 1: shared origin">
+All agents push to one remote. Lead pulls from there to integrate. The default for most teams.
+</Flashcard>
+
+<Flashcard question="Pattern 2: per-agent fork">
+Each agent pushes to its own remote (fork). Lead adds each fork as a named remote. Strongest isolation, used for untrusted agents.
+</Flashcard>
+
+<Flashcard question="Pattern 3: shared worktrees">
+All worktrees on lead's machine. No remote push until integration final. Fastest iteration, smallest blast radius.
+</Flashcard>
+
+<Flashcard question="When to use shared origin">
+Default. Other-human review needed in-flight. Standard team workflow.
+</Flashcard>
+
+<Flashcard question="When to use per-agent fork">
+Untrusted agents. External contributors. Hard isolation requirements.
+</Flashcard>
+
+<Flashcard question="When to use shared worktrees">
+Fast solo iteration. Lead controls whole sprint. Maximum control with minimum cleanup.
+</Flashcard>
+
+<Flashcard question="Lead orchestrator role (7 parts)">
+Plan, spawn, watch, integrate, catch semantic conflicts, push gate, cleanup.
+</Flashcard>
+
+<Flashcard question="Semantic conflict">
+Code merges cleanly (git happy) but behaves wrong because two agents had inconsistent models. NOT detected by git.
+</Flashcard>
+
+<Flashcard question="Three defenses against semantic conflicts">
+1. Tight agent scope (reduce overlap). 2. Integration tests at each merge step. 3. Lead reads integrated diff before pushing.
+</Flashcard>
+
+<Flashcard question="Lead-stage build">
+Full-system build at integration step. Most important guardrail in multi-agent work. Catches what per-agent tests miss.
+</Flashcard>
+
+<Flashcard question="Clawless 2026-06-04 lesson">
+Per-agent tests passed; lead-stage build caught ~300 latent breakers. Per-agent tests necessary but not sufficient.
+</Flashcard>
+
+<Flashcard question="When to abort agent vs repair">
+Abort if a refined prompt would be clearer and re-run is cheap. Repair if the agent's work is mostly good and needs targeted fixes.
+</Flashcard>
+
+<Flashcard question="Push gate">
+The lead is the only one who pushes integrated work to main. Last line of human review.
+</Flashcard>
+
+<Flashcard question="Semantic conflict example: renames">
+Agent A renames function X to Y. Agent B's code calls X. Merges cleanly, behavior breaks.
+</Flashcard>
+
+<Flashcard question="Semantic conflict example: duplicate utilities">
+Two agents add similar helper functions in different files with different names. Merges cleanly, code is wasteful.
+</Flashcard>
+
+</FlashcardSet>

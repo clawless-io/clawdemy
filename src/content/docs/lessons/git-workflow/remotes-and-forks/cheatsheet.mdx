@@ -1,0 +1,183 @@
+---
+title: 'Cheatsheet: Remotes and forks'
+description: Quick reference for remote commands, the fork workflow, the pull-rebase default, force-push discipline, and self-check answers.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+---
+
+### Voice anchor
+
+> Git stores snapshots. Every other command is just navigating those snapshots.
+
+Push and pull are navigating snapshots between machines.
+
+### Command reference
+
+```bash
+# Inspect
+git remote -v                            # list remotes with URLs
+git branch -a                            # list local + remote-tracking branches
+git branch -r                            # list only remote-tracking branches
+git status                               # ahead/behind information
+
+# Manage remotes
+git remote add upstream <url>            # add a remote
+git remote remove upstream               # remove a remote
+git remote rename origin myorigin        # rename a remote
+
+# Get changes from remote
+git fetch                                # download without merging
+git fetch upstream                       # fetch from a specific remote
+git pull                                 # fetch + merge (default)
+git pull --rebase                        # fetch + rebase (preferred)
+
+# Send changes to remote
+git push                                 # push current branch (if tracking set)
+git push -u origin <branch>              # first push, sets tracking
+git push --force-with-lease              # safe force-push (personal branches only)
+
+# Configure global defaults (run once)
+git config --global pull.rebase true     # make pull use rebase
+git config --global merge.conflictstyle diff3   # better conflict markers (L7)
+
+# Clone
+git clone <url>                          # full copy of a remote repo
+git clone <url> <folder-name>            # clone into a specific folder
+```
+
+### The fork-based model setup
+
+```bash
+# 1. Fork on GitHub (UI click), then:
+git clone https://github.com/<your-username>/<repo>.git
+cd <repo>
+git remote add upstream https://github.com/<original-owner>/<repo>.git
+git remote -v   # verify both remotes
+
+# 2. Stay synced with upstream
+git switch main
+git fetch upstream
+git rebase upstream/main
+git push origin main
+
+# 3. Contribute
+git switch -c feature/my-change
+# ... do work, commit
+git push -u origin feature/my-change
+# ... open PR on GitHub from your fork to upstream
+```
+
+### Pull-rebase: the one-time global config
+
+```bash
+git config --global pull.rebase true
+```
+
+After this, every `git pull` automatically uses rebase. No more merge-commit clutter.
+
+**Caveat:** if you have uncommitted changes, `git pull --rebase` refuses. Either commit first, or `git stash` + pull + `git stash pop`.
+
+### Force-push decision tree
+
+```
+Is the branch shared with others (main, develop, release/*)?
+  YES -> NEVER force-push
+  NO -> continue
+
+Have I rebased / amended commits that are already on the remote?
+  NO -> regular git push works
+  YES -> continue
+
+Has anyone else pushed to this branch since my last fetch?
+  YES -> force-with-lease will refuse; fetch and decide
+  NO -> git push --force-with-lease
+
+NEVER use plain --force unless you 100% understand the consequences.
+ALWAYS use --force-with-lease as the default safe variant.
+```
+
+### Remote-tracking branches quick reference
+
+| Name | What it is |
+|---|---|
+| `main` (local) | Your local main branch |
+| `origin/main` | Read-only label for "what origin's main looked like at last fetch" |
+| `upstream/main` | Read-only label for "what upstream's main looked like at last fetch" |
+
+To compare:
+
+```bash
+git log main..origin/main        # commits remote has that you don't
+git log origin/main..main        # commits you have that remote doesn't
+git diff main origin/main        # actual code differences
+```
+
+### Self-check question model answers
+
+**Q1 model answer.** Git is called "distributed" because every clone is a full repository; it contains the entire history (every commit, every branch, every tag). There's no architectural "central server"; the team designates one repo as canonical by convention. Practical consequences: most operations work offline (commit, branch, log, diff, status; only push and pull need network). If GitHub has an outage, your local repo still works fully; you just can't push or pull until GitHub is back. If GitHub data were lost entirely, any developer's clone could become the new canonical repo with no data loss. The distributed model is more resilient than centralized version control because the team's history is replicated across every developer's machine.
+
+**Q2 model answer.** `git fetch` downloads new commits from the remote and updates the remote-tracking branch labels (`origin/main`, etc.) but does NOT change your working files or merge anything into your current branch. It's "look but don't touch." `git pull` is a shortcut for `git fetch + git merge` (or `git fetch + git rebase` with `--rebase`). The difference: fetch lets you inspect the remote state and decide what to do, while pull automatically integrates. A senior engineer might prefer fetch in two situations: (1) when investigating "what did my teammate push?" without committing to integrate it, and (2) when about to merge and wanting to verify the conflict surface before triggering the merge. The "look first, then decide" workflow is safer than the "integrate automatically" workflow, especially on shared branches.
+
+**Q3 model answer.** Resolution in order:
+1. Read the push-rejected error message; observe it tells you to "fetch first" and pull before pushing
+2. Run `git pull --rebase` (or `git pull` if rebase isn't your default). This fetches teammate's commits and integrates them with yours.
+3. If there's a merge conflict, resolve it (L7 mechanics): edit the file, remove markers, `git add`, then `git rebase --continue`.
+4. Run `git push` again. This time it succeeds because your local now has all the commits the remote did, plus yours on top.
+
+Total time: usually under a minute if no conflicts; a few minutes if there are. The push-rejected error is not failure; it's just git ensuring you don't accidentally overwrite teammate work.
+
+**Q4 model answer.** In the fork-based model:
+- `origin` points to YOUR fork (your-username/repo). You have write access to your fork. This is where you push your branches.
+- `upstream` points to the ORIGINAL project (original-owner/repo). You don't have write access (otherwise you wouldn't need a fork). You fetch from upstream to stay current, but rarely push to it (typically only maintainers do).
+
+Workflow: branches on your fork (push to origin), PRs target upstream (the original project), and you periodically sync your fork's main from upstream's main to stay current. This model scales to almost every open-source contribution scenario on GitHub.
+
+**Q5 model answer.** `git push --force-with-lease` is safe when:
+- The branch is your personal feature branch (no one else is committing to it)
+- You've rebased or amended commits and need to push the rewritten history
+- The lease check protects you: it refuses if someone pushed to the branch since your last fetch, preventing silent overwrites
+
+It's never acceptable on:
+- Shared branches like `main`, `develop`, `release/*`; these are the team's source of truth; force-push silently breaks everyone's local work
+- Production-deployed branches; force-push can leave history in a state inconsistent with what's deployed
+- Anyone else's branch; your responsibility is your own branches; let others manage theirs
+
+The rule: force-push is for branches whose history is YOUR personal responsibility. Always use `--force-with-lease` rather than plain `--force` to get the safety check.
+
+### Scenario reflection model answers
+
+**Scenario A model answer.** Two situations where fetch is the better choice:
+1. **Investigating before integrating.** Your teammate just pushed a huge change. You want to see what they did before merging it into your branch. `git fetch` downloads their commits and lets you `git log origin/main`, `git diff main origin/main`, `git show <their-commit>` without affecting your working tree. Once you understand what they did, then decide whether to merge, rebase, or wait.
+2. **Pre-merge conflict verification.** Before merging a long-lived feature branch into main, you want to know how many conflicts to expect. `git fetch && git log origin/main..feature/my-branch` shows you what's diverged. You can scan for files both branches touched. Then you can plan the merge with realistic expectations instead of being surprised mid-conflict.
+
+The general principle: pull is a commitment; fetch is reconnaissance. Senior engineers default to reconnaissance.
+
+**Scenario B model answer.** Upstream cause: every time someone runs `git pull` with the default behavior (merge), git creates a "Merge branch 'main' of ..." commit. Over months of pulls, these accumulate. The clutter is visual noise; nobody benefits from those merge commits; they just record "I pulled at 3:47pm." The single config change that prevents this going forward:
+
+```bash
+git config --global pull.rebase true
+```
+
+After this, every `git pull` uses rebase instead of merge. Pulled commits go on the bottom of local commits; no merge commit is created. History stays linear.
+
+For the existing merge commits in history: leave them. They're harmless. The fix prevents future ones; trying to rewrite history to remove the old ones would create a much bigger problem than the visual clutter.
+
+**Scenario C model answer.** Conversation with the new contributor (without blame):
+- "Hey, I noticed you force-pushed to `<branch>` earlier; I think someone else was working off that branch and lost their commits when you pushed. Let me show you `--force-with-lease` which would have caught that case automatically."
+- Walk them through `--force-with-lease` and explain when it's safe vs unsafe.
+- "For your own branches, force-with-lease is fine after a rebase. For shared branches like main, we don't force-push at all."
+
+Policy to suggest:
+1. Branch protection rules on `main`: no force-pushes allowed. (GitHub setting, takes 2 minutes to configure.)
+2. Project CONTRIBUTING.md adds a "force-push policy" section: force-with-lease only, personal branches only.
+3. If you're feeling generous, a pre-push git hook that warns when about to force-push (advanced, optional).
+
+The structural fix (branch protection) is more reliable than the cultural fix (telling contributors). Both belong.
+
+### What's in L9
+
+L9 introduces the **three production team workflows: GitHub Flow, GitFlow, and Trunk-based Development.** Each is a pattern built on the primitives from L5-L8 (branches, PRs, conflicts, remotes). You'll learn the tradeoffs, when each fits, and how to choose for your team. After L9, you understand the structural choices behind every production engineering team's git practices.
+
+L9 opens Phase 3. Phase 3 also covers releases + tags (L10), cherry-pick + stash (L11), and rebase deeper (L12).

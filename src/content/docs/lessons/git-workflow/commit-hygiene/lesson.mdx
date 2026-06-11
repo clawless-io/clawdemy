@@ -1,0 +1,314 @@
+---
+title: 'Lesson: Commit hygiene'
+description: The lesson where mechanics become discipline. You can commit, now you learn to commit WELL, meaningful messages, atomic scope, the staging area as a thinking tool, and the Conventional Commits convention that most professional teams use.
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+### Why this lesson exists
+
+You can commit. L2 gave you the mechanics. L3 is about doing it WELL.
+
+The mechanics of committing are easy. The discipline of writing commits that make sense to your future self (and to teammates you have not met yet) is harder. The difference between casual git use and professional git use is mostly the difference in commit discipline.
+
+Here is the experience that motivates this lesson:
+
+It is 11:47 PM. Production is broken. You traced the bug to a specific function that worked three weeks ago. You run `git log` to find when it changed. You find the commit. The commit message is, in its entirety:
+
+```
+fix
+```
+
+The author was you. Three weeks ago. You have no memory of what you fixed, what you broke, or why. The commit changes 47 lines across 6 files. You spend the next hour reading the diff to reconstruct what your past self was thinking.
+
+This is what bad commits do. They turn debugging into archaeology.
+
+The same scenario with a well-written commit:
+
+```
+fix(checkout): prevent crash when shipping address has no postal code
+
+The address-validator was assuming every address has a postal code,
+but our international expansion added countries (Ireland, Hong Kong)
+that don't use them. validateAddress() now treats postalCode as
+optional and skips the postal-specific regex when it's absent.
+
+Fixes #4521.
+```
+
+Same code change. You know exactly what happened, why, and how to verify it. Debugging takes minutes instead of an hour.
+
+The first commit was faster to write. The second commit was faster to use.
+
+Most days you are the user of past commits, not the writer of new ones. Writing well costs you a minute; reading badly costs you an hour. The math is brutal in favor of writing well.
+
+### Anatomy of a good commit message
+
+Git commit messages have two parts: a **subject line** and an optional **body**. Separated by a blank line.
+
+```
+Subject line (50-72 chars, imperative mood, capitalized, no period)
+
+Body explaining WHY this change exists. Wrap at 72 chars per line.
+Reference issues, tickets, or related commits if useful. Use multiple
+paragraphs separated by blank lines if the WHY is complex.
+```
+
+Five rules for the subject line, all of them learned the hard way by generations of developers:
+
+**1. Keep it under 50-72 characters.**
+
+Git tools (`git log --oneline`, GitHub UI, code review tools) truncate subject lines around 72 chars. Anything longer gets cut off and your message loses the part that mattered. 50 chars is the ideal target; 72 is the hard ceiling.
+
+**2. Use the imperative mood.**
+
+Write the subject as if completing the sentence: *"This commit will [your subject line]."*
+
+- Yes: `Add login form validation` (this commit will add login form validation)
+- Yes: `Fix crash on empty shipping address` (this commit will fix the crash)
+- No: `Added login form validation` (past tense)
+- No: `Fixes the crash` (present third-person)
+
+Imperative mood is the convention git itself uses when it generates messages (`git revert` writes "Revert ..." not "Reverted ..."). Aligning with the convention keeps history consistent.
+
+**3. Capitalize the first letter, no period at the end.**
+
+- Yes: `Add login form validation`
+- No: `add login form validation` (lowercase)
+- No: `Add login form validation.` (period)
+
+Small thing, but consistency matters across thousands of commits.
+
+**4. Subject line answers WHAT changed, body answers WHY.**
+
+The diff already shows what changed in code-detail terms. The subject line summarizes that change in human terms. The body explains the reasoning a diff cannot capture.
+
+WHY questions the body should answer:
+- What problem did this solve?
+- What other approaches did you consider and reject?
+- What does the reviewer need to know to evaluate this?
+- Are there related issues, tickets, or commits worth referencing?
+
+If the change is small and obvious, the body can be skipped. If the change is non-trivial, the body is where you preserve the institutional memory for your future self.
+
+**5. Reference issue numbers, tickets, and related commits in the body.**
+
+- `Fixes #4521` (closes the issue when this lands on main)
+- `Related to #4520` (does not close, but useful cross-reference)
+- `Reverts a3f9c12` (specifies what commit this undoes)
+
+These references become navigable links in most code-review tools. They turn the commit history into a connected knowledge graph instead of a flat list.
+
+### Putting it together: a worked example
+
+Here is a real commit message for a change that adds a new feature. Notice how the subject line is scannable, the body is searchable, and the references make it traceable.
+
+```
+Add export-to-CSV button on the reports page
+
+Users have asked for a way to take report data into Excel for ad-hoc
+analysis. The existing JSON export works for technical users but the
+support team has been manually copying tables into spreadsheets for
+non-technical users.
+
+This adds a CSV export option alongside the existing JSON one. Both
+buttons live in the same dropdown to avoid cluttering the UI. The
+CSV writer reuses the existing data-fetch logic; only the serializer
+is new.
+
+I considered adding XLSX (true Excel format) but it requires a heavy
+dependency and CSV opens directly in Excel anyway. CSV ships now;
+XLSX can be a follow-up if anyone asks.
+
+Closes #2891.
+```
+
+Six things that commit message does well:
+
+1. **Subject line answers WHAT in one scannable sentence.**
+2. **First body paragraph answers WHY (user need, current pain).**
+3. **Second body paragraph answers HOW at a design level (UI placement, code reuse).**
+4. **Third body paragraph captures a REJECTED ALTERNATIVE and the reasoning** (this is gold for your future self, saves someone three months from now from suggesting XLSX and getting the same rationale).
+5. **Reference closes the ticket** when this commit lands.
+6. **No code shown** (the diff has the code). The message is everything the diff cannot tell you.
+
+### The atomic commit principle
+
+A commit is **atomic** if it represents exactly one logical change. Atomic commits have a property the rest of git workflow depends on: you can revert one commit without disturbing the others.
+
+Two scenarios that show why this matters:
+
+**Scenario one (non-atomic commit).** You worked on three things this afternoon: fixed a bug, refactored a function, and added a new feature. You commit all of it as `Various changes`. Two weeks later, the feature breaks something on staging. You want to revert just the feature, but the commit also contains the bugfix and refactor. Reverting reintroduces the bug and undoes the refactor. You either spend an hour cherry-picking the diff manually, or you ship a worse state to fix the broken feature.
+
+**Scenario two (atomic commits).** Same three things, but you commit them separately: `Fix crash on empty shipping address`, `Refactor address-validator for testability`, `Add CSV export to reports page`. Two weeks later, when the feature breaks staging, you `git revert <feature-commit>` and ship in 30 seconds. The bugfix and refactor stay.
+
+Atomic commits make every other git operation easier: code review (reviewer reads one logical change at a time), rebasing (you can reorder and squash with confidence), bisecting (`git bisect` can pinpoint exactly which commit broke something), and the institutional history (each commit tells one coherent story).
+
+### The staging area as a thinking tool
+
+You learned in L2 that the staging area lets you choose which changes go into the next commit. The atomic commit principle is what makes this matter.
+
+Scenario: your working directory has changes to three files. File A is a bugfix. File B is an unrelated refactor. File C is a new feature. Without the staging area, you would commit all three at once or stop work on two of them. With the staging area, you commit them separately:
+
+```bash
+# Commit 1: just the bugfix
+git add fileA.js
+git commit -m "Fix crash on empty shipping address"
+
+# Commit 2: just the refactor
+git add fileB.js
+git commit -m "Refactor address-validator for testability"
+
+# Commit 3: just the feature
+git add fileC.js
+git commit -m "Add CSV export to reports page"
+```
+
+Three commits, three logical changes, three reverts available. The working directory is now clean. The history is readable.
+
+**Power-user version:** sometimes a single file has changes for two different commits. (You added a method for the new feature AND fixed a typo on an unrelated line.) Git can stage parts of a file using `git add -p` (the `p` is for "patch"). It walks you through each chunk of changes and asks `y` (stage), `n` (skip), or `s` (split this chunk into smaller pieces). This takes practice but is enormously useful for keeping commits atomic when changes are mixed within a file.
+
+We do not go deeper into `git add -p` in this lesson; it is enough to know it exists and that you have a tool for the case where the simple `git add <file>` is too coarse.
+
+### When in doubt, ask: "could this be two commits?"
+
+A useful rule of thumb when deciding whether to commit something: ask whether the change is one logical thing or two. If you find yourself writing "and" in the commit message subject ("Add login form AND fix navigation bug"), that is a signal to split into two commits.
+
+Some signals you have a non-atomic commit:
+
+- The subject line uses "and", "also", "plus", "with"
+- The diff touches multiple unrelated parts of the codebase
+- You would describe what you did as "I worked on X and Y today"
+- A reviewer would have to mentally separate the changes to evaluate them
+- A future reverter would have to mentally untangle the changes to undo just one
+
+When you spot these signals, split. The staging area makes this cheap.
+
+### Conventional Commits, a popular team convention
+
+Teams that want consistent commit history often adopt **Conventional Commits**, a specification for structured commit subject lines. The format:
+
+```
+<type>(<scope>): <description>
+```
+
+- `<type>` describes the nature of the change: `feat` (new feature), `fix` (bug fix), `docs` (documentation), `refactor`, `test`, `chore` (maintenance), `style` (formatting), `perf` (performance)
+- `<scope>` is optional, names the part of the codebase touched: `api`, `ui`, `auth`, `db`, etc.
+- `<description>` is the imperative-mood subject from the earlier rules
+
+Examples:
+
+- `feat(auth): add OAuth login with GitHub`
+- `fix(api): handle null response in user-search endpoint`
+- `docs: update README with new env variable`
+- `refactor(checkout): extract address-validator into separate module`
+- `chore: bump dependencies to latest versions`
+
+Why teams adopt it:
+
+1. **Skim-readability.** Filtering history by type (`git log --grep "^fix"`) finds all bug fixes instantly.
+2. **Automated tooling.** Tools like `semantic-release` parse Conventional Commits to automatically determine release version (feat = minor bump, fix = patch bump, breaking change = major bump).
+3. **Consistency.** A team of 12 developers writes commits in a similar shape; the history reads coherently rather than reflecting 12 different personal styles.
+
+When to use Conventional Commits:
+
+- Yes: Working on a team that has adopted the convention
+- Yes: Working on an open-source project that has adopted it (check `CONTRIBUTING.md`)
+- Yes: Wanting automated release tooling to work
+- Maybe: Solo project: optional. Good practice but not load-bearing.
+- No: Working on a team that has NOT adopted it (using it inconsistently is worse than not using it).
+
+When in doubt: ask the team. If you are starting a new repo, decide early and add the convention to your project's contributing guide.
+
+### Common anti-patterns to avoid
+
+Pattern recognition for things to NOT do:
+
+**1. The vague-verb commit.**
+
+```
+update
+fix
+changes
+WIP
+stuff
+.
+```
+
+These tell the future reader nothing. The commit might as well not have a message. If you find yourself typing one of these, stop and write the actual subject. It takes 15 seconds; it saves an hour later.
+
+**2. The kitchen-sink commit.**
+
+```
+Add login, fix navigation, update README, bump deps, refactor parser, add tests
+```
+
+Six unrelated changes in one commit. Cannot be reverted independently. Cannot be reviewed coherently. Should be six commits.
+
+**3. The end-of-day megacommit.**
+
+A common bad habit: code for eight hours, commit everything at the end of the day with a message like `Day's work`. By bedtime you cannot remember what was in the day's work; six months later neither can anyone else.
+
+Fix: commit as you go, at natural logical boundaries (a function complete, a bug fixed, a feature ready). End-of-day is for `git status` to confirm clean state, not for catch-up committing.
+
+**4. The "fix the previous commit" cascade.**
+
+```
+abc1234 Add login
+def5678 fix
+fed9012 fix again
+ghi3456 typo
+jkl7890 actually fix
+```
+
+Five commits where one would have done. This happens when you commit too eagerly without testing locally first. Fix: run your code, verify it works, THEN commit.
+
+When this DOES happen and the commits have not been pushed yet, you can clean it up with interactive rebase (covered in L12). When the commits HAVE been pushed and others have based work on them, you generally have to live with the noise.
+
+**5. The body-less commit on a complex change.**
+
+A 200-line refactor with the commit message:
+
+```
+Refactor user-service
+```
+
+The subject tells WHAT in a tiny way. The body that should tell WHY (which 200-line refactors always need) is missing. The reviewer has no idea what to evaluate. The future reader has no idea why.
+
+Fix: any commit you would have to explain in code review needs a body explaining it in the commit itself.
+
+### A useful frame for managers and technical product managers
+
+If you do not write commits yourself, here is why commit hygiene matters from a non-engineering perspective.
+
+**Commit messages are institutional memory.** Your team's git history is the most honest record of what the team has done. Performance reviews, year-in-review reports, and "why did we build this?" investigations all benefit from a readable commit history. A team with consistent commit hygiene leaves behind a navigable record of every decision. A team without it leaves behind a black box.
+
+**Commit conventions are team-culture decisions.** When a team adopts Conventional Commits or any other shared convention, they are agreeing to a standard for how engineering work is documented. The decision is small individually (each developer types a few extra characters) but compounds enormously (the team's history becomes coherent over years). Asking your team "do you have a commit convention?" is a reasonable maturity-signal question.
+
+**Commit discipline correlates with team scaling.** Solo developers can survive bad commit hygiene. Teams of 5+ cannot. The team-scaling threshold where bad commits become unmanageable is roughly when nobody can answer "why was this change made?" by reading the commit alone. The fix is either better commit discipline going forward, or accepting that historical knowledge is permanently lost.
+
+**For technical product managers specifically:** the commit history is your tool for understanding what the engineering team actually did vs what was discussed in standups. The two should match; when they diverge, the commit history is the source of truth. Browsing recent commits in the products you own is a 10-minute weekly habit that pays for itself many times over.
+
+### What you can do now
+
+By the end of this lesson you can:
+
+- Write commit messages that explain WHY, not just WHAT
+- Make atomic commits using the staging area
+- Recognize and use Conventional Commits when your team has adopted it
+- Identify common anti-patterns in your own past commits and your team's
+- Explain to a manager why commit hygiene matters at the team-scaling threshold
+
+### What's next in Phase 1
+
+L4 covers undoing things: when commits go wrong, how to recover safely. `git reset` vs `git revert` vs `git restore`. The `reflog` as your safety net. The skills land directly on top of L3's hygiene: knowing how to write a clean commit AND how to undo a messy one closes the foundational loop.
+
+After L4 you have confident solo workflow. Phase 2 adds collaboration patterns.
+
+### Voice anchor (carried from L1 + L2)
+
+> Git stores snapshots. Every other command is just navigating those snapshots.
+
+A commit is a snapshot with intent. L1 introduced the snapshot. L2 made the snapshot. L3 makes the snapshot MEANINGFUL, labeled with the WHY, scoped to one logical change, navigable years later. The mechanic from L2 plus the discipline from L3 produces a history that earns its existence.

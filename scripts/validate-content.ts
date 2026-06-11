@@ -319,6 +319,13 @@ const TRACK_23_PHASE_SLUGS = [
 	'ethics-and-governance',
 ] as const;
 
+const TRACK_7_PHASE_SLUGS = [
+	'foundations',
+	'branching-and-collaboration',
+	'workflows-in-the-wild',
+	'multi-agent-teams',
+] as const;
+
 const PHASE_SLUGS = [
 	...TRACK_5_PHASE_SLUGS,
 	...TRACK_6_PHASE_SLUGS,
@@ -340,6 +347,7 @@ const PHASE_SLUGS = [
 	...TRACK_18_PHASE_SLUGS,
 	...TRACK_22_PHASE_SLUGS,
 	...TRACK_23_PHASE_SLUGS,
+	...TRACK_7_PHASE_SLUGS,
 ] as const;
 
 const BriefSchema = z.object({
@@ -374,6 +382,7 @@ const BriefSchema = z.object({
 		'deep-reinforcement-learning',
 		'building-with-claude',
 		'ai-safety-and-alignment',
+		'git-workflow',
 	]),
 	difficulty: z.enum(['intro', 'standard', 'deep']),
 	estimated_read_minutes: z.number().int().positive(),
@@ -417,6 +426,7 @@ async function main(): Promise<number> {
 	const phaseSlotsTrack4 = new Map<string, string[]>();
 	const phaseSlotsTrack8 = new Map<string, string[]>();
 	const phaseSlotsTrack9 = new Map<string, string[]>();
+	const phaseSlotsTrack7 = new Map<string, string[]>();
 
 	if (!existsSync(LESSONS_ROOT)) {
 		console.log(
@@ -854,6 +864,33 @@ async function main(): Promise<number> {
 							phaseSlotsTrack9.set(key, seen);
 						}
 					}
+
+					// Track 7 phase context: required when track is git-workflow.
+					if (parsed.data.track === 'git-workflow') {
+						if (parsed.data.phase === undefined) {
+							errors.push({
+								path: relative(ROOT, briefPath),
+								message: `Track 7 lesson missing required field: phase (one of ${TRACK_7_PHASE_SLUGS.join(', ')})`,
+							});
+						} else if (!TRACK_7_PHASE_SLUGS.includes(parsed.data.phase as any)) {
+							errors.push({
+								path: relative(ROOT, briefPath),
+								message: `Track 7 lesson has phase "${parsed.data.phase}" but Track 7 phases are: ${TRACK_7_PHASE_SLUGS.join(', ')}.`,
+							});
+						}
+						if (parsed.data.phase_order === undefined) {
+							errors.push({
+								path: relative(ROOT, briefPath),
+								message: `Track 7 lesson missing required field: phase_order`,
+							});
+						}
+						if (parsed.data.phase !== undefined && parsed.data.phase_order !== undefined) {
+							const key = `${parsed.data.phase}/${parsed.data.phase_order}`;
+							const seen = phaseSlotsTrack7.get(key) ?? [];
+							seen.push(relative(ROOT, briefPath));
+							phaseSlotsTrack7.set(key, seen);
+						}
+					}
 				}
 			}
 		}
@@ -1000,6 +1037,16 @@ async function main(): Promise<number> {
 				errors.push({
 					path: p,
 					message: `Track 9: duplicate (phase, phase_order) pair "${key}"; also used by: ${paths.filter((q) => q !== p).join(', ')}`,
+				});
+			}
+		}
+	}
+	for (const [key, paths] of phaseSlotsTrack7) {
+		if (paths.length > 1) {
+			for (const p of paths) {
+				errors.push({
+					path: p,
+					message: `Track 7: duplicate (phase, phase_order) pair "${key}"; also used by: ${paths.filter((q) => q !== p).join(', ')}`,
 				});
 			}
 		}

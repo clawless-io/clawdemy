@@ -1,0 +1,149 @@
+---
+title: 'Cheatsheet: Merge conflicts'
+description: Quick reference for conflict resolution, the five conflict types, self-check answers, and worked example walkthroughs.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+---
+
+### Voice anchor
+
+> Git stores snapshots. Every other command is just navigating those snapshots.
+
+A conflict is git asking which snapshot to make current.
+
+### The six-step resolution (memorize)
+
+```bash
+git status              # 1. recognize merge state
+# 2. find markers in each file (open in editor, search <<<<<<<)
+# 3. decide on the resolution
+# 4. edit to the resolution + delete ALL markers
+git add <file>          # 5. stage
+git commit              # 6. commit (git pre-fills the message)
+```
+
+### Conflict marker anatomy
+
+**Default style:**
+
+```
+<<<<<<< HEAD
+your version
+=======
+their version
+>>>>>>> their-branch-name
+```
+
+**diff3 style (recommended; turn on once):**
+
+```
+<<<<<<< HEAD
+your version
+||||||| ancestor
+original version (common ancestor)
+=======
+their version
+>>>>>>> their-branch-name
+```
+
+**Setup commands:**
+
+```bash
+git config --global merge.conflictstyle diff3    # standard recommendation
+git config --global merge.conflictstyle zdiff3   # modern alternative, even cleaner
+```
+
+### The five conflict types
+
+| Type | git indicator | Resolution |
+|---|---|---|
+| **Textual** | `<<<<<<<` markers | Pick one, the other, or combine; remove markers; `git add` |
+| **Logical combine** | Markers around adjacent changes that should coexist | Write both into the resolution; add a test |
+| **Semantic** | NO markers; auto-merge succeeded | Cannot fix at merge; catch with integration tests |
+| **Delete-modify** | "deleted by us / modified by them" | `git rm <file>` (delete) or `git add <file>` (modify) |
+| **Rename-edit** | Delete-modify on old path + clean file on new path | Apply edits to new path; `git rm` old path; `git add` new path |
+
+### The abort command
+
+```bash
+git merge --abort
+```
+
+Takes the repo back to exactly the state before the merge started. No data loss.
+
+**Use when:** conflicts too large, wrong branch, teammate's branch unexpected, you're tired/distracted, you realize you should rebase first.
+
+**Don't use when:** you're partway through resolving (aborting throws away resolution work). Instead, leave the merge state and come back later.
+
+### Conflict prevention checklist
+
+- [ ] Rebase your branch onto main daily (or use `git pull --rebase`)
+- [ ] PRs land within 1-3 days of opening
+- [ ] Big refactors announced in team channel before starting
+- [ ] Feature flags + small PRs instead of long-lived branches
+- [ ] Engineers on different modules where possible
+
+### Tools quick comparison
+
+| Tool | When to use |
+|---|---|
+| Plain text editor + markers | Default; works everywhere; sufficient for 95% of conflicts |
+| VS Code merge editor | Best day-to-day; 1-click "accept this side" buttons + 3-pane mode |
+| JetBrains merge tool | Best for complex multi-region conflicts |
+| GitHub web conflict resolver | One-line PR conflicts; not for complex |
+| `git mergetool` | Configurable external tool; most developers never use it |
+
+### Self-check question model answers
+
+**Q1 model answer.** The worry is unfounded because nothing has been destroyed. Both branches' commits still exist; both are in git's history. The conflict is just git stopping mid-merge to ask "which version of these lines do you want?"; the question doesn't damage anything. `git merge --abort` undoes the merge entirely if they panic. The mechanics of resolution are six rote steps (recognize, find, decide, edit, stage, commit). The fear comes from not having a roadmap; once they read the markers and understand the structure, it's mechanical.
+
+**Q2 model answer.** Diff3 conflict style adds a third section to the conflict marker showing the common ancestor (the original version of the lines before either branch touched them). The default style shows only "your version" and "their version"; you have to remember or guess what the original looked like. With diff3, the original is right there in the file. The strictly-better claim: in nearly every conflict, knowing the ancestor makes the right resolution obvious. The ancestor tells you "what was here," which often clarifies "what was each branch trying to change." Enable once with `git config --global merge.conflictstyle diff3`; never look back.
+
+**Q3 model answer.** (1) Recognize: run `git status` after the failed auto-merge; observe the "Unmerged paths" section listing files with conflicts. (2) Find: open each conflicting file in your editor; search for `<<<<<<<` to navigate to each conflict region. A file may have multiple regions; each one independently needs resolving. (3) Decide: for each region, ask "what should the final code look like?"; your version, their version, both combined, or something new. (4) Edit: write the resolved content where the conflict was; delete ALL marker lines (`<<<<<<<`, `|||||||`, `=======`, `>>>>>>>`). The file should look like normal code with no markers. (5) Stage: `git add <file>` tells git you've resolved that file. Repeat for every conflicting file. (6) Commit: `git commit` opens an editor with a pre-filled merge commit message; accept or edit; save; close. The merge is complete.
+
+**Q4 model answer.** (a) Why git didn't catch it: the two branches touched DIFFERENT files. Git's auto-merge only checks for textual overlap; semantic dependencies (one change assumes the other behaves a certain way) are invisible. Both branches merged clean. (b) What would have caught it pre-merge: (i) integration tests that exercise both files together; a test of "refund flow with validation" would have caught the example in the lesson. (ii) Code review that thinks about the merged result, not just each PR in isolation. (iii) CI that runs the full test suite, not per-file tests. (iv) Short-lived branches that merge often, reducing the surface for semantic divergence. (c) Why semantic conflicts are more dangerous: they ship to production silently. Textual conflicts force a human to look at the merge; semantic conflicts don't. They cause the "two PRs that both passed review broke production" failure mode. Mature teams invest in catching semantic conflicts because the cost of missing them is high.
+
+**Q5 model answer.** Push through OR abort; it depends on the resolution work invested. If you've invested significant time and the resolutions are mostly done, finish: aborting throws away the work. If you've barely started and the conflict surface is overwhelming, abort: rebase onto main, then re-attempt the merge. The middle case (30 min in, still complex): often easier to abort than to finish, because the resolution decisions you've made may be wrong if a rebase-first approach would have produced different conflicts entirely. The judgment call: how much of your resolution work would carry over to the rebased version? If most carries (your decisions don't depend on the merge approach), finish. If little carries (your decisions are merge-specific), abort. When in doubt, abort and rebase; the do-over is cheap relative to the cost of a wrong resolution.
+
+### Scenario reflection model answers
+
+**Scenario A model answer.** Path to changing the abort-and-ask habit:
+1. **Show them the mechanics once.** Sit with them through one resolution end-to-end, slow. The fear comes from not having a roadmap; one full walkthrough provides the roadmap.
+2. **Build their conflict reps.** Suggest they deliberately create a few conflicts in a sandbox (the practice section drills are exactly this). Five sandbox conflicts later, they have the muscle memory.
+3. **Stop fixing it for them.** When they ask, offer to pair, not fix. "Let's look at it together; what do the markers say?" This is supportive without enabling the habit.
+4. **Praise the next solo resolution.** When they resolve a conflict on their own, recognize it. Pattern reinforcement.
+The discipline: support without enabling. Senior engineers fixing every conflict for a junior is well-intentioned but blocks their growth.
+
+**Scenario B model answer.** Three highest-leverage process changes:
+1. **Reduce branch lifetime.** If PRs are landing 1-2 weeks after opening, the conflict rate is structural; branches diverge from main during the wait. Aim for 1-3 day PR lifetimes. May require splitting larger features into multiple PRs.
+2. **Adopt rebase-before-merge as policy.** When a PR is ready to merge, rebase onto latest main first. Each PR comes to main on top of latest main, so conflicts are surfaced at PR-author time (not at merge time). Distributed cost; smaller individual conflicts.
+3. **Identify hotspot files.** Some files (config, schema, shared utilities) generate disproportionate conflict. Restructure where possible (e.g., split a giant config file into per-module configs), or assign clear ownership so only one person touches it at a time.
+Underlying cause if all three don't help: lack of module boundaries or unclear team ownership. That's a structural problem, not a process problem; raise it as architecture.
+
+**Scenario C model answer.** This was a **semantic conflict.** Both AI agents' PRs were textually compatible (touched different files) so git's auto-merge succeeded; but they made incompatible assumptions about how the shared utility behaved. The discipline that would have caught it:
+1. **Integration tests at the orchestrator level.** Tests that exercise both code paths together, not per-PR unit tests. The integration test of "use the utility from both code paths simultaneously" would have surfaced the conflict.
+2. **The orchestrator reviewing the merged result, not just each PR.** A human or orchestrating-agent reading both PRs together would have noticed the assumption mismatch. This is the multi-agent equivalent of code review.
+3. **Smaller, more frequent merges.** If both agents had merged within hours of each other, the surface for divergence would have been smaller. Daily integration beats weekly.
+The Phase 4 design principle: at multi-agent scale, semantic conflicts are inevitable. Build integration tests at the orchestrator level; review at the orchestrator level; merge often.
+
+### Worked example quick walkthroughs (lesson refresher)
+
+**Example 1, Trivial textual:** Both branches renamed the same heading differently. Pick the one product approved. 30 seconds.
+
+**Example 2, Logical combine:** Discount codes (your branch) + gift cards (their branch) in the same `calculateTotal`. Combine in order; write a test for the combined case.
+
+**Example 3, Rename + edit:** You renamed `authenticateUser` to `signIn`; they added a `requireMfa` parameter. Keep your rename AND adopt their parameter. Conflicts in declaration + every call site.
+
+**Example 4, Delete-modify:** You deleted a file; they fixed a bug in it. Choose: delete (your delete wins) or modify (their fix wins) or both (their fix now, plan delete for later PR).
+
+**Example 5, Semantic (no markers, fails at runtime):** Validation rejecting negatives + refunds using negatives. Git can't catch; integration tests + thoughtful review do.
+
+**Example 6, Rename-edit (if rename not detected):** You moved a file; they edited the old path. Apply their edits to the new path; `git rm` the old.
+
+### What's in L8
+
+L8 introduces **remotes and forks**: the way branches travel across machines and across repositories. You'll learn `origin` vs `upstream`, the push/fetch/pull mechanic, what `git pull --rebase` does, and the fork-based contribution model used by open-source projects.
+
+L8 closes Phase 2. After L8 you can collaborate end-to-end with a real partner on a real project.

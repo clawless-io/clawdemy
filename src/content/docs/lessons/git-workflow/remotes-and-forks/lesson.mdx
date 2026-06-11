@@ -1,0 +1,601 @@
+---
+title: 'Lesson: Remotes and forks'
+description: How branches travel between machines and between repositories. You learn what a remote is, how push and fetch and pull work, the difference between origin and upstream, the fork-based contribution model used by open-source projects, and how to safely force-push when you need to. Closes Phase 2.
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+### The lesson that lets your work leave your laptop
+
+So far in T7, every command has been local. You initialized a repo (L2), made commits (L2 + L3), undid things (L4), branched (L5), opened PRs (L6), resolved conflicts (L7). Everything has happened on your machine.
+
+But the team's main repository doesn't live on your machine. It lives on GitHub (or GitLab, or Bitbucket, or a private server). Your commits aren't useful to the team until they reach that shared repository. Your teammate's commits aren't visible to you until you pull them from there.
+
+The mechanism that lets git move work between machines is **remotes.** A remote is a pointer to "another git repository, somewhere not on this machine." Most commonly, the remote is a hosted server (GitHub) and the connection is over HTTPS or SSH. But conceptually, a remote can be any other git repository: another machine on your network, a folder on a USB drive, even another folder on the same machine.
+
+L8 teaches you how branches travel through remotes. By the end, you can push your work, fetch teammates' work, pull updates, fork an open-source project, contribute back, and reason about the difference between what's local and what's remote. You close Phase 2 with end-to-end collaboration skills.
+
+### Why git is called "distributed"
+
+In a centralized version control system like SVN or older Perforce, there is ONE repository that lives on a server. Every developer's machine has a "working copy" but not a full repository, so to see history, you query the server.
+
+In git, **every clone is a full repository.** When you `git clone` from GitHub, you get the entire history (every commit, every branch, every tag) copied to your machine. Your local repo is just as complete as GitHub's. There is no architectural difference between your laptop's repo and the one on GitHub's servers. Both are "the repo." Both have all the history. Both can serve as "the source" if needed.
+
+This is what "distributed" means. The repository is replicated across machines, and changes propagate by explicit push and pull operations.
+
+Practical consequences:
+- You can do almost everything offline (`git log`, `git status`, `git commit`, `git branch`, `git checkout`, `git diff`) without the network
+- The GitHub server going down doesn't make your work disappear; your local repo still has it all
+- You can have multiple remotes (your fork, the original project, a private mirror) and push/pull from each
+- You can recover the entire team's history from any developer's working laptop, if needed
+
+The team convention is to designate ONE repository (usually GitHub) as the "canonical" one, the one everyone pushes to and pulls from. But git itself doesn't have a built-in concept of "the official repo." That's a team convention enforced by workflow, not a technical constraint.
+
+### What a remote is, mechanically
+
+A remote is a named pointer to another git repository's URL. Most repos have at least one remote called `origin`, which points to the URL you cloned from.
+
+To see your remotes:
+
+```bash
+git remote -v
+```
+
+Typical output for a project you cloned from GitHub:
+
+```
+origin  https://github.com/your-team/payment-service.git (fetch)
+origin  https://github.com/your-team/payment-service.git (push)
+```
+
+The `-v` flag means "verbose"; it shows the URLs. Without `-v`, you'd just see the name `origin`.
+
+Notice the two lines for `origin`, one for fetch, one for push. In nearly every setup, both URLs are the same. Advanced workflows can configure different push and fetch URLs, but you'll likely never need to.
+
+To add a remote:
+
+```bash
+git remote add upstream https://github.com/original-project/payment-service.git
+```
+
+Now you have two remotes: `origin` and `upstream`. We'll get to why you'd want this in the fork section.
+
+To remove a remote:
+
+```bash
+git remote remove upstream
+```
+
+To rename a remote:
+
+```bash
+git remote rename origin myorigin
+```
+
+These are administrative commands. You'll run them once when setting up a new project, then rarely again.
+
+### `git clone`: getting started with a remote
+
+When you join a new team and they say "clone the repo," you run:
+
+```bash
+git clone https://github.com/your-team/payment-service.git
+```
+
+What happens:
+
+1. Git creates a new folder named `payment-service` in your current directory
+2. Git initializes a new repository in that folder
+3. Git adds the GitHub URL as a remote named `origin`
+4. Git downloads the entire repository history into your local repo
+5. Git checks out the default branch (usually `main`)
+
+You now have a complete working copy. Every command from L1-L7 works the same way; the only difference is that you also have an `origin` remote that knows where to push and pull.
+
+Most developers `git clone` once per project per machine. The clone has all the history; subsequent updates come through `git fetch` or `git pull`.
+
+### `git push`: sending your commits to the remote
+
+You've done some work on a branch. You commit (L2). You commit again. You commit a third time. The commits exist on your local branch. They don't exist on the remote yet. To send them:
+
+```bash
+git push
+```
+
+If your branch is already tracking a remote branch (we'll cover tracking below), this works without arguments. Git knows where to send the commits.
+
+For a brand new branch that hasn't been pushed before, you need to tell git which remote and what to name it remotely:
+
+```bash
+git push -u origin feature/cart-improvements
+```
+
+The `-u` (short for `--set-upstream`) tells git to remember the relationship between your local branch and the remote branch. After running this once, future `git push` calls on this branch work without arguments.
+
+What `push` actually does:
+1. Connects to the remote (using your stored credentials)
+2. Sends the commits that exist locally but not remotely
+3. Updates the remote's branch pointer to your latest commit
+4. Reports success or failure
+
+**Common failure: rejection.** If the remote branch has commits that you don't have locally, git refuses to push:
+
+```
+! [rejected]        main -> main (fetch first)
+error: failed to push some refs to 'github.com:your-team/payment-service.git'
+hint: Updates were rejected because the remote contains work that you do
+hint: not have locally. This is usually caused by another repository pushing
+hint: to the same ref. You may want to first integrate the remote changes
+hint: (e.g., 'git pull ...') before pushing again.
+```
+
+This means: while you were working, someone else pushed to the same branch. The remote has commits you don't have yet. Git refuses to overwrite their commits silently.
+
+The fix: pull first, then push.
+
+```bash
+git pull        # fetches their commits and merges into yours
+git push        # now your local has everything; push succeeds
+```
+
+We'll cover what `pull` actually does in a moment.
+
+### `git fetch`: downloading without merging
+
+`git fetch` is the "look but don't touch" command. It downloads everything new from the remote and stores it locally, but it does NOT change your working files or merge anything into your branches.
+
+```bash
+git fetch
+```
+
+What you get after fetch:
+- Updated `origin/<branch>` references (the remote-tracking branches)
+- New commits from the remote, stored in your local repo
+- Your working directory: unchanged
+- Your local branches: unchanged
+
+After fetch, you can inspect what changed without committing to merging:
+
+```bash
+git log origin/main                    # see what's on remote main
+git log main..origin/main              # see what they have that you don't
+git log origin/main..main              # see what you have that they don't
+git diff main origin/main              # see the actual code differences
+```
+
+Then you can decide what to do: merge, rebase, ignore, examine specific commits, anything. `fetch` gives you the information; you decide the action.
+
+**When to use fetch instead of pull:**
+- You want to see what changed before integrating it
+- You're about to merge but want to verify the conflict surface first
+- You're investigating "what did my teammate push?" without committing to integrate
+
+Most senior engineers prefer `fetch` over `pull` for daily work because the "look first, decide what to do" workflow is safer than the "automatically merge" workflow that `pull` provides.
+
+### `git pull`: fetch plus merge
+
+`git pull` is a shortcut. It runs `git fetch` followed by `git merge origin/<branch>`. So `pull` = fetch + merge.
+
+```bash
+git pull
+```
+
+What happens:
+1. Fetch: download new commits from remote
+2. Merge: combine the fetched commits into your current branch
+
+Step 2 might produce a merge conflict (L7). If it does, you're now in a merge state and need to resolve. If it doesn't, you just got the latest changes.
+
+**The variant: `git pull --rebase`.**
+
+```bash
+git pull --rebase
+```
+
+Instead of merging, this rebases your local commits on top of the fetched commits. The result: a linear history without an extra merge commit.
+
+Many teams enable this as the default for pull:
+
+```bash
+git config --global pull.rebase true
+```
+
+After this setting, every `git pull` automatically uses `--rebase`. Most modern teams prefer this; pull-rebase keeps history clean and avoids the cluttered "Merge branch 'main' into 'main'" commits that simple pull produces.
+
+We'll dive deeper into rebase in L12. For now, know that `--rebase` is usually the better default for `pull`.
+
+### Remote-tracking branches: the labels for "what the remote looked like"
+
+When you fetched, git updated something called `origin/main` (and `origin/feature-x` and so on). These are **remote-tracking branches.**
+
+A remote-tracking branch is a LOCAL label that points to whatever the remote's branch pointed to at your last fetch. They are read-only from your perspective; you don't commit to them directly. They're snapshots of "what GitHub said its `main` was when I last asked."
+
+To see them:
+
+```bash
+git branch -r
+```
+
+Typical output:
+
+```
+  origin/HEAD -> origin/main
+  origin/main
+  origin/feature/cart-improvements
+  origin/hotfix/critical-bug
+```
+
+These are not the same as your local branches. Your local `main` might be ahead of, behind, or diverged from `origin/main`. The whole point of `git fetch` is to update the `origin/X` labels so you can see what the remote has without integrating it.
+
+A useful command:
+
+```bash
+git status
+```
+
+If you're on a branch that tracks a remote branch, the status output tells you:
+
+```
+Your branch is ahead of 'origin/main' by 2 commits.
+  (use "git push" to publish your local commits)
+```
+
+Or:
+
+```
+Your branch is behind 'origin/main' by 5 commits, and can be fast-forwarded.
+  (use "git pull" to update your local branch)
+```
+
+Or:
+
+```
+Your branch and 'origin/main' have diverged,
+and have 2 and 3 different commits each, respectively.
+  (use "git pull" to merge the remote branch into yours)
+```
+
+The "ahead / behind / diverged" framing is exactly the relationship between your local branch and `origin/<branch>`, the remote-tracking label.
+
+### Worked example 1: Pull-push cycle on a shared branch
+
+You and your teammate are both contributing to `main` directly on a small project (this is unusual for production teams but common for early-stage prototypes; PR-based workflows are what L6 covers).
+
+**Your state:** you committed once on main. Local has 1 new commit; remote has 0 new commits (since your last fetch).
+
+**Teammate's state (concurrent):** they committed twice on main. Remote has 2 new commits; you don't know about them yet.
+
+**You try to push:**
+
+```bash
+git push
+```
+
+Rejected. The remote has commits you don't have. (The exact error from earlier.)
+
+**You pull:**
+
+```bash
+git pull --rebase
+```
+
+Git fetches their 2 commits. Then git rebases your 1 commit on top of theirs. Result: linear history with their 2 commits followed by your 1 commit.
+
+**You push again:**
+
+```bash
+git push
+```
+
+This time the push succeeds. The remote now has all 3 commits.
+
+**Time elapsed: 30 seconds.** This is the normal daily workflow when multiple people contribute to a shared branch. The push-rejected error is not failure; it's just git asking you to pull first.
+
+### Worked example 2: Setting up tracking for a new branch
+
+You created a new local branch (L5) called `feature/payment-flow`. You committed some work. Now you want to push.
+
+```bash
+git push
+```
+
+Output:
+
+```
+fatal: The current branch feature/payment-flow has no upstream branch.
+To push the current branch and set the remote as upstream, use
+
+    git push --set-upstream origin feature/payment-flow
+```
+
+Git tells you exactly what to do. Run the suggested command:
+
+```bash
+git push --set-upstream origin feature/payment-flow
+# or the shorter equivalent:
+git push -u origin feature/payment-flow
+```
+
+This pushes the branch AND sets the upstream relationship. Future pushes on this branch work with just `git push`.
+
+The branch now exists on the remote. Your teammates can see it (`git fetch` then `git branch -r`). They can check it out locally (`git checkout feature/payment-flow`). They can contribute to it (push their own commits). The branch is now a shared resource, not just a local thing.
+
+### Worked example 3: The fork-based contribution model
+
+You want to contribute to an open-source project (say, the Astro framework). You don't have write access to the original repo. Here's how the fork-based workflow handles this.
+
+**Step 1: Fork the repo on GitHub.**
+
+On the GitHub web UI, click "Fork" on the original `withastro/astro` repo. GitHub creates `your-username/astro`, a copy of the original repo under your account. You have full write access to your fork.
+
+**Step 2: Clone your fork.**
+
+```bash
+git clone https://github.com/your-username/astro.git
+cd astro
+```
+
+Now you have a local copy. Your remote `origin` points to your fork (`your-username/astro`).
+
+**Step 3: Add the original repo as `upstream`.**
+
+```bash
+git remote add upstream https://github.com/withastro/astro.git
+```
+
+Now you have two remotes:
+- `origin` points to your fork (you can push to this)
+- `upstream` points to the original (you can fetch from this, but typically not push)
+
+Run `git remote -v` to confirm.
+
+**Step 4: Make changes on a feature branch.**
+
+```bash
+git switch -c fix/broken-config-loader
+# do the work, commit
+```
+
+**Step 5: Push to your fork.**
+
+```bash
+git push -u origin fix/broken-config-loader
+```
+
+The branch now exists on `your-username/astro`.
+
+**Step 6: Open a PR from your fork to the original.**
+
+On GitHub, navigate to `withastro/astro`. GitHub detects the recent push to your fork and offers a banner: "Compare & pull request." The PR is from `your-username:fix/broken-config-loader` to `withastro:main`.
+
+**Step 7: Sync with upstream as their main moves.**
+
+Days or weeks pass. The maintainers merge other PRs into `withastro/astro` main. Your fork is now behind. You sync:
+
+```bash
+git switch main
+git fetch upstream
+git rebase upstream/main      # update your local main to match upstream
+git push origin main          # push the updated main to your fork
+```
+
+If you have an in-flight PR branch that's also behind, rebase it onto the updated main:
+
+```bash
+git switch fix/broken-config-loader
+git rebase main
+git push origin fix/broken-config-loader --force-with-lease   # see force-push section below
+```
+
+**Step 8: The PR gets reviewed and merged.**
+
+Maintainer reviews. Maybe asks for changes (L6 etiquette). You push fixes. Maintainer approves and merges. Your contribution is now in `withastro/astro`.
+
+**Step 9: Clean up.**
+
+```bash
+git switch main
+git fetch upstream
+git rebase upstream/main
+git push origin main
+git branch -d fix/broken-config-loader
+git push origin --delete fix/broken-config-loader
+```
+
+You've contributed to open source. The workflow is the same for almost every public project.
+
+### Why the fork-based model exists
+
+You might wonder: why not just push directly to the original repo? Two reasons:
+
+**1. Write access control.** The original repo's maintainers control who can push to it. New contributors can't push directly because they haven't been granted write access. Forks bypass this: you can always push to your own fork.
+
+**2. Isolation of experimentation.** Even if you HAD write access, pushing every experiment to the original repo's branch list would clutter it. Forks let you experiment freely without polluting the canonical project.
+
+The fork-based model is how essentially every open-source project on GitHub accepts contributions. It scales from your first one-line typo fix to the Linux kernel (which uses a different but conceptually similar federation of repos).
+
+### Multiple remotes: when and why
+
+The fork model uses two remotes (`origin` + `upstream`). Some workflows use more.
+
+**Triangular workflow:** you push to your fork, but you base your work on a different remote (the upstream). This is exactly the fork model above. Common in open-source.
+
+**Mirror/backup remote:** some teams add a third remote pointing to a backup server. `git remote add backup git@backup.internal:project.git`. They push to both `origin` (the team server) and `backup` (the backup). Belt and suspenders.
+
+**Multi-fork collaboration:** you and another contributor are co-developing a PR. They have their fork; you have yours. You add their fork as a remote (`git remote add coworker https://github.com/their-username/project.git`) so you can fetch their branches and contribute to their PR.
+
+**Production vs staging remotes:** rare in pure git terms (deploys usually happen through CI), but some workflows push to a `staging` remote that triggers a deploy.
+
+Most developers spend most of their time with just `origin` or `origin` + `upstream`. The N-remote workflows are niches. Recognize them when you see them; you don't need to use them daily.
+
+### Force-push: when and how to do it safely
+
+Sometimes you need to overwrite history on a remote. Maybe you rebased your feature branch and the remote still has the old commits. Maybe you committed a secret and need to expunge it from history.
+
+The naive command:
+
+```bash
+git push --force
+```
+
+This overwrites the remote branch with your local branch, no questions asked. It is dangerous because: if a teammate pushed to that branch after your last fetch, your force-push silently wipes out their work.
+
+**Almost always use this instead:**
+
+```bash
+git push --force-with-lease
+```
+
+The `--force-with-lease` variant says: "force push, BUT only if the remote branch is at the commit I last saw it at. If someone else has pushed since my last fetch, refuse."
+
+This protects you from accidentally overwriting a teammate's work. If your last `git fetch` saw the remote at commit X, and the remote is still at X, force-with-lease succeeds. If the remote is at Y (because a teammate pushed), force-with-lease refuses and you can fetch + decide.
+
+**When force-push is acceptable:**
+- Your own feature branch (you're the only one working on it) AND you rebased
+- A PR branch that you alone are responsible for
+- A new branch that hasn't been pushed before (no force needed; regular push works)
+
+**When force-push is NEVER acceptable:**
+- Shared branches like `main`, `develop`, `release/*`
+- Any branch that other people are working off of
+- Production-deployed branches
+
+The rule: force-push is for branches whose history is YOUR personal responsibility. Never on branches that the team depends on. When in doubt, ask first.
+
+### The `git pull --rebase` setting: make this your default
+
+The default behavior of `git pull` is `fetch + merge`. This creates merge commits when you pull updates. Over a year of pulls, your history accumulates dozens of "Merge branch 'main' of github.com:..." commits, visual noise that nobody benefits from.
+
+The alternative: `git pull --rebase` runs `fetch + rebase`. Your local commits get replayed on top of the fetched commits. No merge commit. Linear history.
+
+To make this the default for all future pulls:
+
+```bash
+git config --global pull.rebase true
+```
+
+Now `git pull` automatically uses `--rebase`. Most modern teams set this; many recommend it as the first config a new developer adds.
+
+**One caveat:** if you have UNCOMMITTED changes, `git pull --rebase` refuses (because rebase can't replay changes that aren't commits). The fix: stash your changes (`git stash`), pull, then unstash (`git stash pop`). Or just commit your work first.
+
+### A note for experienced developers
+
+If you came from SVN, the closest concept to "remote" is the server URL, but git's remotes are more flexible. You can have multiple. You can switch between them. You can pull from one and push to another. SVN's centralized model maps roughly onto a single-remote git workflow.
+
+If you came from Mercurial, the model is nearly identical. `hg push` and `hg pull` work analogously to `git push` and `git pull`. The main difference is that Mercurial doesn't have remote-tracking branches as a separate concept; it tracks remote state more implicitly. Git's explicit `origin/main` labels are slightly more complex but give you more visibility.
+
+If you came from Perforce, the entire mental model is different. Perforce has a central server and you check out files; git has a fully replicated repository and you sync via push/pull. Adapting takes a few weeks; once you do, you'll appreciate the speed of local operations.
+
+### A useful frame for managers and technical product managers
+
+Four observations worth carrying to non-engineering conversations.
+
+**First**, the distributed model means your team can keep working when GitHub is down. The local repo has the whole history; engineers can commit, branch, merge, and review diffs offline. Only push and pull require the network. Asking "is GitHub down? Can the team keep working?" surfaces a useful distinction between "tooling down" and "team down"; they're not the same.
+
+**Second**, the fork-based model is what enables external contributions to open-source projects. If your company has any open-source dependencies, you have the option of forking + fixing + sending a PR upstream when something breaks. This is often faster than waiting for the maintainer or filing an issue, and it builds your team's reputation in the ecosystem. Many engineering leaders underuse this lever.
+
+**Third**, the difference between "rebased" and "merged" history is a team-culture choice. Some teams prefer the audit trail of merge commits ("this PR landed on this date as a unit"). Other teams prefer linear history ("the codebase is a linear sequence of commits, easy to bisect"). Both are valid; switching mid-team is expensive. If you're choosing for a new project, decide intentionally.
+
+**Fourth**, multi-remote workflows (you push to your fork + sync from upstream) are how many open-source-adjacent teams operate. If your engineering team works on open-source code that your company maintains, the fork model is structural. If your team only works on internal repos, you'll likely never need it. The choice is workflow-driven, not arbitrary.
+
+**For technical product managers specifically:** when engineering says "the PR is stuck because they need to rebase first," that means the contributor's branch has fallen behind the main branch and needs to be re-based on top. This is mechanical work, not blocked by external decisions. It's almost always less than an hour of work. Asking "what's the rebase blocker?" sometimes uncovers that the contributor doesn't yet know how to rebase, which is solvable with five minutes of pairing.
+
+### Concrete scenarios across team scales
+
+**Scenario A: Two-person startup, single shared repo.**
+
+You and your co-founder. One repo on GitHub. Both have write access. Workflow:
+- Both clone the repo. Both have `origin` pointing to GitHub.
+- Branch per feature, push to origin, open PR (L6), one of you reviews, merge.
+- Daily `git pull --rebase` on main to stay current.
+- Conflicts (L7) when they happen; resolution is conversational.
+
+You'll never need `upstream`. You don't need multiple remotes. The single-remote workflow is sufficient. The complexity stays low.
+
+**Scenario B: 50-person engineering team, monorepo or multi-repo.**
+
+Shared GitHub org. Engineers clone, branch, push to origin, open PR. Same as above but at higher scale.
+
+What changes:
+- Multiple long-lived branches (`main`, `develop`, `release/*`). Engineers need to push to the right one.
+- Some teams add branch protection rules (covered in L9): main can only be merged via PR, requires N approvals, requires CI green.
+- Force-push is locked out on main; engineers learn `--force-with-lease` and use it only on their own branches.
+- The `pull --rebase` default becomes a team convention to keep history clean.
+
+You still mostly work with `origin`. Multi-remote workflows are rare unless your team also contributes to external open-source projects.
+
+**Scenario C: Open-source contribution.**
+
+The fork-based model from Worked Example 3 above. `origin` = your fork. `upstream` = the original. Push to origin, PR to upstream. This is how the global open-source ecosystem operates. Anyone reading the L8 material can submit a PR to almost any open-source project on GitHub by tomorrow.
+
+The discipline: rebase on upstream frequently so your PR stays mergeable. Force-with-lease only on your own branches. Sync your fork's `main` from `upstream/main` weekly even when you don't have an active PR.
+
+**Scenario D: Multi-agent AI workflow.**
+
+Each AI agent runs in its own git worktree (L15) on the same local clone, OR each agent runs on a separate machine with its own clone. Either way, agents push to a shared `origin`.
+
+What changes from human workflows:
+- Agents push more frequently (sometimes every commit). The remote sees more rapid activity.
+- The orchestrator (human or another agent) does the integration: pulling agent branches, reviewing, merging. The integration cost is concentrated at the orchestrator level.
+- Force-pushes are often produced by agents (during rebases). The orchestrator needs to verify they're safe (always force-with-lease, never on shared branches).
+- Each agent might have its own clone or worktree, all pointing to the same `origin`. The conflict surface concentrates at integration time.
+
+The Clawless 2026-06-04 multi-track sprint: six dev terminals all worked on the Clawdemy repo. Each pushed to the same `origin`. The Lead orchestrated integration. The model works at fleet scale because the underlying primitive (every clone is a full repo, push and pull are explicit) gives each agent isolation and the orchestrator visibility.
+
+### A foreshadowing note for Phase 4
+
+In Phase 4, remotes become the integration backbone between AI agents and humans. Three patterns to anticipate:
+
+**Pattern 1: Shared `origin`, parallel agents.** All agents push to the same remote `origin`. The orchestrator pulls each agent's branch and merges in sequence. This is the Clawless 2026-06-04 pattern. Works for small fleets (under 10 agents) sharing a single remote.
+
+**Pattern 2: Agent-per-fork.** Each agent has its own fork of the project. The orchestrator pulls from each agent's fork, merges into a central repo, pushes to the canonical `origin`. Provides better isolation but adds setup overhead.
+
+**Pattern 3: Shared worktrees, single origin.** All agents work in worktrees off the same clone. They share `origin`. Worktrees give them filesystem isolation; the shared clone gives the orchestrator one place to integrate from. Lighter weight than per-agent forks. Covered in L15.
+
+The pattern that wins depends on agent count, network constraints, and orchestration discipline. The primitive (a remote with explicit push/pull) is the same.
+
+### The stay-calm psychology for remotes
+
+Three principles for staying calm when remote operations behave unexpectedly:
+
+**1. The remote is just another git repo.** Whatever can go wrong with the remote (someone pushed unexpected changes, a branch got force-pushed, history got rewritten) can be diagnosed using the same git commands you use locally. Fetch first, look at the state, then decide.
+
+**2. Network failures are not data failures.** If `git push` fails because the network dropped, your local commits are still there. Try again when the network is back. Nothing was lost.
+
+**3. The reflog (L4) catches local mistakes.** Even if a `git pull --rebase` produces a confusing result, the reflog shows where you were before, and `git reset --hard <hash>` from there gets you back. The safety net from L4 still works.
+
+The fear comes from "I touched the remote and now things look weird." The reality is that the remote is forgiving, your local has safety nets, and almost every "broken" state is recoverable in under 5 minutes.
+
+### What you can do now
+
+By the end of L8 you can:
+- Explain what a remote is and why git is called distributed
+- Use `git clone` to start a project from a remote
+- Push commits to a remote with `git push -u origin <branch>` (first time) or `git push` (thereafter)
+- Fetch updates without merging via `git fetch`
+- Pull updates with `git pull` or (preferably) `git pull --rebase`
+- Set up the fork model with `origin` + `upstream` remotes
+- Recognize remote-tracking branches (`origin/main`) and what they tell you
+- Use `git push --force-with-lease` safely on your own branches
+- Configure `pull.rebase = true` as your default
+
+You have closed **Phase 2.** You can now collaborate end-to-end with another developer on a real project: branching, opening PRs, resolving conflicts, syncing with a remote, contributing to open-source.
+
+### What's next in Phase 3
+
+Phase 3 covers production team workflows, the patterns that emerge when you scale beyond two people:
+
+- **L9 Team workflows: GitHub Flow, GitFlow, Trunk-based**: the three main patterns, when each fits
+- **L10 Releases and tags**: `git tag`, release branches, semantic versioning
+- **L11 Cherry-pick and stash**: moving commits between branches; saving in-progress work
+- **L12 Rebase, deeper**: interactive rebase, history cleanup, when rebase is the right answer
+
+After Phase 3, you can join any production engineering team and operate confidently. Phase 4 then covers the unique angle of T7, multi-agent teams.
+
+### Voice anchor (carried from L1-L7)
+
+> Git stores snapshots. Every other command is just navigating those snapshots.
+
+Push and pull are navigating snapshots between machines. Remote-tracking branches are labels for "what the other machine had." Forks are independent snapshot graphs that share ancestry. Every remote operation is just synchronizing two snapshot graphs. The graph is still the whole model.

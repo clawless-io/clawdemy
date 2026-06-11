@@ -1,0 +1,307 @@
+---
+title: 'Lesson: Branches as parallel work surfaces'
+description: The lesson that opens Phase 2. You learn what a branch actually is (a movable pointer to a commit), how to create and switch branches, and why git's branching model is what makes collaboration possible. The snapshot mental model from L1 starts to pay off most here.
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+### The scenario that explains why branches exist
+
+You are working on a new feature. Halfway through, your manager pings you: production is broken. There is a bug you need to fix right now.
+
+Before git, your options were grim. You could:
+- Commit your half-finished feature with a "WIP" message, fix the bug, then unwind the WIP commit later
+- Stash your changes in a hand-rolled way (manual file copies)
+- Cancel the feature work entirely and lose progress
+
+None of these are good. Git's answer to this scenario is branches.
+
+With branches, you:
+1. Commit (or stash) your in-progress feature work on a branch called something like `feature/payment-flow`
+2. Switch to your default branch (`main`)
+3. Create a new branch called `hotfix/login-bug`
+4. Fix the bug, commit, merge it back into main, push
+5. Switch back to `feature/payment-flow` and resume your feature work exactly where you left off
+
+This is the daily reality of professional development. Every developer juggles 2-5 in-flight workstreams. Branches are the mechanism that makes the juggling tractable.
+
+### What a branch actually is
+
+Most people think a branch is "a copy of the code." It is not. Internalizing what a branch actually is unlocks everything about git's collaboration model.
+
+**A branch is a movable pointer to a commit.** That is it.
+
+Recall from L1 that git stores snapshots, and each snapshot points to its parent. The graph of snapshots looks like this:
+
+```
+A ---- B ---- C ---- D
+                     ^
+                     |
+                    main
+```
+
+`main` is just a label that points to commit D. When you commit, the `main` label moves forward to the new commit:
+
+```
+A ---- B ---- C ---- D ---- E
+                            ^
+                            |
+                           main
+```
+
+A new branch is just a second label. If you create a branch called `feature` while sitting at D:
+
+```
+A ---- B ---- C ---- D
+                     ^
+                     |
+                  main, feature
+```
+
+Both labels point to the same commit. If you check out `feature` and commit, only `feature` moves:
+
+```
+A ---- B ---- C ---- D ---- E
+                     ^      ^
+                     |      |
+                    main  feature
+```
+
+If you then switch back to `main` and commit:
+
+```
+                            F
+                           /
+A ---- B ---- C ---- D ---- E
+                            ^
+                            |
+                         feature
+
+         (main is now at F)
+```
+
+You have a true fork in history. Two parallel sequences of work. Both started from D. Neither knows about the other yet.
+
+This is what "parallel work surfaces" means. The diagram is the entire idea.
+
+### The default branch and the special pointer named HEAD
+
+Every git repo has a default branch. By convention this is now `main` (it used to be `master`; many older repos still use `master`). When you run `git init`, you start on `main` automatically.
+
+There is also a special pointer called `HEAD`. HEAD always points to the branch you currently have checked out:
+
+```
+A ---- B ---- C ---- D
+                     ^
+                     |
+                  main, feature  <-- HEAD points to main (or to feature, depending)
+```
+
+If you switch to `feature`, HEAD now points to `feature`. If you commit, the branch that HEAD points to (which is `feature`) moves forward. `main` stays put.
+
+The mental shortcut: **HEAD is the pointer to your current branch's pointer.** When you commit, the chain is: a new commit goes onto the branch that HEAD points to, and that branch's pointer advances.
+
+This is one level of indirection that confuses people once and then never again. After a few uses, you stop thinking about HEAD; you just know "the branch I'm on moves when I commit."
+
+### Creating branches
+
+Three command styles. Modern git (since version 2.23) added `git switch` and `git restore` to separate concerns that the older `git checkout` mashed together. Both still work. Use whichever your hands learn first; the rest of the world uses both, so reading both is a job skill.
+
+**Modern (recommended):**
+
+```bash
+git switch -c feature/payment-flow
+```
+
+The `-c` means "create the branch and switch to it in one step." Without `-c`, `git switch` switches to an existing branch.
+
+**Older (still works everywhere):**
+
+```bash
+git checkout -b feature/payment-flow
+```
+
+The `-b` means "create and switch." Without `-b`, `git checkout` switches to an existing branch (or, confusingly, to a file or commit).
+
+**Lowest level (rarely used directly):**
+
+```bash
+git branch feature/payment-flow      # creates the branch but DOES NOT switch
+git switch feature/payment-flow      # then switch to it
+```
+
+This two-step form is useful when you want to mark a point in history without leaving your current branch. Most of the time, the `-c` / `-b` shortcut is what you want.
+
+### Switching branches
+
+```bash
+git switch main                # modern
+git checkout main              # older (still works)
+```
+
+When you switch, git updates your working directory to match the snapshot the target branch points to. Files appear, disappear, or change content depending on what the target snapshot has.
+
+**A common surprise:** if you have uncommitted changes that would be overwritten by the switch, git refuses to switch and prints an error. The fix is to either commit your changes, stash them (covered in L11), or discard them with `git restore`. This is a feature, not a bug: git refuses to silently lose your work.
+
+### Listing branches
+
+```bash
+git branch
+```
+
+Output is a list of local branches, with an asterisk marking the current one:
+
+```
+* main
+  feature/payment-flow
+  hotfix/login-bug
+```
+
+For all branches including remote-tracking ones:
+
+```bash
+git branch -a
+```
+
+For remote-tracking branches only:
+
+```bash
+git branch -r
+```
+
+(We cover remote-tracking branches properly in L8. For now, know that `-a` shows you "all branches I know about, including the ones the remote server has.")
+
+### Deleting branches
+
+When a branch's work is merged back into main (covered in L6 with pull requests), the branch itself is no longer useful. Delete it.
+
+**Safe delete (refuses if branch has unmerged work):**
+
+```bash
+git branch -d feature/payment-flow
+```
+
+If the branch has work that hasn't been merged into your current branch, `-d` refuses. This is git protecting you from accidentally losing work.
+
+**Force delete (deletes regardless):**
+
+```bash
+git branch -D feature/payment-flow
+```
+
+Use `-D` (capital D) when you know what you are doing. The commits don't actually disappear (they live in reflog for 90 days per L4), but the branch name is gone.
+
+**Discipline:** prefer `-d` by default. The git error message that `-d` produces ("branch is not fully merged") is a useful warning. If you really do want to delete unmerged work, take the half-second pause to type `-D` deliberately.
+
+### Why branches are cheap (and why that matters)
+
+In older version control systems (SVN, CVS), branches were expensive. Creating one meant copying the entire codebase server-side. Switching branches was slow. Teams used branches sparingly, often only for releases and major features.
+
+In git, a branch is a pointer. Creating one is one filesystem write (the pointer file). Switching is fast because the working directory just gets repopulated from the target snapshot.
+
+**This is git's defining innovation.** Cheap branches mean you can create a branch for any unit of work, no matter how small. The cost is so low that you never have to ask "is this big enough to deserve a branch." The answer is always yes if the work is at all separable.
+
+The practical effect: professional git workflows use many short-lived branches. Each feature, each bug fix, each experiment lives on its own branch. The branch is born, the work happens, the branch is merged back, the branch is deleted. The lifecycle is days to weeks, sometimes hours.
+
+The team-culture effect: code review through Pull Requests (L6) becomes practical because every change has a natural unit (one branch = one review). The whole "feature branch + pull request + merge" workflow is downstream of git making branches cheap.
+
+### Branch naming conventions
+
+There is no enforced convention; git accepts almost any branch name. But team norms exist. A common pattern:
+
+```
+main                              # the main development branch
+feature/payment-flow              # a feature
+feature/user-profile-page         # another feature
+bugfix/login-redirect             # a bug fix
+hotfix/critical-prod-issue        # urgent production fix
+release/v2.0                      # preparing a release
+experiment/new-llm-prompt         # one-off experiment
+```
+
+The `<type>/<short-description>` pattern serves two purposes:
+1. **Filterable lists.** `git branch | grep feature/` shows all features.
+2. **Self-documenting URLs.** Pull request URLs include the branch name, making the PR list scannable.
+
+Some teams use `username/feature-name` (for example, `jay/payment-flow`) to disambiguate. Some teams enforce conventions via CI. Most teams converge on something close to the type-prefix pattern within a few months of starting to use PRs.
+
+**The discipline:** pick a convention, document it in CONTRIBUTING.md or the team wiki, follow it consistently. The specific convention matters less than the consistency.
+
+### When to branch (and when not to)
+
+A pragmatic rule for solo work:
+
+**Branch when:**
+- You are working on something that could ship independently
+- You are experimenting and want to throw away the experiment cleanly
+- You are mid-work on Feature A and need to context-switch to Bug B
+- You expect anyone (you, a teammate, an AI agent) to review the work before it lands in main
+
+**Don't branch when:**
+- You are making a one-line typo fix and the cost of a branch plus PR exceeds the cost of the change
+- You are in a solo prototype with no collaborator and no production deploy
+- You are doing a series of related commits that should land together as a single unit (just commit them on main)
+
+The judgment call gets easier with practice. Default to branching when collaboration is involved; default to committing directly when working solo on a private project where main IS your work surface.
+
+### A note for experienced developers
+
+If you came from SVN, you probably under-use branches. The SVN-trained instinct is "branches are expensive, use sparingly." Override it. In git, branches are nearly free, and the team workflows assume you use them liberally.
+
+If you came from Mercurial, branches in Mercurial are heavier and less flexible (Mercurial named branches are baked into commit metadata). Git's branches are lighter; you can rename, move, or delete them without rewriting history. This means git encourages more aggressive branching: experiments, throwaways, exploratory branches that never merge anywhere.
+
+If you came from Perforce, you probably used streams or workspaces for parallel work. Git branches play that role but at much lower cost. Embrace the cheapness.
+
+### A useful frame for managers and technical product managers
+
+Three observations worth carrying to non-engineering conversations.
+
+**First**, branches map cleanly onto the units of work that organizations track. A Jira ticket is a feature. A feature is a branch. A branch produces a pull request. A pull request becomes a merge into main. This one-to-one mapping (ticket to branch to PR to merge) is what makes git-based engineering legible to product teams. If you've ever wondered why engineers can answer "where is feature X in flight" so quickly, this is part of the answer.
+
+**Second**, branch hygiene predicts team velocity better than most metrics. Teams whose `git branch -a` lists hundreds of stale branches usually have process gaps: PRs are not getting reviewed promptly, deletions are not happening after merge, abandoned experiments are not getting cleaned up. The branch list is a leading indicator. If your engineering team's branch list is growing without bound, that is a signal worth surfacing in a 1:1.
+
+**Third**, the "branches are cheap" principle is what unlocks experimentation. Teams that branch freely run more experiments because the cost of a failed experiment is "delete the branch, move on." Teams that branch reluctantly accumulate risk into long-lived shared branches, where the cost of failure is much higher (merge conflicts, half-finished work blocking other work, etc.). Encouraging your team to branch liberally is encouraging them to experiment.
+
+**For technical product managers specifically:** when you see "we should A/B test this" or "we should prototype this," the engineering cost is roughly one branch. The cost is not "schedule a sprint." It is "create a branch, try it, see what happens, delete the branch if it doesn't work." Leaning on this fact in conversations with engineering leads can dramatically accelerate the cadence of small experiments.
+
+### A foreshadowing note for Phase 4
+
+In Phase 4 (multi-agent teams), branches become the unit of parallelization. Each AI agent works on its own branch, in its own worktree (a git feature we cover in L15). The branch model from L5 (cheap, independent, mergeable) is what makes multi-agent work tractable at all.
+
+The Clawless 2026-06-04 sprint had six dev terminals authoring six different tracks in parallel. Each terminal worked on its own branch. The integration point was a Lead who reviewed and merged each branch into the shared main. Without git's branching model, six parallel agents would have stepped on each other constantly.
+
+Open-source maintainers manage similar parallelism at human scale: 50 active contributors each on their own branch, each producing a pull request, the maintainer triaging and merging. Same model, different scale, same primitive.
+
+The discipline you are building in L5 (branch per unit of work, merge when ready, delete after) scales from one developer to one team to one open-source community to one multi-agent system. Same primitive.
+
+### What you can do now
+
+By the end of L5 you can:
+- Explain what a branch is (a movable pointer to a commit)
+- Create a branch with `git switch -c <name>` (or `git checkout -b <name>`)
+- Switch between branches with `git switch <name>`
+- List branches with `git branch`
+- Delete merged branches with `git branch -d <name>`
+- Recognize what HEAD points to and why that matters
+- Articulate why git branches are cheap and what that enables
+- Choose between "branch this" and "commit directly to main" based on context
+
+You have opened **Phase 2.** L6 covers the natural next question: once you have a branch with work on it, how do you propose to merge it back? That is Pull Requests.
+
+### What's next in Phase 2
+
+- **L6 Pull requests**: the workflow that turns "I have work on a branch" into "the team reviewed and merged my work"
+- **L7 Merge conflicts**: what to do when two branches both modified the same lines
+- **L8 Remotes and forks**: pushing branches to GitHub, fetching from teammates, the difference between origin and upstream
+
+By the end of Phase 2 you can collaborate with one other person on a real project. Phase 3 covers production team workflows (GitHub Flow, GitFlow, releases). Phase 4 covers multi-agent teams.
+
+### Voice anchor (carried from L1 + L2 + L3 + L4)
+
+> Git stores snapshots. Every other command is just navigating those snapshots.
+
+A branch is a label that points to a snapshot. Switching branches is navigating to a different label in the snapshot graph. Creating a branch is adding a new label. Deleting a branch is removing a label (the snapshots stay; the label goes). Every branch operation is just label management on the snapshot graph.
+
+Once you see branches as labels on a graph, every later git topic (merges, conflicts, remotes, pull requests) becomes a sequence of label operations on the same graph. The graph is the whole model.

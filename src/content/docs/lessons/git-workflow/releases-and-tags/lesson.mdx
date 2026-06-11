@@ -1,0 +1,458 @@
+---
+title: 'Lesson: Releases and tags'
+description: How specific commits become formal releases. You learn what a git tag is, the difference between lightweight and annotated tags, semantic versioning (semver), how to write release notes, and how releases work across the four workflows from L9. By the end you can mark, push, and announce a release for any project.
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+### The lesson where "I shipped a thing" becomes "we released version 2.0"
+
+You've built a feature. It's merged. It's in production. Users are using it. Have you "released" anything?
+
+In casual usage, yes: every merge to main IS a release. In formal usage, "release" means something specific: a marked, named, announced point in history that you and your team agree is a coherent unit. v1.0. v2.3.7. The "January 2026 release." A thing with a version number, release notes, and a marker in git you can return to.
+
+L10 is about formal releases. Tags in git are the marking mechanism. Semantic versioning is the naming mechanism. Release notes are the announcing mechanism. By the end of L10, you can take a commit and turn it into "release v2.0" with everything that implies.
+
+This matters because: even teams using continuous deployment usually want SOME formal release markers, for changelog generation, for "what was deployed at 3pm Tuesday" debugging, for customer communication ("the feature you asked about shipped in v2.3.5"), for rollback targeting. Without tags, every commit blurs into every other commit. With tags, you have anchors.
+
+### What a git tag is, mechanically
+
+A **tag** is a named pointer to a specific commit that never moves. Unlike a branch (which moves forward when you commit), a tag is fixed. Once you tag commit `abc1234` as `v1.0`, the tag `v1.0` always means commit `abc1234`. Forever (or until you delete the tag).
+
+Two kinds of tags:
+
+**Lightweight tags**: just a pointer with a name. No metadata. Created with:
+
+```bash
+git tag v1.0
+```
+
+**Annotated tags**: a pointer with a name PLUS metadata: who tagged it, when, an optional message. Stored as a full git object. Created with:
+
+```bash
+git tag -a v1.0 -m "Release v1.0: initial public release"
+```
+
+**The discipline:** for releases, always use annotated tags. The annotation lets future debuggers see who tagged the release and when, and the message can include short release notes. Lightweight tags are fine for private markers (your own bookmarks) but should not be used for shipped releases.
+
+### Creating, listing, and pushing tags
+
+**Create an annotated tag on the current commit:**
+
+```bash
+git tag -a v1.0 -m "Release v1.0: payment-flow GA"
+```
+
+**Create an annotated tag on a specific past commit:**
+
+```bash
+git tag -a v0.9 abc1234 -m "Tag the v0.9 release commit retroactively"
+```
+
+**List all tags:**
+
+```bash
+git tag
+```
+
+Output is alphabetically sorted by default, which makes `v1.10` appear before `v1.2` (because string ordering, not numeric). For sane sorting:
+
+```bash
+git tag --sort=-v:refname
+```
+
+This sorts by version-aware refname, descending (newest first). Add to your aliases if you tag often.
+
+**Show details of a specific tag:**
+
+```bash
+git show v1.0
+```
+
+Shows the tag's metadata (tagger, date, message) plus the commit it points to.
+
+**Push tags to the remote:**
+
+Tags don't push with `git push` by default. You have to push them explicitly:
+
+```bash
+git push origin v1.0          # push one specific tag
+git push origin --tags         # push all local tags
+```
+
+**Pull tags from the remote:**
+
+```bash
+git fetch --tags
+```
+
+Most modern git configurations auto-fetch tags during regular `git fetch`. The explicit form is for when they don't.
+
+**Delete a tag locally:**
+
+```bash
+git tag -d v1.0
+```
+
+**Delete a tag on the remote:**
+
+```bash
+git push origin --delete v1.0
+```
+
+(Be very careful, deleting a remote tag changes the public release record. Almost always you want to ADD a corrected tag, not delete the old one.)
+
+### Semantic Versioning (semver), the naming convention
+
+You can name tags anything: `v1.0`, `release-january-2026`, `the-good-one`. But the industry convention is **Semantic Versioning** (semver). It looks like:
+
+```
+MAJOR.MINOR.PATCH
+```
+
+For example: `v1.0.0`, `v2.3.7`, `v0.42.1`.
+
+The three numbers communicate the kind of change since the last release:
+
+- **MAJOR** (the first number): incremented when you make **incompatible** changes. Breaking the API. Removing a feature. Changing behavior in ways that consumers must respond to.
+- **MINOR** (the second number): incremented when you add functionality in a **backward-compatible** way. New features. New API endpoints. Things consumers can opt into.
+- **PATCH** (the third number): incremented when you make **backward-compatible bug fixes**. Internal fixes that consumers don't need to know about beyond "the bug is gone."
+
+**Examples:**
+
+- `v1.0.0` -> `v1.0.1`, bug fix (PATCH bump)
+- `v1.0.1` -> `v1.1.0`, new feature, backward compatible (MINOR bump)
+- `v1.1.0` -> `v2.0.0`, breaking change (MAJOR bump)
+- `v2.0.0` -> `v2.0.1`, bug fix in the new major version (PATCH bump)
+
+**The 0.x.y rule:** versions starting with 0 (like `v0.5.2`) signal "pre-1.0; anything might change." Many projects stay in 0.x for months or years while the API stabilizes. Reaching `v1.0.0` is the public commitment that future MAJOR bumps will only happen for genuine breaking changes.
+
+**Pre-release identifiers** (optional): tags like `v2.0.0-alpha.1`, `v2.0.0-beta.3`, `v2.0.0-rc.1` (release candidate) signal "this is heading toward v2.0.0 but isn't there yet." Consumers know it's experimental.
+
+**Build metadata** (optional): `v2.0.0+build.20260610.abc1234` adds machine-readable build info after a `+`. Rarely needed except for build pipelines.
+
+**Why semver matters:** when consumers see your tag, they know IMMEDIATELY what level of risk an upgrade is. A patch bump (v1.0.0 to v1.0.1)? Probably safe to upgrade without testing. A major bump (v1.0.0 to v2.0.0)? Read the release notes carefully; expect breaking changes. The convention is the contract.
+
+**The full semver spec** lives at [semver.org](https://semver.org/). It's short (about 1,500 words) and worth reading once.
+
+### Release notes, the announcing mechanism
+
+A tag marks the commit. Release notes explain what's in it.
+
+Release notes serve multiple audiences:
+
+- **Users** want to know what's new, what's fixed, what's broken
+- **Operators** want to know what to expect during deploy, migration steps, rollback considerations
+- **Developers** want to know API changes, deprecations, behavior shifts
+- **Auditors** want a complete record of what shipped when
+
+A canonical release note structure:
+
+```markdown
+# v2.0.0 - 2026-06-10
+
+## Highlights
+One-paragraph summary of the big things in this release.
+
+## Breaking changes
+- Removed `legacy-api/v1/` endpoints (replaced by `api/v2/`)
+- Changed default timeout from 30s to 60s
+- ...
+
+## New features
+- Added Stripe Tax integration to checkout
+- Added bulk-import for product catalogs
+- ...
+
+## Improvements
+- Reduced payment-flow latency by ~40% (from 280ms to 165ms p99)
+- Cleaned up error messages on validation failures
+- ...
+
+## Bug fixes
+- Fixed login redirect dropping the `state` parameter (#1234)
+- Fixed cart total miscalculation when discount + gift card combined (#1245)
+- ...
+
+## Migration notes
+For users upgrading from v1.x:
+- Update API URLs from `/v1/` to `/v2/`
+- Run `migrate.sh` if you're using the self-hosted version
+- ...
+
+## Contributors
+Thanks to @alice, @bob, @charlie, and 23 others for contributions.
+```
+
+Not every release needs every section. A patch release (v1.0.1 to v1.0.2) might only have "Bug fixes." A major release (v1.x to v2.0) probably has all of them. Calibrate to the release.
+
+**Writing tips:**
+
+- **Lead with what users care about.** Highlights first; gory details later.
+- **Use the user's language, not your team's internal jargon.** "Faster checkout" beats "optimized the FooBarService payment path."
+- **Link to issues and PRs.** Anyone debugging "what changed in v2.0?" can drill into the source.
+- **Be honest about breaking changes.** Hiding them angers users when they upgrade and break.
+- **Thank contributors.** For open-source projects especially; it's the polite default and it builds community.
+
+### How releases work across the four workflows (from L9)
+
+The mechanics differ slightly depending on which L9 workflow your team uses.
+
+**Releases in GitHub Flow:**
+
+- Day-to-day: every merge to main deploys (continuous deploy).
+- Releases are formal markers, separate from deploys. You tag a specific main commit as the release.
+- Workflow:
+  1. Decide "this main commit is the release"
+  2. `git tag -a v2.0.0 -m "Release v2.0.0"`
+  3. `git push origin v2.0.0`
+  4. Write release notes (in GitHub's Releases UI, or `CHANGELOG.md`, or both)
+  5. Announce (Slack, Twitter, email, whatever your team does)
+
+**Releases in GitFlow:**
+
+- The release branch is the formal release vehicle. Workflow:
+  1. Cut a `release/v2.0.0` branch off develop
+  2. QA happens on the release branch; bug fixes commit to it
+  3. When ready, merge release branch to main AND back to develop
+  4. Tag the main commit (`git tag -a v2.0.0 -m "Release v2.0.0"`)
+  5. Push the tag
+  6. Delete the release branch
+  7. Write release notes; announce
+
+GitFlow's release branch gives you a place to stabilize before the formal tag. Useful for products where the tagged release is a Big Deal.
+
+**Releases in Trunk-based Development:**
+
+- Continuous deploy to trunk. Releases happen on top of trunk via tags.
+- Often automated: every nightly trunk commit (or every Friday afternoon, or every 100 commits) gets tagged as the next release.
+- Workflow:
+  1. Tag specific trunk commits as releases (often automated)
+  2. Release notes auto-generated from PR titles since the last tag (tools like `git-changelog`, `release-please`, or platform-specific)
+  3. Deploy from the tagged commit
+  4. Announce (often automated too)
+
+Trunk-based teams often have aggressive automation around releases: the tag, the notes, the deploy, the announcement can all happen with one command or via CI/CD.
+
+**Releases in Forking:**
+
+- The maintainer of the canonical repo is the release authority.
+- Contributors don't tag releases; only maintainers do.
+- Workflow: same mechanics as GitHub Flow on the canonical repo (or whichever internal workflow the maintainer uses). The fork model doesn't change the release mechanics; it just clarifies who has authority to tag.
+- Often the release process is documented in `CONTRIBUTING.md` so the community knows the cadence ("we release on the first Tuesday of each month").
+
+### Worked example 1, tagging the v1.0 release of a side project
+
+You built a small library. You've been on `v0.x` for months. The API has stabilized; you've polished documentation; you're ready to commit to `v1.0`.
+
+**Steps:**
+
+1. Make sure main is in the state you want to release. Run tests one more time.
+
+2. Tag the commit:
+
+```bash
+git tag -a v1.0.0 -m "Release v1.0.0: first stable release"
+```
+
+3. Push the tag:
+
+```bash
+git push origin v1.0.0
+```
+
+4. On GitHub, navigate to your repo's Releases section. Click "Draft a new release." Pick `v1.0.0` as the tag. Title: "v1.0.0 - 2026-06-10." Body: your release notes.
+
+5. Publish. GitHub creates the release page. The tag is now publicly associated with the release notes.
+
+6. Announce. Tweet, post on LinkedIn, update README, post in any relevant Slack/Discord. "v1.0.0 is out! Here's what's in it: [link to release notes]."
+
+Total time: 10 minutes for the mechanics + however long it takes you to write the release notes.
+
+### Worked example 2, a patch release fixing a critical bug
+
+You shipped `v2.0.0` a week ago. Users report a critical bug. You fix it on main. Now you need to release `v2.0.1`.
+
+**Steps:**
+
+1. Confirm the fix is on main and tested.
+
+2. Tag the new release:
+
+```bash
+git tag -a v2.0.1 -m "Release v2.0.1: fix critical payment-flow timeout bug"
+```
+
+3. Push:
+
+```bash
+git push origin v2.0.1
+```
+
+4. Create the GitHub release. Body:
+
+```markdown
+# v2.0.1 - 2026-06-10
+
+## Bug fixes
+- Fixed payment-flow timeout when Stripe Tax response exceeds 30s (#1567)
+
+## Notes for operators
+Hotfix release. Recommend immediate upgrade if you saw the timeout in v2.0.0.
+```
+
+5. Publish. Tweet a short alert: "v2.0.1 is out with a critical payment-flow timeout fix. Recommend upgrading if you saw issues."
+
+The release process can be fast when the change is small. A patch release shouldn't feel ceremonial; the ceremony is for major releases.
+
+### Worked example 3, a pre-release for testing
+
+You're working toward `v3.0.0` but it's not ready. You want trusted users to try a preview. Tag a pre-release:
+
+```bash
+git tag -a v3.0.0-beta.1 -m "v3.0.0 beta.1: feature-complete, awaiting QA"
+git push origin v3.0.0-beta.1
+```
+
+On GitHub, when creating the release, check "This is a pre-release." This flags the release in the Releases UI so users know it's not stable.
+
+Pre-releases are normal in mature projects. They get feedback from early adopters before the formal release. Beta users find bugs you didn't.
+
+The version progression might look like:
+
+```
+v3.0.0-alpha.1
+v3.0.0-alpha.2
+v3.0.0-beta.1
+v3.0.0-beta.2
+v3.0.0-rc.1     (release candidate)
+v3.0.0-rc.2
+v3.0.0          (the actual release)
+```
+
+Each pre-release tag is a distinct point in history; users can opt in.
+
+### Worked example 4, auto-generating release notes from PR titles
+
+You have 30+ PRs merged since the last release. Writing release notes by hand is tedious. Many tools auto-generate from PR titles.
+
+The pattern (using GitHub):
+
+1. Configure `.github/release.yml` to define categories and how to populate them.
+2. When you create the release on GitHub, click "Generate release notes", GitHub auto-fills from PRs merged since the last tag, organized by category.
+3. Edit the auto-generated notes for clarity and add a Highlights section at the top.
+
+For this to work well, your team's PR titles need to be informative (L6 discipline pays off here). "Fix login bug" doesn't tell users much; "Fix login redirect dropping state parameter for OAuth flows (#1234)" does.
+
+Tools like [release-please](https://github.com/googleapis/release-please) (Google) and [semantic-release](https://github.com/semantic-release/semantic-release) can fully automate the release process: they read your commit messages, decide the next semver number, write release notes, create the tag, and publish, all triggered by a merge to main.
+
+### A note for experienced developers
+
+If you came from SVN, the closest concept to a tag is a "branch you never commit to" (because SVN tags are technically just branches by convention). Git tags are a distinct object type, with their own semantics. Stop thinking "branch I never commit to"; start thinking "immutable named pointer."
+
+If you came from Mercurial, hg tags work similarly but are stored as commits in `.hgtags`. Git tags are stored as ref files (`.git/refs/tags/`). The conceptual model is the same; the implementation is cleaner in git.
+
+If you came from a Maven/npm/Cargo background where versioned releases happen automatically based on package manifest version bumps, git tags are still the underlying mechanism even when the package manager hides it. Most package registries (npm, PyPI, crates.io, Maven Central) require a git tag matching the published version. You're tagging; the package manager is making it nicer to use.
+
+### A useful frame for managers and technical product managers
+
+Five observations worth carrying to non-engineering conversations.
+
+**First**, releases are how engineering communicates with the rest of the company. Marketing tweets about "v2.0 is out"; sales uses "we shipped feature X in v1.5"; support tells customers "upgrade to v2.0.1 for that fix." Without versioned releases, these conversations get fuzzy. The lift from formal releases is communication clarity across the org.
+
+**Second**, semantic versioning is a contract with users. A patch release signals "safe to upgrade"; a major release signals "test before upgrading." Teams that follow semver build trust; teams that bump majors casually erode it. The discipline is worth coaching engineers on.
+
+**Third**, release notes are marketing material. A well-written release note can drive engagement, recover lost customers, and generate social-media attention. A bad release note makes engineering look uncommunicative. Investing in good release notes pays off.
+
+**Fourth**, the choice of release cadence is a product decision, not an engineering preference. Some products benefit from frequent small releases (SaaS web apps, often weekly). Others benefit from infrequent larger releases (mobile apps, every few months). Pick the cadence that matches your users' upgrade behavior + your team's velocity.
+
+**Fifth**, automated release-note generation isn't lazy; it's correct. The human contribution is editing and adding context. The mechanical work (categorizing PRs, listing fixes) is what computers are good at. Many mature teams have fully automated release pipelines and benefit from the consistency.
+
+**For technical product managers specifically:** when engineering ships features without versioned releases, you can't easily answer "what shipped in March?" or "what version is customer X on?" Encouraging the team to tag releases (even if continuous deploy is the deployment model) gives you a vocabulary for these conversations.
+
+### A foreshadowing note for Phase 4
+
+In Phase 4 (multi-agent teams), releases become the synchronization point between humans and agents.
+
+The pattern that's emerging:
+- Agents commit continuously to trunk (small commits, behind flags)
+- A periodic release tag is cut (often automated, sometimes human-triggered)
+- The release tag is what gets reviewed for "what did the agents collectively produce?"
+- Release notes are auto-generated from agent commit messages, then human-edited
+
+This makes releases the human-readable summary of high-frequency agent activity. Without releases, the agent commit log is a firehose; with releases, humans can engage with weekly or monthly summaries.
+
+The Clawless 2026-06-04 sprint pattern (six agents, Lead integrating, founder reviewing) implicitly created a release at the end of each track. Each track promotion to production was effectively a release event. The discipline of formally tagging it (`clawdemy-v2026.06.04`) would have provided a marker for "this is what the sprint produced."
+
+L14 covers multi-agent specifics; L10's release primitives are the substrate that L14 builds on.
+
+### Concrete scenarios across team scales
+
+**Scenario A, solo developer publishing a side-project library.**
+
+You built a small npm package. You publish v1.0.0. Subsequent releases as you add features.
+
+The discipline: tag every release. Push to GitHub Releases. Auto-publish to npm from CI on tag push. Release notes don't need to be elaborate; one bullet per change.
+
+**Scenario B, 30-person SaaS team using continuous deploy.**
+
+Continuous deploy means every merge ships. But the team still wants tags for "what was deployed at 3pm Tuesday."
+
+The discipline: tag every Friday afternoon at the same time. Or tag every merge to main automatically. Or tag every Nth merge. Or tag manually when there's a marketing announcement. The exact cadence is a team choice; the discipline of "we always have tags" is the load-bearing part.
+
+**Scenario C, mobile app team shipping versioned releases.**
+
+App Store reviews take 24 hours. Each release is a Big Deal. Release notes ship to users via the App Store.
+
+The discipline: tag every release that goes to the App Store. Release notes are user-visible (App Store description). Pre-releases use TestFlight (Apple's beta testing). The semver discipline carries weight here because users see version numbers directly.
+
+**Scenario D, open-source library with 50 contributors.**
+
+Maintainer is the release authority. Contributors PR; maintainer reviews + merges + tags releases.
+
+The discipline: monthly release cadence (or quarterly, or whatever the project commits to). Release notes auto-generated from PR titles. Pre-releases for major version bumps to give early adopters time to try. Tag pushes trigger CI to publish to package registries.
+
+**Scenario E, multi-agent AI workflow shipping continuously.**
+
+Agents commit small changes constantly. Lead orchestrator integrates. Periodic releases summarize a sprint or a week of work.
+
+The discipline: automated release tagging (every Friday, or every 100 commits, or per-track completion). Auto-generated release notes from agent commit messages, edited by Lead. Human-readable summary of high-frequency agent activity.
+
+### The stay-calm psychology for releases
+
+Three principles for staying calm about formal releases:
+
+**1. A release is just a tag with notes.** All the ceremony is downstream of "git tag -a vX.Y.Z" + "git push origin vX.Y.Z" + writing some text. The mechanics are trivial; the human time is in writing good notes.
+
+**2. Wrong releases are recoverable.** If you tag the wrong commit, delete the tag (`git push origin --delete vX.Y.Z`) and tag the right one. If the release shipped a critical bug, ship vX.Y.Z+1 with the fix. Nothing is permanent.
+
+**3. Cadence beats perfectionism.** A team that ships v1.5.3 every Friday is healthier than a team that ships v2.0.0 every six months. Iterate quickly; mistakes get corrected fast; users see continuous progress.
+
+### What you can do now
+
+By the end of L10 you can:
+- Explain what a git tag is and how it differs from a branch
+- Create annotated tags with `git tag -a vX.Y.Z -m "message"`
+- Push tags to a remote with `git push origin vX.Y.Z` or `--tags`
+- Apply semantic versioning (MAJOR.MINOR.PATCH) to choose the right version
+- Write release notes that serve users, operators, developers, and auditors
+- Recognize how each of the four workflows handles releases
+- Use pre-release identifiers (alpha, beta, rc) for early-access releases
+- Reason about cadence and automation choices for your team's context
+
+L11 covers two more powerful primitives: **cherry-pick** (moving commits between branches) and **stash** (saving in-progress work without committing). Both are tools for advanced workflows where the L1-L10 primitives need composition.
+
+### What's next in Phase 3
+
+- **L11 Cherry-pick and stash**, moving commits between branches; saving in-progress work
+- **L12 Rebase, deeper**, interactive rebase, history cleanup, rebase vs merge tradeoffs
+
+L12 closes Phase 3. Phase 4 (L13-L16) then covers multi-agent teams, the unique angle of this track.
+
+### Voice anchor (carried from L1-L9)
+
+> Git stores snapshots. Every other command is just navigating those snapshots.
+
+A tag is a label on a specific snapshot that never moves. A release is "this snapshot, plus the human-readable explanation of why it matters." Tags + release notes turn the snapshot graph into a human-readable timeline of "what shipped when."

@@ -1,0 +1,622 @@
+---
+title: 'Lesson: Rebase, deeper'
+description: A deep treatment of rebase. Interactive rebase for history cleanup (pick, reword, squash, fixup, drop, reorder). The rebase-vs-merge decision under pressure. The hard rule about rebasing published commits and what happens when you break it. How to recover from a rebase gone wrong. By the end of L12 you can clean up a feature branch's messy commits into a reviewable story, choose rebase vs merge with confidence, and back out of any rebase safely.
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+### The lesson where "my feature branch is a mess" becomes a clean reviewable story
+
+You've been heads-down on a feature for three days. Twelve commits. Half of them are "WIP," some say "fix typo," one says "I think this works now," another says "actually fix the same typo I tried to fix earlier." You're done with the feature. It works. Tests pass. You're ready to open a PR.
+
+You also know, looking at your branch, that no reviewer is going to thank you for this commit history. They're going to either tell you to clean it up or grit their teeth and review the whole diff as one undifferentiated blob.
+
+You have a choice. You can leave the history as-is, or you can spend ten minutes turning twelve messy commits into four clean ones that each tell part of the story: "add data model," "wire up the API endpoint," "add the UI form," "add tests." Each commit reviewable on its own. Each commit a reasonable rollback point.
+
+The tool that lets you do that is **interactive rebase**. `git rebase -i`. The "i" stands for interactive, and what it does is let you replay your branch's commits one at a time with the chance to edit, combine, drop, reword, or reorder each one along the way.
+
+L12 is the deep treatment of rebase. We touched it lightly in L5 (when you used it to keep your feature branch on top of an advancing main) and L9 (when we contrasted rebase-merge workflows with merge-merge workflows). Now we get into the actual mechanics, the patterns, the recovery moves, and the one hard rule you cannot break.
+
+L12 closes Phase 3. After L12, we cross into Phase 4, the multi-agent territory.
+
+### Quick recap: what plain rebase does
+
+Before getting interactive, a fast review of plain rebase.
+
+You have a feature branch off main. While you were working, main advanced. Your branch is now based on an old commit. If you merge main into your branch, you get a merge commit in your history. If you rebase your branch onto main, your commits are replayed on top of the new main as if you had always been working on top of the latest.
+
+```bash
+git checkout feature/my-feature
+git rebase main
+```
+
+Mechanically: git rewinds your branch to where it diverged from main, fast-forwards your branch pointer to the tip of main, then replays each of your commits on top one by one. Each replayed commit gets a new SHA (because its parent changed). Your branch ends up linear: latest-main to your-commit-1 to your-commit-2 to ... to HEAD.
+
+If a replayed commit conflicts with main, rebase pauses. You resolve, `git add`, then `git rebase --continue` (or `--abort` to give up).
+
+Plain rebase is non-interactive: it just replays every commit in order, no chance to edit them. Interactive rebase is plain rebase with a "stop and let me edit" step inserted at the start.
+
+### What interactive rebase adds
+
+```bash
+git rebase -i HEAD~5
+```
+
+The `HEAD~5` part means "the commit 5 back from where I am now." So this command says: "Take the last 5 commits and let me edit them as I replay them."
+
+When you run this, git opens your text editor with a "todo list" that looks something like:
+
+```
+pick a8d3e22 wip: initial spike at feature
+pick 7f9a44b wip: started form fields
+pick c5b2f01 fix typo
+pick e1d99c4 actually wire up the API
+pick fe5d23a wip: tests
+```
+
+Each line is a commit, listed oldest-first (note: this is the OPPOSITE of `git log`, which is newest-first). Each line starts with an action keyword (`pick` is the default).
+
+You edit the file. You change keywords. You reorder lines. You delete lines. You save and close the editor. Git then replays the commits according to your edited todo list.
+
+### The action keywords
+
+**`pick`**: Replay this commit as-is. No changes. This is the default.
+
+**`reword`** (or `r`): Replay the commit but stop and let you edit the commit message before continuing. Use this to fix unclear messages.
+
+**`edit`** (or `e`): Replay the commit, but pause after replaying and let you make changes to the working tree (add files, change the diff). Then you `git commit --amend` and `git rebase --continue`. Use this to retroactively fix what's IN a commit (e.g. you forgot to include a file).
+
+**`squash`** (or `s`): Combine this commit into the PREVIOUS one. The two commits merge into one. Git opens the editor with BOTH commit messages so you can write a new combined message. Use this to merge related commits into a single coherent unit.
+
+**`fixup`** (or `f`): Same as squash, but DISCARD this commit's message. The combined commit uses ONLY the previous commit's message. Use this for "oops, fix typo" commits where the message doesn't add value.
+
+**`drop`** (or `d`): Delete this commit entirely. Its changes are removed. Use carefully; this is destructive (though recoverable via reflog).
+
+**`exec`** (or `x`): Run a shell command after this commit (e.g. run tests). If the command exits non-zero, the rebase pauses. Useful for "run tests after every commit during rebase" patterns.
+
+**`break`** (or `b`): Pause the rebase here for any reason. You can poke around, run commands, then `git rebase --continue` when ready.
+
+**Reordering**: Just move the lines around. Git replays in the new order.
+
+### A concrete worked example: the messy feature branch
+
+You start with:
+
+```
+pick a8d3e22 wip: initial spike at feature
+pick 7f9a44b wip: started form fields
+pick c5b2f01 fix typo
+pick e1d99c4 actually wire up the API
+pick fe5d23a wip: tests
+```
+
+You want to end with four clean commits: "add data model" (which includes the model and the form structure), "wire up API endpoint," "add UI form," "add tests."
+
+You edit the todo list:
+
+```
+pick a8d3e22 wip: initial spike at feature
+fixup 7f9a44b wip: started form fields
+fixup c5b2f01 fix typo
+pick e1d99c4 actually wire up the API
+pick fe5d23a wip: tests
+```
+
+Wait, that's not quite right. The "spike" had model code AND some form bits, and the second WIP added more form fields. Let me think again.
+
+OK new plan: squash the spike and the form commits together (keep both messages temporarily, then rewrite). Drop the typo fix into the form commit. Rename to clean messages.
+
+```
+reword a8d3e22 wip: initial spike at feature
+fixup 7f9a44b wip: started form fields
+fixup c5b2f01 fix typo
+reword e1d99c4 actually wire up the API
+reword fe5d23a wip: tests
+```
+
+Save. Git starts replaying.
+
+- a8d3e22 is reworded. Editor opens. You change the message to "add data model and form scaffold." Save.
+- 7f9a44b is fixed up into the previous commit. No editor opens. The combined commit's message is still "add data model and form scaffold."
+- c5b2f01 is fixed up into the same combined commit. Same result.
+- e1d99c4 is reworded. Editor opens. You change the message to "wire up API endpoint for form submission." Save.
+- fe5d23a is reworded. Editor opens. You change the message to "add tests for data model, form, and API." Save.
+
+Done. Your branch now has three clean commits:
+1. add data model and form scaffold
+2. wire up API endpoint for form submission
+3. add tests for data model, form, and API
+
+Each one reviewable, each one a reasonable rollback point. Hooray.
+
+(You can also do this in finer-grained pieces by using `edit` to retroactively split a commit, but for most cleanup, squash + reword is enough.)
+
+### The fixup-and-autosquash workflow
+
+The pattern above (interactive rebase before opening a PR) is reactive: you let the mess accumulate, then clean it at the end. A more proactive pattern keeps the mess from accumulating in the first place. It's called **fixup commits with autosquash**.
+
+The idea: as you work, when you realize a previous commit needs a small tweak (you forgot a comma, missed a variable rename), don't make a new commit called "fix typo from earlier commit." Instead, make a commit using `--fixup`:
+
+```bash
+git commit --fixup=abc1234
+```
+
+Where `abc1234` is the SHA of the commit you're tweaking. Git creates a commit with the message `fixup! <original commit message>`. The `fixup!` prefix is a marker.
+
+Later (before opening a PR), you run:
+
+```bash
+git rebase -i --autosquash main
+```
+
+The `--autosquash` flag tells git to AUTO-REARRANGE your fixup commits next to their targets and pre-fill the `fixup` action in the todo list. You just confirm and save. The fixup commits get squashed automatically.
+
+The full flow:
+
+```bash
+# Working on a feature
+git commit -m "add data model"           # commit abc1234
+# ... continue work ...
+git commit -m "wire up API"              # commit def5678
+# ... realize you missed a field in the data model ...
+git add models.py
+git commit --fixup=abc1234               # creates "fixup! add data model"
+# ... continue work ...
+git commit -m "add tests"                # commit ghi9012
+
+# Before opening PR
+git rebase -i --autosquash main          # auto-rearranges fixup, you just save
+
+# History is now: add data model (with the fixup folded in), wire up API, add tests.
+```
+
+This is the most efficient cleanup pattern once you internalize it. The cost is one extra flag (`--fixup`); the benefit is no last-minute cleanup sprint before opening the PR.
+
+To make this even smoother, set:
+
+```bash
+git config --global rebase.autosquash true
+```
+
+Now `git rebase -i main` automatically does autosquash (without the explicit flag). Many developers consider this a near-required config.
+
+### Rebase conflicts
+
+Just like plain rebase, interactive rebase can hit conflicts during replay. The conflict-handling pattern is the same:
+
+```
+CONFLICT (content): Merge conflict in src/foo.py
+error: could not apply abc1234... your commit message
+```
+
+Three options:
+- Resolve the conflict in the file, then `git add` and `git rebase --continue`.
+- `git rebase --skip`: skip this commit entirely (its changes are lost).
+- `git rebase --abort`: give up the whole rebase, return to the pre-rebase state.
+
+Conflict resolution during rebase uses the SAME process as merge conflict resolution (L7). The conflict markers look the same. The tools (your editor or a merge tool like `vimdiff`, `meld`, VS Code's conflict UI) work the same.
+
+One subtlety: when rebasing, conflicts can happen on EACH commit in the replay. So if commit 1 conflicts and you resolve it, commit 2 might also conflict (against a now-modified context). Rebase pauses again. You resolve again. And so on.
+
+If a rebase has many conflicts, sometimes the right move is to abort and approach it differently: squash to fewer commits first (locally), then rebase the squashed version, where there's only one conflict to resolve instead of N.
+
+### The hard rule: don't rebase published commits
+
+This is the one part of rebase that has bitten every developer at least once. The rule:
+
+> **If you have pushed a commit to a shared branch, don't rebase it.**
+
+Why: rebase rewrites history. The original commits (with their original SHAs) get replaced with new commits (different SHAs). If someone else has already pulled the original commits, their local copy diverges from the new history. When you push the rewritten history, they pull, and git tries to figure out what to do with two conflicting histories.
+
+The result is one of:
+- A confusing merge between the two histories (extra commits, ugly graph).
+- Your push gets rejected (good outcome; git stops you).
+- You force-push (`git push --force`), overwriting the remote with your new history, and your teammates' next pull fails or, worse, succeeds but their local work is now based on commits that no longer exist on the remote. They have to recover by hand.
+
+**The corollary:** force-pushing to a shared branch (like `main`) is one of the most dangerous things you can do in git. Most teams forbid force-push to main entirely (via branch protection rules on GitHub/GitLab). Force-pushing to your OWN feature branch is fine and expected (especially when cleaning up before PR review).
+
+**When IS it safe to rebase?**
+- Your local branch that you haven't pushed yet: fully safe.
+- Your feature branch that you've pushed but nobody else has pulled: safe, but use `--force-with-lease` (not plain `--force`) to be defensive.
+- Any branch you have explicit team agreement to rewrite (e.g. some teams use "rebase your feature branch before merging" as a workflow, with everyone aware): fine, with care.
+
+**When is it absolutely NOT safe to rebase?**
+- The shared main/master/trunk branch. Don't do this. Ever.
+- Long-lived release branches that multiple teams pull from.
+- Any commit that someone else has built work on top of.
+
+### The "force-with-lease" safety net
+
+When you DO need to force-push a rebased feature branch (because you cleaned up history), use `--force-with-lease` instead of `--force`:
+
+```bash
+git push --force-with-lease
+```
+
+The difference: `--force-with-lease` only overwrites the remote IF the remote is still at the commit you last fetched. If someone else has pushed to the branch since your last fetch, your push is rejected and you get a chance to investigate before overwriting their work.
+
+`--force` doesn't check. It just overwrites. If your teammate just pushed a critical fix to your shared feature branch and you force-push your rebase, their fix is gone (recoverable via reflog, but a panicky few minutes).
+
+The discipline: if you find yourself reaching for `git push --force`, stop and reach for `git push --force-with-lease` instead. The extra check costs nothing in the normal case and saves your teammate when something unusual is happening.
+
+### Recovery: when a rebase goes wrong
+
+You started a rebase. Things got messy. You're not sure how to get out. Here's the toolkit:
+
+**Mid-rebase, give up:**
+
+```bash
+git rebase --abort
+```
+
+Returns the working tree and HEAD to where they were BEFORE you started the rebase. Safest move when you're stuck.
+
+**Already finished the rebase, want to go back:**
+
+The reflog has your back. The reflog records every move HEAD made, regardless of whether commits are "reachable" via branches.
+
+```bash
+git reflog
+```
+
+Output looks like:
+
+```
+fe5d23a HEAD@{0}: rebase finished: returning to refs/heads/feature/X
+fe5d23a HEAD@{1}: rebase: add tests
+e1d99c4 HEAD@{2}: rebase: wire up API
+a8d3e22 HEAD@{3}: rebase: add data model
+9b2c4f8 HEAD@{4}: rebase (start): checkout main
+4d0a91e HEAD@{5}: commit: wip: tests
+c5b2f01 HEAD@{6}: commit: fix typo
+a8d3e22 HEAD@{7}: commit: wip: started form fields
+7f9a44b HEAD@{8}: commit: wip: initial spike at feature
+```
+
+The line `HEAD@{5}` is "before the rebase started." To return to that exact state:
+
+```bash
+git reset --hard HEAD@{5}
+```
+
+Your branch is back to its pre-rebase state. All your messy commits are restored. The rebase is undone.
+
+**Caveat:** `git reset --hard` is destructive of WORKING-TREE changes (it discards anything not committed). Don't run it with uncommitted work you care about. If you have uncommitted work, stash it first (`git stash`).
+
+**Already force-pushed the rebased version, then realized it was wrong:**
+
+If you (or someone) still has the old pre-rebase commits LOCALLY (via reflog), you can reset to the old version and force-push BACK. This is the "I made it worse, then I made it worse again" recovery. It works but is awkward. The remedy is to be more careful with force-push in the first place.
+
+### When rebase is right vs when merge is right (revisited)
+
+L5 and L9 introduced this tradeoff. L12 adds nuance:
+
+**Use rebase when:**
+- You're cleaning up your own feature branch before PR review. (Most common use.)
+- Your team has agreed on a linear-history convention and "rebase your feature on top of main" is the merge style.
+- You're catching your feature branch up to main as you work (rebase periodically; force-push your feature branch as needed using `--force-with-lease`).
+- You want a clean, linear story when someone reads `git log` later.
+
+**Use merge when:**
+- The branch you're integrating has been pushed and others are looking at it. Don't rewrite published history.
+- You want to preserve the literal honest history (this branch was developed in parallel with main; the merge commit shows when it joined).
+- You're integrating long-lived branches (release branches, infrastructure migrations) where the parallel-development story matters for future debugging.
+- Your team prefers merge-commit workflows for the audit trail or because of CI/release tooling that depends on merge commits.
+
+**The L9 framing summarized:**
+- GitHub Flow means rebase before merge (clean linear history)
+- GitFlow means merge (preserve branch story for develop/release/hotfix audit trails)
+- Trunk-based development means squash-and-merge or rebase (very short feature lifetimes, clean main)
+- Forking workflow means cherry-pick or rebase (depending on the maintainer's preference)
+
+### Worked example 1: Cleaning up before PR review
+
+**Setup:** You've been working on `feature/customer-search` for two days. `git log feature/customer-search --oneline` shows seven commits:
+
+```
+4f3a2b1 (HEAD -> feature/customer-search) wip: more tests
+a8c9d2e refactor query builder
+b1e3f4g wip: index work
+c5d7e8f wip: search basics
+d9e0f1g typo in comment
+e2f3g4h hack: use customers table
+f5g6h7i (main) base commit
+```
+
+You want a clean, three-commit version for the PR: "add customer search query," "add database index," "add tests."
+
+**Step 1:** Make sure you're on the right branch and have committed everything (no dirty working tree).
+
+```bash
+git status   # clean
+git log --oneline | head -10   # confirm the seven commits above
+```
+
+**Step 2:** Start the interactive rebase from main:
+
+```bash
+git rebase -i main
+```
+
+Editor opens with all six commits between main and HEAD (oldest first):
+
+```
+pick e2f3g4h hack: use customers table
+pick d9e0f1g typo in comment
+pick c5d7e8f wip: search basics
+pick b1e3f4g wip: index work
+pick a8c9d2e refactor query builder
+pick 4f3a2b1 wip: more tests
+```
+
+**Step 3:** Edit the todo list to your plan:
+
+```
+reword e2f3g4h add customer search query
+fixup d9e0f1g typo in comment
+fixup c5d7e8f wip: search basics
+reword a8c9d2e refactor query builder
+pick b1e3f4g wip: index work
+reword 4f3a2b1 wip: more tests
+```
+
+Wait, that doesn't quite match. The refactor and "search basics" overlap conceptually. Let me re-plan.
+
+```
+reword e2f3g4h add customer search query
+fixup d9e0f1g typo in comment
+fixup c5d7e8f wip: search basics
+fixup a8c9d2e refactor query builder
+reword b1e3f4g add database index
+reword 4f3a2b1 add tests
+```
+
+Save and close.
+
+**Step 4:** Git starts replaying:
+- e2f3g4h: editor opens. You change "hack: use customers table" to "add customer search query." Save.
+- d9e0f1g: fixed up into previous (no editor).
+- c5d7e8f: fixed up into previous (no editor).
+- a8c9d2e: fixed up into previous (no editor).
+- b1e3f4g: editor opens. You change "wip: index work" to "add database index for customer search." Save.
+- 4f3a2b1: editor opens. You change "wip: more tests" to "add tests for customer search query and index." Save.
+
+**Step 5:** Done. `git log feature/customer-search --oneline`:
+
+```
+new5h7i (HEAD -> feature/customer-search) add tests for customer search query and index
+new4g6h add database index for customer search
+new3f5g add customer search query
+f5g6h7i (main) base commit
+```
+
+Three clean commits, each one reviewable.
+
+**Step 6:** Force-push (with-lease) and open the PR:
+
+```bash
+git push --force-with-lease origin feature/customer-search
+```
+
+Open the PR. Reviewer sees three coherent commits instead of seven messy ones. PR review is faster and more thorough because the diff is digestible.
+
+### Worked example 2: The fixup-and-autosquash flow during development
+
+**Setup:** You're starting a new feature. You decide to keep the history clean as you go using fixup.
+
+```bash
+git checkout -b feature/profile-redesign main
+
+# First commit: data model
+git add models/profile.py
+git commit -m "extend Profile model with new fields"
+# SHA: a1b2c3d
+
+# Continue work on the form
+git add templates/profile_form.html
+git commit -m "add profile edit form"
+# SHA: d4e5f6g
+
+# Realize the data model needs one more field
+git add models/profile.py
+git commit --fixup=a1b2c3d
+# creates "fixup! extend Profile model with new fields"
+
+# Continue with the API
+git add api/profile.py
+git commit -m "wire up profile update API"
+# SHA: h7i8j9k
+
+# Realize the form has a small bug
+git add templates/profile_form.html
+git commit --fixup=d4e5f6g
+# creates "fixup! add profile edit form"
+
+# Done with feature. Clean up.
+git rebase -i --autosquash main
+```
+
+When the editor opens, the todo list is already arranged:
+
+```
+pick a1b2c3d extend Profile model with new fields
+fixup <sha>  fixup! extend Profile model with new fields
+pick d4e5f6g add profile edit form
+fixup <sha>  fixup! add profile edit form
+pick h7i8j9k wire up profile update API
+```
+
+You just save the file as-is. Git replays, applying the fixups automatically. Final history:
+
+```
+new3 (HEAD -> feature/profile-redesign) wire up profile update API
+new2 add profile edit form
+new1 extend Profile model with new fields
+... (main)
+```
+
+Clean from the start. No last-minute cleanup needed.
+
+### Worked example 3: Rebase conflict during a long feature
+
+**Setup:** You've been on `feature/X` for a week. `main` has moved forward by 60 commits. You want to catch up.
+
+```bash
+git fetch origin
+git rebase origin/main
+```
+
+After replaying your first commit, conflict:
+
+```
+CONFLICT (content): Merge conflict in src/billing.py
+error: could not apply abc1234... feature/X: add billing flow
+```
+
+You open `src/billing.py`. You see conflict markers. The conflict is between YOUR commit's change and main's recent refactor of the billing module. You resolve carefully (perhaps consulting a teammate familiar with the recent refactor), then:
+
+```bash
+git add src/billing.py
+git rebase --continue
+```
+
+Git applies your next commit. Another conflict, but smaller: your code referenced an old function name. You update to the new name. Continue.
+
+After three more conflicts (in different files), the rebase finishes. Your branch is now based on the latest main with all your commits replayed in order. You force-push:
+
+```bash
+git push --force-with-lease origin feature/X
+```
+
+If the rebase had been too painful (say, twenty conflicts because main refactored half the codebase), you might have aborted (`git rebase --abort`) and chosen a different approach: merge main into your branch instead (preserves the linear story of when the merge happened, accepts a merge commit in the history).
+
+### Worked example 4: The "I rebased main by mistake" recovery
+
+**Setup:** You're on `main`. You see a few "WIP" commits in the log that someone added by mistake. You think "I'll just clean these up real quick" and run:
+
+```bash
+git rebase -i HEAD~5
+```
+
+You squash a couple of commits and save. The rebase completes. You're feeling clever.
+
+Then your teammate Slacks you: "Did you just push to main? My branch is broken."
+
+You realize: you rewrote main's history. Even before pushing, you've broken local main. If you push (`git push --force`), you'll break it for everyone.
+
+**Recovery, before pushing:**
+
+```bash
+git reflog
+# find the line just before "rebase (start)"
+git reset --hard HEAD@{<N>}
+```
+
+Main is restored. Don't push. Apologize to teammate. Lesson learned.
+
+**Recovery, after pushing force:**
+
+You and the team need to coordinate. The remote main now has the rewritten history. Anyone who had pulled before your push has the old history locally.
+
+The simplest recovery: someone who has the old history locally `git push --force-with-lease` to restore the old history. Everyone else pulls the restored version. Anyone who pulled the broken version in between needs to reset their main to the restored remote.
+
+This is a few hours of confusion at minimum, and a real chance someone loses work in the chaos. Avoid getting here. Use branch protection on main (most platforms support "no force-push" rules). Use `--force-with-lease` instead of `--force`. Triple-check the branch before rebasing.
+
+### A note for experienced developers
+
+If you're coming from Mercurial: `hg histedit` is the equivalent of `git rebase -i` (same concept, same actions). Mercurial's `hg rebase` is the equivalent of plain `git rebase`. The mental model transfers directly. The published-history rule is similar: Mercurial's "public phase" prevents rewriting commits that have been pushed.
+
+If you're coming from SVN: there's no SVN equivalent of rebase. SVN history is immutable from the developer's perspective. Cleaning up before commit means using local patches (`svn diff > my.patch`, edit, re-apply) which is much heavier. The git ability to freely rewrite local history is one of the things SVN users most appreciate when they switch.
+
+If you're coming from Perforce: `p4 obliterate` removes commits from history but is an admin operation and not really used for cleanup. The git-style "rewrite my local branch freely, push the clean version" pattern doesn't have a direct P4 equivalent. P4 users often do branch cleanup by re-doing their work as a single shelved changelist.
+
+The general principle: git's willingness to let you rewrite local history is a powerful feature, with the inviolable rule "don't rewrite history other people have pulled." Most other VCSs either forbid rewriting entirely (SVN, P4) or scope it carefully (Mercurial's public phase). Git puts the responsibility on you.
+
+### A useful frame for managers and technical product managers
+
+When your engineers talk about "rebasing" or "cleaning up the branch before PR," here's the gist:
+
+- **Clean commit history matters for review velocity.** A PR with three clean commits ("add data model," "wire up API," "add tests") gets reviewed faster and more thoroughly than a PR with twelve WIP commits. Reviewers can read each commit independently, suggest changes per-commit, and trust that each commit is a reasonable rollback point.
+- **Rebase is local cleanup, not a code change.** When an engineer says "I rebased before opening the PR," they didn't change the FINAL state of the code; they just reorganized the history of how they got there. The PR's diff is the same.
+- **The "force-push to main" failure mode is real and costly.** When an engineer accidentally force-pushes to a shared branch and rewrites history, the team loses 2-4 hours of recovery time (sometimes more) and there's a risk of lost work. The most important guardrail is BRANCH PROTECTION on main/master/trunk that forbids force-pushes from anyone. Most platforms support this; it should be turned on for every protected branch.
+- **The "rebase vs merge" choice is workflow philosophy, not technical correctness.** Different teams legitimately prefer different histories. Linear (rebase-merge) reads cleaner. Branched (merge-commit) preserves the honest parallel-development story. Pick one as a team and document it. Either works.
+
+**For TPMs specifically:** the cleanup-before-PR pattern is a real time investment for engineers (10-30 minutes per feature). If your team prioritizes PR throughput over commit-history quality, encourage "squash-and-merge" at the platform level. This collapses all of a feature's commits into one when merged, regardless of how messy the feature branch was. Engineers don't have to clean up; the platform does it at merge time. The trade-off: you lose the per-commit story inside the feature, but you get a tidy main and zero cleanup overhead. Many teams find this a good trade.
+
+### A foreshadowing note for Phase 4
+
+In Phase 4 (L13-L16) we'll see that AI agents working in parallel often produce many small commits as they explore. The fixup-and-autosquash pattern, used by the lead at integration time, is how you turn a fleet's exploratory commits into clean reviewable units. The hard rule about not rewriting published history still applies (the lead rebases LOCALLY before pushing, never after), but the cleanup volume per session is often high. L14 will walk through the specific patterns.
+
+### Concrete scenarios across team scales
+
+**Startup, 3-person team, single product:**
+
+Heavy use of rebase. Small team, fast PR turnaround, everyone comfortable with the local cleanup pattern. "Rebase your branch on main and force-push before opening the PR" is often the documented norm. No team-wide review of the WHY (just the convention), but the practice is uniform.
+
+Squash-and-merge at the platform level is common backup: if someone forgets to clean up, the merge collapses it anyway.
+
+Branch protection on main is essential (force-pushes forbidden). Without it, an early-stage team can lose hours to a single accidental rebase + force-push.
+
+**Mid-size company, 50-person engineering team:**
+
+Mixed. Some teams use rebase-clean before PR; others use squash-and-merge; a few use plain merge commits. Often the choice is per-team or per-repo, documented in the repo's CONTRIBUTING.md.
+
+Engineers occasionally hit the "rebase public history" failure. Recovery is usually quick because the team is small enough that everyone can sync up in a Slack thread, but it's an annoyance.
+
+Interactive rebase is taught as part of onboarding for new hires; the fixup-and-autosquash flow is often a "secret pro tip" that more experienced engineers introduce informally.
+
+**Open-source project with many external contributors:**
+
+Force-pushing to maintainer-controlled branches is forbidden by platform protection rules. Maintainers may rebase contributor PR branches at merge time (via "rebase and merge" button on GitHub, or by hand on harder PRs). Contributors are expected to clean up their PR branch before submission and may be asked to do another cleanup pass during review.
+
+Interactive rebase is treated as a normal expected skill. Newcomer guides cover it. Some projects have automation that detects messy PRs and asks for cleanup.
+
+**Multi-agent team, 6 agents working in parallel:**
+
+The lead does most of the rebase work. Agents commit freely (small, often) to their own branches. At integration time, the lead pulls each agent's branch, runs interactive rebase to clean up the agent's commits into reviewable units, then merges or cherry-picks the cleaned versions into the integration branch.
+
+Agents themselves rarely do interactive rebase: they commit straightforwardly and let the lead handle history hygiene.
+
+The published-history rule applies the same way: the lead rebases LOCALLY before pushing the integration branch, never after.
+
+### The stay-calm psychology for rebase
+
+Two things to internalize.
+
+**One: the reflog is your safety net.** No rebase action is permanent. The reflog records every commit your HEAD has touched, even ones that aren't reachable from any branch anymore. If you do something wrong, `git reflog` shows you every state HEAD was in, and `git reset --hard HEAD@{N}` returns to any of them. This is true for 90 days by default (the reflog's expiry). You essentially can't lose work to a rebase mistake unless you wait three months before noticing.
+
+**Two: the published-history rule is the only inviolable one.** Everything else about rebase is style and convenience. You can rebase or not rebase. You can squash heavily or lightly. You can edit commit messages or leave them alone. None of these decisions can cause irreparable damage. The only operation that can cause real, lasting harm is force-pushing rewritten history to a shared branch. If you avoid that, if you never force-push to main, and you use `--force-with-lease` on your own branches, you can't break anything that isn't recoverable.
+
+The combination of these two mental models is the unlock: aggressively use rebase for local cleanup, defensively use force-with-lease for your own branches, and absolutely never rewrite shared history.
+
+### What you can do now
+
+You can:
+
+- Use `git rebase -i HEAD~N` to clean up your local commits before opening a PR
+- Apply `pick`, `reword`, `squash`, `fixup`, `drop`, and reordering to turn messy WIP commits into clean reviewable history
+- Use `git commit --fixup=<sha>` during development and `git rebase -i --autosquash` at cleanup time to maintain clean history as you work
+- Resolve rebase conflicts the same way as merge conflicts (markers, resolve, `git add`, `git rebase --continue`)
+- Recover from a rebase gone wrong with `git rebase --abort` (mid-rebase) or `git reset --hard HEAD@{N}` from the reflog (post-rebase)
+- Recognize the "don't rebase published history" rule and apply it with `--force-with-lease` for your own branches
+- Choose between rebase and merge for a given situation using the team-policy framing from L9
+
+### Phase 3 closes here
+
+L9 (team workflows) gave you the macro: which workflow your team uses to integrate work. L10 (releases and tags) gave you the marker mechanism: how to formalize "we released v2.0." L11 (cherry-pick and stash) gave you the surgical tools for backports and context switches. L12 (rebase, deeper) gave you the history-cleanup tools and the rules around rewriting.
+
+Together, the four lessons cover everything most engineering teams use day-to-day in their production workflow. After L12 you should be able to drop into nearly any team's git practice (GitHub Flow, GitFlow, trunk-based, forking) and contribute productively from day one.
+
+### What's next in Phase 4
+
+L13 (Worktrees and parallel agents) crosses into the multi-agent territory. Worktrees let you have multiple working directories from a single clone, each on a different branch. The substrate for parallel AI agents (and also a useful tool for human developers doing complex multi-context work). L13 is also the first lesson without a v1 equivalent in most existing git curricula.
+
+L14 builds on L13 with multi-agent integration patterns. L15 covers AI-authored commits and PRs (co-authorship conventions, what the human review changes). L16 closes the track with a speculative-but-grounded look at where git might evolve in an AI-collaborative world.
+
+### Voice anchor (carried from L1-L11)
+
+> Git stores snapshots. Every other command is just navigating those snapshots.
+
+Rebase replays a sequence of snapshots onto a new base, creating new snapshots along the way. Interactive rebase lets you decide which snapshots to keep, combine, or drop before the replay. The reflog records every snapshot HEAD has touched, so you can always navigate back to any prior state. None of it is magic. Once you see the snapshot model, every rebase action is just snapshot bookkeeping.

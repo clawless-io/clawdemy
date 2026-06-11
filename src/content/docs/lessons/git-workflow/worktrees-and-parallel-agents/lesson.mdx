@@ -1,0 +1,548 @@
+---
+title: 'Lesson: Worktrees and parallel agents'
+description: One git command that quietly transforms how you can work with branches, and that becomes essential when AI agents enter the picture. A worktree is a separate working directory attached to the same git repository, with its own branch checked out. You can have main, a feature branch, a release branch, and three agent branches all checked out simultaneously, side by side, in different folders. By the end of L13 you can create and remove worktrees, choose between worktrees and multiple clones, and see why worktrees are the natural substrate for parallel multi-agent work.
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+### The lesson where "I wish I could be on two branches at once" stops being a wish
+
+Here's a situation every working developer hits.
+
+You're mid-feature on `feature/payment-flow`. Three files modified, nothing committed. The work is going well. You'd like to keep going.
+
+A teammate Slacks you: "Can you take a look at my PR for `feature/dashboard-redesign`? I need a review. It's blocking the next sprint."
+
+You face a small but real friction. To check out their branch, you have to switch off your current work. You could commit a WIP commit (clean), or stash (small but real ceremony, recovery if conflicts), or work in a separate clone (have to keep it synced, lots of disk space). None of these are terrible, but they all add overhead to what should be a 10-minute task: spin up their branch, run it, leave a review.
+
+What if you could just say: "Give me a SECOND copy of this repo, in a folder over there, with their branch checked out, side by side with my current work." Two folders, two branches, simultaneous, no interference.
+
+That's a worktree. One command:
+
+```bash
+git worktree add ../review-dashboard feature/dashboard-redesign
+```
+
+You now have a folder `../review-dashboard` (next to your current repo folder) with `feature/dashboard-redesign` checked out. You can `cd ../review-dashboard`, run the dashboard project, test it, leave a review. Your original folder is untouched: `feature/payment-flow` is still there, files still modified, exactly as you left it. When you're done with the review:
+
+```bash
+git worktree remove ../review-dashboard
+```
+
+The folder is gone. Your original work continues uninterrupted.
+
+L13 is about this command and the workflow it unlocks. Worktrees are the quietest power feature in git. Most engineers either never use them or use them once and integrate them deeply into their daily workflow.
+
+L13 is also the **substrate for Phase 4**. The lessons that follow (L14 multi-agent integration patterns, L15 AI-authored commits, L16 the future of git in an AI world) all assume you can run multiple parallel agents, each with their own working directory, all pointing at the same repository. Worktrees are how that works.
+
+### What a worktree is, mechanically
+
+A git repository has two main parts:
+1. The **git directory** (the `.git/` folder), which holds all the history, branches, tags, configuration. The "database."
+2. The **working tree**, which is the regular folder of files you edit. The "scratch space" for one specific branch.
+
+In a normal clone, there's one git directory and one working tree. They live together in one folder.
+
+A worktree is an ADDITIONAL working tree attached to the same git directory. The git directory stays where it is. A new folder somewhere else on your disk becomes a second working tree, with its own branch checked out, its own working state.
+
+So you end up with one shared "database" of history and multiple "scratch spaces" pointing at it. Commits in any scratch space are visible from all the others (because they all share the database). But uncommitted files in one scratch space don't appear in another (because the scratch spaces are separate folders).
+
+The key freedoms:
+- Each worktree can have a different branch checked out.
+- Each worktree has its own uncommitted state: its own modified files, its own stash (well, stashes share the database too, but you get the idea).
+- Each worktree can be in a completely different folder, on a completely different disk partition if you want.
+
+The key constraint:
+- You CANNOT have the same branch checked out in two worktrees simultaneously. Git refuses to let you do this because two scratch spaces trying to commit to the same branch is asking for chaos. (Detached HEAD, where no branch is checked out, is fine in any worktree.)
+
+### Creating a worktree
+
+The basic command:
+
+```bash
+git worktree add <path> <branch>
+```
+
+`<path>` is where the new working tree's folder will live. Relative paths are relative to your current repo's root. `<branch>` is the branch you want checked out in the new worktree.
+
+Common patterns:
+
+**Attach to an existing branch:**
+
+```bash
+git worktree add ../review-dashboard feature/dashboard-redesign
+```
+
+A new folder `../review-dashboard` is created. `feature/dashboard-redesign` is checked out there. If the branch existed only on the remote, git fetches it.
+
+**Create a new branch in the worktree:**
+
+```bash
+git worktree add -b feature/new-thing ../new-feature main
+```
+
+A new folder `../new-feature` is created. A new branch `feature/new-thing` is created off `main` and checked out there.
+
+**Worktree at a specific commit (detached HEAD):**
+
+```bash
+git worktree add --detach ../inspect-old-state abc1234
+```
+
+A new folder is created with the working tree at commit `abc1234` in detached-HEAD mode. Useful for inspecting an old state without affecting any branch.
+
+**Worktree at a tag:**
+
+```bash
+git worktree add ../v1.0-check v1.0
+```
+
+Useful for "let me see exactly what shipped in v1.0" without committing to v1.0 or affecting other state.
+
+### Listing, removing, and pruning worktrees
+
+**List all worktrees attached to this repo:**
+
+```bash
+git worktree list
+```
+
+Output:
+
+```
+/Users/you/projects/myrepo                abc1234 [main]
+/Users/you/projects/review-dashboard       def5678 [feature/dashboard-redesign]
+/Users/you/projects/myrepo-v1.0            ghi9012 (detached HEAD)
+```
+
+Shows path, current SHA, and branch (or "detached HEAD" if no branch).
+
+**Remove a worktree:**
+
+```bash
+git worktree remove ../review-dashboard
+```
+
+Deletes the worktree's folder and removes git's record of it. If the worktree has uncommitted changes, git refuses; use `--force` to override (or commit/stash the changes first).
+
+**Prune stale worktree records:**
+
+```bash
+git worktree prune
+```
+
+If you manually deleted a worktree folder (e.g. `rm -rf`) without running `git worktree remove`, git still has a record of it. Prune cleans up these stale records.
+
+**Set a per-worktree lock:**
+
+```bash
+git worktree lock ../my-worktree --reason "long-running test, don't prune"
+git worktree unlock ../my-worktree
+```
+
+Locks prevent accidental pruning if the worktree's folder is temporarily unavailable (e.g. on a removable disk).
+
+### Worktree vs clone, the key differences
+
+Both worktrees and clones give you "more than one folder pointing at this project." The differences:
+
+**Clone:**
+- Full copy of the git directory (the database).
+- Full copy of all history (commits, branches, tags).
+- Disk usage: 2x (or more) for the database, plus the working tree.
+- To share commits between clones: you have to push and pull.
+- To get a new branch from a teammate: fetch from the remote.
+- Independent: clones can drift from each other.
+
+**Worktree:**
+- Shared git directory.
+- Shared history. Commits in one worktree are IMMEDIATELY visible to all others (they're stored in the shared database).
+- Disk usage: 1x for the database, plus N working trees.
+- No push/pull needed between worktrees: they're already synced through the shared database.
+- To get a teammate's branch in a worktree: fetch once (in any worktree), then `worktree add`.
+- Tightly coupled: operations in any worktree affect the shared database.
+
+**When to prefer clones over worktrees:**
+- You want truly independent copies (e.g. one for daily work, one for testing destructive operations).
+- You're working on different machines (worktrees can't share a database across machines; clones can sync via remote).
+- You want isolation from a teammate's changes (their pushes show up immediately in your worktree if you fetch; in a separate clone, you control when).
+
+**When to prefer worktrees over clones:**
+- You want parallel branches on the same machine for quick swap-back-and-forth work.
+- You want to save disk space (database isn't duplicated).
+- You want commits to appear instantly in all working trees without fetch ceremony.
+- You're running AI agents in parallel and want them to share history through the same database (more on this below).
+
+For most engineer-on-laptop workflows, worktrees are the right tool when "I want two branches checked out at once" is the situation. Multiple clones are right when "I want fully independent copies."
+
+### Worktree vs checkout-switching
+
+A more familiar comparison: when you switch branches via `git checkout <other-branch>`, your single working tree gets reset to the other branch's files. Any uncommitted changes either come along (if compatible) or block the checkout (if conflicting).
+
+Checkout-switching is fine when:
+- You're done with your current branch's work (committed or no longer needed).
+- The two branches are similar enough that the file shuffle is fast.
+- You're working sequentially, not in parallel.
+
+Checkout-switching is friction-heavy when:
+- You have uncommitted work on the current branch you don't want to commit OR stash.
+- The two branches are very different (lots of file additions/deletions/modifications); the checkout itself is slow.
+- You need to switch back and forth repeatedly.
+
+Worktrees eliminate this friction by giving each branch its own working tree. You `cd` to switch context. No file shuffling. No risk of losing uncommitted state.
+
+The cost: more disk space (one full working tree per worktree) and a slightly more complex mental model (multiple folders to track). For occasional "swap branches once a day" work, checkout-switching is fine. For "swap branches three times an hour" or "run multiple branches simultaneously," worktrees are a huge quality-of-life improvement.
+
+### Use case 1, review a teammate's PR without losing your current work
+
+Already covered in the opening scenario but worth repeating because it's the most common entry-point use case.
+
+```bash
+# You're mid-work on main repo, files modified
+cd ~/projects/myrepo
+
+# Spin up a worktree for the review
+git fetch origin feature/their-branch
+git worktree add ../review ./feature/their-branch
+
+# Review it
+cd ../review
+# run the project, test, look at the diff
+git log main..HEAD  # see what they're proposing
+# leave PR comments via GitHub/GitLab UI
+
+# Done. Clean up.
+cd ~/projects/myrepo
+git worktree remove ../review
+```
+
+Total time: 30 seconds of overhead. Your `myrepo` folder was untouched during the review. Files still modified, exactly as before.
+
+### Use case 2, hotfix during a feature
+
+You're mid-feature. Production breaks. You need to ship a hotfix off main without disturbing your feature work.
+
+```bash
+# Spin up a hotfix worktree
+git worktree add ../hotfix-auth -b hotfix/auth-nullpointer main
+
+# Work in it
+cd ../hotfix-auth
+# fix the bug, test, commit, push
+git push origin hotfix/auth-nullpointer
+# open PR, get review, merge
+
+# Clean up
+cd ~/projects/myrepo
+git worktree remove ../hotfix-auth
+```
+
+Your `myrepo` folder still has the feature work. The hotfix happened in a parallel space. The two never touched.
+
+### Use case 3, side-by-side comparison across versions
+
+You're investigating a regression. The bug exists on `main` but didn't exist on `v1.4`. You want both checked out simultaneously so you can compare behavior in two terminals.
+
+```bash
+git worktree add ../check-v1.4 v1.4
+```
+
+Now in one terminal, you can be in `myrepo` with `main` and in another terminal in `check-v1.4` with `v1.4`. Run both. Diff outputs. Find the regression-introducing commit.
+
+### Use case 4, the setup for parallel AI agents
+
+Here's the unique-to-Phase-4 use case. You're running multiple AI agents in parallel, each working on a different aspect of the codebase. You want them to:
+- Work on their own branch (so their changes don't collide).
+- Have their own working directory (so file edits are isolated).
+- Share git history (so when they commit, the others can see it).
+- Be cheap to spin up and tear down (because you might create six of them and dispose of three within an hour).
+
+Worktrees check every box.
+
+The pattern for a 4-agent fleet:
+
+```bash
+# From the main repo
+git worktree add ../agent-1 -b agent-1/data-model main
+git worktree add ../agent-2 -b agent-2/api-endpoints main
+git worktree add ../agent-3 -b agent-3/ui-form main
+git worktree add ../agent-4 -b agent-4/tests main
+```
+
+Each agent operates in its own folder, on its own branch. They commit independently. Their commits flow into the shared `.git/` so the lead (you, or another orchestrator) can see all of them with `git log --all --oneline`.
+
+When the work is done:
+- Lead merges or cherry-picks from each agent branch into a clean integration branch.
+- Worktrees get removed.
+- Branches get deleted.
+- Total elapsed: a few hours for the fleet, a few minutes for the cleanup.
+
+This is the substrate. L14 covers the integration patterns built on top of it.
+
+### Worked example 1, a morning of context-switching with three worktrees
+
+It's Monday morning. You arrive at your desk with three things on your plate:
+- Continue your current feature `feature/checkout-redesign` (started Friday, half-done).
+- Review your teammate's PR for `feature/inventory-sync`.
+- Cut a patch release v1.4.3 fixing yesterday's critical bug (fix is already on `release/v1.4`; you need to tag and push).
+
+Without worktrees, you'd context-switch by stashing and checking out. Easy to lose track. Friction at every transition.
+
+With worktrees:
+
+```bash
+# Set up
+cd ~/projects/myrepo                                       # your default tree, on feature/checkout-redesign
+git worktree add ../review-inventory feature/inventory-sync
+git worktree add ../patch-release release/v1.4
+
+# Open three terminal tabs (or VS Code windows), one for each
+# Tab 1: ~/projects/myrepo            (continuing your feature)
+# Tab 2: ~/projects/review-inventory  (reviewing teammate's work)
+# Tab 3: ~/projects/patch-release     (cutting v1.4.3)
+```
+
+Now you can:
+- Work on feature/checkout-redesign in tab 1
+- Pull up the teammate's PR locally in tab 2, run the inventory sync, check it actually works, leave a review
+- In tab 3, run `git tag -a v1.4.3 -m "fix: critical bug X"`, push the tag, draft release notes
+
+You hop between tabs without losing any state. Your feature work continues seamlessly. The review is thorough because you actually ran their code. The release happens cleanly because nothing else interferes.
+
+At end of day:
+
+```bash
+git worktree remove ../review-inventory       # review done
+git worktree remove ../patch-release           # release shipped
+# myrepo continues with your feature
+```
+
+Three independent contexts. One repo. No friction. This is the unlock.
+
+### Worked example 2, spinning up a 4-agent fleet for a feature
+
+You're using AI agents to build a new "weekly digest" feature. The feature has four parts: data model, background job to compute the digest, email template, and tests. You decide to assign each part to its own agent.
+
+```bash
+cd ~/projects/myrepo
+git checkout main
+git pull
+
+# Spin up 4 worktrees, one per agent
+git worktree add ../agent-data -b agent-data-model/digest main
+git worktree add ../agent-job -b agent-job/digest main
+git worktree add ../agent-email -b agent-email/digest main
+git worktree add ../agent-tests -b agent-tests/digest main
+```
+
+You launch four agent sessions, each pointing at its own worktree. They work in parallel for an hour. Each one commits to its own branch as it makes progress:
+
+```bash
+# Watch all four agents' progress from main repo
+git log --all --oneline --graph
+# *  ee5 (agent-tests/digest) tests for compute_digest
+# | *  cc4 (agent-email/digest) HTML email template
+# | | *  bb3 (agent-job/digest) wire up digest cron
+# | | | *  aa2 (agent-data-model/digest) Digest model fields
+# |/|/|/
+# *  start (main)
+```
+
+The commits all live in the shared `.git/`. You can read each branch's progress without leaving the main repo. You can see disagreement (two agents both editing the same file unaware), conflict potential (two branches trying to add similar code), and progress (which agent is moving faster).
+
+When all four agents are done, you integrate. We'll cover those patterns in L14.
+
+When the integration is done, cleanup:
+
+```bash
+git worktree remove ../agent-data
+git worktree remove ../agent-job
+git worktree remove ../agent-email
+git worktree remove ../agent-tests
+# branches can stay (they're in history) or be deleted
+git branch -D agent-data-model/digest agent-job/digest agent-email/digest agent-tests/digest
+```
+
+The fleet existed for an afternoon. Now it's a few merged commits on main and nothing else.
+
+### Worked example 3, removing a worktree with uncommitted changes
+
+You created a worktree for an experiment. You made some changes but didn't commit. You decide the experiment failed.
+
+```bash
+git worktree remove ../experiment
+# error: '../experiment' contains modified or untracked files, use --force to delete it
+```
+
+Git refuses to silently delete uncommitted work. Two options:
+
+**Option A: commit or stash first if you might want the work back.**
+
+```bash
+cd ../experiment
+git add -A
+git commit -m "WIP: failed experiment, saving for reference"
+cd ~/projects/myrepo
+git worktree remove ../experiment
+# the branch with the WIP commit still exists; delete with git branch -D if you don't want it
+```
+
+**Option B: throw the work away with --force.**
+
+```bash
+git worktree remove --force ../experiment
+```
+
+Use `--force` when you're sure the changes don't matter. Note: untracked files in the worktree ARE deleted by force-remove. There's no recovery for true untracked files (no reflog for never-added files).
+
+### Worked example 4, worktree for a long-running test or build
+
+You have a slow integration test suite that takes 45 minutes to run. You want to run it on `feature/X` but also keep working.
+
+```bash
+git worktree add ../test-feature-X feature/X
+cd ../test-feature-X
+./run-full-test-suite.sh &       # run in background
+cd ~/projects/myrepo              # back to main work
+```
+
+The tests run in `../test-feature-X` using its own files. Your `myrepo` folder is untouched. You continue developing. When the tests finish 45 minutes later, you check the results in `../test-feature-X`.
+
+If you want, lock the worktree to prevent accidental pruning during the long run:
+
+```bash
+git worktree lock ../test-feature-X --reason "long test suite running"
+# ... test finishes ...
+git worktree unlock ../test-feature-X
+git worktree remove ../test-feature-X
+```
+
+### Constraints and gotchas
+
+**One branch per worktree.** If you try to check out `feature/X` in worktree A when worktree B already has `feature/X` checked out, git rejects:
+
+```
+fatal: 'feature/X' is already checked out at '/path/to/B'
+```
+
+The fix: choose a different branch, or detach HEAD if you just need to inspect the same commit.
+
+**Submodules in worktrees.** Worktrees and submodules play together but with caveats. If your repo uses submodules, the submodule state is per-worktree (each worktree gets its own submodule checkout). Refresh submodules when you `worktree add`.
+
+**Hooks and CI.** Hooks (e.g. pre-commit hooks) work the same in any worktree. CI configuration is the same (it's a property of the branch/code, not the working tree).
+
+**IDE projects.** Your IDE may treat each worktree as a separate project (because each has its own folder). VS Code, JetBrains IDEs, and most others handle this gracefully. Some IDEs let you open multiple worktrees as a "workspace."
+
+**Disk space.** Each worktree includes a full working tree (all the files). For large repos, this can be significant. Worktrees still save disk space compared to clones (which would also duplicate `.git/`), but they're not free.
+
+**Switching default tree.** The original repo's working tree (the one with the `.git/` folder inside it) is sometimes called the "primary" worktree. You can't remove this one via `git worktree remove`. To "move" your primary worktree, you'd `git clone` fresh or use `git worktree move` (which exists but is for edge cases).
+
+**Removing a worktree where the branch is gone.** If the worktree was on a branch that's been deleted, the worktree's HEAD is detached. `git worktree remove` still works; just confirm you're not losing anything.
+
+### A note for experienced developers
+
+If you're coming from Mercurial: `hg share` is the closest analog (shared store, multiple working directories). Mercurial historically also had `hg multiclone` and external tools. The git worktree feature is cleaner and more first-class.
+
+If you're coming from SVN: the closest mechanism is having multiple `svn checkout` directories pointed at different branches (which in SVN are typically directories in the repository structure). It works but is heavier: each checkout has its own metadata and they don't share much. Worktrees in git are more efficient.
+
+If you're coming from Perforce: P4 has multiple "client workspaces" pointed at the same depot. Functionally similar to worktrees but P4-flavored (each workspace has its own mapping spec, sync state, etc.). Engineers used to P4 multi-workspace setups adapt quickly to git worktrees.
+
+The general principle: git worktrees are unusually elegant because the database (the `.git/`) is genuinely shared (no duplication, no sync overhead) while the working trees are completely independent. Other VCSs either duplicate more or share less.
+
+### A useful frame for managers and technical product managers
+
+Worktrees are mostly invisible to non-engineers: there's no PR template change, no platform-level setting, no team policy that needs updating to support them. They're an individual-engineer productivity tool.
+
+What's useful to know:
+
+- **Worktrees can speed up code review.** An engineer who reviews PRs by actually running the code (vs only reading the diff in the GitHub UI) catches more bugs. Worktrees lower the friction of "spin up the PR locally" from minutes to seconds. Teams that train juniors on the worktree workflow often see review quality improve.
+- **Worktrees are essential infrastructure for multi-agent AI workflows.** If your team is starting to use AI agents in parallel, worktrees are how each agent gets its own working space without the agents stepping on each other. The technical cost of running N agents drops significantly when worktrees are in the workflow.
+- **Worktrees can be confusing to onboard.** New hires who learned git via single-checkout workflows may not have encountered worktrees and may be skeptical at first. A 15-minute walk-through during onboarding pays off many times over.
+- **No platform changes needed.** Worktrees are a git feature, not a GitHub/GitLab feature. Nothing needs to be configured on the platform side. Engineers just start using them.
+
+**For TPMs specifically:** if you're planning roadmap work that involves multi-stream parallel development (feature work + hotfix readiness + release prep), worktrees are how engineers manage the context-switching gracefully. Encourage the practice; it's a quiet productivity multiplier.
+
+### A foreshadowing note for L14-L16
+
+L14 covers the multi-agent integration patterns built on top of worktrees: three patterns (shared origin, per-agent fork, shared worktrees), lead orchestration, semantic-conflict catching at integration.
+
+L15 covers AI-authored commits and PRs: co-authorship conventions, the "Generated with Claude Code" marker, what the human review changes when an AI did the typing, how release notes evolve to acknowledge AI contributions.
+
+L16 closes the track with a speculative but grounded look at where git might evolve as AI authorship becomes routine: the kinds of primitives we might want, how to stay calm as the tooling shifts.
+
+All three lessons assume worktrees as the foundation. L13 sets them up.
+
+### Concrete scenarios across team scales
+
+**Solo developer with side projects:**
+
+Worktrees shine for side-project juggling. Main project in one folder, experimental fork in another, a "play with the new library" worktree somewhere else. No need to switch between clones. Single git history serves all.
+
+Common pattern: a "scratch" worktree on a detached HEAD where you can freely make commits that never go anywhere, as exploration. Tear down when done.
+
+**Startup, 3-person team:**
+
+Light use of worktrees, mostly for the "review teammate's PR locally" pattern. The "spin up a hotfix worktree" pattern also comes up. Most engineers can get by with stash-and-checkout, but the ones who pick up worktrees move noticeably faster.
+
+When the startup starts experimenting with multi-agent AI workflows (often around series A or first major feature push), worktrees become essential overnight.
+
+**Mid-size company, 50-person engineering team:**
+
+Worktree usage is uneven. Some engineers use them daily; others have never created one. Internal "git tips" docs usually cover them. New hires sometimes discover them via a more senior engineer's pair-programming session and adopt them quickly.
+
+For teams running multi-agent AI workflows (becoming common in 2026+), worktrees are part of the standard tooling. Onboarding docs cover the agent-fleet setup pattern.
+
+**Open-source project:**
+
+Worktrees are common among maintainers (reviewing many PRs, sometimes from many contributors, often needing to switch context quickly). Less common among occasional contributors who may only ever submit one PR.
+
+Some projects publish "maintainer worktree setup" guides covering the patterns the project's maintainers use most: `worktree add` for each PR being reviewed, `worktree add` for the LTS branches being maintained, etc.
+
+**Multi-agent team, 6 agents working in parallel:**
+
+Worktrees are infrastructure. The fleet is launched by a script that creates 6 worktrees, one per agent. The lead orchestrator watches all six branches simultaneously. Integration involves merging or cherry-picking from each worktree's branch. Teardown removes the worktrees and deletes the branches.
+
+This pattern is uniquely possible because worktrees:
+- Share git history (commits flow into shared `.git/` immediately, no fetch ceremony)
+- Isolate working state (each agent's files don't appear in the others)
+- Are cheap (one command to create, one to remove)
+- Scale (you can have 6, 12, 60 worktrees on one machine if you have disk space)
+
+Without worktrees, multi-agent parallelism is still possible but requires either multiple clones (more disk, more sync overhead) or single-clone with branch-switching (which serializes the agents and defeats the parallelism).
+
+### The stay-calm psychology for worktrees
+
+Worktrees feel "advanced" the first time. They aren't. They're one command (`worktree add`), one command to list (`worktree list`), one command to remove (`worktree remove`). The mental model is "extra folders that share history." That's it.
+
+The most common worry: "what if I get confused about which folder I'm in?" The answer: use your terminal's directory display (most prompts show the current folder), and adopt a naming convention for your worktree folders (e.g. always prefix them, like `wt-review-X` or `agent-X-Y`). Once you've spent a week with worktrees, the confusion fades.
+
+The most common mistake: forgetting to clean up old worktrees. They accumulate. Run `git worktree list` periodically. If you see worktrees you don't remember creating, remove them.
+
+The most powerful realization: worktrees compose with everything else you've learned. Cherry-pick from one worktree's branch to another. Rebase a worktree's branch independently. Stash in one worktree without affecting others. The constraints (one branch per worktree, shared database) are minor; the freedoms are major.
+
+### What you can do now
+
+You can:
+
+- Create a worktree with `git worktree add ../path branch` and use it as an independent working directory
+- List your worktrees with `git worktree list` to see what's currently attached
+- Remove a worktree with `git worktree remove ../path` (or `--force` if it has uncommitted changes you don't care about)
+- Prune stale worktree records with `git worktree prune`
+- Spin up a parallel worktree to review a teammate's PR, then tear it down, without disturbing your current work
+- Spin up a parallel worktree to handle a hotfix without losing your in-flight feature work
+- Spin up multiple worktrees, one per AI agent, as the substrate for a parallel multi-agent workflow
+- Choose between worktrees, multiple clones, and checkout-switching based on the situation
+
+### What's next in Phase 4
+
+L14 (Multi-agent integration patterns) takes the worktree foundation from L13 and covers three patterns for integrating work from parallel agents (shared origin, per-agent fork, shared worktrees), how the lead orchestrates the work, and how to catch semantic conflicts that surface only at integration time.
+
+Then L15 (AI-authored commits and PRs) gets specific about what changes when an AI is the one typing the code. Then L16 (the future of git in an AI world) closes the track.
+
+### Voice anchor (carried from L1-L12)
+
+> Git stores snapshots. Every other command is just navigating those snapshots.
+
+Worktrees don't change what git stores. They're just multiple working trees pointing at the same snapshot database. Each worktree shows you one branch's snapshot at a time; together, they let you have several snapshots in front of you simultaneously. The snapshots themselves don't change. You just have more windows into them.

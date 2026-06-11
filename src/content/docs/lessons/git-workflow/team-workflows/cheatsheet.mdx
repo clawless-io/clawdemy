@@ -1,0 +1,297 @@
+---
+title: 'Cheatsheet: Team workflows: GitHub Flow, GitFlow, Trunk-based, Forking'
+description: Quick reference for the four workflows, branch protection rules, CI gates, the decision rule, and self-check answers.
+artifact: cheatsheet
+sidebar:
+  order: 5
+  label: Cheatsheet
+---
+
+### Voice anchor
+
+> Git stores snapshots. Every other command is just navigating those snapshots.
+
+A workflow is a convention about which branches exist and how they relate to the production snapshot.
+
+### The four workflows side by side
+
+| Dimension | GitHub Flow | GitFlow | Trunk-based | Forking |
+|---|---|---|---|---|
+| Long-lived branches | 1 (main) | 2 (main + develop) | 1 (trunk) | 1 per repo (main) across N repos |
+| Repositories | 1 (shared) | 1 (shared) | 1 (shared) | 1 canonical + N forks |
+| Branch lifetime | Hours to days | Days to weeks | Hours, ideally | Per-fork; PRs days to weeks |
+| Release model | Continuous, on every merge | Formal release branches + tags | Continuous, behind flags | Maintainer-gated; tag-based |
+| Ceremony | Low | High | Medium | Medium (fork sync + PR review) |
+| Best fit team size | 2-50 | 10-100 | 10-1000+ | Any (with external contributors) |
+| Best fit product type | Web app, SaaS | Versioned desktop/mobile, regulated | High-velocity SaaS, monorepo | Open-source, multi-stakeholder, restricted-write |
+| CI requirement | Strong | Medium | Very strong | Strong (must catch contributor mistakes) |
+| Feature flag requirement | Optional | Optional | Required | Optional |
+| External contributor support | Limited | Limited | Limited | Designed for it |
+
+**Compositional note:** Forking sits ON TOP of one of the first three. Most open-source maintainers run GitHub Flow internally + Forking externally. Don't pick "GitHub Flow vs Forking"; pick "what does my team do internally" + "do we accept external forks too."
+
+### Branch protection rules, typical setup
+
+**For GitHub Flow's `main`:**
+
+```
+[x] Require pull request before merging
+[x] Require approvals (1 for small teams, 2+ for security-sensitive)
+[x] Require status checks to pass (CI green)
+[x] Require branches to be up to date before merging
+[ ] Require linear history (optional)
+[x] Restrict who can push directly (only via PR)
+[x] No force-pushes
+[x] No deletions
+```
+
+**For GitFlow's `main` AND `develop`:** same as above on both. Add similar rules to active `release/*` and `hotfix/*` branches.
+
+**For Trunk-based's `trunk`:**
+
+```
+[x] Require status checks to pass (CI green), most important
+[x] Require approvals on PRs (for non-trivial changes)
+[ ] Require pull request before merging (optional; some teams allow trusted direct commits)
+[x] No force-pushes
+[x] No deletions
+```
+
+### CI gate stack (recommended starter)
+
+1. **Linting** (per-file checks)
+2. **Type checking** (per-file)
+3. **Unit tests** (per-function)
+4. **Integration tests** (cross-module)
+5. **Build verification** (the artifact compiles)
+6. **Security scans** (static analysis)
+7. **E2E tests** (most critical journeys only; optional but recommended)
+8. **Performance benchmarks** (for perf-sensitive code; optional)
+
+The discipline: each gate has a cost (developer wait time) and a benefit (caught bugs). Pick gates whose benefit > cost.
+
+### The decision rule
+
+```
+Start with GitHub Flow if:
+  - 2-50 engineers
+  - Web app or SaaS
+  - Single production environment
+  - Decent CI
+
+Choose GitFlow only if:
+  - Multiple supported versions (e.g., v8 + v9 + v10)
+  - Formal release cycles (mobile, embedded, regulated)
+  - Release-branch QA gates
+
+Migrate to Trunk-based when:
+  - 100+ engineers AND
+  - Mature CI (fast + comprehensive) AND
+  - Feature flag infrastructure
+
+Add Forking on top of the above when:
+  - Publishing an open-source project
+  - Accepting contributions from people without write access
+  - External contractors / partners with limited write
+  - Wanting to scale to many contributors without giving all push access
+
+Use a hybrid almost always.
+The pure workflows are reference points; deviations are normal.
+```
+
+### The decision flowchart
+
+```
+                          START
+                            │
+                            ▼
+             ┌──────────────────────────────┐
+             │ Do you ship multiple         │
+             │ supported versions           │
+             │ simultaneously?              │
+             │ (e.g., v8 + v9 + v10)        │
+             └──────────────────────────────┘
+                    │              │
+                  YES             NO
+                    │              │
+                    ▼              ▼
+              ┌─────────┐    ┌──────────────────────────┐
+              │ GITFLOW │    │ Do you have:             │
+              └─────────┘    │   - 100+ engineers AND   │
+                             │   - Mature CI AND        │
+                             │   - Feature flags?       │
+                             └──────────────────────────┘
+                                   │            │
+                                 YES           NO
+                                   │            │
+                                   ▼            ▼
+                             ┌─────────────┐  ┌─────────────────┐
+                             │ TRUNK-BASED │  │ GITHUB FLOW     │
+                             └─────────────┘  │ (default)       │
+                                              └─────────────────┘
+
+       At any branch above, ALSO ask:
+       ┌──────────────────────────────────────────────┐
+       │ Do you accept contributions from outside     │
+       │ your team (open source, external partners,   │
+       │ contractors without full write access)?      │
+       └──────────────────────────────────────────────┘
+              │                       │
+            YES                      NO
+              │                       │
+              ▼                       ▼
+       ┌──────────────────────┐   ┌──────────────────┐
+       │ ALSO add FORKING     │   │ No Forking       │
+       │ (compose with your   │   │ needed; team     │
+       │ chosen internal      │   │ shares one repo  │
+       │ workflow above)      │   │ directly.        │
+       └──────────────────────┘   └──────────────────┘
+```
+
+**Reading the flowchart:** the top half picks your INTERNAL team workflow (one of three). The bottom half asks separately whether you accept EXTERNAL contributions. Forking is additive, not a fourth alternative to the first three. Most Clawdemy students who publish open-source work end up at "GitHub Flow internally + Forking externally."
+
+### Common hybrids
+
+| Hybrid | Description | When to use |
+|---|---|---|
+| GitHub Flow + tags | Pure GHF day-to-day; tag specific main commits as releases | Need versioned releases but not GitFlow's overhead (80% of "versioning needs") |
+| Trunk-based + PR | Always PR but PRs live hours; trunk always deployable | Want trunk-based velocity + code review safety |
+| GitFlow lite | Drop develop; use `release/*` + `hotfix/*` off main as needed | Need release branches sometimes but not daily integration |
+
+### Self-check question model answers
+
+**Q1 model answer.** Structural differences:
+- **GitHub Flow** has ONE long-lived branch (`main`), which represents production. Feature branches are ephemeral and merge back to main.
+- **GitFlow** has TWO long-lived branches: `main` (production) and `develop` (integration). Plus three short-lived types: `feature/*` (off develop), `release/*` (off develop, merges to main + develop), `hotfix/*` (off main, merges to main + develop). Two parallel "trunks" with formal release ceremonies.
+- **Trunk-based** has ONE long-lived branch (`trunk`), but with stricter discipline: very short-lived feature branches (hours), feature flags for incomplete work, heavy CI on every commit. Trunk is always deployable.
+
+The structural distinction: GitHub Flow has the simplest topology; GitFlow has the most complex; Trunk-based has the simplest topology but the strictest discipline.
+
+**Q2 model answer.** Two characteristics that make GitFlow right:
+- You ship multiple supported versions simultaneously (e.g., v2.0 in QA while v1.5 needs a hotfix)
+- You have formal release cycles (App Store reviews, regulated quarterly releases)
+
+Two characteristics that make GitFlow wrong:
+- You deploy continuously to one production environment (develop becomes a bottleneck)
+- You're a small team without dedicated release management (the ceremony exceeds the value)
+
+The decision: if you don't have the multi-version OR formal-release problem GitFlow solves, you don't need GitFlow. GitHub Flow is the safer default.
+
+**Q3 model answer.** Branch protection rules (on the repo platform: GitHub / GitLab / Bitbucket) are the structural enforcement mechanism. They turn convention into enforced policy. Examples: "main requires PR + 2 approvals + CI green + no force-push." Without protection rules, the workflow is a wish. With them, the workflow is enforced by tooling. The team can't accidentally bypass the rules (because the platform refuses the commit) and intentional bypass requires a documented rule change.
+
+Beyond branch protection, the team also enforces via: CI gates (block merge until tests pass), CODEOWNERS files (route reviews to right people), and documented conventions in CONTRIBUTING.md.
+
+**Q4 model answer.** The hybrid: pure GitHub Flow day-to-day + tag specific main commits as releases.
+
+Day-to-day workflow: same as pure GitHub Flow (main + feature branches + PR + merge). Engineers don't think about releases during normal work.
+
+When you want to mark a release: `git tag -a v2.0 -m "Release v2.0"` then `git push origin v2.0`. The tag becomes the formal "this commit is the v2.0 release." Release notes are written against the tag (often auto-generated from PR titles).
+
+When it's the right choice: you need versioned releases for changelog purposes (semver compatibility info, release notes for users), but you don't have the multi-version-support complexity that GitFlow's release branches are designed for. You ship to one production but want a clear "here's what's in v2.0 vs v2.1" record.
+
+This hybrid covers about 80% of "we need versioned releases but don't want GitFlow's overhead." Many open-source projects, many SaaS teams use this exact pattern.
+
+**Q5 model answer.** Trunk-based requires three things:
+
+1. **Heavy CI.** Because every commit goes to trunk, broken commits would break everyone. CI must catch breaks fast (every commit, under 10 minutes ideally) and comprehensively (unit + integration + sometimes E2E). Without strong CI, trunk-based is "everyone breaks main constantly."
+
+2. **Feature flag infrastructure.** Because changes go to trunk before they're ready for users, incomplete features need to hide. Feature flags (LaunchDarkly, Unleash, env-vars, simple booleans) are the hiding mechanism. Without flags, half-finished features ship to production.
+
+3. **Strong code review culture.** Many trunk commits go in directly (no PR) for trusted senior engineers + small changes. The team needs trust: trust that committers verify their own work, trust that the CI catches missed cases. Without this culture, trunk-based produces poorly-reviewed code.
+
+Without all three, trunk-based breaks the team. With all three, trunk-based scales to thousands of engineers.
+
+**Q6 model answer.** Forking is framed as a fourth workflow because it's a structurally distinct PATTERN, not just a contribution mechanism. The first three workflows (GitHub Flow, GitFlow, Trunk-based) describe how a team works on a SHARED repository. Forking describes the topology of MULTIPLE repositories (one canonical + N forks) and the workflow of accepting contributions across that boundary. The maintainer's job (review forked PRs, gatekeep what merges) is a distinct workflow role from the contributor's job (fork, branch, PR).
+
+How it composes: Forking sits ON TOP of one of the other three. A solo open-source maintainer's canonical repo runs GitHub Flow internally (main + feature branches + PR + merge). On the boundary, contributors fork and submit PRs. Two workflows operating at two levels simultaneously. This is why L9 frames the question as "what's your internal workflow?" + "do you accept external forks?", not "pick one of four mutually exclusive options."
+
+**Q7 model answer.** Five repo-level setup steps:
+
+1. **Push to a public repo** (GitHub.com, GitLab.com, etc.) under your account or a project-specific account. This is now the "upstream" / "blessed" repo. Without this, there's nothing to fork.
+
+2. **Add a README.md** explaining what the project does, the basic install instructions, and a one-paragraph "what is this for" framing. Without this, potential contributors can't quickly assess if your project is worth their time.
+
+3. **Add a CONTRIBUTING.md** explaining the fork-and-PR flow (or just linking to a standard reference). Cover: how to set up a dev environment, your team's PR description expectations (L6), your code style if any. Without this, every contributor reinvents your conventions and gets frustrated.
+
+4. **Add a LICENSE file.** MIT or Apache 2.0 is the typical permissive choice; GPL if you want share-alike. Without a license, contributors LEGALLY cannot use, fork, or contribute to your code, even if they want to. Many projects forget this; don't.
+
+5. **Set branch protection on main** (PR + your approval required + CI green if you have CI). Without this, a contributor with mistaken push access (or a hijacked account) could push directly to main. The protection is a safety net AND a workflow signal ("here's how changes land").
+
+Beyond these five: optionally add `.github/PULL_REQUEST_TEMPLATE.md` for PR description scaffolding, `.github/ISSUE_TEMPLATE/` for issue triage, code-of-conduct (`CODE_OF_CONDUCT.md`), security disclosure policy (`SECURITY.md`). Useful but not strictly required.
+
+### Workflow recognition drill, model identifications (Drill 1)
+
+1. **SaaS, 15 engineers, continuous deploy, 5min CI** yields **GitHub Flow.** Standard fit. Probably with branch protection on main.
+2. **Mobile, v8 + v9 + v10 supported, App Store reviews** yields **GitFlow.** The multi-version-supported requirement is exactly what GitFlow solves.
+3. **400 engineers, monorepo, feature flags, fast CI** yields **Trunk-based.** The scale + infrastructure match.
+4. **Open-source, fork-based contributions, tagged releases** yields **GitHub Flow + release tags hybrid.** Maintainers merge PRs to main; specific commits get tagged for releases.
+5. **Healthcare-regulated, formal QA sign-off, gated releases** yields **GitFlow.** The regulated-release-gate requirement maps to GitFlow's release branches.
+
+### Workflow pick drill, model answers (Drill 2)
+
+1. **Personal side project, Vercel** yields **No formal workflow. Just commit to main.** No team, no review needed, no production users at risk.
+2. **Two-person startup, B2B SaaS** yields **GitHub Flow.** Protect main with PR + 1 approval + CI green.
+3. **10-person, desktop app** yields **GitFlow** if shipping multiple supported versions; **GitHub Flow + release tags** if single-version. Most startups start with the latter and migrate only if needed.
+4. **30-person, SaaS, no feature flags** yields **GitHub Flow.** Trunk-based requires feature flag infrastructure that doesn't exist yet.
+5. **30-person, SaaS, has feature flags** yields **GitHub Flow or Trunk-based-with-PR hybrid.** Could go either way. Many teams default to GitHub Flow until the engineering count makes Trunk-based necessary.
+6. **200-person, monorepo, mature CI** yields **Trunk-based.** The scale + infrastructure match. Strong code review culture is the remaining requirement to verify.
+
+### Branch protection setup drill, model rules (Drill 3)
+
+**GitHub Flow main:**
+- Require PR before merging
+- Require 1+ approvals (CODEOWNER-aware)
+- Require CI green
+- Require branch up-to-date before merge
+- No force-push
+- No deletions
+
+**GitFlow main + develop:**
+- Same as above on both
+- For active `release/*` branches: require PR + approval + CI green; allow merges from feature branches; deletion allowed when release is over
+- For active `hotfix/*` branches: similar; deletion allowed when hotfix is merged
+
+**Trunk-based trunk:**
+- Require CI green (the most important rule)
+- Require PR for non-trivial changes (some teams require for all changes; others allow direct commits for trusted committers)
+- No force-push
+- No deletions
+
+The trunk-based pattern is interesting: the rule set is LESS strict than GitHub Flow on the PR requirement but MORE strict on CI. The trade-off matches the workflow's philosophy: trust the committer for small things; trust the tests for everything.
+
+### Scenario reflection model answers
+
+**Scenario A model answer.** Conversation with engineering leadership:
+- **The data:** "We adopted GitFlow 18 months ago because [reason]. The conditions that made it right have changed. We're now shipping to one production environment; we deploy continuously; the develop branch has become a bottleneck where features sit waiting for the next release. Hotfixes routinely bypass develop, exposing the model's awkwardness. The release branch ceremony hasn't earned its keep in [X months]."
+- **The proposal:** "I'd like us to migrate to GitHub Flow. Concretely: stop creating new `release/*` branches; let main be the deployable branch; merge feature branches directly to main; tag commits on main as releases when we want a marker."
+- **The migration plan:** "We can transition over one sprint. Existing release branches finish their lifecycle as normal. New work follows the new pattern. We update our CONTRIBUTING.md and run a 30-min training session for the team."
+- **The risk acknowledgment:** "The trade-off is we lose the formal release-branch QA gate. We replace it with stronger CI + branch protection on main. I think the trade is worth it given our current product context, but I'm open to evidence otherwise."
+
+Frame it as data + proposal + plan, not as "GitFlow is bad."
+
+**Scenario B model answer.** Explanation for the new engineer (without confrontation):
+- "We use Trunk-based Development here. The mental model is different from GitFlow, so let me walk you through where work-in-progress lives."
+- **Where WIP lives:** "We use feature flags. When you're working on something not ready for users, you put it behind a flag. The code lives on trunk; the feature isn't visible to users until you turn the flag on. This way, your work integrates daily without shipping to users prematurely."
+- **The day-to-day:** "Pick up a ticket. Make a branch (it'll live hours, not days). Push small commits. Open a PR. PRs typically merge same-day; review SLA is one business day. After merge, your code is on trunk and might deploy within minutes, but if it's behind a flag, users don't see it until you decide."
+- **The discipline:** "The discipline is small-changes-shipped-fast + hide-behind-flags. It feels weird at first if you came from GitFlow. Stick with it for two weeks and you'll see the velocity benefit."
+- **The reassurance:** "If you're unsure about a change, err on the side of feature-flagging it. Better safe than visible-to-users-before-ready."
+
+Frame it as an introduction to a different model, not as a critique of GitFlow.
+
+**Scenario C model answer.** Decision-making process:
+- **Don't take sides yet.** Both camps probably have valid arguments; the right answer depends on context, not preference.
+- **Surface the decision criteria.** Ask the team to evaluate:
+  - Current CI maturity (Trunk-based requires faster + comprehensive CI)
+  - Feature flag infrastructure (Trunk-based requires it; investing if not present is a real cost)
+  - Team trust + code review culture (Trunk-based assumes more direct trust)
+  - Engineering scale (Trunk-based pays off most at 100+ engineers)
+  - Product velocity needs (faster velocity favors Trunk-based)
+- **Run a 30-minute exercise.** Score the team on each criterion (1-5). Add up. If the score is high, Trunk-based makes sense. If low, GitHub Flow is the safer choice.
+- **Pilot it.** Don't commit the whole team. Pick a sub-team that's enthusiastic about Trunk-based; run it for 3 months; measure velocity + bug rate. Use the data to decide for the whole team.
+- **Communicate the decision.** Once made, communicate the rationale clearly. "We picked X because [criteria]. We'll revisit in 12 months."
+
+Decisions like this aren't preference; they're data-informed bets. Make the bet, measure, adjust.
+
+### What's in L10
+
+L10 introduces **releases and tags**, the formal "this commit is the v2.0 release" mechanism that all four workflows interact with. You'll learn `git tag` (annotated vs lightweight), semantic versioning (semver), release notes generation, and how releases differ across the four workflows. After L10, you can mark and announce a release for any project.

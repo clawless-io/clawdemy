@@ -870,6 +870,227 @@ export default defineConfig({
 					],
 				},
 				{
+					label: 'Track 7: Git Workflow',
+					items: [
+						{
+							label: 'Phase 1\nFoundations',
+							collapsed: true,
+							items: [
+								{
+									label: 'Why git exists',
+									collapsed: true,
+									items: [
+									{ label: 'Brief', slug: 'lessons/git-workflow/why-git-exists/brief' },
+									{ label: 'Lesson', slug: 'lessons/git-workflow/why-git-exists/lesson' },
+									{ label: 'Practice', slug: 'lessons/git-workflow/why-git-exists/practice' },
+									{ label: 'Summary', slug: 'lessons/git-workflow/why-git-exists/summary' },
+									{ label: 'Cheatsheet', slug: 'lessons/git-workflow/why-git-exists/cheatsheet' },
+									{ label: 'References', slug: 'lessons/git-workflow/why-git-exists/references' },
+									],
+								},
+								{
+									label: 'Your first repo',
+									collapsed: true,
+									items: [
+									{ label: 'Brief', slug: 'lessons/git-workflow/your-first-repo/brief' },
+									{ label: 'Lesson', slug: 'lessons/git-workflow/your-first-repo/lesson' },
+									{ label: 'Practice', slug: 'lessons/git-workflow/your-first-repo/practice' },
+									{ label: 'Summary', slug: 'lessons/git-workflow/your-first-repo/summary' },
+									{ label: 'Cheatsheet', slug: 'lessons/git-workflow/your-first-repo/cheatsheet' },
+									{ label: 'References', slug: 'lessons/git-workflow/your-first-repo/references' },
+									],
+								},
+								{
+									label: 'Commit hygiene',
+									collapsed: true,
+									items: [
+									{ label: 'Brief', slug: 'lessons/git-workflow/commit-hygiene/brief' },
+									{ label: 'Lesson', slug: 'lessons/git-workflow/commit-hygiene/lesson' },
+									{ label: 'Practice', slug: 'lessons/git-workflow/commit-hygiene/practice' },
+									{ label: 'Summary', slug: 'lessons/git-workflow/commit-hygiene/summary' },
+									{ label: 'Cheatsheet', slug: 'lessons/git-workflow/commit-hygiene/cheatsheet' },
+									{ label: 'References', slug: 'lessons/git-workflow/commit-hygiene/references' },
+									],
+								},
+								{
+									label: 'Undoing things',
+									collapsed: true,
+									items: [
+									{ label: 'Brief', slug: 'lessons/git-workflow/undoing-things/brief' },
+									{ label: 'Lesson', slug: 'lessons/git-workflow/undoing-things/lesson' },
+									{ label: 'Practice', slug: 'lessons/git-workflow/undoing-things/practice' },
+									{ label: 'Summary', slug: 'lessons/git-workflow/undoing-things/summary' },
+									{ label: 'Cheatsheet', slug: 'lessons/git-workflow/undoing-things/cheatsheet' },
+									{ label: 'References', slug: 'lessons/git-workflow/undoing-things/references' },
+									],
+								},
+							],
+						},
+						{
+							label: 'Phase 2\nBranching and collaboration',
+							collapsed: true,
+							items: [
+								{
+									label: 'Branches',
+									collapsed: true,
+									items: [
+									{ label: 'Brief', slug: 'lessons/git-workflow/branches/brief' },
+									{ label: 'Lesson', slug: 'lessons/git-workflow/branches/lesson' },
+									{ label: 'Practice', slug: 'lessons/git-workflow/branches/practice' },
+									{ label: 'Summary', slug: 'lessons/git-workflow/branches/summary' },
+									{ label: 'Cheatsheet', slug: 'lessons/git-workflow/branches/cheatsheet' },
+									{ label: 'References', slug: 'lessons/git-workflow/branches/references' },
+									],
+								},
+								{
+									label: 'Pull requests',
+									collapsed: true,
+									items: [
+									{ label: 'Brief', slug: 'lessons/git-workflow/pull-requests/brief' },
+									{ label: 'Lesson', slug: 'lessons/git-workflow/pull-requests/lesson' },
+									{ label: 'Practice', slug: 'lessons/git-workflow/pull-requests/practice' },
+									{ label: 'Summary', slug: 'lessons/git-workflow/pull-requests/summary' },
+									{ label: 'Cheatsheet', slug: 'lessons/git-workflow/pull-requests/cheatsheet' },
+									{ label: 'References', slug: 'lessons/git-workflow/pull-requests/references' },
+									],
+								},
+								{
+									label: 'Merge conflicts',
+									collapsed: true,
+									items: [
+									{ label: 'Brief', slug: 'lessons/git-workflow/merge-conflicts/brief' },
+									{ label: 'Lesson', slug: 'lessons/git-workflow/merge-conflicts/lesson' },
+									{ label: 'Practice', slug: 'lessons/git-workflow/merge-conflicts/practice' },
+									{ label: 'Summary', slug: 'lessons/git-workflow/merge-conflicts/summary' },
+									{ label: 'Cheatsheet', slug: 'lessons/git-workflow/merge-conflicts/cheatsheet' },
+									{ label: 'References', slug: 'lessons/git-workflow/merge-conflicts/references' },
+									],
+								},
+								{
+									label: 'Remotes and forks',
+									collapsed: true,
+									items: [
+									{ label: 'Brief', slug: 'lessons/git-workflow/remotes-and-forks/brief' },
+									{ label: 'Lesson', slug: 'lessons/git-workflow/remotes-and-forks/lesson' },
+									{ label: 'Practice', slug: 'lessons/git-workflow/remotes-and-forks/practice' },
+									{ label: 'Summary', slug: 'lessons/git-workflow/remotes-and-forks/summary' },
+									{ label: 'Cheatsheet', slug: 'lessons/git-workflow/remotes-and-forks/cheatsheet' },
+									{ label: 'References', slug: 'lessons/git-workflow/remotes-and-forks/references' },
+									],
+								},
+							],
+						},
+						{
+							label: 'Phase 3\nWorkflows in the wild',
+							collapsed: true,
+							items: [
+								{
+									label: 'Team workflows',
+									collapsed: true,
+									items: [
+									{ label: 'Brief', slug: 'lessons/git-workflow/team-workflows/brief' },
+									{ label: 'Lesson', slug: 'lessons/git-workflow/team-workflows/lesson' },
+									{ label: 'Practice', slug: 'lessons/git-workflow/team-workflows/practice' },
+									{ label: 'Summary', slug: 'lessons/git-workflow/team-workflows/summary' },
+									{ label: 'Cheatsheet', slug: 'lessons/git-workflow/team-workflows/cheatsheet' },
+									{ label: 'References', slug: 'lessons/git-workflow/team-workflows/references' },
+									],
+								},
+								{
+									label: 'Releases and tags',
+									collapsed: true,
+									items: [
+									{ label: 'Brief', slug: 'lessons/git-workflow/releases-and-tags/brief' },
+									{ label: 'Lesson', slug: 'lessons/git-workflow/releases-and-tags/lesson' },
+									{ label: 'Practice', slug: 'lessons/git-workflow/releases-and-tags/practice' },
+									{ label: 'Summary', slug: 'lessons/git-workflow/releases-and-tags/summary' },
+									{ label: 'Cheatsheet', slug: 'lessons/git-workflow/releases-and-tags/cheatsheet' },
+									{ label: 'References', slug: 'lessons/git-workflow/releases-and-tags/references' },
+									],
+								},
+								{
+									label: 'Cherry-pick and stash',
+									collapsed: true,
+									items: [
+									{ label: 'Brief', slug: 'lessons/git-workflow/cherry-pick-and-stash/brief' },
+									{ label: 'Lesson', slug: 'lessons/git-workflow/cherry-pick-and-stash/lesson' },
+									{ label: 'Practice', slug: 'lessons/git-workflow/cherry-pick-and-stash/practice' },
+									{ label: 'Summary', slug: 'lessons/git-workflow/cherry-pick-and-stash/summary' },
+									{ label: 'Cheatsheet', slug: 'lessons/git-workflow/cherry-pick-and-stash/cheatsheet' },
+									{ label: 'References', slug: 'lessons/git-workflow/cherry-pick-and-stash/references' },
+									],
+								},
+								{
+									label: 'Rebase, deeper',
+									collapsed: true,
+									items: [
+									{ label: 'Brief', slug: 'lessons/git-workflow/rebase-deeper/brief' },
+									{ label: 'Lesson', slug: 'lessons/git-workflow/rebase-deeper/lesson' },
+									{ label: 'Practice', slug: 'lessons/git-workflow/rebase-deeper/practice' },
+									{ label: 'Summary', slug: 'lessons/git-workflow/rebase-deeper/summary' },
+									{ label: 'Cheatsheet', slug: 'lessons/git-workflow/rebase-deeper/cheatsheet' },
+									{ label: 'References', slug: 'lessons/git-workflow/rebase-deeper/references' },
+									],
+								},
+							],
+						},
+						{
+							label: 'Phase 4\nMulti-agent teams',
+							collapsed: true,
+							items: [
+								{
+									label: 'Worktrees and parallel agents',
+									collapsed: true,
+									items: [
+									{ label: 'Brief', slug: 'lessons/git-workflow/worktrees-and-parallel-agents/brief' },
+									{ label: 'Lesson', slug: 'lessons/git-workflow/worktrees-and-parallel-agents/lesson' },
+									{ label: 'Practice', slug: 'lessons/git-workflow/worktrees-and-parallel-agents/practice' },
+									{ label: 'Summary', slug: 'lessons/git-workflow/worktrees-and-parallel-agents/summary' },
+									{ label: 'Cheatsheet', slug: 'lessons/git-workflow/worktrees-and-parallel-agents/cheatsheet' },
+									{ label: 'References', slug: 'lessons/git-workflow/worktrees-and-parallel-agents/references' },
+									],
+								},
+								{
+									label: 'Multi-agent integration patterns',
+									collapsed: true,
+									items: [
+									{ label: 'Brief', slug: 'lessons/git-workflow/multi-agent-integration-patterns/brief' },
+									{ label: 'Lesson', slug: 'lessons/git-workflow/multi-agent-integration-patterns/lesson' },
+									{ label: 'Practice', slug: 'lessons/git-workflow/multi-agent-integration-patterns/practice' },
+									{ label: 'Summary', slug: 'lessons/git-workflow/multi-agent-integration-patterns/summary' },
+									{ label: 'Cheatsheet', slug: 'lessons/git-workflow/multi-agent-integration-patterns/cheatsheet' },
+									{ label: 'References', slug: 'lessons/git-workflow/multi-agent-integration-patterns/references' },
+									],
+								},
+								{
+									label: 'AI-authored commits and PRs',
+									collapsed: true,
+									items: [
+									{ label: 'Brief', slug: 'lessons/git-workflow/ai-authored-commits-and-prs/brief' },
+									{ label: 'Lesson', slug: 'lessons/git-workflow/ai-authored-commits-and-prs/lesson' },
+									{ label: 'Practice', slug: 'lessons/git-workflow/ai-authored-commits-and-prs/practice' },
+									{ label: 'Summary', slug: 'lessons/git-workflow/ai-authored-commits-and-prs/summary' },
+									{ label: 'Cheatsheet', slug: 'lessons/git-workflow/ai-authored-commits-and-prs/cheatsheet' },
+									{ label: 'References', slug: 'lessons/git-workflow/ai-authored-commits-and-prs/references' },
+									],
+								},
+								{
+									label: 'The future of git',
+									collapsed: true,
+									items: [
+									{ label: 'Brief', slug: 'lessons/git-workflow/the-future-of-git-in-an-ai-world/brief' },
+									{ label: 'Lesson', slug: 'lessons/git-workflow/the-future-of-git-in-an-ai-world/lesson' },
+									{ label: 'Practice', slug: 'lessons/git-workflow/the-future-of-git-in-an-ai-world/practice' },
+									{ label: 'Summary', slug: 'lessons/git-workflow/the-future-of-git-in-an-ai-world/summary' },
+									{ label: 'Cheatsheet', slug: 'lessons/git-workflow/the-future-of-git-in-an-ai-world/cheatsheet' },
+									{ label: 'References', slug: 'lessons/git-workflow/the-future-of-git-in-an-ai-world/references' },
+									],
+								},
+							],
+						},
+					],
+				},
+				{
 					label: 'Track 8: Visual Math: Calculus',
 					items: [
 						{
