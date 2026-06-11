@@ -1,6 +1,6 @@
 ---
 title: 'Cheatsheet: Multi-agent integration patterns'
-description: Quick reference plus model answers for L14 self-check questions and drills.
+description: Quick reference for L14 integration patterns, the semantic-conflict checklist, and drill walk-throughs.
 artifact: cheatsheet
 sidebar:
   order: 5
@@ -101,60 +101,6 @@ Before pushing, review `git diff main..integration/<name>` and look for:
 
 If any item is uncertain, dig in before pushing.
 
-### Self-check question model answers
-
-**Q1.** Three patterns in one sentence each:
-
-- Shared origin: all agents push to one remote, lead integrates there.
-- Per-agent fork: each agent on its own remote, lead pulls from each fork.
-- Shared worktrees: all local, nothing pushed until integration final.
-
-**Q2.** Why shared origin is the default:
-
-Simplest setup. Uses standard tooling without special configuration. Branches are visible for other-human review. Matches the workflow most teams already know.
-
-**Q3.** Why per-agent fork for untrusted/external agents:
-
-Quarantines the agent's work on a separate remote. The team's main remote is never polluted with unvetted code. The lead can vet the work freely (including discarding it entirely) without leaving traces. Maps to the open-source forking workflow where external contributors push to their own forks.
-
-**Q4.** Disadvantage of shared worktrees:
-
-No backup, no remote visibility during the work. If the lead's machine dies, the work is gone. Other team members can't see what agents are doing until the lead pushes. Doesn't scale to teams with multiple concurrent fleets.
-
-**Q5.** Lead orchestrator's seven responsibilities:
-
-Plan, spawn, watch, integrate, catch semantic conflicts, push gate, cleanup.
-
-**Q6.** Semantic conflict:
-
-Code merges cleanly (git produces no line-level conflict) but behaves wrong because two agents had inconsistent mental models. Examples: renamings, duplicate utilities, mismatched field names, mismatched return types. Git can't detect them because they cross file boundaries without overlapping at the line level.
-
-**Q7.** Three layers of defense:
-
-1. Tight agent scope, reduce overlap to reduce conflict surface area
-2. Integration tests at each merge step in the integration sequence
-3. Lead reads the integrated diff before pushing, judgment work that no test framework substitutes for
-
-**Q8.** Clawless 2026-06-04 lesson:
-
-Per-agent tests are NECESSARY but NOT SUFFICIENT. The lead-stage build (full-system, after all merges) caught ~300 latent breakers that per-agent tests had missed. The build gate at integration is the most important guardrail.
-
-**Q9.** When to abort vs repair:
-
-Abort and re-run when:
-- The agent misunderstood its scope and a refined prompt would clearly help
-- The bad work is more than a few quick fixes
-- The work is small enough that re-running is cheap
-
-Repair the branch when:
-- The work is mostly good with targeted issues
-- The fixes are small and obvious
-- Re-running would lose work that's worth keeping
-
-**Q10.** Why the build gate is non-negotiable:
-
-It catches what nothing else can. Per-agent tests catch individual-agent issues; integration tests catch boundary issues at the merge level; the build gate catches the cumulative interactions of all agents' work as a complete system. Skipping the build gate has historically been the source of multi-agent integration bugs that shipped.
-
 ### Pattern selection drill, model answers
 
 1. Solo dev, 4 agents, 2-hour sprint: **shared worktrees**. Fast iteration, lead controls everything, no need for remote visibility.
@@ -183,52 +129,6 @@ After the deliberate semantic conflict (renaming `add` to `sum_two` on one branc
 6. Tests pass.
 
 This is the canonical semantic-conflict-and-recovery pattern. Most multi-agent integrations include at least one of these.
-
-### Scenario reflection model answers
-
-**Scenario A, starting multi-agent for the first time:**
-
-Start with shared-origin. Process discipline:
-1. Tight agent scope, non-overlapping when possible
-2. Integration tests covering boundaries between agent scopes
-3. Lead-stage build at the end of each integration sequence
-4. Lead reads the integrated diff before pushing
-5. Cleanup after each sprint (remove worktrees, delete branches)
-
-Document the workflow. Train the lead role explicitly. Track metrics: integration time, semantic-conflict frequency, agent rework rate.
-
-**Scenario B, 6 agents, agent-4 fails 12 tests:**
-
-Decision tree:
-1. Read the test failures. Are they git-level conflicts (the merge had problems)? Or semantic (merge clean, behavior wrong)?
-2. If semantic, are the failures concentrated in one boundary (agent-3 + agent-4)? If so, that boundary is the suspect.
-3. Investigate the diff for agent-4 vs the integration of agents 1-3. Look for renamings, mismatched assumptions.
-4. If the fix is small and obvious: repair agent-4's branch and continue.
-5. If the fix would be substantial: ABORT agent-4, refine its prompt to address the misunderstanding, re-run.
-
-Don't sink hours into rescuing a confused agent. 20 minutes of re-running often beats 2 hours of hand-repair.
-
-**Scenario C, recurring duplicate utilities:**
-
-Process-level fixes:
-1. Prompt agents with an explicit "before adding a utility function, check if one already exists" instruction
-2. Have one agent (or the lead) own shared utilities; other agents must use what already exists or coordinate
-3. Add lint rules that detect duplicate-logic patterns at integration time
-4. Lead's diff review includes an explicit "check for duplicate functions" step
-
-The pattern fix is upstream of the symptom. Don't keep catching duplicates in integration; prevent them at the prompt or scope-design step.
-
-**Scenario D, explaining to a non-technical stakeholder:**
-
-The agents produce drafts in parallel. Each draft is independently correct, but combining them into a working whole requires:
-- Resolving conflicts where drafts disagree
-- Catching subtle mismatches where drafts make different assumptions
-- Running the full system to verify the combination actually works
-- Reading the combined result for judgment-level issues no test can catch
-
-A useful analogy: imagine six authors writing different chapters of a book in parallel. Each chapter is internally well-written. But the editor still needs to make sure the character names match, the plot timeline is consistent, the tone is unified, and the book reads as one coherent work. The lead's integration role is similar.
-
-The work the lead does is genuinely high-leverage. It's not pure overhead; it's the step that converts parallel drafts into shippable software.
 
 ### Common mistakes and fixes
 

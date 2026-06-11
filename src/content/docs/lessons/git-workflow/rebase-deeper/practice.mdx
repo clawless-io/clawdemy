@@ -1,6 +1,6 @@
 ---
 title: 'Practice: Rebase, deeper'
-description: Self-check questions, drills, scenario reflections, and flashcards for L12. Model answers in the cheatsheet.
+description: Self-check questions, drills, scenario reflections, and flashcards for L12.
 artifact: practice
 sidebar:
   order: 3
@@ -12,25 +12,115 @@ import FlashcardSet from '../../../../../components/FlashcardSet.astro';
 
 ### Self-check questions
 
+Answer each in your own words first, then open the answer to check. 
+
 **Q1.** What does the `-i` flag add to `git rebase`?
+
+<details>
+<summary>Show answer</summary>
+
+It makes the rebase interactive: git opens a text editor with a todo list of all the commits being replayed, and you can edit each commit's action (pick, reword, squash, fixup, drop, etc.) before the replay starts.
+
+</details>
 
 **Q2.** List five of the action keywords in an interactive rebase todo list and what each does.
 
+<details>
+<summary>Show answer</summary>
+
+- `pick`: replay as-is (default)
+- `reword`: replay but stop to edit message
+- `squash`: combine into previous, keep both messages
+- `fixup`: combine into previous, discard this message
+- `drop`: delete the commit entirely
+
+(Other answers also valid: edit, exec, break.)
+
+</details>
+
 **Q3.** What's the difference between `squash` and `fixup`?
+
+<details>
+<summary>Show answer</summary>
+
+Both combine a commit into the previous one. Squash keeps BOTH commit messages and opens the editor for you to write a combined message. Fixup DISCARDS this commit's message and uses only the previous commit's message. Use fixup when this commit is just a tweak (typo fix, missed comma) whose message adds no value.
+
+</details>
 
 **Q4.** Why does interactive rebase show commits OLDEST FIRST instead of newest-first like `git log`?
 
+<details>
+<summary>Show answer</summary>
+
+Because rebase replays commits in chronological order (oldest first). The todo list mirrors the replay order. This is opposite to `git log` (which is newest-first because you usually want to see recent activity). It catches new users off-guard; the rule of thumb is "the order you see in the rebase editor is the order they'll replay."
+
+</details>
+
 **Q5.** What does `--autosquash` do, and how do you use it with `--fixup`?
+
+<details>
+<summary>Show answer</summary>
+
+`--autosquash` tells `git rebase -i` to automatically rearrange any commits whose messages start with `fixup!` or `squash!` so they sit immediately AFTER the commit they target, and to pre-fill the action keyword (`fixup` or `squash`).
+
+You use it with `--fixup` like this: during development, when you want to amend a previous commit, run `git commit --fixup=<sha>` instead of making a new "fix" commit. This creates a commit with message `fixup! <original message>`. Later, when you cleanup with `git rebase -i --autosquash <base>`, the editor opens with everything already arranged. You just save.
+
+You can make autosquash the default with `git config --global rebase.autosquash true`.
+
+</details>
 
 **Q6.** What's the rule about rebasing published commits, and why?
 
+<details>
+<summary>Show answer</summary>
+
+Don't rebase commits you've pushed to a shared branch. Reason: rebase rewrites history, giving commits new SHAs. If teammates have pulled the original commits, their local copies diverge from the rewritten remote. The next time they pull, git tries to reconcile two histories, and the result is either a confusing merge or, if you force-push, lost work.
+
+The corollary: branch protection on main (a platform setting that forbids force-push) is the most important guardrail.
+
+</details>
+
 **Q7.** What's the difference between `git push --force` and `git push --force-with-lease`?
+
+<details>
+<summary>Show answer</summary>
+
+`--force` overwrites the remote with your local history, no matter what. If someone else pushed to the branch since your last fetch, their work is gone.
+
+`--force-with-lease` only overwrites IF the remote is still at the commit you last fetched. If someone else has pushed since, the force-push is REJECTED and you have a chance to investigate. It's the safer default for force-pushing your own feature branches.
+
+The discipline: always use `--force-with-lease` unless you have a specific reason not to.
+
+</details>
 
 **Q8.** You finished a rebase and realize it was wrong. How do you get back to the pre-rebase state?
 
+<details>
+<summary>Show answer</summary>
+
+Run `git reflog` to see the recent HEAD-modifying actions. Find the entry just before the "rebase (start)" line. Run `git reset --hard HEAD@{N}` to that entry. You're back at the pre-rebase state with all your original commits.
+
+Caveat: `git reset --hard` discards uncommitted working-tree changes. Stash first if you have any.
+
+</details>
+
 **Q9.** When would you choose rebase over merge for integrating your feature branch with main?
 
+<details>
+<summary>Show answer</summary>
+
+For cleaning up your local feature branch before opening a PR (the most common case). For teams that prefer linear history. For integrating your feature on top of an advancing main without adding merge commits. For branches that haven't been pushed (or that only you pull).
+
+</details>
+
 **Q10.** When would you choose merge over rebase?
+
+<details>
+<summary>Show answer</summary>
+
+When the branch you'd be rebasing has been pushed and teammates have pulled it (the published-history rule). When you want to preserve the honest parallel-development history. For long-lived release branches where the merge points matter for audit. When your team's workflow (GitFlow, etc.) calls for merge commits at integration points.
+
+</details>
 
 ### Interactive rebase cleanup drill
 
@@ -84,11 +174,56 @@ import FlashcardSet from '../../../../../components/FlashcardSet.astro';
 
 **Scenario A:** You've been working on a feature branch for a week. Your manager asks you to open a PR today. Your branch has 18 commits, most of them "WIP" or single-word messages. Walk through your approach to preparing the PR.
 
+<details>
+<summary>Show answer</summary>
+
+Run `git rebase -i main`. Plan the cleanup before opening the editor: which 3-5 logical commits do you want the final history to show? Typically: data model, API endpoint, UI, tests. Maybe more for a large feature. Edit the todo list: pick the right starting commits, fixup or squash the WIP and typo commits into them, reword to clean messages. Resolve any conflicts. Push with `--force-with-lease`. Open PR.
+
+If 18 commits feels too many to manage in interactive rebase: consider doing a single `git reset --soft main` to put all your changes in the staging area, then making 3-5 fresh commits from scratch. Heavier-handed but sometimes cleaner.
+
+</details>
+
 **Scenario B:** You accidentally ran `git push --force` on main after rebasing it. Three teammates have pulled main today. Walk through the recovery process you'd lead.
+
+<details>
+<summary>Show answer</summary>
+
+Apologize first (this is real damage, not just an inconvenience). Triage:
+1. Find someone whose local main hasn't been pulled-since-the-force-push. Their local has the OLD history.
+2. That person checks out main, then `git push --force-with-lease origin main` to restore the old history. (Make sure platform protection isn't blocking; you may need a brief admin override.)
+3. Everyone else resets their local main to the restored remote: `git fetch && git reset --hard origin/main`.
+4. If anyone made commits on broken main during the window, those commits need to be recovered (find their SHAs from reflog, cherry-pick onto restored main).
+
+Post-mortem: enable branch protection forbidding force-push to main. Never again.
+
+</details>
 
 **Scenario C:** You're rebasing a feature branch onto main and hitting conflict after conflict: every commit you've made conflicts with main's recent changes. After ten conflicts, you're exhausted. What are your options?
 
+<details>
+<summary>Show answer</summary>
+
+Options:
+- `git rebase --abort` and approach differently. Either merge main into your feature (instead of rebase), accepting a merge commit; or do a partial rebase (squash your feature branch's commits to one or two locally first, then rebase the smaller version with fewer conflict surfaces).
+- Continue the rebase if individual conflicts are tractable, but pace yourself (take breaks; a tired conflict resolution often introduces bugs).
+- Ask the teammate whose commits are causing the conflicts to pair on the resolution: they understand the recent changes better.
+
+The lesson: a conflict storm usually signals that your feature branch has been alive too long. Future fix: rebase more often (weekly, daily) so each individual rebase has few conflicts.
+
+</details>
+
 **Scenario D:** You're on a team that uses GitFlow. Someone proposes switching to a "rebase before merge" policy. Discuss the pros and cons.
+
+<details>
+<summary>Show answer</summary>
+
+Pros: linear history is easier to read with `git log`. `git blame` traces cleanly without merge-commit detours. Bisect (binary search through history) is simpler. PRs are typically cleaner because the cleanup happens before merge.
+
+Cons: rewriting history is more error-prone for less experienced engineers. The honest "this branch was developed in parallel" story is lost. The release-branch audit trail GitFlow provides is diluted. Force-pushing feature branches becomes routine, slightly raising the risk of "force-push to wrong branch" mistakes.
+
+Decision should be team-wide and documented. The choice is style, not correctness.
+
+</details>
 
 ### Flashcards
 

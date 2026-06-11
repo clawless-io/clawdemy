@@ -1,6 +1,6 @@
 ---
 title: 'Cheatsheet: Worktrees and parallel agents'
-description: Quick reference plus model answers for L13 self-check questions and drills.
+description: Quick reference for L13 worktree commands, tool-choice guidance, and drill walk-throughs.
 artifact: cheatsheet
 sidebar:
   order: 5
@@ -64,52 +64,6 @@ git worktree remove ../agent-2
 git branch -D agent-1/<task> agent-2/<task> ...
 ```
 
-### Self-check question model answers
-
-**Q1. What is a git worktree?**
-
-A separate working directory attached to the same git repository. Multiple folders share one `.git/` (the database of commits, branches, tags). Each folder has its own branch checked out and its own uncommitted working state. Differs from a clone in that the git history is SHARED (no duplication, no push/pull between worktrees) rather than independently copied.
-
-**Q2. Why does git refuse same-branch in two worktrees?**
-
-Because two working trees both trying to commit to the same branch is asking for race conditions and chaos. Git's design assumes one branch = one current "working state" at a time. If you genuinely need to inspect the same commit in two places, use detached HEAD in one of them (`git worktree add --detach <path> <sha>`).
-
-**Q3. Two situations where worktrees beat checkout-switching:**
-
-- Frequent context-switching (multiple times per hour): worktrees eliminate the stash/checkout/unstash ceremony.
-- Long-running operations on one branch (a 45-minute test) while you continue work on another: checkout-switching would block you; worktrees let both happen.
-
-**Q4. One situation where clones beat worktrees:**
-
-Working across multiple machines. Worktrees can't share a database across machines; clones can sync via a shared remote. So if you want to work on the same repo from your laptop and your desktop, separate clones (with push/pull) are the answer.
-
-**Q5. What does `git worktree prune` do?**
-
-Cleans up internal records of worktrees whose folders have been manually deleted (e.g. you `rm -rf` a worktree folder without first running `git worktree remove`). After pruning, `git worktree list` shows only the worktrees whose folders actually exist.
-
-**Q6. Are commits in a worktree visible from other worktrees?**
-
-Yes, via the shared `.git/`. A commit you make in worktree A is immediately part of the database all other worktrees of the same repo share. Running `git log --all` in any worktree shows commits made in any other worktree (across all branches).
-
-The only caveat: a commit is visible on its BRANCH. If worktree A made a commit on branch `feature-A`, that commit is visible in worktree B if B looks at `feature-A` (or runs `git log --all`), but it's NOT in worktree B's CURRENT branch unless B merges or cherry-picks.
-
-**Q7. Why are worktrees a particularly good fit for parallel AI agents?**
-
-- Each agent gets its own working directory (no file-edit interference between agents).
-- Each agent gets its own branch (no commit-history collision).
-- All agents share the same `.git/` (their commits are immediately visible to the lead and to each other).
-- Worktrees are cheap to create and destroy (one command each), matching the "spin up 6 agents for an hour, tear down" lifecycle.
-
-The alternative, multiple clones, would mean more disk space, push/pull ceremony between clones, and slower fleet setup/teardown. Worktrees are simply the right shape for this work.
-
-**Q8. Disk-space tradeoff:**
-
-A single-checkout uses 1x git database + 1x working tree.
-A clone uses 2x git database + 2x working tree.
-A worktree-pair uses 1x git database + 2x working tree.
-
-So worktrees save the git-database duplication (which for a large repo can be hundreds of megabytes) but still use one full working tree per attached folder. Lighter than clones, heavier than single-checkout.
-
 ### Worktree basics drill, model walk-through
 
 After running through the drill, you should see:
@@ -150,91 +104,6 @@ After completing the drill, your unified graph (`git log --all --oneline --graph
 ```
 
 Three branches diverged from main, each with their own commits. The integration step merges them back into a new branch.
-
-### Scenario reflection model answers
-
-**Scenario A, 60-minute test suite, continue coding:**
-
-```bash
-git worktree add ../test-current HEAD
-cd ../test-current
-./run-test-suite.sh > test-output.log 2>&1 &       # background
-cd ~/projects/myrepo                                # back to main work, continue coding
-```
-
-When the test finishes (60 min later), `cd ../test-current` and check `test-output.log`. After confirming, `git worktree remove ../test-current`.
-
-The trick is `HEAD` as the branch: same branch as your current work, but in a separate folder. The constraint "same branch in two worktrees is forbidden" is the problem. Workaround: use `--detach` to start the test worktree in detached-HEAD mode at the same commit:
-
-```bash
-git worktree add --detach ../test-current HEAD
-```
-
-Now both folders are at the same commit, but only your main folder is on the branch. Tests run on the detached state; coding continues on the branch.
-
-**Scenario B, maintainer reviewing 5-10 PRs per week:**
-
-```bash
-# For each PR
-git fetch origin pull/<PR-number>/head:pr-<PR-number>
-git worktree add ../pr-<PR-number> pr-<PR-number>
-cd ../pr-<PR-number>
-# review: run the code, test, comment on the PR via UI
-cd ~/projects/myrepo
-git worktree remove ../pr-<PR-number>
-git branch -D pr-<PR-number>
-```
-
-For high-volume maintainers, often a small shell function or script encapsulates this. The friction drops from minutes to seconds per PR review.
-
-**Scenario C, 6-agent fleet:**
-
-```bash
-cd ~/projects/myrepo
-git checkout main && git pull
-
-for i in 1 2 3 4 5 6; do
-    git worktree add -b agent-$i/feature ../agent-$i main
-done
-
-# Launch 6 agent sessions, each pointing at ../agent-N
-# Watch progress from main repo:
-git log --all --oneline --graph
-
-# When agents finish (some sooner than others), integrate:
-git checkout -b integration main
-git merge agent-1/feature        # or cherry-pick specific commits
-# ... and so on for each ...
-
-# Teardown:
-for i in 1 2 3 4 5 6; do
-    git worktree remove ../agent-$i
-    git branch -D agent-$i/feature
-done
-```
-
-The fleet existed for the duration of the agent work (an hour or two), then disappeared.
-
-**Scenario D, forgotten worktree from last week:**
-
-```bash
-git worktree list
-# /Users/you/myrepo                    abc1234 [main]
-# /Users/you/wt-forgotten-experiment   def5678 [feature/old-experiment]
-```
-
-The list reveals where it lives. `cd /Users/you/wt-forgotten-experiment` to inspect. If you don't care:
-
-```bash
-git worktree remove --force /Users/you/wt-forgotten-experiment
-git branch -D feature/old-experiment       # if you don't want the branch either
-```
-
-If the folder was manually deleted (just `rm -rf`-ed), the list will still show it, but pointing at a nonexistent path. Then:
-
-```bash
-git worktree prune     # cleans up the record
-```
 
 ### Common mistakes and fixes
 

@@ -1,6 +1,6 @@
 ---
 title: 'Practice: Multi-agent integration patterns'
-description: Self-check questions, drills, scenario reflections, and flashcards for L14. Model answers in the cheatsheet.
+description: Self-check questions, drills, scenario reflections, and flashcards for L14.
 artifact: practice
 sidebar:
   order: 3
@@ -12,25 +12,109 @@ import FlashcardSet from '../../../../../components/FlashcardSet.astro';
 
 ### Self-check questions
 
+Answer each in your own words first, then open the answer to check.
+
 **Q1.** Describe the three integration patterns in one sentence each.
+
+<details>
+<summary>Show answer</summary>
+
+- Shared origin: all agents push to one remote, lead integrates there.
+- Per-agent fork: each agent on its own remote, lead pulls from each fork.
+- Shared worktrees: all local, nothing pushed until integration final.
+
+</details>
 
 **Q2.** Which pattern is the default starting point for most multi-agent workflows, and why?
 
+<details>
+<summary>Show answer</summary>
+
+Simplest setup. Uses standard tooling without special configuration. Branches are visible for other-human review. Matches the workflow most teams already know.
+
+</details>
+
 **Q3.** Why is per-agent fork the right choice when working with untrusted or external agents?
+
+<details>
+<summary>Show answer</summary>
+
+Quarantines the agent's work on a separate remote. The team's main remote is never polluted with unvetted code. The lead can vet the work freely (including discarding it entirely) without leaving traces. Maps to the open-source forking workflow where external contributors push to their own forks.
+
+</details>
 
 **Q4.** What's the disadvantage of shared-worktrees vs the other two patterns?
 
+<details>
+<summary>Show answer</summary>
+
+No backup, no remote visibility during the work. If the lead's machine dies, the work is gone. Other team members can't see what agents are doing until the lead pushes. Doesn't scale to teams with multiple concurrent fleets.
+
+</details>
+
 **Q5.** List the seven responsibilities of the lead orchestrator role.
+
+<details>
+<summary>Show answer</summary>
+
+Plan, spawn, watch, integrate, catch semantic conflicts, push gate, cleanup.
+
+</details>
 
 **Q6.** What's a semantic conflict, and why can git not detect it?
 
+<details>
+<summary>Show answer</summary>
+
+Code merges cleanly (git produces no line-level conflict) but behaves wrong because two agents had inconsistent mental models. Examples: renamings, duplicate utilities, mismatched field names, mismatched return types. Git can't detect them because they cross file boundaries without overlapping at the line level.
+
+</details>
+
 **Q7.** List the three layers of defense against semantic conflicts.
+
+<details>
+<summary>Show answer</summary>
+
+1. Tight agent scope, reduce overlap to reduce conflict surface area
+2. Integration tests at each merge step in the integration sequence
+3. Lead reads the integrated diff before pushing, judgment work that no test framework substitutes for
+
+</details>
 
 **Q8.** What did the Clawless 2026-06-04 sprint teach about per-agent tests vs the lead-stage build?
 
+<details>
+<summary>Show answer</summary>
+
+Per-agent tests are NECESSARY but NOT SUFFICIENT. The lead-stage build (full-system, after all merges) caught ~300 latent breakers that per-agent tests had missed. The build gate at integration is the most important guardrail.
+
+</details>
+
 **Q9.** When should you abort and re-run an agent vs repair its branch by hand?
 
+<details>
+<summary>Show answer</summary>
+
+Abort and re-run when:
+- The agent misunderstood its scope and a refined prompt would clearly help
+- The bad work is more than a few quick fixes
+- The work is small enough that re-running is cheap
+
+Repair the branch when:
+- The work is mostly good with targeted issues
+- The fixes are small and obvious
+- Re-running would lose work that's worth keeping
+
+</details>
+
 **Q10.** Why is the build gate at integration time "non-negotiable"?
+
+<details>
+<summary>Show answer</summary>
+
+It catches what nothing else can. Per-agent tests catch individual-agent issues; integration tests catch boundary issues at the merge level; the build gate catches the cumulative interactions of all agents' work as a complete system. Skipping the build gate has historically been the source of multi-agent integration bugs that shipped.
+
+</details>
 
 ### Pattern selection drill
 
@@ -86,11 +170,67 @@ git merge agent-3/z       # should succeed
 
 **Scenario A:** Your team is starting multi-agent workflows for the first time. What's your recommended starting pattern, and what process discipline do you put in place from day one?
 
+<details>
+<summary>Show answer</summary>
+
+Start with shared-origin. Process discipline:
+1. Tight agent scope, non-overlapping when possible
+2. Integration tests covering boundaries between agent scopes
+3. Lead-stage build at the end of each integration sequence
+4. Lead reads the integrated diff before pushing
+5. Cleanup after each sprint (remove worktrees, delete branches)
+
+Document the workflow. Train the lead role explicitly. Track metrics: integration time, semantic-conflict frequency, agent rework rate.
+
+</details>
+
 **Scenario B:** You're integrating 6 agent branches. Three integrate cleanly with passing tests. The fourth merges cleanly but fails 12 tests. Walk through your decision process.
+
+<details>
+<summary>Show answer</summary>
+
+Decision tree:
+1. Read the test failures. Are they git-level conflicts (the merge had problems)? Or semantic (merge clean, behavior wrong)?
+2. If semantic, are the failures concentrated in one boundary (agent-3 + agent-4)? If so, that boundary is the suspect.
+3. Investigate the diff for agent-4 vs the integration of agents 1-3. Look for renamings, mismatched assumptions.
+4. If the fix is small and obvious: repair agent-4's branch and continue.
+5. If the fix would be substantial: ABORT agent-4, refine its prompt to address the misunderstanding, re-run.
+
+Don't sink hours into rescuing a confused agent. 20 minutes of re-running often beats 2 hours of hand-repair.
+
+</details>
 
 **Scenario C:** Your team has been doing multi-agent fleets for 3 months. You're seeing a recurring pattern of duplicate utility functions across agent branches. How do you address this at the process level?
 
+<details>
+<summary>Show answer</summary>
+
+Process-level fixes:
+1. Prompt agents with an explicit "before adding a utility function, check if one already exists" instruction
+2. Have one agent (or the lead) own shared utilities; other agents must use what already exists or coordinate
+3. Add lint rules that detect duplicate-logic patterns at integration time
+4. Lead's diff review includes an explicit "check for duplicate functions" step
+
+The pattern fix is upstream of the symptom. Don't keep catching duplicates in integration; prevent them at the prompt or scope-design step.
+
+</details>
+
 **Scenario D:** A non-technical stakeholder asks why the integration step takes so long when "the agents do the work in minutes." How do you explain the lead's role?
+
+<details>
+<summary>Show answer</summary>
+
+The agents produce drafts in parallel. Each draft is independently correct, but combining them into a working whole requires:
+- Resolving conflicts where drafts disagree
+- Catching subtle mismatches where drafts make different assumptions
+- Running the full system to verify the combination actually works
+- Reading the combined result for judgment-level issues no test can catch
+
+A useful analogy: imagine six authors writing different chapters of a book in parallel. Each chapter is internally well-written. But the editor still needs to make sure the character names match, the plot timeline is consistent, the tone is unified, and the book reads as one coherent work. The lead's integration role is similar.
+
+The work the lead does is genuinely high-leverage. It's not pure overhead; it's the step that converts parallel drafts into shippable software.
+
+</details>
 
 ### Flashcards
 
