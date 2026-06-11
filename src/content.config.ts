@@ -195,7 +195,7 @@ export const collections = {
 				// License
 				license: z
 					.object({
-						text: z.string().default('CC-BY-SA-4.0'),
+						text: z.string().default('CC-BY-NC-SA-4.0'),
 						code: z.string().default('MIT'),
 					})
 					.optional(),
