@@ -40,7 +40,14 @@ export default defineConfig({
 		// meta in their frontmatter head: block; sitemap exclusion is hygiene,
 		// noindex is enforcement.
 		sitemap({
-			filter: (page) => !page.includes('/legal/') && !page.includes('/trust/'),
+			// /legal/licensing/ is the EXCEPTION to the legal-exclusion rule.
+				// It is positive policy content where discoverability serves the
+				// project (commercial inquirers searching "Clawdemy commercial
+				// licensing" should land here). All other /legal/ pages stay
+				// excluded from sitemap + carry noindex meta in their frontmatter.
+				filter: (page) =>
+					page.includes('/legal/licensing/') ||
+					(!page.includes('/legal/') && !page.includes('/trust/')),
 		}),
 		starlight({
 			title: 'Clawdemy',

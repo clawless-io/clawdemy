@@ -57,11 +57,13 @@ Pull requests for typo fixes and link corrections are welcome. Larger contributi
 
 ## License
 
-**Lesson content** (everything under `src/content/docs/`): [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/). Share, adapt, remix, even commercially, as long as you credit Clawdemy and share-alike.
+**Lesson text content** (everything under `src/content/docs/` except code samples): [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/). Share, adapt, translate, and remix for non-commercial purposes with attribution and share-alike. Commercial use requires a license; inquiries at `licensing@clawdemy.org`. Detailed policy at [clawdemy.org/legal/licensing](https://clawdemy.org/legal/licensing/).
+
+**Audio narration** (MP3 files served from `audio.clawdemy.org` and the podcast feed): All Rights Reserved by RBJ Global LLC. Listening via legitimate podcast platforms is permitted; re-hosting requires permission.
 
 **Code, build tooling, and supporting scripts**: [MIT](./LICENSE). Use freely.
 
-Full terms in [`LICENSE`](./LICENSE).
+Full terms in [`LICENSE`](./LICENSE). License history: lesson content was previously CC BY-SA 4.0 prior to 2026-06-11; the change reflects a clarification of Clawdemy's actual non-commercial intent.
 
 ## Related projects
 
