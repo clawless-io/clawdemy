@@ -70,4 +70,25 @@ export const ACRONYMS: Record<string, string> = {
 	// Hardware
 	GPU: 'Graphics Processing Unit',
 	TPU: 'Tensor Processing Unit',
+
+	// Git / dev-workflow + general computing (Track 7 and across the catalog).
+	// Only globally-unambiguous expansions are listed here. Deliberately OMITTED
+	// because they collide with other meanings elsewhere in this catalog (the
+	// dictionary is global + whole-word, so a wrong expansion would surface on
+	// those lessons): PR (Precision-Recall in stats), CI (Confidence Interval
+	// in stats), CD (Contrastive Divergence in generative models), QA (Question
+	// Answering in NLP). Add those only via a future track-scoped mechanism.
+	API: 'Application Programming Interface',
+	URL: 'Uniform Resource Locator',
+	HTML: 'HyperText Markup Language',
+	SSH: 'Secure Shell',
+	SHA: 'Secure Hash Algorithm',
+	UTC: 'Coordinated Universal Time',
+	SaaS: 'Software as a Service',
+	LTS: 'Long-Term Support',
+	OSS: 'Open Source Software',
+	SVN: 'Subversion',
+	CVS: 'Concurrent Versions System',
+	AWS: 'Amazon Web Services',
+	FAANG: 'Facebook, Amazon, Apple, Netflix, Google',
 };
