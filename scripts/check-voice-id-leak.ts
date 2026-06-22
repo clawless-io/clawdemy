@@ -62,6 +62,13 @@ const PVC_VOICE_IDS = [
 // Path matching is exact relative to repo root; no glob.
 const ALLOWED_FILES = new Set([
 	'scripts/generate-audio.ts',
+	// This gate must itself contain the PVC IDs in PVC_VOICE_IDS to scan
+	// for them; its own definition list is an intended location, not a
+	// leak. Without this entry, a full-tree run (no --staged) flags line
+	// ~58 and always exits non-zero, making the on-demand invocation
+	// documented above unusable. Pre-commit --staged detection on every
+	// other file is unaffected.
+	'scripts/check-voice-id-leak.ts',
 ]);
 
 // .env.example MUST contain only placeholders, never the actual ID.
