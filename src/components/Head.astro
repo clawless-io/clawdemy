@@ -56,6 +56,44 @@ const structuredData = {
 		},
 	],
 };
+
+// Per-lesson LearningResource JSON-LD. Entity/content-type clarity for AI search
+// + AEO discoverability (NOT a ranking lever, and lessons do not get a visible
+// Google rich result; this is correctness, not a ranking play). Single node,
+// refs into the homepage Organization + WebSite graph by @id (no duplication).
+//
+// Scoped to artifact === 'lesson' ONLY: the supplementary artifacts (brief /
+// practice / summary / cheatsheet / references) are slated for noindex, so
+// marking structured data on them would be incoherent + dilute the signal.
+//
+// LearningResource, not Course (Course needs hasCourseInstance or it is an
+// invalid rich-result attempt) and not Article/TechArticle (Article wants
+// headline+image+datePublished+author and we have no reliable per-lesson date
+// or image, so those would just generate GSC warnings).
+//
+// author = the Organization @id ref, NOT a Person: the human-authorship claim
+// is an open accuracy question; org-as-author is safe and true. educationalLevel
+// / datePublished / image are deliberately OMITTED (no reliable per-lesson data;
+// a wrong constant is worse than absent).
+const lessonEntry = Astro.locals.starlightRoute.entry;
+const isLesson = lessonEntry?.data?.artifact === 'lesson';
+const canonicalUrl = new URL(Astro.url.pathname, Astro.site).toString();
+const lessonStructuredData = isLesson
+	? {
+			'@context': 'https://schema.org',
+			'@type': 'LearningResource',
+			'@id': `${canonicalUrl}#lesson`,
+			name: lessonEntry.data.title,
+			description: lessonEntry.data.description ?? '',
+			url: canonicalUrl,
+			inLanguage: 'en',
+			isAccessibleForFree: true,
+			learningResourceType: 'lesson',
+			isPartOf: { '@id': 'https://clawdemy.org/#website' },
+			publisher: { '@id': 'https://clawdemy.org/#organization' },
+			author: { '@id': 'https://clawdemy.org/#organization' },
+		}
+	: null;
 ---
 
 <Default><slot /></Default>
@@ -76,4 +114,11 @@ const structuredData = {
     (e.g. .replace(/</g, '\\u003c')) to prevent a script breakout. */}
 {isHome && (
 	<script type="application/ld+json" is:inline set:html={JSON.stringify(structuredData)} />
+)}
+{/* Per-lesson LearningResource. name/description come from frontmatter, so escape
+    "<" as the JSON unicode escape < (NOT the HTML entity &lt;, which a JSON-LD
+    parser does not decode and would corrupt a field value) to prevent a
+    </script> breakout if any title/description ever contains "<". */}
+{isLesson && lessonStructuredData && (
+	<script type="application/ld+json" is:inline set:html={JSON.stringify(lessonStructuredData).replace(/</g, '\\u003c')} />
 )}
