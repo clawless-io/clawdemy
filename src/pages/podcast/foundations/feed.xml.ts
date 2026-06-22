@@ -33,6 +33,25 @@ const FEED_LANGUAGE = 'en';
 // specific variant can follow if the per-path pattern is adopted.
 const COVER_ART = `${SITE_URL}/podcast/cover.jpg`;
 
+// Podcasting 2.0 protection parity with the master feed (src/pages/podcast/
+// feed.xml.ts). A pilot feed that may later be submitted to platforms needs
+// the same claim-takeover defense.
+// - FEED_URL: canonical feed URL for <atom:link rel="self"> and GUID derivation.
+// - FEED_COPYRIGHT / PODCAST_LICENSE_*: All Rights Reserved for audio per LICENSE,
+//   identical to the master (same owning entity + same /legal/licensing anchor).
+// - PODCAST_GUID: its OWN UUID-v5, derived from the lowercased feed URL minus
+//   scheme ("clawdemy.org/podcast/foundations/feed.xml") using the Podcasting 2.0
+//   namespace UUID `ead4c236-bf58-58c6-a2c6-a6b28d128cb6`. This is a DISTINCT
+//   feed and must NOT reuse the master's GUID. Locked: do not change even if the
+//   feed URL changes (that is the whole point of GUID).
+// - <podcast:locked> with owner=<itunes:email> tells P2.0-aware indexers to
+//   refuse imports unless the requester proves ownership of the email.
+const FEED_URL = `${SITE_URL}/podcast/foundations/feed.xml`;
+const FEED_COPYRIGHT = 'Copyright © 2026 RBJ Global LLC. All rights reserved.';
+const PODCAST_GUID = 'ce6baeef-1591-51d6-b567-f449c644ed36';
+const PODCAST_LICENSE_URL = `${SITE_URL}/legal/licensing/#audio-narration-all-rights-reserved`;
+const PODCAST_LICENSE_CODE = 'arr';
+
 // Foundations track directory slugs, live from the manifest (source of truth).
 const FOUNDATIONS_SLUGS = new Set(tracksByTheme('foundations').map((t) => t.slug));
 
@@ -145,6 +164,8 @@ export const GET: APIRoute = async (context) => {
 
 	const channelMeta = [
 		`<language>${FEED_LANGUAGE}</language>`,
+		`<copyright>${escapeXml(FEED_COPYRIGHT)}</copyright>`,
+		`<atom:link href="${FEED_URL}" rel="self" type="application/rss+xml" />`,
 		`<itunes:author>${escapeXml(AUTHOR)}</itunes:author>`,
 		`<itunes:summary>${escapeXml(FEED_DESCRIPTION)}</itunes:summary>`,
 		`<itunes:owner><itunes:name>${escapeXml(AUTHOR)}</itunes:name><itunes:email>${escapeXml(OWNER_EMAIL)}</itunes:email></itunes:owner>`,
@@ -153,10 +174,18 @@ export const GET: APIRoute = async (context) => {
 		`<itunes:category text="Technology" />`,
 		`<itunes:explicit>false</itunes:explicit>`,
 		`<itunes:type>episodic</itunes:type>`,
+		`<podcast:guid>${PODCAST_GUID}</podcast:guid>`,
+		`<podcast:locked owner="${escapeXml(OWNER_EMAIL)}">yes</podcast:locked>`,
+		`<podcast:license url="${PODCAST_LICENSE_URL}">${PODCAST_LICENSE_CODE}</podcast:license>`,
+		`<podcast:medium>podcast</podcast:medium>`,
 	].join('');
 
 	return rss({
-		xmlns: { itunes: 'http://www.itunes.com/dtds/podcast-1.0.dtd' },
+		xmlns: {
+			itunes: 'http://www.itunes.com/dtds/podcast-1.0.dtd',
+			podcast: 'https://podcastindex.org/namespace/1.0',
+			atom: 'http://www.w3.org/2005/Atom',
+		},
 		title: FEED_TITLE,
 		description: FEED_DESCRIPTION,
 		site: context.site ?? SITE_URL,
