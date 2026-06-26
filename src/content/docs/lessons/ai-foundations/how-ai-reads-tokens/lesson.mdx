@@ -18,11 +18,11 @@ import LessonStar from '../../../../../components/LessonStar.astro';
 <ReadAlongDim
   src="https://audio.clawdemy.org/lessons/how-ai-reads-tokens-lesson.mp3"
   slug="how-ai-reads-tokens"
-  cacheVersion="20260608"
+  cacheVersion="20260626"
   approxMinutes={20}
 />
 
-AI can write a poem about strawberries. Ask older models how many Rs are in the word and they get it wrong; ask the latest frontier models (Llama 4, o3, GPT-5.x) and most of them now answer three, because the makers trained the failure mode away after it became a meme.
+AI can write a poem about strawberries. Ask older models how many Rs are in the word and they get it wrong; ask the latest frontier models and most of them now answer three, because once the failure became a well-known meme the specific case got largely fixed in newer models.
 
 For most of the GPT-4 era, asking an AI "how many Rs are in strawberry?" was a famous and reliable failure. The model would say two. The word has three. You can count them in less than a second.
 
@@ -87,15 +87,15 @@ w i d e r </w>       (3 occurrences)
 n e w </w>           (1 occurrence)
 ```
 
-The `</w>` is an end-of-word marker that BPE tracks so it knows where words end. The number in parentheses is how often each word appears.
+The end-of-word marker `</w>` is what BPE uses to track where each word ends. The number in parentheses is how often each word appears.
 
-**Step one: count every adjacent pair.** The pair `(e, r)` appears in `lower`, `newer`, and `wider`, weighted by their frequencies: 2 + 6 + 3 = 11 occurrences. The pair `(l, o)` appears in `low` and `lower`: 5 + 2 = 7 occurrences. Other pairs are smaller. The most frequent pair is `(e, r)` with 11.
+**Step one: count every adjacent pair.** Look at the pair e then r, the letter e immediately followed by the letter r. It appears inside the words lower, newer, and wider, weighted by how often those words occur: 2 plus 6 plus 3, which is 11 occurrences. The pair l then o appears inside low and lower: 5 plus 2, which is 7. Every other adjacent pair is rarer. The most frequent pair is e then r, with 11 (it ties with one other pair at 11, and the tokenizer breaks the tie by a fixed rule; we merge e then r first).
 
-**Step two: merge it.** Add a new token `er` to the vocabulary. Every occurrence of the pair `(e, r)` gets replaced by the new token:
+**Step two: merge it.** Add a new token for that pair to the vocabulary, the merge token `er`. Every occurrence of e then r in the corpus gets replaced by this single new token:
 
 <TokensBpeMerge />
 
-That is one BPE merge. The vocabulary just grew by one entry (`er`). Run the same procedure again and the next most frequent pair might be `(er, </w>)` with 11 occurrences, so you would add `er</w>` as a new token, meaning "the suffix -er at the end of a word." Run it 50,000 times and you have your full BPE vocabulary.
+That is one BPE merge. The vocabulary just grew by one entry, the merge token `er`. Run the same procedure again and the next most frequent pair might be that new `er` token followed by the end-of-word marker, again with 11 occurrences, so you would add a single token for the e-r suffix at the end of a word, the end-of-word suffix token `er</w>`. Run it 50,000 times and you have your full BPE vocabulary.
 
 The vocabulary you end up with is a snapshot of how text was actually structured in the training corpus. Common syllables get their own tokens. Common whole words get their own tokens. Names and rare words get spelled out across several tokens. Every input text the model ever encounters is broken into these pieces, in a deterministic way that exactly matches how the vocabulary was built.
 
@@ -103,7 +103,7 @@ The vocabulary you end up with is a snapshot of how text was actually structured
 
 We can now answer the question we opened with.
 
-If you paste "strawberry" into a real tokenizer (we will do exactly this in the practice section), the result depends on the tokenizer. In some GPT-family tokenizers it comes out as a single token; in others it splits into more than one piece. Either way, what the model sees is one or a small number of integer IDs. The model never sees `s`, `t`, `r`, `a`, `w`, `b`, `e`, `r`, `r`, `y`. It sees those IDs.
+If you paste "strawberry" into a real tokenizer (we will do exactly this in the practice section), the result depends on the tokenizer. In some GPT-family tokenizers it comes out as a single token; in others it splits into more than one piece. Either way, what the model sees is one or a small number of integer IDs. The model never sees the individual letters that spell the word, or the three Rs hidden in there. It sees those IDs.
 
 When you ask the model "how many Rs are in strawberry?", the model is being asked to count the R's inside the word. But the word, from the model's perspective, is not a sequence of letters. It is a single integer.
 
@@ -119,13 +119,13 @@ This is also why the same model does fine on numerical reasoning that does not r
 
 A real vocabulary contains a few entries that are not subword fragments. They are the housekeeping tokens the model uses to mark structural events:
 
-- **`<|begin_of_text|>` and `<|end_of_text|>`** (often written `BOS` and `EOS`). These mark the start and end of a piece of text. The model has been trained to expect them at certain places.
-- **Chat-role markers** like `<|im_start|>` and `<|im_end|>`, or `system` / `user` / `assistant`. In chat-tuned models these mark whose turn is whose. Without them, the model would not be able to tell where your message ends and its previous message begins.
-- **`<pad>`**, **`<unk>`**, **`<mask>`**. Padding to make batches uniform; an unknown-token fallback (rarely needed in subword tokenizers); a mask token used during training for fill-in-the-blank objectives.
+- **Beginning-of-text and end-of-text markers**, often shortened to BOS and EOS. These mark the start and end of a piece of text, and the model has been trained to expect them at certain places. In the tokenizer they show up as the symbols `<|begin_of_text|>` and `<|end_of_text|>`.
+- **Chat-role markers** mark whose turn is whose in a chat-tuned model: the role labels system, user, and assistant, plus the structural symbols `<|im_start|>` and `<|im_end|>`. Without them, the model would not be able to tell where your message ends and its previous message begins.
+- **Padding, unknown, and mask tokens.** Padding makes batches a uniform length; the unknown-token slot is a fallback that is rarely needed in subword tokenizers; the mask token is used during training for fill-in-the-blank objectives. They appear as the symbols `<pad>`, `<unk>`, and `<mask>`.
 
 The boring detail is that special tokens look different from text in the tokenizer's output: they have their own integer IDs, separate from the BPE merges.
 
-One thing worth flagging, though we will not go deep here: special tokens are also where prompt-injection attacks live. If a malicious input contains the literal string `<|im_start|>user` and the tokenizer parses it as the special token instead of as plain text, the attacker has just inserted a fake conversation turn into the model's input. This is the structural reason API providers strip or escape these markers in user input. The full story belongs in its own future lesson; for now, file it as "tokenization has a security surface that becomes important later."
+One thing worth flagging, though we will not go deep here: special tokens are also one place prompt-injection attacks live. An attacker can smuggle a literal chat-role marker into ordinary input as plain text, for example the characters `<|im_start|>user`. If the tokenizer parses that as a real special token instead of as plain text, the attacker has just inserted a fake conversation turn into the model's input. This is the structural reason API providers strip or escape these markers in user input. The full story belongs in its own future lesson; for now, file it as "tokenization has a security surface that becomes important later."
 
 ## Why this matters when you use AI
 
