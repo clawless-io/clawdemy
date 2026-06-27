@@ -40,14 +40,22 @@ export default defineConfig({
 		// meta in their frontmatter head: block; sitemap exclusion is hygiene,
 		// noindex is enforcement.
 		sitemap({
-			// /legal/licensing/ is the EXCEPTION to the legal-exclusion rule.
+			// Noindex lesson-artifact types (summary / practice / references)
+				// carry robots=noindex,follow (see src/components/Head.astro), so
+				// they must NOT appear in the sitemap: a noindexed URL in the
+				// sitemap makes Google flag "Submitted URL marked 'noindex'" in
+				// Coverage. Same hygiene rule as the legal/utility pages below
+				// (noindex => omit from sitemap). The indexed artifacts
+				// (lesson / brief / cheatsheet) stay in. GSD-flagged 2026-06-27.
+				// /legal/licensing/ is the EXCEPTION to the legal-exclusion rule.
 				// It is positive policy content where discoverability serves the
 				// project (commercial inquirers searching "Clawdemy commercial
 				// licensing" should land here). All other /legal/ pages stay
 				// excluded from sitemap + carry noindex meta in their frontmatter.
 				filter: (page) =>
-					page.includes('/legal/licensing/') ||
-					(!page.includes('/legal/') && !page.includes('/trust/')),
+					!/\/(summary|practice|references)\/?$/.test(page) &&
+					(page.includes('/legal/licensing/') ||
+						(!page.includes('/legal/') && !page.includes('/trust/'))),
 		}),
 		starlight({
 			title: 'Clawdemy',
