@@ -4061,6 +4061,18 @@ export default defineConfig({
 								{ label: 'References', slug: 'lessons/ai-agent-teams/why-split-one-ai-into-many/references' },
 							],
 						},
+						{
+							label: 'How an agent fetches its own data',
+							collapsed: true,
+							items: [
+								{ label: 'Brief', slug: 'lessons/ai-agent-teams/how-an-agent-fetches-its-own-data/brief' },
+								{ label: 'Lesson', slug: 'lessons/ai-agent-teams/how-an-agent-fetches-its-own-data/lesson' },
+								{ label: 'Practice', slug: 'lessons/ai-agent-teams/how-an-agent-fetches-its-own-data/practice' },
+								{ label: 'Summary', slug: 'lessons/ai-agent-teams/how-an-agent-fetches-its-own-data/summary' },
+								{ label: 'Cheatsheet', slug: 'lessons/ai-agent-teams/how-an-agent-fetches-its-own-data/cheatsheet' },
+								{ label: 'References', slug: 'lessons/ai-agent-teams/how-an-agent-fetches-its-own-data/references' },
+							],
+						},
 					],
 				},
 			];
