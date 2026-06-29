@@ -367,6 +367,7 @@ const BriefSchema = z.object({
 		'intro-to-deep-learning',
 		'build-nns-from-scratch',
 		'ai-agents-and-tool-use',
+		'ai-agent-teams',
 		'neural-network-intuition',
 		'practical-transformers',
 		'reinforcement-learning-foundations',

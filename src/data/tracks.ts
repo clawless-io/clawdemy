@@ -369,6 +369,17 @@ export const TRACKS: Track[] = [
 		status: 'live',
 		href: '/lessons/multimodal-ai/what-multimodal-ai-actually-is/lesson/',
 	},
+	{
+		id: 25,
+		slug: 'ai-agent-teams',
+		title: 'Anatomy of an AI Agent Team: Inside a Real Multi-Agent System',
+		blurb: "Read a real production multi-agent system's code and learn to build your own.",
+		theme: 'production',
+		level: 'Advanced',
+		lessons: 1,
+		status: 'live',
+		href: '/lessons/ai-agent-teams/why-split-one-ai-into-many/lesson/',
+	},
 
 	// --- Planned (not yet built; rendered only where status is surfaced) ----
 	{

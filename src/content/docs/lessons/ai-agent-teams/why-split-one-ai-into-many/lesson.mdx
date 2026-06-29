@@ -1,0 +1,122 @@
+---
+title: "Why split one AI into many"
+description: "Open the hood on a real multi-agent system: meet its twelve specialist agents, see how the roles split by function, and why only two get the deep model."
+artifact: lesson
+sidebar:
+  order: 1
+  label: Lesson
+---
+
+import LessonStar from '../../../../../components/LessonStar.astro';
+
+<LessonStar slug="why-split-one-ai-into-many" />
+
+{/* Read-along audio is wired at production-deploy time, after the text is frozen. */}
+
+The previous track argued, in the abstract, that some tasks are worth splitting across a team of specialist agents and some are not. This track does something different. It opens the hood on a real, running multi-agent system and reads its actual code, so that by the end you could build one of your own.
+
+The system is **TradingAgents**, an open-source research framework that analyzes a company the way an investment firm might: not with one model answering "buy or sell," but with a team of specialist agents that each do one job and hand their work down a line. We are going to study how that team is built. We are not going to study investing.
+
+> This track teaches how a multi-agent AI system is built and coordinated. It uses stock analysis as the worked example. It is for education only. It is not investment, financial, or trading advice, and nothing here is a recommendation to buy or sell anything.
+
+By the end of this lesson you will be able to read the roster of a real agent team and explain two decisions its authors made: how they divided the work into roles, and the less obvious choice of which roles get the most capable (and most expensive) model.
+
+## A note on the source
+
+TradingAgents was built by TauricResearch (Yijia Xiao, Edward Sun, Di Luo, and Wei Wang), described in their paper (arXiv:2412.20138), and published on GitHub at github.com/TauricResearch/TradingAgents. It is open source under the Apache-2.0 license, which is why we can read and quote its code directly in this course. Everything we show is pinned to one specific snapshot of the project (commit `7e9e7b8`), so the code you read here is exactly the code as it stood at that point, even as the project keeps evolving.
+
+## Meet the team
+
+When you open the project's agent package, a pair of utility imports come first, and then the cast. Here is the top of the file, in order:
+
+```python
+# tradingagents/agents/__init__.py  (pinned at 7e9e7b8; import order as in the file)
+from .utils.agent_utils import create_msg_delete
+from .utils.agent_states import AgentState, InvestDebateState, RiskDebateState
+
+from .analysts.fundamentals_analyst import create_fundamentals_analyst
+from .analysts.market_analyst import create_market_analyst
+from .analysts.news_analyst import create_news_analyst
+from .analysts.social_media_analyst import create_social_media_analyst
+
+from .researchers.bear_researcher import create_bear_researcher
+from .researchers.bull_researcher import create_bull_researcher
+
+from .risk_mgmt.aggressive_debator import create_aggressive_debator
+from .risk_mgmt.conservative_debator import create_conservative_debator
+from .risk_mgmt.neutral_debator import create_neutral_debator
+
+from .managers.research_manager import create_research_manager
+from .managers.portfolio_manager import create_portfolio_manager
+
+from .trader.trader import create_trader
+```
+
+Hold onto those first two imports. `AgentState`, `InvestDebateState`, and `RiskDebateState` are the shared memory the whole team reads from and writes into. The team's scratchpad is imported before any single agent is. They are the subject of lesson 6; for now just note that they are there.
+
+Below them are twelve agent factories, and they arrive already grouped: the project keeps each kind of agent in its own subpackage (`analysts/`, `researchers/`, `risk_mgmt/`, `managers/`, `trader/`), and the blank-line blocks above are those groups. (Twelve is the headcount when all four analysts are switched on, which is the default. The analysts are selectable, so you can run the team with fewer; the other eight roles are always built.) The grouping is not cosmetic. Each cluster is a **function**, a distinct kind of work:
+
+- **Four analysts** gather and read raw information. One reads market data, one reads social and sentiment signals, one reads news, one reads company fundamentals.
+- **Two researchers** argue. One builds the strongest case for the company (the bull), one builds the strongest case against it (the bear).
+- **Three risk seats** stress-test a plan from three temperaments: aggressive, conservative, and neutral.
+- **Two managers** are the judges. A research manager rules on the bull-versus-bear argument; a portfolio manager makes the final call.
+- **One trader** turns a ruling into a concrete plan.
+
+Each `create_*` is a **factory**: call it and it hands back one configured agent node, with the model it should use passed in as an argument (you will see that injection in the next excerpt). That single design choice is what makes a role replaceable. Swap the factory, keep the wiring.
+
+Now, the order the file imports them is not the order they run. At run time these functions form a **pipeline**, and it is worth tracing because it shows where the judges sit: the analysts gather, the bull and bear argue, the **research manager** rules on that argument, the trader turns the ruling into a plan, the three risk seats stress-test it, and the **portfolio manager** makes the final call. Notice the two judges are not side by side; one decides in the middle of the flow and one decides at the end. The team was not split into twelve pieces for the sake of having twelve agents. It was split along the natural seams of one workflow, and a judge was placed at each point where the work needs a decision before it can continue.
+
+## Why split it this way
+
+Each of these agents is still the same thing the earlier track described: a model with a focused job. (Some run a full tool-using loop, which is the next lesson; others run a single focused pass.) Splitting one big job into smaller ones buys three things, and you can see all three in the roster above.
+
+- **Focus.** The news analyst is told to read news and nothing else. Its instructions are short, its tools are few, and its attention is not diluted by also having to value a balance sheet. A narrow agent with a narrow job is more reliable than one generalist trying to hold the whole task in its head at once.
+- **Deliberate opposition.** The bull and the bear are not redundant. They exist specifically to argue opposite sides, because a single agent asked to "weigh the pros and cons" tends to talk itself into a tidy, balanced answer. Splitting that into two adversaries forces both cases to be made at full strength. (We spend all of lesson 3 on why this works.)
+- **Replaceability.** Because each role lives in its own file with its own prompt, you can improve the news analyst, or swap it out entirely, without touching the trader. The team is modular by construction.
+
+This is the first transferable lesson of the track: **a good agent team is a decomposition of one workflow into roles, each kept small enough to do well.** Before you write a line of code, the design question is "what are the distinct jobs here," not "how many agents can I use."
+
+## The decision most people miss: spend capability where it counts
+
+Here is the choice that separates a thoughtful agent team from a naive one, and it is invisible unless you read the wiring.
+
+The system is configured with **two model tiers**, not one. Its configuration defines a "deep" slot, meant for a more capable (and more expensive, slower) model, and a "quick" slot, meant for a cheaper, faster one. In the Lab you choose which actual models fill those two slots.
+
+The interesting part is how those two tiers are handed out. When the graph is assembled, almost every agent is created with the quick model:
+
+```python
+# tradingagents/graph/setup.py  (pinned at 7e9e7b8)
+bull_researcher_node  = create_bull_researcher(self.quick_thinking_llm)
+bear_researcher_node  = create_bear_researcher(self.quick_thinking_llm)
+research_manager_node = create_research_manager(self.deep_thinking_llm)   # judge
+trader_node           = create_trader(self.quick_thinking_llm)
+aggressive_analyst    = create_aggressive_debator(self.quick_thinking_llm)
+neutral_analyst       = create_neutral_debator(self.quick_thinking_llm)
+conservative_analyst  = create_conservative_debator(self.quick_thinking_llm)
+portfolio_manager_node = create_portfolio_manager(self.deep_thinking_llm) # judge
+```
+
+(The two `# judge` comments are added for clarity; the rest is the wiring as written.) The four analysts are created the same way, on the quick model. Count it up: with all four analysts on, ten of the twelve agents run on the cheap, fast model. The deep model is given to exactly **two** of them, and they are the same two: the **research manager** and the **portfolio manager**. The two judges. Change how many analysts you run and the headcount shifts, but this does not: the deep model always goes to exactly those two judges and nothing else. That invariant, not the number twelve, is the design.
+
+That is a real architecture decision, and it generalizes far beyond trading. Capability is a budget. Most of the work in an agent team, gathering, summarizing, arguing a single side, does not need your strongest model; a fast cheap model does it well enough. The places where a wrong call is most expensive are the **judgment** points, where one agent weighs everyone else's work and commits. Those are where you spend. This system puts its best model only at the two nodes that decide, and runs everything else lean.
+
+## Build your own: the takeaway
+
+When you design your own agent team, this lesson gives you the first two steps.
+
+1. **Decompose the workflow into functions.** Write down the distinct jobs the task actually contains (gather, analyze, argue, synthesize, check, decide). Each becomes a role with narrow instructions and a small set of tools. Resist adding roles that do not map to a real job.
+2. **Find the judgment nodes and spend your capability there.** Identify the few points where one agent commits on behalf of the others. Give those your most capable model; let the rest run on a cheaper, faster one. In this system there are exactly two such nodes; in your own, look for the small number of points where one agent decides for the rest, and expect far fewer of them than you would guess.
+
+## Common pitfalls
+
+- **Counting agents instead of functions.** "Twelve agents" is not the design. The design is the set of distinct jobs; the count just falls out of it. Adding agents that do not map to a real function adds coordination cost and buys nothing.
+- **Using one model tier everywhere.** Putting your best model on every agent is slow and expensive; putting a weak model on the judge is unreliable. The split is the point.
+- **Assuming more roles means more intelligence.** A team is more specialized and more complex than a solo agent, not inherently smarter. Those are different properties.
+
+## What you should remember
+
+- **A real agent team is a workflow split into roles by function.** TradingAgents divides the work into analysts who gather, researchers who argue, a trader who synthesizes, risk seats who stress-test, and managers who judge. The roster reads as a pipeline from raw information to a decision.
+- **Each agent is still a model in a loop with a focused job.** The gains from splitting are focus, deliberate opposition, and replaceability.
+- **Capability is a budget you spend at the judgment nodes.** This system runs ten of twelve agents on a cheap, fast model and reserves its most capable model for the two judges. That choice, not the agent count, is the architecture.
+
+The roster tells you who is on the team, but not how they get their information. The analysts are not handed a tidy packet of data to read. They go and fetch it themselves, deciding what to pull and when to stop. That is the next lesson: how an agent uses tools to gather what it needs.

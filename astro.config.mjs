@@ -4046,6 +4046,23 @@ export default defineConfig({
 						},
 					],
 				},
+				{
+					label: 'Track 25: AI Agent Teams',
+					items: [
+						{
+							label: 'Why split one AI into many',
+							collapsed: true,
+							items: [
+								{ label: 'Brief', slug: 'lessons/ai-agent-teams/why-split-one-ai-into-many/brief' },
+								{ label: 'Lesson', slug: 'lessons/ai-agent-teams/why-split-one-ai-into-many/lesson' },
+								{ label: 'Practice', slug: 'lessons/ai-agent-teams/why-split-one-ai-into-many/practice' },
+								{ label: 'Summary', slug: 'lessons/ai-agent-teams/why-split-one-ai-into-many/summary' },
+								{ label: 'Cheatsheet', slug: 'lessons/ai-agent-teams/why-split-one-ai-into-many/cheatsheet' },
+								{ label: 'References', slug: 'lessons/ai-agent-teams/why-split-one-ai-into-many/references' },
+							],
+						},
+					],
+				},
 			];
 					const __top = __groups.filter((g) => !/^Track \d+/.test(g.label));
 					const __tracks = __groups
