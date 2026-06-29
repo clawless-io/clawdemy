@@ -242,6 +242,15 @@ export function mdxToProse(mdx: string): string {
 	// Import statements
 	text = text.replace(/^\s*import\s+.+?from\s+['"][^'"]+['"];?\s*$/gm, '');
 
+	// JSX expression comments {/* ... */}: drop entirely. They render to nothing
+	// in the DOM, so the ReadAlongDim walker never sees their words; narrating
+	// them would both speak an internal note aloud (e.g. the "Read-along audio is
+	// wired at production-deploy time" marker on 17 lessons) AND push every later
+	// word out of sync with the highlight. Stripped before the italic pass so the
+	// inner asterisks are never mistaken for emphasis. Found 2026-06-29 on
+	// ai-agent-teams L2 while ear-checking the code-lesson narration.
+	text = text.replace(/\{\/\*[\s\S]*?\*\/\}/g, '');
+
 	// References / bibliography section: drop from the "## References" heading to
 	// the end of the document. Bibliography entries are URLs, arXiv IDs, author
 	// lists, DOIs, and venue names that the TTS mispronounces ("arXiv:1805.00909"
