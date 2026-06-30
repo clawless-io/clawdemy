@@ -4134,6 +4134,18 @@ export default defineConfig({
 									{ label: 'Cheatsheet', slug: 'lessons/ai-agent-teams/memory-and-reflection/cheatsheet' },
 									{ label: 'References', slug: 'lessons/ai-agent-teams/memory-and-reflection/references' },
 								],
+							},
+							{
+								label: 'The capstone',
+								collapsed: true,
+								items: [
+									{ label: 'Brief', slug: 'lessons/ai-agent-teams/the-capstone/brief' },
+									{ label: 'Lesson', slug: 'lessons/ai-agent-teams/the-capstone/lesson' },
+									{ label: 'Practice', slug: 'lessons/ai-agent-teams/the-capstone/practice' },
+									{ label: 'Summary', slug: 'lessons/ai-agent-teams/the-capstone/summary' },
+									{ label: 'Cheatsheet', slug: 'lessons/ai-agent-teams/the-capstone/cheatsheet' },
+									{ label: 'References', slug: 'lessons/ai-agent-teams/the-capstone/references' },
+								],
 							}
 			];
 					const __top = __groups.filter((g) => !/^Track \d+/.test(g.label));
