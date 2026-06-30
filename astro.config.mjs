@@ -4085,6 +4085,18 @@ export default defineConfig({
 									{ label: 'References', slug: 'lessons/ai-agent-teams/the-bull-and-the-bear/references' },
 								],
 							},
+							{
+								label: 'The trader',
+								collapsed: true,
+								items: [
+									{ label: 'Brief', slug: 'lessons/ai-agent-teams/the-trader/brief' },
+									{ label: 'Lesson', slug: 'lessons/ai-agent-teams/the-trader/lesson' },
+									{ label: 'Practice', slug: 'lessons/ai-agent-teams/the-trader/practice' },
+									{ label: 'Summary', slug: 'lessons/ai-agent-teams/the-trader/summary' },
+									{ label: 'Cheatsheet', slug: 'lessons/ai-agent-teams/the-trader/cheatsheet' },
+									{ label: 'References', slug: 'lessons/ai-agent-teams/the-trader/references' },
+								],
+							},
 					],
 				},
 			];

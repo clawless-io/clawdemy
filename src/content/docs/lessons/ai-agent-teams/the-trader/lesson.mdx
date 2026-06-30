@@ -1,0 +1,111 @@
+---
+title: "From verdict to plan: the trader"
+description: "A decision is not yet an action. Watch a real agent turn the judge's verdict into a concrete plan, on the cheaper model, without reopening the debate."
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+import LessonStar from '../../../../../components/LessonStar.astro';
+
+<LessonStar slug="the-trader" />
+
+{/* Read-along audio is wired at production-deploy time, after the text is frozen. */}
+
+A jury reaches a verdict: guilty. That is a decision, and it is a big one, but it is not yet a sentence. A judge still has to turn "guilty" into something concrete: how long, on what terms, with what conditions. The verdict and the plan that carries it out are two different jobs, done by two different people, on purpose. One decides; the other works out what the decision actually means in practice.
+
+Last lesson, the bull and the bear argued, and a separate judge committed to a stance and wrote it down as a plan. But that plan is still a judgment in words: "the case favors growing the position." It says what to lean toward, not what to actually do. Something has to turn the verdict into a concrete, specific course of action. That is the trader, and it is a smaller, quieter role than the debate, which is exactly what makes it worth looking at.
+
+> This track teaches how a multi-agent AI system is built and coordinated. It uses stock analysis as the worked example. It is for education only. It is not investment, financial, or trading advice, and nothing here is a recommendation to buy or sell anything.
+
+## The idea: deciding and doing are different jobs
+
+There is a strong temptation, when you build with AI, to ask one agent to both decide and lay out the plan in a single breath. It feels efficient. It usually is not, because the two tasks pull in different directions. Deciding means weighing competing arguments and committing. Working out the plan means taking the decision as settled and spelling out the concrete steps. Mash them together and the agent tends to re-argue the decision while it is supposed to be executing it, and you get a wobbly answer that does neither job cleanly.
+
+So the system splits them. The judge from last lesson decides. A separate agent, the trader, takes that decision as given and turns it into a specific, actionable proposal. The trader is not asked whether the judge was right. Its job starts after the decision is made.
+
+## Open the code: the trader
+
+From here we read the real system. You can follow along in your browser, with no account, no Git, and no programming knowledge needed:
+
+**[github.com/TauricResearch/TradingAgents (pinned snapshot)](https://github.com/TauricResearch/TradingAgents/tree/7e9e7b8)**
+
+Everything below is quoted from that frozen snapshot (the short code `7e9e7b8` marks the exact version). The trader is one short file (`tradingagents/agents/trader/trader.py`).
+
+The first thing the trader does is reach into shared state and pull out one specific thing: the plan the judge wrote.
+
+```python
+# tradingagents/agents/trader/trader.py
+investment_plan = state["investment_plan"]
+```
+
+That is the handoff between lessons made literal. The judge's decision was saved into the team's shared state under a name; the trader reads exactly that. It does not re-read the raw debate transcript to form its own opinion; it takes the finished judgment as its starting point.
+
+Then it is told what to do with it. This is the trader's instruction, quoted exactly:
+
+```
+You are a trading agent analyzing market data to make investment decisions.
+Based on your analysis, provide a specific recommendation to buy, sell, or hold.
+Anchor your reasoning in the analysts' reports and the research plan.
+```
+
+Read the last line carefully, because it is the whole point of the role: "Anchor your reasoning in the analysts' reports and the research plan." The trader is told to build on the decision, not to relitigate it. (The "recommendation to buy, sell, or hold" is the agent's own output inside the system, an architectural step, not advice to you.)
+
+When it finishes, the trader saves its concrete proposal back into shared state as its own field, the one thing it leaves behind for the next stage:
+
+```python
+# the trader's proposal becomes a new entry in shared state
+# (name is "Trader"; other keys omitted)
+return {
+    "trader_investment_plan": trader_plan,
+    "sender": name,
+}
+```
+
+Like the judge before it, the trader fills in a structured proposal (a tidy, machine-readable plan), with a plain-text fallback if that fails. Same shape as last lesson, different job.
+
+## The quiet tell: the trader runs on the cheaper model
+
+Here is the detail that makes this lesson click, and it is one line in the wiring of the graph:
+
+```python
+# tradingagents/graph/setup.py
+trader_node = create_trader(self.quick_thinking_llm)
+```
+
+The trader is built with the quick (cheaper, faster) model, not the deep one. Look back at the judge from last lesson: it got the deep, more capable model. That contrast is the lesson 1 idea showing up a third time, and now you can read the reasoning straight off the code. The hard part, weighing both sides and committing, already happened at the judge, and that is where the expensive model was spent. Turning a settled decision into a concrete plan is real work, but it is not the hard judgment, so it runs on the cheaper model.
+
+In other words, the model tier follows the difficulty of the thinking, not the importance of the agent. The trader's output matters a great deal; the thinking it has to do is comparatively routine.
+
+## Why this matters when you use AI
+
+When you chain AI steps together, you will keep hitting this fork: should one agent both decide and produce the deliverable, or should those be two steps?
+
+- **Separate deciding from doing.** Let one step make the call, then hand that call to a second step whose only job is to turn it into the concrete artifact (the plan, the draft, the itinerary, the spec). Each step does one thing well, and you can inspect the decision before you build on it.
+- **Make the doing step build on the decision, not reopen it.** Feed the prior decision in as settled, and instruct the agent to anchor on it. Otherwise it quietly re-argues, and may even contradict the call that was already made.
+- **Match the model to the difficulty, not the importance.** The expensive model belongs where the hard judgment happens. A step that operationalizes a decision already made can usually run on a cheaper, faster model, even though its output is what you actually use.
+
+So when you reach for AI on a multi-step task, do not ask one prompt to both decide and deliver. Decide first, then operationalize, and spend your best model on the decision.
+
+## Build your own: the takeaway
+
+To add a clean synthesis step after a decision in your own system:
+
+1. **Pass the decision in as given.** The synthesis agent reads the finished decision from wherever you stored it, not the raw inputs that produced it.
+2. **Tell it to build on the decision, not relitigate.** Its instruction should anchor it to the prior judgment and ask for the concrete plan, not a fresh opinion.
+3. **Use a cheaper model here.** The hard call is already made; operationalizing it rarely needs your most capable model. Save that for the decision step.
+
+## Common pitfalls
+
+- **One agent that decides and delivers in a single shot.** It tends to re-argue while it should be executing, and the output is muddier for it. Split the two.
+- **A synthesis step that reopens the question.** If you feed it the raw evidence instead of the decision, it forms its own view and may contradict the judgment you already made. Hand it the decision, and point it at the decision.
+- **Spending your best model on the write-up.** The deliverable matters, but producing it from a settled decision is not the hard part. Putting the expensive model here, and a cheap one on the actual judgment, is exactly backwards.
+
+## What you should remember
+
+- **Deciding and operationalizing are different jobs.** The judge commits to a stance; the trader turns that stance into a concrete, specific plan. Keeping them in separate agents keeps each one clean.
+- **The synthesis step builds on the decision.** The trader reads the judge's plan from shared state and is told to anchor on it, not to reopen the debate.
+- **Model tier follows difficulty, not importance.** The trader's plan is what gets used, yet it runs on the cheaper model, because the hard judgment already happened upstream.
+
+The trader has turned the verdict into a concrete proposal. But no proposal should go out the door without someone asking "what could go wrong?" Before the team commits, the plan is handed to a risk layer: voices that pull in different directions on caution, and a final manager who can temper or override. That risk gate is the next lesson.
