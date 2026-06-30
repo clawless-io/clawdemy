@@ -1,0 +1,111 @@
+---
+title: "How the system learns from its past calls"
+description: "A team that never reviews its past calls repeats its mistakes. See how the system records each decision and, once the outcome is known, reflects on it."
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+import LessonStar from '../../../../../components/LessonStar.astro';
+
+<LessonStar slug="memory-and-reflection" />
+
+{/* Read-along audio is wired at production-deploy time, after the text is frozen. */}
+
+A good pilot keeps a logbook. Not to admire it, but because the only way to get better is to look back at real flights and ask what worked and what did not. And there is a catch that is easy to miss: you cannot review a flight while you are still flying it. The review only means something after you have landed and you know how it actually went.
+
+For six lessons we have watched the team make a decision: gather, argue, judge, plan, stress-test, decide. But a decision is not the end of a good system. The best teams keep a record of what they decided, and then, once they can see how it turned out, they look back and learn. This lesson is about that last loop: how the system remembers its own decisions and reflects on them. And the heart of it is exactly the pilot's catch. You cannot judge a decision the moment you make it, because you do not yet know how it turned out. So the system splits the work in two, across time.
+
+> This track teaches how a multi-agent AI system is built and coordinated. It uses stock analysis as the worked example. It is for education only. It is not investment, financial, or trading advice, and nothing here is a recommendation to buy or sell anything.
+
+## The idea: record now, judge later
+
+There are two separate moments here, and keeping them separate is the whole trick.
+
+The first moment is when the decision is made. The system writes it down immediately: what it decided, on what day, for what company. That is all. It does not yet ask whether the call was good, because it cannot know.
+
+The second moment comes later, once enough time has passed that the outcome is visible. Only then does the system look back at that recorded decision, see how things actually went, and write an honest reflection: was the call right, what held up, what to do differently next time. That reflection is saved alongside the original decision.
+
+Recording is cheap and instant. Judging is something you can only do with hindsight. A system that tries to do both at once ends up grading its own homework before the results are in, which is no grade at all.
+
+## Open the code: writing the decision down
+
+From here we read the real system. You can follow along in your browser, with no account, no Git, and no programming knowledge needed:
+
+**[github.com/TauricResearch/TradingAgents (pinned snapshot)](https://github.com/TauricResearch/TradingAgents/tree/7e9e7b8)**
+
+Everything below is drawn from that frozen snapshot (the short code `7e9e7b8` marks the exact version). The instruction lines are quoted word for word; the code is shown lightly trimmed for readability, with its logic intact.
+
+When a run finishes, the system records the decision in a plain logbook (its memory log). The method that writes it says, in its own words, exactly when it runs and what it does not do:
+
+```python
+# tradingagents/agents/utils/memory.py
+def store_decision(self, ticker, trade_date, final_trade_decision):
+    """Append pending entry at end of propagate(). No LLM call."""
+    ...
+    tag = f"[{trade_date} | {ticker} | {rating} | pending]"
+```
+
+Read the tag it writes. Each entry starts with the date, the company, the decision's stance, and one telling word: pending. Pending means "we made this call, but we do not yet know how it turned out." That word is the placeholder for hindsight. And notice the docstring: no model is involved. Writing down what you decided is bookkeeping, not thinking, so it costs nothing.
+
+## Open the code: reflecting once the outcome is known
+
+Here is where the two moments live in the run. When the system starts a run for a company, the very first thing it does is go back and settle the unfinished business from before:
+
+```python
+# tradingagents/graph/trading_graph.py
+# Resolve any pending memory-log entries for this ticker before the pipeline runs.
+self._resolve_pending_entries(company_name)
+```
+
+And at the end of the run, after the decision is made, it records the new one for next time:
+
+```python
+# Store decision for deferred reflection on the next same-ticker run.
+self.memory_log.store_decision(...)
+```
+
+Read those two comments together and the whole rhythm appears. A decision made today is recorded as pending. The reflection on it waits until the next time this same company is analyzed, by which point real time has passed and the outcome can be measured. Elsewhere in the same file, the project notes the trade-off in its own words: "only same-ticker entries are resolved per run."
+
+What does "resolved" mean? The system goes and looks at what actually happened in the days after the decision (five of them, by default). Crucially, it does not just ask "did the price go up." It compares the company against a baseline: how a broad slice of the market moved over the same days (the framework uses the S&P 500 as that yardstick). Beating, or trailing, that simple baseline is a fairer test than a raw up-or-down, because it asks whether the careful analysis actually added anything over just holding the market.
+
+With that outcome in hand, the system writes the reflection. This is the one place in the loop where a model is used, and it is the cheaper, faster one (the reflector is built with the quick model, `quick_thinking_llm`). The reflection prompt is deliberately strict: a few plain sentences, no formatting, answering whether the call was right, which part of the reasoning held or failed, and one concrete lesson for the next similar analysis. The prompt even tells the model its words will be stored and re-read by future analysts, so every word has to earn its place. The reflection is written back into the logbook next to the original decision, and the pending marker is replaced.
+
+(To be clear about what this is: a way for the system to learn from experience, recording whether each past call was right or wrong. It is not a claim that the system makes money or predicts the market.)
+
+## Open the code: feeding the lesson back
+
+A logbook nobody reads is just paper. The point of remembering is to let the past shape the next decision. So at the start of each run, the system pulls the relevant history and hands it to the team:
+
+```python
+# tradingagents/graph/trading_graph.py
+past_context = self.memory_log.get_past_context(company_name)
+```
+
+That past context gathers the recent decisions on this same company, plus a few short lessons carried over from other companies, and injects them into the run. And here is the detail that ties this lesson back to the whole track: of all twelve agents, only one actually reads that history. The final gate, the portfolio manager, the same agent that makes the last call and runs on the more capable model, is the one that gets the memory. The system spends its memory where it spends its capability and its authority: at the single point of decision.
+
+## Why this matters when you use AI
+
+You will not build a trading system, but the moment you want an AI workflow to improve over time, you face exactly these choices.
+
+- **Record decisions when you make them, judge them when you can.** Write down what your system decided and move on. Resist the urge to ask "was that good?" in the same breath, because the honest answer is not available yet. Build in the wait.
+- **Ground reflection in a real outcome, not a self-review.** An AI asked "did you do well?" right after it acts will almost always say yes. The reflection only has teeth when it is fed what actually happened, and is fairer still when it is measured against a baseline (what would have happened anyway), not against nothing.
+- **Keep memory short and re-readable.** The lessons are stored as a few plain sentences, on purpose, so they can be fed back into later runs without drowning them. A memory you cannot afford to re-read is not memory.
+- **Feed the lesson to the point of decision.** The history goes to the agent that makes the call, not scattered across everyone. Put the hard-won context where the hard decision is made.
+
+The pattern is simple to say and easy to skip: act, wait, look at what really happened, write down one lesson, and put that lesson where the next decision is made.
+
+## Common pitfalls
+
+- **Grading the decision at the moment you make it.** With no outcome yet, the "reflection" is just the same confidence restated. Separate recording from judging in time.
+- **Reflecting on a feeling instead of a result.** If the review is not anchored to what actually happened, it learns nothing; it just rationalizes. Feed it the outcome.
+- **Writing memory nobody can use.** A log that is too long, too raw, or never read back into the next run is overhead, not learning. Keep it short and wire it back in.
+
+## What you should remember
+
+- **Memory is recorded immediately and cheaply; reflection waits for the outcome.** The decision is written down the moment it is made, marked as not yet judged, with no model involved. The reflection comes on a later run, once real time has passed.
+- **Reflection is grounded in what actually happened, against a baseline.** The system measures the real outcome over the following days and compares it to a broad market yardstick, then writes a short, honest lesson on the cheaper model.
+- **The lesson is fed back to the point of decision.** Only the final gate reads the accumulated history, so memory lands exactly where the system commits.
+
+You have now seen the whole system end to end: how it gathers its own data, argues both sides, judges, plans, stress-tests, decides, coordinates itself, and learns from how its calls turn out. There is one thing left to do with all of that. In the last lesson, you run it yourself, in a safe simulation with your own AI provider key, and watch the team you have been reading about actually work.

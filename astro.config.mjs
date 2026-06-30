@@ -4123,6 +4123,18 @@ export default defineConfig({
 							}
 					],
 				},
+							{
+								label: 'Memory and reflection',
+								collapsed: true,
+								items: [
+									{ label: 'Brief', slug: 'lessons/ai-agent-teams/memory-and-reflection/brief' },
+									{ label: 'Lesson', slug: 'lessons/ai-agent-teams/memory-and-reflection/lesson' },
+									{ label: 'Practice', slug: 'lessons/ai-agent-teams/memory-and-reflection/practice' },
+									{ label: 'Summary', slug: 'lessons/ai-agent-teams/memory-and-reflection/summary' },
+									{ label: 'Cheatsheet', slug: 'lessons/ai-agent-teams/memory-and-reflection/cheatsheet' },
+									{ label: 'References', slug: 'lessons/ai-agent-teams/memory-and-reflection/references' },
+								],
+							}
 			];
 					const __top = __groups.filter((g) => !/^Track \d+/.test(g.label));
 					const __tracks = __groups
