@@ -4109,6 +4109,18 @@ export default defineConfig({
 									{ label: 'References', slug: 'lessons/ai-agent-teams/the-risk-gate/references' },
 								],
 							},
+							{
+								label: 'Orchestration and shared state',
+								collapsed: true,
+								items: [
+									{ label: 'Brief', slug: 'lessons/ai-agent-teams/orchestration-and-shared-state/brief' },
+									{ label: 'Lesson', slug: 'lessons/ai-agent-teams/orchestration-and-shared-state/lesson' },
+									{ label: 'Practice', slug: 'lessons/ai-agent-teams/orchestration-and-shared-state/practice' },
+									{ label: 'Summary', slug: 'lessons/ai-agent-teams/orchestration-and-shared-state/summary' },
+									{ label: 'Cheatsheet', slug: 'lessons/ai-agent-teams/orchestration-and-shared-state/cheatsheet' },
+									{ label: 'References', slug: 'lessons/ai-agent-teams/orchestration-and-shared-state/references' },
+								],
+							}
 					],
 				},
 			];
