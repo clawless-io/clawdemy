@@ -4073,6 +4073,18 @@ export default defineConfig({
 								{ label: 'References', slug: 'lessons/ai-agent-teams/how-an-agent-fetches-its-own-data/references' },
 							],
 						},
+							{
+								label: 'The bull and the bear',
+								collapsed: true,
+								items: [
+									{ label: 'Brief', slug: 'lessons/ai-agent-teams/the-bull-and-the-bear/brief' },
+									{ label: 'Lesson', slug: 'lessons/ai-agent-teams/the-bull-and-the-bear/lesson' },
+									{ label: 'Practice', slug: 'lessons/ai-agent-teams/the-bull-and-the-bear/practice' },
+									{ label: 'Summary', slug: 'lessons/ai-agent-teams/the-bull-and-the-bear/summary' },
+									{ label: 'Cheatsheet', slug: 'lessons/ai-agent-teams/the-bull-and-the-bear/cheatsheet' },
+									{ label: 'References', slug: 'lessons/ai-agent-teams/the-bull-and-the-bear/references' },
+								],
+							},
 					],
 				},
 			];
