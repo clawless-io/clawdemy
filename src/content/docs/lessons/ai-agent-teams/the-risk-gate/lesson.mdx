@@ -1,0 +1,113 @@
+---
+title: "What could go wrong: the risk gate"
+description: "Before the plan is final, three risk voices stress-test it and a separate manager makes the last call. The review-and-veto gate, in real code."
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+import LessonStar from '../../../../../components/LessonStar.astro';
+
+<LessonStar slug="the-risk-gate" />
+
+{/* Read-along audio is wired at production-deploy time, after the text is frozen. */}
+
+Before an airliner pushes back from the gate, the plan is already made: the route is filed, the fuel is loaded, the crew is briefed. And then, deliberately, someone runs a checklist whose entire purpose is to ask "what could go wrong?" The captain who makes the final go or no-go call is not the same person who loaded the plan. The work is done by one set of hands; the last check, and the authority to stop, sits with another.
+
+Last lesson, the trader turned the judge's verdict into a concrete proposal. It would be easy to stop there: the team has analyzed, debated, decided, and planned. But the system does one more thing on purpose, and it is the thing that separates a careful design from a reckless one. Before the proposal becomes the team's final answer, it goes through a risk review, and then through a gate that can confirm it, soften it, or overrule it entirely.
+
+> This track teaches how a multi-agent AI system is built and coordinated. It uses stock analysis as the worked example. It is for education only. It is not investment, financial, or trading advice, and nothing here is a recommendation to buy or sell anything.
+
+## The idea: review by people who disagree, then a gate
+
+A weak review is one reviewer nodding along. A strong review puts the work in front of people who genuinely weigh risk differently, so their disagreements surface the things a single reviewer would miss. One person is temperamentally bold and notices missed upside. One is cautious and notices exposure. One sits in the middle and weighs both. You learn the most from a plan by watching those three argue about it.
+
+But a review that only produces opinions is not enough. Someone has to make the final call, and crucially it should not be the people who did the work or the people who just argued. So after the risk review, a separate manager holds the gate: it reads the whole discussion and issues the final decision, with the authority to overrule what came before. Review surfaces the risks; the gate decides what to do about them.
+
+## Open the code: three risk temperaments
+
+From here we read the real system. You can follow along in your browser, with no account, no Git, and no programming knowledge needed:
+
+**[github.com/TauricResearch/TradingAgents (pinned snapshot)](https://github.com/TauricResearch/TradingAgents/tree/7e9e7b8)**
+
+Everything below is quoted from that frozen snapshot (the short code `7e9e7b8` marks the exact version). The three risk seats live in the risk-management folder (`tradingagents/agents/risk_mgmt/`), one file each.
+
+All three read the same thing: the trader's proposal from the previous lesson, plus the four analyst reports, plus whatever the other two seats just said. What separates them is the temperament each is told to adopt. These are the opening instructions of the three seats, quoted exactly:
+
+- The risk-seeker is told to "actively champion high-reward, high-risk opportunities."
+- The guardian's "primary objective is to protect assets, minimize volatility, and ensure steady, reliable growth."
+- The balancer is told to "provide a balanced perspective, weighing both the potential benefits and risks."
+
+That is the whole point of using three: they are not three tries at the same answer, they are three different attitudes toward risk, each prompted to challenge the other two. The bold seat is told to push back on the cautious one, and the cautious seat is told to point out where the bold one is exposed. The plan gets pressure from every direction at once.
+
+When a seat finishes speaking, it adds its argument to the running risk discussion and records who just spoke. A counter ticks up by one each time a seat takes a turn.
+
+## The rotation, and when it stops
+
+The three seats take turns in a fixed cycle, and like the debate two lessons ago, the rotation is bounded. One short function decides, after each turn, whether to rotate to the next seat or hand the whole thing to the gate:
+
+```python
+# tradingagents/graph/conditional_logic.py
+def should_continue_risk_analysis(self, state):
+    if state["risk_debate_state"]["count"] >= 3 * self.max_risk_discuss_rounds:
+        return "Portfolio Manager"
+    if state["risk_debate_state"]["latest_speaker"].startswith("Aggressive"):
+        return "Conservative Analyst"
+    if state["risk_debate_state"]["latest_speaker"].startswith("Conservative"):
+        return "Neutral Analyst"
+    return "Aggressive Analyst"
+```
+
+Read it in plain English. There is a counter and a round limit. If enough turns have happened, hand off to the Portfolio Manager (the gate). Otherwise rotate: after the bold seat comes the cautious one, after the cautious one comes the balancer, and then back to the bold seat to begin again. The limit is one number, the number of rounds. By default it is one, compared against three times it, because there are three seats: one round means each of the three speaks once, and then the gate takes over. (As in the earlier debate, the file has a loose comment about "3 rounds"; the behavior follows the number, which defaults to one round of all three.)
+
+So the structure mirrors the bull and bear from lesson 3, with two differences: three voices instead of two, and they are stress-testing a finished plan rather than weighing raw evidence.
+
+## The gate: the final decision, and the authority to overrule
+
+When the rotation ends, everything goes to the Portfolio Manager. This is the gate, and it is worth being precise about what makes it a gate rather than just another opinion.
+
+The Portfolio Manager reads the entire risk discussion, and also the judge's plan and the trader's proposal from earlier. Then it issues the final decision, one of the same five stances you saw the first judge use: Buy, Overweight, Hold, Underweight, or Sell. (These are the system's own labels for the verdict, an architectural choice, not advice to you.) That decision is written into shared state as the final trade decision: the last word, the thing the whole pipeline was building toward.
+
+```python
+# tradingagents/agents/managers/portfolio_manager.py
+# the gate's verdict becomes the team's final decision
+return {
+    "final_trade_decision": final_trade_decision,
+    # (the risk discussion record is also updated)
+}
+```
+
+Two things make this a real gate. First, it is a separate role: the Portfolio Manager did not argue any of the three risk positions, just as the trader did not argue the bull or bear case. It can confirm the trader's proposal, water it down, or overrule it. Second, it runs on the deep, more capable model, while the three risk seats run on the cheaper one. That is the lesson 1 idea one more time, and now you can see the shape of the whole system: there are exactly two points that get the expensive model, the judge after the bull and bear debate, and this final gate after the risk review. Both are the moments where the system commits, and both have authority that the agents around them do not. Capability and authority are concentrated at the two decisions, not spread evenly across the team.
+
+## Why this matters when you use AI
+
+When you build something with AI that produces a real recommendation, the temptation is to ship whatever the last step produced. This lesson is the case for adding a gate.
+
+- **Review the work with reviewers who disagree.** One reviewer, or three reviewers who think alike, will miss what a deliberately mixed panel catches. Assign different priorities (push for upside, guard against downside, balance the two) so the failure modes surface from different angles.
+- **Separate the gate from the work and from the reviewers.** The agent that makes the final call should not be one that produced the plan or argued the review. A neutral gate reading the whole discussion is what gives the decision its authority.
+- **Give the gate real teeth, and your best model.** A gate that cannot overrule is just a rubber stamp. Put the authority to confirm, soften, or reject at the gate, and spend your most capable model there, because this is where the system actually commits.
+
+So when an AI workflow is about to hand you a recommendation, ask where its gate is. If nothing reviewed the work with an adversarial eye, and nothing had the authority to stop it, you are looking at a first draft, not a decision.
+
+## Build your own: the takeaway
+
+To put a review-and-gate stage at the end of your own system:
+
+1. **Add a review after the work is produced.** Use more than one reviewer, with genuinely different priorities, and have them respond to each other rather than review in isolation.
+2. **Bound the review.** Decide how many rounds the reviewers get, and end it there, exactly as you bounded the earlier debate.
+3. **Put a separate gate at the end, with authority and your best model.** One agent, not one of the reviewers, reads the whole review and issues the final decision, free to overrule what came before.
+
+## Common pitfalls
+
+- **The makers approve their own work.** If the agent that produced the plan also signs off on it, there is no gate, just a signature. The reviewer and the gate have to be separate from the work.
+- **A like-minded review panel.** Three cautious reviewers catch cautious-reviewer concerns and miss the rest. The disagreement is the feature; build it in by assigning different risk attitudes.
+- **A gate with no teeth.** If the final step cannot actually change or reject the proposal, it is decoration. A gate has to be able to say no.
+
+## What you should remember
+
+- **A strong review is built on disagreement.** Three risk seats with different attitudes (bold, cautious, balanced) stress-test the trader's plan from every direction, which a single reviewer cannot do.
+- **The gate is separate, and it decides.** The Portfolio Manager argued none of the three positions; it reads the whole review and issues the final trade decision, with the authority to confirm, soften, or overrule.
+- **Capability and authority sit at the two decision points.** The system spends its deep model on exactly two agents, the judge after the bull and bear debate and this final gate. Both are where it commits.
+
+You have now seen every role in the team: the analysts who gather, the bull and bear who argue, the judge who decides, the trader who plans, and the risk seats and gate that make the final call. But something has been quietly doing the connecting all along, deciding who goes next and carrying each agent's output to the one after it. That something is the orchestrator and the shared state, and seeing it whole is the next lesson.

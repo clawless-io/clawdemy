@@ -376,7 +376,7 @@ export const TRACKS: Track[] = [
 		blurb: "Read a real production multi-agent system's code and learn to build your own.",
 		theme: 'production',
 		level: 'Advanced',
-		lessons: 4,
+		lessons: 5,
 		status: 'live',
 		href: '/lessons/ai-agent-teams/why-split-one-ai-into-many/lesson/',
 	},

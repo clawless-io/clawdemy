@@ -4097,6 +4097,18 @@ export default defineConfig({
 									{ label: 'References', slug: 'lessons/ai-agent-teams/the-trader/references' },
 								],
 							},
+							{
+								label: 'The risk gate',
+								collapsed: true,
+								items: [
+									{ label: 'Brief', slug: 'lessons/ai-agent-teams/the-risk-gate/brief' },
+									{ label: 'Lesson', slug: 'lessons/ai-agent-teams/the-risk-gate/lesson' },
+									{ label: 'Practice', slug: 'lessons/ai-agent-teams/the-risk-gate/practice' },
+									{ label: 'Summary', slug: 'lessons/ai-agent-teams/the-risk-gate/summary' },
+									{ label: 'Cheatsheet', slug: 'lessons/ai-agent-teams/the-risk-gate/cheatsheet' },
+									{ label: 'References', slug: 'lessons/ai-agent-teams/the-risk-gate/references' },
+								],
+							},
 					],
 				},
 			];
