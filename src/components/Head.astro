@@ -18,6 +18,7 @@
  */
 
 import Default from '@astrojs/starlight/components/Head.astro';
+import { TRACKS } from '../data/tracks';
 
 const ogImage = new URL('/og-default.png', Astro.site).toString();
 const ogImageAlt = 'Clawdemy: From zero to autonomous, one lesson at a time.';
@@ -78,6 +79,45 @@ const structuredData = {
 // is an open accuracy question; org-as-author is safe and true. educationalLevel
 // / datePublished / image are deliberately OMITTED (no reliable per-lesson data;
 // a wrong constant is worse than absent).
+// Track-level subject/entity association for the LearningResource (GEO / AI-search).
+// Keyed by track slug so a whole track's lessons share the same subject with zero
+// content churn (lead's call: option B, track-slug map, not per-lesson frontmatter;
+// migrate to frontmatter if per-lesson teaches/keywords are ever needed). Only tracks
+// that READ a specific external framework/paper get an entry; everything else stays
+// generic. `about.sameAs` = the framework's canonical repo + paper (not a parent org);
+// `citation` = the source paper as a ScholarlyArticle so AI engines resolve the lessons
+// to the entity being explained. Values verified with the Clawdemy lead 2026-06-30.
+const TRACK_SUBJECT: Record<string, Record<string, unknown>> = {
+	'ai-agent-teams': {
+		about: {
+			'@type': 'SoftwareSourceCode',
+			name: 'TradingAgents (multi-agent LLM framework)',
+			sameAs: [
+				'https://github.com/TauricResearch/TradingAgents',
+				'https://arxiv.org/abs/2412.20138',
+			],
+		},
+		teaches: 'how a multi-agent AI system is structured and coordinated',
+		keywords: 'multi-agent AI, LLM agents, agent orchestration, TradingAgents framework',
+		citation: {
+			'@type': 'ScholarlyArticle',
+			name: 'TradingAgents: Multi-Agents LLM Financial Trading Framework',
+			identifier: 'arXiv:2412.20138',
+			url: 'https://arxiv.org/abs/2412.20138',
+			author: [
+				{ '@type': 'Person', name: 'Yijia Xiao' },
+				{ '@type': 'Person', name: 'Edward Sun' },
+				{ '@type': 'Person', name: 'Di Luo' },
+				{ '@type': 'Person', name: 'Wei Wang' },
+			],
+		},
+	},
+};
+// Track slug is the second path segment for a lesson URL: /lessons/<track>/<lesson>/<artifact>/
+const pathSegments = Astro.url.pathname.split('/').filter(Boolean);
+const trackSlug = pathSegments[0] === 'lessons' ? pathSegments[1] : null;
+const trackSubject = trackSlug ? TRACK_SUBJECT[trackSlug] : null;
+
 const lessonEntry = Astro.locals.starlightRoute.entry;
 const isLesson = lessonEntry?.data?.artifact === 'lesson';
 // Thin / zero-click supplementary artifacts get robots=noindex,follow so they
@@ -100,6 +140,39 @@ const lessonStructuredData = isLesson
 			isPartOf: { '@id': 'https://clawdemy.org/#website' },
 			publisher: { '@id': 'https://clawdemy.org/#organization' },
 			author: { '@id': 'https://clawdemy.org/#organization' },
+			// Track-level subject/citation, only for tracks in TRACK_SUBJECT (else no-op).
+			...(trackSubject ?? {}),
+		}
+	: null;
+
+// CollectionPage + ItemList JSON-LD for the /tracks/ catalog (site-wide GEO win, GSD
+// surface, lead-nodded 2026-06-30). Enumerates the live tracks from the single-source
+// TRACKS manifest so search + AI engines see the catalog as one structured list. Each
+// item points at the track's entry URL (its first lesson; per-track hubs do not exist
+// yet). Scoped to the catalog root only.
+const isTracksIndex = Astro.url.pathname === '/tracks/' || Astro.url.pathname === '/tracks';
+const tracksUrl = new URL('/tracks/', Astro.site).toString();
+const tracksCollectionData = isTracksIndex
+	? {
+			'@context': 'https://schema.org',
+			'@type': 'CollectionPage',
+			'@id': `${tracksUrl}#tracks`,
+			name: 'Clawdemy tracks',
+			description:
+				'The full Clawdemy catalog: free, self-paced tracks that teach how modern AI actually works, from foundations to agents.',
+			url: tracksUrl,
+			isPartOf: { '@id': 'https://clawdemy.org/#website' },
+			mainEntity: {
+				'@type': 'ItemList',
+				itemListElement: TRACKS.filter((t) => t.status === 'live' && t.href).map(
+					(t, i) => ({
+						'@type': 'ListItem',
+						position: i + 1,
+						name: t.title,
+						url: new URL(t.href, Astro.site).toString(),
+					}),
+				),
+			},
 		}
 	: null;
 ---
@@ -131,4 +204,10 @@ const lessonStructuredData = isLesson
     </script> breakout if any title/description ever contains "<". */}
 {isLesson && lessonStructuredData && (
 	<script type="application/ld+json" is:inline set:html={JSON.stringify(lessonStructuredData).replace(/</g, '\\u003c')} />
+)}
+{/* CollectionPage + ItemList for the /tracks/ catalog. Track titles come from the
+    TRACKS manifest, so escape "<" as the JSON unicode escape to prevent a </script>
+    breakout if any title ever contains "<". */}
+{isTracksIndex && tracksCollectionData && (
+	<script type="application/ld+json" is:inline set:html={JSON.stringify(tracksCollectionData).replace(/</g, '\\u003c')} />
 )}
