@@ -1,0 +1,122 @@
+---
+title: "Arguing on purpose: the bull and the bear"
+description: "Two agents argue the same evidence at full strength, one for and one against, then a separate judge decides. The structured-disagreement pattern, in real code."
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+import ReadAlongDim from '../../../../../components/ReadAlongDim.astro';
+import LessonStar from '../../../../../components/LessonStar.astro';
+
+<LessonStar slug="the-bull-and-the-bear" />
+
+<ReadAlongDim
+  src="https://audio.clawdemy.org/lessons/the-bull-and-the-bear-lesson.mp3"
+  slug="the-bull-and-the-bear"
+  cacheVersion="20260630"
+  approxMinutes={11}
+/>
+
+A courtroom does not hand the whole case to one lawyer and ask for the truth. It puts a prosecutor on one side, a defender on the other, tells each to make the strongest case they can, and then lets a neutral judge or jury weigh the two. The design is deliberate. You get to a better verdict by forcing the best version of both sides into the open, not by trusting a single confident voice.
+
+Last lesson, each of the four analysts handed in a report. The team now has four independent readings of the same company. But four reports are information, not a decision, and information has a way of looking more convincing than it should when only one person is reading it. So the system does something deliberate: before anyone commits, it stages an argument. One agent is told to make the case for. Another is told to make the case against. Then a separate judge weighs them.
+
+> This track teaches how a multi-agent AI system is built and coordinated. It uses stock analysis as the worked example. It is for education only. It is not investment, financial, or trading advice, and nothing here is a recommendation to buy or sell anything.
+
+## The idea: a devil's advocate, on purpose
+
+If you ask one capable agent "is this a good idea?", you get one answer, shaped by wherever it happened to lean. It will marshal evidence for its view and quietly underweight the rest. That is not a flaw you can prompt away; it is what a single pass does.
+
+The fix is structural: split the question into two jobs and give them opposite mandates. One agent's only task is to build the strongest possible case in favor. Another's only task is to build the strongest possible case against. Neither is trying to be balanced. Balance is not their job; it is the judge's. Their job is to make sure the best argument on each side actually gets made, so nothing important gets glossed over because it was inconvenient.
+
+This is the bull and the bear. A "bull" is optimistic (argues the thing will go up); a "bear" is pessimistic (argues it will go down). Same evidence, opposite assignments.
+
+## Open the code: the two researchers
+
+From here we read the real system. You can follow along in your browser, with no account, no Git, and no programming knowledge needed:
+
+**[github.com/TauricResearch/TradingAgents (pinned snapshot)](https://github.com/TauricResearch/TradingAgents/tree/7e9e7b8)**
+
+Everything below is drawn from that frozen snapshot (the short code `7e9e7b8` marks the exact version). The instruction lines are quoted word for word; the code is shown lightly trimmed for readability, with its logic intact. The two researchers each get their own file, in the researchers folder (`tradingagents/agents/researchers/`).
+
+The bull researcher reads the same four analyst reports, plus one more thing: the last argument the bear made. Then it is told, in plain language, which side it is on. This is the opening line of its instructions, quoted exactly:
+
+```
+You are a Bull Analyst advocating for investing in the stock. Your task is to
+build a strong, evidence-based case emphasizing growth potential, competitive
+advantages, and positive market indicators.
+```
+
+The bear researcher is the mirror image. It reads the same reports and the last argument the bull made, and its instruction opens:
+
+```
+You are a Bear Analyst making the case against investing in the stock.
+```
+
+Two things matter here. First, each researcher sees the same evidence; the difference is the mandate, not the data. Second, each one reads the other's most recent argument and is told to rebut it. That is what makes this a debate and not two monologues written in separate rooms: the bull has to answer the bear's strongest point, and the bear has to answer the bull's.
+
+When a researcher finishes, it does not decide anything. It just adds its argument to a running transcript and notes whose turn it was. Each side keeps its own thread, and the combined transcript grows by one entry. A turn counter ticks up by one each time anyone speaks (we will see why that counter matters next).
+
+## The debate is bounded, not endless
+
+Here is the part people get wrong when they imagine AI agents debating: this is not "argue until one convinces the other." Left to themselves, two capable advocates would never stop, and every turn costs time and money. So the debate runs for a fixed, small number of turns, and then it ends, decided or not.
+
+One short function makes that call after every turn:
+
+```python
+# tradingagents/graph/conditional_logic.py
+def should_continue_debate(self, state):
+    if state["investment_debate_state"]["count"] >= 2 * self.max_debate_rounds:
+        return "Research Manager"
+    if state["investment_debate_state"]["current_response"].startswith("Bull"):
+        return "Bear Researcher"
+    return "Bull Researcher"
+```
+
+Read it in plain English. There is a turn counter and a round limit. If enough turns have happened, hand the whole thing to the Research Manager (the judge). Otherwise, if the bull just spoke, it is the bear's turn; if the bear just spoke, it is the bull's. The limit is set by one number, the number of rounds. By default that number is one, and the counter is compared against two times it: one round means one bull turn and one bear turn, and then the judge steps in. (The file carries an offhand comment about "3 rounds"; the behavior is governed by the number, which defaults to one round of back-and-forth.) Turn the number up to two and you get two turns each before the judge; the structure does not change, only the length.
+
+The point is that the back-and-forth is deliberately capped. The debate exists to surface the strong arguments, not to run forever chasing a winner.
+
+## The judge: a separate role, a stronger model
+
+When the turns run out, the transcript goes to a different agent entirely: the Research Manager. This is the most important design choice in the lesson, so it is worth saying slowly.
+
+The judge is not the bull and not the bear. It did not argue either side. Its job is to read the full transcript, both cases, and commit to a single decision. And it runs on the more capable (and more expensive) model, while the two advocates run on the cheaper one. That is the same idea from lesson 1, made concrete: you spend your best model at the judgment point, not on every voice.
+
+The judge also is not allowed to wave its hands. It has to land on exactly one of five stances: Buy, Overweight, Hold, Underweight, or Sell. (These are the system's own labels for the agent's verdict, an architectural choice, not advice to you.) The instructions even tell it to reserve the middle, balanced stance ("Hold") for when the evidence really is even, and otherwise to commit. Under the hood, the judge fills in a structured decision (a tidy, machine-readable verdict), with a plain-text fallback if that fails. The result is written into shared state as the investment plan: the one thing the debate leaves behind for the next agent to act on.
+
+Notice the shape of the whole stage. Two advocates with opposite mandates, a hard cap on how long they argue, and then a separate, more capable judge that must commit. Advocacy and authority are split on purpose. The agents that argue do not decide; the agent that decides did not argue.
+
+## Why this matters when you use AI
+
+When you want a sound decision out of AI, the instinct is to ask one model for "the answer." This lesson is the argument against that instinct.
+
+- **One pass hides its own blind spots.** A single agent gives you one slanted view and the confidence to match. If the decision matters, make the model argue against itself: ask for the strongest case for, then the strongest case against, as separate jobs. The weaknesses that a single pass would have skated over come to the surface.
+- **Bound the argument.** Two advocates will not converge on their own. You decide how many rounds are worth it, and then something has to end it. Endless deliberation is not depth; it is just cost.
+- **Separate the judge from the advocates.** The agent that decides should not be one of the agents that argued, and it is the right place to spend your most capable model. A neutral judge reading both cases beats either advocate grading its own work.
+
+So when you reach for AI on a real call, do not ask "what should I do?" once. Stage the disagreement, cap it, and judge it. The structure is the quality.
+
+## Build your own: the takeaway
+
+To get a debated decision out of agents instead of a single opinion:
+
+1. **Assign opposite mandates over the same evidence.** One role builds the case for, one builds the case against, and each must answer the other's strongest point. Same inputs, opposite jobs.
+2. **Cap the rounds.** Pick a small number of turns and end the debate there, whether or not anyone "won." The cap is what keeps it from running forever.
+3. **Hand the transcript to a separate judge that must commit.** A different agent, ideally on your most capable model, reads both cases and lands on one decision from a fixed set of options.
+
+## Common pitfalls
+
+- **A single advocate.** Asking one agent to "weigh the pros and cons" gives you one voice doing both jobs badly. The counter-case has to be built by something whose only mandate is the counter-case.
+- **An unbounded debate.** With no turn cap, two advocates argue until your patience or budget runs out. The stop has to be designed, exactly like the tool loop in lesson 2.
+- **A judge who is also an advocate.** If the deciding agent is the same one that argued a side, you have not separated advocacy from authority; you have just let the winner score the match.
+
+## What you should remember
+
+- **Structured disagreement beats a single opinion.** Two agents with opposite mandates, arguing the same evidence at full strength, surface what one confident pass would hide.
+- **The debate is bounded, then judged.** A turn counter and a round limit end the back-and-forth after a fixed number of turns; the goal is to expose the strong arguments, not to run until someone wins.
+- **Advocacy and authority are split.** A separate judge, on the more capable model, reads both cases and must commit to one stance. The agents that argue do not decide.
+
+The debate is over and the judge has written a plan. But a plan is still words: "the case favors growing the position" is not the same as a concrete, sized course of action. Turning the judgment into something executable is a job of its own, and it belongs to the next agent. That is the trader, and it is the next lesson.

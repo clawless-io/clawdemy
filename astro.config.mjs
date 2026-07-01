@@ -4046,6 +4046,107 @@ export default defineConfig({
 						},
 					],
 				},
+				{
+					label: 'Track 25: AI Agent Teams',
+					items: [
+						{
+							label: 'Why split one AI into many',
+							collapsed: true,
+							items: [
+								{ label: 'Brief', slug: 'lessons/ai-agent-teams/why-split-one-ai-into-many/brief' },
+								{ label: 'Lesson', slug: 'lessons/ai-agent-teams/why-split-one-ai-into-many/lesson' },
+								{ label: 'Practice', slug: 'lessons/ai-agent-teams/why-split-one-ai-into-many/practice' },
+								{ label: 'Summary', slug: 'lessons/ai-agent-teams/why-split-one-ai-into-many/summary' },
+								{ label: 'Cheatsheet', slug: 'lessons/ai-agent-teams/why-split-one-ai-into-many/cheatsheet' },
+								{ label: 'References', slug: 'lessons/ai-agent-teams/why-split-one-ai-into-many/references' },
+							],
+						},
+						{
+							label: 'How an agent fetches its own data',
+							collapsed: true,
+							items: [
+								{ label: 'Brief', slug: 'lessons/ai-agent-teams/how-an-agent-fetches-its-own-data/brief' },
+								{ label: 'Lesson', slug: 'lessons/ai-agent-teams/how-an-agent-fetches-its-own-data/lesson' },
+								{ label: 'Practice', slug: 'lessons/ai-agent-teams/how-an-agent-fetches-its-own-data/practice' },
+								{ label: 'Summary', slug: 'lessons/ai-agent-teams/how-an-agent-fetches-its-own-data/summary' },
+								{ label: 'Cheatsheet', slug: 'lessons/ai-agent-teams/how-an-agent-fetches-its-own-data/cheatsheet' },
+								{ label: 'References', slug: 'lessons/ai-agent-teams/how-an-agent-fetches-its-own-data/references' },
+							],
+						},
+							{
+								label: 'The bull and the bear',
+								collapsed: true,
+								items: [
+									{ label: 'Brief', slug: 'lessons/ai-agent-teams/the-bull-and-the-bear/brief' },
+									{ label: 'Lesson', slug: 'lessons/ai-agent-teams/the-bull-and-the-bear/lesson' },
+									{ label: 'Practice', slug: 'lessons/ai-agent-teams/the-bull-and-the-bear/practice' },
+									{ label: 'Summary', slug: 'lessons/ai-agent-teams/the-bull-and-the-bear/summary' },
+									{ label: 'Cheatsheet', slug: 'lessons/ai-agent-teams/the-bull-and-the-bear/cheatsheet' },
+									{ label: 'References', slug: 'lessons/ai-agent-teams/the-bull-and-the-bear/references' },
+								],
+							},
+							{
+								label: 'The trader',
+								collapsed: true,
+								items: [
+									{ label: 'Brief', slug: 'lessons/ai-agent-teams/the-trader/brief' },
+									{ label: 'Lesson', slug: 'lessons/ai-agent-teams/the-trader/lesson' },
+									{ label: 'Practice', slug: 'lessons/ai-agent-teams/the-trader/practice' },
+									{ label: 'Summary', slug: 'lessons/ai-agent-teams/the-trader/summary' },
+									{ label: 'Cheatsheet', slug: 'lessons/ai-agent-teams/the-trader/cheatsheet' },
+									{ label: 'References', slug: 'lessons/ai-agent-teams/the-trader/references' },
+								],
+							},
+							{
+								label: 'The risk gate',
+								collapsed: true,
+								items: [
+									{ label: 'Brief', slug: 'lessons/ai-agent-teams/the-risk-gate/brief' },
+									{ label: 'Lesson', slug: 'lessons/ai-agent-teams/the-risk-gate/lesson' },
+									{ label: 'Practice', slug: 'lessons/ai-agent-teams/the-risk-gate/practice' },
+									{ label: 'Summary', slug: 'lessons/ai-agent-teams/the-risk-gate/summary' },
+									{ label: 'Cheatsheet', slug: 'lessons/ai-agent-teams/the-risk-gate/cheatsheet' },
+									{ label: 'References', slug: 'lessons/ai-agent-teams/the-risk-gate/references' },
+								],
+							},
+							{
+								label: 'Orchestration and shared state',
+								collapsed: true,
+								items: [
+									{ label: 'Brief', slug: 'lessons/ai-agent-teams/orchestration-and-shared-state/brief' },
+									{ label: 'Lesson', slug: 'lessons/ai-agent-teams/orchestration-and-shared-state/lesson' },
+									{ label: 'Practice', slug: 'lessons/ai-agent-teams/orchestration-and-shared-state/practice' },
+									{ label: 'Summary', slug: 'lessons/ai-agent-teams/orchestration-and-shared-state/summary' },
+									{ label: 'Cheatsheet', slug: 'lessons/ai-agent-teams/orchestration-and-shared-state/cheatsheet' },
+									{ label: 'References', slug: 'lessons/ai-agent-teams/orchestration-and-shared-state/references' },
+								],
+							},
+							{
+								label: 'Memory and reflection',
+								collapsed: true,
+								items: [
+									{ label: 'Brief', slug: 'lessons/ai-agent-teams/memory-and-reflection/brief' },
+									{ label: 'Lesson', slug: 'lessons/ai-agent-teams/memory-and-reflection/lesson' },
+									{ label: 'Practice', slug: 'lessons/ai-agent-teams/memory-and-reflection/practice' },
+									{ label: 'Summary', slug: 'lessons/ai-agent-teams/memory-and-reflection/summary' },
+									{ label: 'Cheatsheet', slug: 'lessons/ai-agent-teams/memory-and-reflection/cheatsheet' },
+									{ label: 'References', slug: 'lessons/ai-agent-teams/memory-and-reflection/references' },
+								],
+							},
+							{
+								label: 'The capstone',
+								collapsed: true,
+								items: [
+									{ label: 'Brief', slug: 'lessons/ai-agent-teams/the-capstone/brief' },
+									{ label: 'Lesson', slug: 'lessons/ai-agent-teams/the-capstone/lesson' },
+									{ label: 'Practice', slug: 'lessons/ai-agent-teams/the-capstone/practice' },
+									{ label: 'Summary', slug: 'lessons/ai-agent-teams/the-capstone/summary' },
+									{ label: 'Cheatsheet', slug: 'lessons/ai-agent-teams/the-capstone/cheatsheet' },
+									{ label: 'References', slug: 'lessons/ai-agent-teams/the-capstone/references' },
+								],
+							}
+],
+				}
 			];
 					const __top = __groups.filter((g) => !/^Track \d+/.test(g.label));
 					const __tracks = __groups

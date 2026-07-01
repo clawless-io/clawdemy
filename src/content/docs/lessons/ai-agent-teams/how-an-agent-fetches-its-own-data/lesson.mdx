@@ -1,0 +1,158 @@
+---
+title: "How an agent fetches its own data"
+description: "Watch a real analyst agent decide what data it needs, fetch it with tools, and stop on its own. The tool-use loop that turns a model into an agent."
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+import ReadAlongDim from '../../../../../components/ReadAlongDim.astro';
+import LessonStar from '../../../../../components/LessonStar.astro';
+
+<LessonStar slug="how-an-agent-fetches-its-own-data" />
+
+<ReadAlongDim
+  src="https://audio.clawdemy.org/lessons/how-an-agent-fetches-its-own-data-lesson.mp3"
+  slug="how-an-agent-fetches-its-own-data"
+  cacheVersion="20260630"
+  approxMinutes={10}
+/>
+
+There are two ways to hand someone a research job. You can drop a folder of data on their desk and say "write me a summary," or you can give them a phone and a library card and say "go find what you need." The first is faster to set up. The second gets a better answer, because the person doing the work decides what is worth looking at.
+
+Last lesson you met the team and saw that the four analysts gather information. What we did not say is *how*. They are not handed a tidy packet of data to read. Each analyst is given a small set of tools and sent to fetch its own facts, deciding what to pull and when it has enough. That single difference, an agent that gathers for itself instead of being spoon-fed, is what this lesson is about. It is also the first time we open the actual code.
+
+> This track teaches how a multi-agent AI system is built and coordinated. It uses stock analysis as the worked example. It is for education only. It is not investment, financial, or trading advice, and nothing here is a recommendation to buy or sell anything.
+
+## The idea: a model that can act, not just answer
+
+On its own, a language model can only produce text. Give it a question and it gives you words back. That is useful, but it is stuck with whatever it already knows; it cannot go and look something up.
+
+A **tool** changes that. A tool is a function the model is allowed to call: fetch a stock's price history, pull recent news, read a balance sheet. The model does not run the function itself; it asks for it (in effect, "go fetch this company's price history"), the system runs the function, and the result is handed back to the model. Now the model can act in the world, not just describe it. This is what the foundational track called the move that turns a model into an agent.
+
+What makes it powerful is that the asking repeats. The agent looks at what it has, decides whether it needs more, asks for another tool, reads the result, and decides again. It runs in a loop: think, act, observe, think again, until it decides it has enough and writes its answer. The agent, not the programmer, chooses the path.
+
+## Open the code: the market analyst
+
+From here on we read the real system. You can follow along in your browser, with no account, no Git, and no programming knowledge needed:
+
+**[github.com/TauricResearch/TradingAgents (pinned snapshot)](https://github.com/TauricResearch/TradingAgents/tree/7e9e7b8)**
+
+Everything below is drawn from that frozen snapshot (the short code `7e9e7b8` marks the exact version). The instruction lines are quoted word for word; the code is shown lightly trimmed for readability, with its logic intact. We are looking at the market analyst's file (`tradingagents/agents/analysts/market_analyst.py`). You do not need to read every line; we pull out the parts that matter.
+
+First, the market analyst is given its tools. Just two:
+
+```python
+# tradingagents/agents/analysts/market_analyst.py
+tools = [
+    get_stock_data,
+    get_indicators,
+]
+```
+
+One tool fetches the price history (`get_stock_data`); the other computes technical measures from it (`get_indicators`). Those two are the analyst's whole toolbox. A narrow set of tools for a narrow job, exactly the focus idea from lesson 1.
+
+Then the tools are attached to the model, and the model is asked to work:
+
+```python
+# the model is given its tools, then invoked on the conversation so far
+chain = prompt | llm.bind_tools(tools)
+result = chain.invoke(state["messages"])
+```
+
+One call does the real work here (`bind_tools`): it tells the model "these are the functions you may call." From now on, when the model responds, it can either write text or ask to call one of its tools.
+
+The analyst's instructions tell it how to use them. This is a direct quote from the prompt in the file:
+
+```
+Please make sure to call get_stock_data first to retrieve the CSV that is
+needed to generate indicators. Then use get_indicators with the specific
+indicator names.
+```
+
+Notice what this is: not code forcing an order, but an instruction the model is expected to follow. The agent is told the sensible sequence (get the data, then compute on it) and left to carry it out.
+
+## The loop: keep going, or stop
+
+Here is the part that makes it an agent rather than a single question-and-answer. After the model responds, the system checks one thing: did it ask for a tool?
+
+```python
+# tradingagents/graph/conditional_logic.py
+def should_continue_market(self, state):
+    messages = state["messages"]
+    last_message = messages[-1]
+    if last_message.tool_calls:
+        return "tools_market"
+    return "Msg Clear Market"
+```
+
+Read it in plain English: if the analyst's last message contains tool calls, send it to the tool step that actually runs the requested tool (`tools_market`). Otherwise, the analyst is done; move on.
+
+And that tool step (`tools_market`) loops straight back to the analyst:
+
+```python
+# tradingagents/graph/setup.py
+workflow.add_edge(current_tools, current_analyst)
+```
+
+That single edge is the loop. The analyst asks for a tool, the tool runs, the result comes back to the analyst, and the analyst decides again. It will keep pulling data, one tool call at a time, for as long as it judges it needs more. There is no fixed number of steps; the agent sets its own pace.
+
+The **stop condition** is just as simple, and it is structural. Back in the analyst file:
+
+```python
+# market_analyst.py: if the model asked for no tools, it is finished
+report = ""
+if len(result.tool_calls) == 0:
+    report = result.content
+
+return {
+    "messages": [result],
+    "market_report": report,
+}
+```
+
+When the model stops asking for tools and just writes prose, that prose *is* the report. "No tool call" is the agent's way of saying "I have enough." The report it produces is saved into the team's shared state under a single name (`market_report`), the one durable thing this analyst leaves behind.
+
+## A small design touch: a clean desk for the next analyst
+
+There is one more detail worth seeing, because it is the kind of thing you would not think of until it bit you. When an analyst finishes, the system does not just move on; it first wipes the analyst's working notes:
+
+```python
+# agents/utils/agent_utils.py (create_msg_delete)
+# Remove all messages, leave a single "Continue" placeholder
+removal_operations = [RemoveMessage(id=m.id) for m in messages]
+placeholder = HumanMessage(content="Continue")
+```
+
+All the back-and-forth from the tool loop (the raw price tables, the half-formed thoughts) gets cleared before the next analyst starts. What survives is only the finished report, saved in shared state. Each specialist works at a clean desk and leaves behind a tidy summary, not its scratch paper. (Why the report survives while the scratch does not is the shared-state lesson.)
+
+## Why this matters when you use AI
+
+An agent that fetches its own data is more capable than one you spoon-feed, and also less predictable. It might pull more than you expected, or stop sooner than you would like. That trade is the whole point, and it tells you where your control actually lives:
+
+- **The tools you give it set the boundaries.** An agent can only act through the tools it has. Give it few, well-described tools and it stays focused; give it fifty and it flails. The market analyst gets exactly two.
+- **The stop condition decides when it is done.** Here, "done" means the model stopped asking for tools. When you build with agents, knowing what makes one stop (a structural signal, a step limit, a goal check) is how you keep it from looping forever or quitting early.
+
+So when you ask an AI to "go research X and report back," you are really making two design choices: what it is allowed to reach for, and what counts as finished. Get those right and the agent's freedom works for you.
+
+## Build your own: the takeaway
+
+To give a role in your own system the ability to gather for itself:
+
+1. **Hand it a small, sharply described toolbox.** Each tool is one capability (fetch this, look up that). Fewer and clearer beats many and vague; the description is how the model knows when to reach for it.
+2. **Let it loop, and define the stop.** Allow the agent to call a tool, read the result, and decide again. Then pick an explicit stop condition (it stops asking, it hits a step budget, it satisfies a goal) so the loop always ends.
+
+## Common pitfalls
+
+- **Pre-fetching everything "to be safe."** Dumping all possible data on the agent throws away the reason to make it tool-using: its own judgment about what to look at. It also buries the signal in noise.
+- **No stop condition.** An agent that can always call one more tool, with nothing that ends the loop, can run forever (and run up cost). The stop has to be designed, not assumed.
+- **Vague tool descriptions.** The model picks tools by their descriptions. Two tools that sound alike, or a tool whose description does not say when to use it, lead to wrong or wasted calls.
+
+## What you should remember
+
+- **Tools turn a model into an agent.** A tool is a function the model may ask to call; the system runs it and hands back the result, so the model can act, not just answer.
+- **The agent runs a loop and sets its own pace.** Think, call a tool, read the result, decide again, and stop when it has enough. In this system the loop is one edge from the tool step back to the analyst, and the stop is simply the model making no more tool calls.
+- **You control the tools and the stop condition.** Those two choices, not the model itself, are where you shape what an agent gathers and when it finishes.
+
+Each analyst now hands in its report, and the team has four independent readings of the same company. But information is not a decision. The next step is to make the case for and against, on purpose and at full strength, before anyone commits. That is the bull and the bear, and it is the next lesson.

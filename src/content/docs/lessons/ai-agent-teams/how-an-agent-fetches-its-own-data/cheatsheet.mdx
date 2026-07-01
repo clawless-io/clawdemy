@@ -1,0 +1,61 @@
+---
+title: "How an agent fetches its own data: cheatsheet"
+description: "Quick reference: tools, bind_tools, the think-act-observe loop, the no-tool-call stop, the clean-desk message clear, and the build-your-own pattern."
+sidebar:
+  order: 5
+  label: Cheatsheet
+artifact: cheatsheet
+tableOfContents: false
+---
+
+> For education only. Multi-agent architecture taught via stock analysis; not investment, financial, or trading advice.
+
+## The one idea
+
+An agent gathers for itself. Give a role a small toolbox, let it loop (think, call a tool, read the result, decide again), and define an explicit stop so the loop always ends. (Anchored to the TradingAgents framework, frozen snapshot `7e9e7b8`; market analyst in `agents/analysts/market_analyst.py`.)
+
+## Tool use in one line
+
+A **tool** is a function the model may ask to call. The model does not run it; it requests the call, the system runs the function, and the result is handed back. That is what lets a text-only model act in the world.
+
+## The market analyst's toolbox
+
+- `get_stock_data`: pull the price history.
+- `get_indicators`: compute technical measures from it.
+- Two tools, one narrow job. The instruction tells it the order ("call get_stock_data first ... then use get_indicators"); the model carries it out.
+
+## The loop and the stop
+
+| Step | What happens | In the code |
+| --- | --- | --- |
+| Attach tools | The model is told which functions it may call | `llm.bind_tools(tools)` |
+| Ask? | Did the model request a tool? | `if last_message.tool_calls: return "tools_market"` |
+| Run + loop | Run the tool, send the result back to the analyst | `workflow.add_edge(current_tools, current_analyst)` |
+| Stop | No tool call means done; the prose is the report | `if len(result.tool_calls) == 0: report = result.content` |
+
+No fixed step count: the agent loops until it stops asking for tools.
+
+## The clean desk
+
+When an analyst finishes, its working notes are wiped (`create_msg_delete` removes the messages, leaves a "Continue" placeholder). Only the finished report survives in shared state. Each specialist starts fresh and hands forward a summary, not its scratch. (Why the report survives is lesson 6, shared state.)
+
+## How to follow along
+
+Read it free in your browser at [github.com/TauricResearch/TradingAgents (pinned snapshot)](https://github.com/TauricResearch/TradingAgents/tree/7e9e7b8). No account, no Git, no programming knowledge needed. The short code `7e9e7b8` marks one frozen version, so the lessons match what you see.
+
+## Build your own (the transferable pattern)
+
+1. Hand the role a small, sharply described toolbox; each tool is one capability, and the description is how the model knows when to use it.
+2. Let it loop (call, read, decide again), and pick an explicit stop (stops asking, hits a step budget, satisfies a goal) so the loop always ends.
+
+## Pitfalls to dodge
+
+- Pre-fetching everything "to be safe" (throws away the agent's judgment and buries the signal).
+- No stop condition (the loop can run forever and run up cost).
+- Vague or look-alike tool descriptions (the model picks tools by their descriptions, so it picks wrong).
+
+## Words to use precisely
+
+- **Tool:** a function the model may ask to call; the system runs it and returns the result.
+- **Tool-use loop:** think, call a tool, read the result, decide again, until a stop condition is met.
+- **Stop condition:** what ends the loop. Here, the model making no more tool calls.

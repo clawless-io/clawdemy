@@ -2,8 +2,8 @@
  * Single source of truth for the Clawdemy curriculum-scale marketing numbers.
  *
  * These are END-STATE curriculum-SCOPE figures (the shape of the full
- * 24-track curriculum), NOT a claim about how many lessons are live today.
- * Copy that uses them must stay in scope framing ("a 24-track curriculum",
+ * 25-track curriculum), NOT a claim about how many lessons are live today.
+ * Copy that uses them must stay in scope framing ("a 25-track curriculum",
  * "built lesson by lesson"), never "310 lessons available now".
  *
  * One constant, imported by StatBanner.astro (and reusable by the homepage
@@ -27,7 +27,7 @@ export interface CurriculumStat {
 // (2x2 mobile / 4-up desktop). If you add or remove a stat, update the
 // nth-child divider suppression in StatBanner.astro to match.
 export const CURRICULUM_STATS: readonly CurriculumStat[] = [
-	{ value: '24', label: 'Tracks' },
+	{ value: '25', label: 'Tracks' },
 	{ value: '310', label: 'Lessons' },
 	{ value: '1.5M+', label: 'Words', srText: 'More than 1.5 million words' },
 	{ value: 'Free', label: 'No signup' },

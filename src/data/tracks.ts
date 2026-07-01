@@ -19,7 +19,7 @@
 //                                lessons = actual lesson.mdx count)
 //   - blurb / level / theme   -> editorial (advisor defaults; founder-lockable)
 //
-// Stat-banner numbers (24 tracks / total lessons / words) live in the marketing
+// Stat-banner numbers (track count / total lessons / words) live in the marketing
 // CURRICULUM_STATS constant, NOT here. This manifest is per-track card data.
 // ---------------------------------------------------------------------------
 
@@ -126,7 +126,7 @@ export const THEME_ORDER: ThemeMeta[] = Object.values(THEMES).sort(
 );
 
 // ---------------------------------------------------------------------------
-// The tracks. 22 live + 2 planned (T2 / T3) = the 24-track curriculum.
+// The tracks. See CURRICULUM_STATS for the authoritative live track count.
 // href values are verified against the live sidebar entry per track.
 // ---------------------------------------------------------------------------
 export const TRACKS: Track[] = [
@@ -368,6 +368,17 @@ export const TRACKS: Track[] = [
 		lessons: 10,
 		status: 'live',
 		href: '/lessons/multimodal-ai/what-multimodal-ai-actually-is/lesson/',
+	},
+	{
+		id: 25,
+		slug: 'ai-agent-teams',
+		title: 'Anatomy of an AI Agent Team: Inside a Real Multi-Agent System',
+		blurb: "Read a real production multi-agent system's code and learn to build your own.",
+		theme: 'production',
+		level: 'Advanced',
+		lessons: 8,
+		status: 'live',
+		href: '/lessons/ai-agent-teams/why-split-one-ai-into-many/lesson/',
 	},
 
 	// --- Planned (not yet built; rendered only where status is surfaced) ----
