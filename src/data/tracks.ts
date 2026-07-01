@@ -58,6 +58,8 @@ export interface Track {
 	startHere?: boolean;
 	/** Sort order within the Start here rail (lower = earlier). */
 	startHereOrder?: number;
+	/** Sort order within a theme's learning-path page (lower = earlier). Optional; tracks without it keep manifest order. */
+	pathOrder?: number;
 }
 
 // Theme display metadata. `order` drives the homepage rail sequence (plan §6).
@@ -284,6 +286,7 @@ export const TRACKS: Track[] = [
 	{
 		id: 17,
 		slug: 'reinforcement-learning-foundations',
+		pathOrder: 4,
 		title: 'Reinforcement Learning Foundations',
 		blurb: 'Agents, rewards, and policies: the foundations of reinforcement learning.',
 		theme: 'production',
@@ -295,6 +298,7 @@ export const TRACKS: Track[] = [
 	{
 		id: 18,
 		slug: 'deep-reinforcement-learning',
+		pathOrder: 5,
 		title: 'Deep Reinforcement Learning',
 		blurb: 'Policy gradients, Q-learning, PPO, and the algorithms behind RLHF.',
 		theme: 'production',
@@ -317,6 +321,7 @@ export const TRACKS: Track[] = [
 	{
 		id: 20,
 		slug: 'ai-agents-and-tool-use',
+		pathOrder: 2,
 		title: 'AI Agents and Tool Use',
 		blurb: 'Give models tools, memory, and loops so they act, not just answer.',
 		theme: 'production',
@@ -328,6 +333,7 @@ export const TRACKS: Track[] = [
 	{
 		id: 21,
 		slug: 'llm-ops-and-production',
+		pathOrder: 6,
 		title: 'LLM Ops and Production',
 		blurb: 'Ship LLM apps: evaluation, deployment, monitoring, and cost.',
 		theme: 'production',
@@ -339,6 +345,7 @@ export const TRACKS: Track[] = [
 	{
 		id: 22,
 		slug: 'building-with-claude',
+		pathOrder: 3,
 		title: 'Building with Claude',
 		blurb: 'Build real applications on the Claude API, step by step.',
 		theme: 'production',
@@ -372,6 +379,7 @@ export const TRACKS: Track[] = [
 	{
 		id: 25,
 		slug: 'ai-agent-teams',
+		pathOrder: 7,
 		title: 'Anatomy of an AI Agent Team: Inside a Real Multi-Agent System',
 		blurb: "Read a real production multi-agent system's code and learn to build your own.",
 		theme: 'production',
@@ -407,6 +415,7 @@ export const TRACKS: Track[] = [
 	{
 		id: 7,
 		slug: 'git-workflow',
+		pathOrder: 1,
 		title: 'Git Workflow: From Solo to Multi-Agent Teams',
 		blurb: 'Version control as collaboration infrastructure, from your first commit to coordinating AI agent teams on parallel branches.',
 		theme: 'production',
@@ -422,9 +431,12 @@ export const TRACKS: Track[] = [
 /** Live tracks only, in manifest order. */
 export const liveTracks = (): Track[] => TRACKS.filter((t) => t.status === 'live');
 
-/** Live tracks in a theme, in manifest order. */
+/** Live tracks in a theme, ordered by pathOrder (then manifest order). */
 export function tracksByTheme(theme: ThemeKey): Track[] {
-	return TRACKS.filter((t) => t.status === 'live' && t.theme === theme);
+	// Stable sort by pathOrder; tracks without pathOrder keep their manifest order.
+	return TRACKS.filter((t) => t.status === 'live' && t.theme === theme).sort(
+		(a, b) => (a.pathOrder ?? Infinity) - (b.pathOrder ?? Infinity),
+	);
 }
 
 /** The curated "Start here" rail, in startHereOrder. */
