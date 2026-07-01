@@ -386,7 +386,11 @@ export const TRACKS: Track[] = [
 		level: 'Advanced',
 		lessons: 8,
 		status: 'live',
-		href: '/lessons/ai-agent-teams/why-split-one-ai-into-many/lesson/',
+		// Track 25 has a dedicated hub page (the only track with one, 2026-06-30):
+		// the card, the /tracks/ ItemList, and the marketing funnel all canonicalize
+		// on the hub, which then routes into lesson 1. Other tracks still point at
+		// their first lesson.
+		href: '/tracks/ai-agent-teams/',
 	},
 
 	// --- Planned (not yet built; rendered only where status is surfaced) ----
