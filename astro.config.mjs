@@ -4120,9 +4120,7 @@ export default defineConfig({
 									{ label: 'Cheatsheet', slug: 'lessons/ai-agent-teams/orchestration-and-shared-state/cheatsheet' },
 									{ label: 'References', slug: 'lessons/ai-agent-teams/orchestration-and-shared-state/references' },
 								],
-							}
-					],
-				},
+							},
 							{
 								label: 'Memory and reflection',
 								collapsed: true,
@@ -4147,6 +4145,8 @@ export default defineConfig({
 									{ label: 'References', slug: 'lessons/ai-agent-teams/the-capstone/references' },
 								],
 							}
+],
+				}
 			];
 					const __top = __groups.filter((g) => !/^Track \d+/.test(g.label));
 					const __tracks = __groups
