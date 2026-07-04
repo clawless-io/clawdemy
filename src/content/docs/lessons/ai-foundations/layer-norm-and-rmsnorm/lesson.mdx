@@ -15,7 +15,7 @@ import LessonStar from '../../../../../components/LessonStar.astro';
 <ReadAlongDim
   src="https://audio.clawdemy.org/lessons/layer-norm-and-rmsnorm-lesson.mp3"
   slug="layer-norm-and-rmsnorm"
-  cacheVersion="20260513"
+  cacheVersion="20260703"
   approxMinutes={18}
 />
 
@@ -23,7 +23,7 @@ The "Add & Norm" boxes in the original transformer diagram are easy to skim past
 
 Each one does two specific things between every sub-layer (attention, feed-forward) and the next: it adds the residual back in, and it normalizes the result so the next sub-layer sees activations in a useful range. The Stanford lecturer calls it "a little trick" the original authors used; in practice it improves convergence and shortens training time enough to matter at every model size.
 
-The mechanism the original paper used is called **LayerNorm**. The 2017 transformer wrapped it around each sub-layer as `LayerNorm(x + SubLayer(x))`. Modern transformers do two things differently. First, they put the LayerNorm in a different place: `x + SubLayer(LayerNorm(x))` instead of around the residual. Second, they often use a simplification of LayerNorm called **RMSNorm**. Both changes show up explicitly in modern model cards (you'll see "Pre-LayerNorm" or "Pre-RMSNorm" listed as architecture features), and both exist for a specific structural payoff.
+The mechanism the original paper used is called **LayerNorm**. The 2017 transformer wrapped it around each sub-layer as `LayerNorm(x + SubLayer(x))`. Modern transformers do two things differently. First, they move the LayerNorm to a different place: `x + SubLayer(LayerNorm(x))` instead of around the residual. Second, they often use a simpler version of LayerNorm called **RMSNorm**. Both changes show up plainly in modern model cards. You will see "Pre-LayerNorm" or "Pre-RMSNorm" listed as architecture features. Each one exists for a specific structural payoff.
 
 This is the second of three lessons in this lecture on the architectural changes that stuck after 2017. The position embeddings lesson covered the first one; the next lesson covers attention efficiency. Most of the original transformer is intact in modern LLMs; normalization is one of the small handful of pieces that genuinely moved.
 
@@ -33,9 +33,9 @@ Activations inside a deep network drift. The vector flowing between two sub-laye
 
 The fix is to **bring the values of the components into a controlled range** before they reach the next sub-layer. Why exactly normalization helps is a question worth slowing down on, because the framing has shifted in the literature.
 
-The original BatchNorm paper (Ioffe and Szegedy, 2015) framed the benefit in terms of **internal covariate shift**: the distribution of activations shifts as the network trains, and that shift was supposed to be what makes the next layer's job harder. That framing has not held up empirically. Santurkar, Tsipras, Ilyas and Madry (2018, "How Does Batch Normalization Help Optimization?") showed that BatchNorm does not actually reduce internal covariate shift, and that you can artificially inject covariate shift after the normalization without hurting optimization. The currently accepted explanation is that normalization smooths the loss landscape (reduces the Lipschitz constants of the loss and its gradient), which lets gradient descent take larger stable steps. The empirical observation (deep networks train faster and more reliably with normalization) is robust; the mechanism is more subtle than the original paper claimed.
+The original BatchNorm paper (Ioffe and Szegedy, 2015) framed the benefit as fixing **internal covariate shift**. The idea: the spread of activations shifts as the network trains, and that shift was supposed to make the next layer's job harder. That framing has not held up. Santurkar, Tsipras, Ilyas and Madry (2018, "How Does Batch Normalization Help Optimization?") showed that BatchNorm does not actually reduce internal covariate shift. They even injected extra shift after the normalization, and optimization was fine. The explanation accepted today is different. Normalization smooths the loss landscape, which lets gradient descent take larger, stable steps. The observation holds up well: deep networks train faster and more reliably with normalization. The mechanism is just more subtle than the original paper claimed.
 
-LayerNorm itself, introduced by Ba, Kiros and Hinton (2016) for recurrent networks, was motivated differently from the start. The LayerNorm paper's framing is per-example hidden-state stabilization: normalize each example's activations using statistics computed only from that example, which avoids the train-test discrepancies and small-batch failures that BatchNorm runs into. That motivation has translated cleanly to transformers, where each token's activation vector gets normalized independently of the rest of the batch.
+LayerNorm itself, introduced by Ba, Kiros and Hinton (2016) for recurrent networks, had a different motivation from the start. Its framing is per-example stabilization. You normalize each example's activations using statistics from that example alone. This avoids the train-test gaps and small-batch failures that BatchNorm runs into. That motivation carried over cleanly to transformers, where each token's activation vector is normalized on its own, apart from the rest of the batch.
 
 LayerNorm does this per-token. For a single token's activation vector `x` with `d` components:
 
@@ -59,7 +59,7 @@ Transformers use LayerNorm, not BatchNorm. Two reasons.
 
 First, the lecturer's framing: "probably because empirically it works better." The empirical preference is consistent enough that it is the default for transformer-style models, even if the field has not converged on one clean theoretical reason.
 
-Second, BatchNorm has a structural disadvantage for sequence models: it depends on the batch composition. The statistics you compute at training time (mean and standard deviation of each component across the batch) are different from the statistics you compute at inference time, when the batch may be a single sequence. LayerNorm sidesteps that train-vs-inference difference entirely, because it operates per-token without ever looking at other vectors in the batch.
+Second, BatchNorm has a structural weakness for sequence models. It depends on the batch composition. At training time you compute the mean and standard deviation of each component across the batch. At inference time the batch may be a single sequence, so those statistics differ. LayerNorm sidesteps that train-vs-inference gap entirely. It works per-token and never looks at other vectors in the batch.
 
 If you have CV intuition, the easiest substitution is: BatchNorm normalizes "one component across many vectors"; LayerNorm normalizes "one vector across many components." Same operation, different axis.
 
