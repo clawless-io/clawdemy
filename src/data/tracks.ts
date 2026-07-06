@@ -392,6 +392,18 @@ export const TRACKS: Track[] = [
 		// their first lesson.
 		href: '/tracks/ai-agent-teams/',
 	},
+	{
+		id: 26,
+		slug: 'engineering-agentic-systems',
+		pathOrder: 8,
+		title: 'Engineering Agentic Systems',
+		blurb: 'The architect layer: configuration, tool design, orchestration, reliability.',
+		theme: 'production',
+		level: 'Advanced',
+		lessons: 1,
+		status: 'live',
+		href: '/lessons/engineering-agentic-systems/thinking-like-an-architect/lesson/',
+	},
 
 	// --- Planned (not yet built; rendered only where status is surfaced) ----
 	{

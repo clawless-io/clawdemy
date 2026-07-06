@@ -4146,6 +4146,23 @@ export default defineConfig({
 								],
 							}
 ],
+				},
+				{
+					label: 'Track 26: Agentic Systems',
+					items: [
+						{
+							label: 'Thinking like an architect',
+							collapsed: true,
+							items: [
+								{ label: 'Brief', slug: 'lessons/engineering-agentic-systems/thinking-like-an-architect/brief' },
+								{ label: 'Lesson', slug: 'lessons/engineering-agentic-systems/thinking-like-an-architect/lesson' },
+								{ label: 'Practice', slug: 'lessons/engineering-agentic-systems/thinking-like-an-architect/practice' },
+								{ label: 'Summary', slug: 'lessons/engineering-agentic-systems/thinking-like-an-architect/summary' },
+								{ label: 'Cheatsheet', slug: 'lessons/engineering-agentic-systems/thinking-like-an-architect/cheatsheet' },
+								{ label: 'References', slug: 'lessons/engineering-agentic-systems/thinking-like-an-architect/references' },
+							],
+						},
+					],
 				}
 			];
 					const __top = __groups.filter((g) => !/^Track \d+/.test(g.label));
