@@ -400,7 +400,7 @@ export const TRACKS: Track[] = [
 		blurb: 'The architect layer: configuration, tool design, orchestration, reliability.',
 		theme: 'production',
 		level: 'Advanced',
-		lessons: 7,
+		lessons: 8,
 		status: 'live',
 		href: '/lessons/engineering-agentic-systems/thinking-like-an-architect/lesson/',
 	},

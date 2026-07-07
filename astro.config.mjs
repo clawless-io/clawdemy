@@ -4234,6 +4234,18 @@ export default defineConfig({
 								{ label: 'References', slug: 'lessons/engineering-agentic-systems/agents-in-the-pipeline/references' },
 							],
 						},
+						{
+							label: 'The capstone: design, build, defend',
+							collapsed: true,
+							items: [
+								{ label: 'Brief', slug: 'lessons/engineering-agentic-systems/design-build-defend/brief' },
+								{ label: 'Lesson', slug: 'lessons/engineering-agentic-systems/design-build-defend/lesson' },
+								{ label: 'Practice', slug: 'lessons/engineering-agentic-systems/design-build-defend/practice' },
+								{ label: 'Summary', slug: 'lessons/engineering-agentic-systems/design-build-defend/summary' },
+								{ label: 'Cheatsheet', slug: 'lessons/engineering-agentic-systems/design-build-defend/cheatsheet' },
+								{ label: 'References', slug: 'lessons/engineering-agentic-systems/design-build-defend/references' },
+							],
+						},
 					],
 				}
 			];
