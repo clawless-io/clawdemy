@@ -1,0 +1,172 @@
+---
+title: "Agents in the pipeline"
+description: "Run Claude Code with nobody at the keyboard: headless mode, JSON output for CI, the generator-reviewer split, and review checks teams trust."
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+import LessonStar from '../../../../../components/LessonStar.astro';
+
+<LessonStar slug="agents-in-the-pipeline" />
+
+At 4:52 on a Friday afternoon, someone on Priya's team opens a pull request. A check starts in the background. Eleven minutes later a review comment appears: two findings, each with a file, a line, and a reason. Both are real. Nobody read the diff. Nobody was at a keyboard. The reviewer was Claude Code, running inside the pipeline with no human anywhere in the loop.
+
+Every lesson in this track so far kept a person in the frame. Lesson 2's configuration had a developer at the terminal to correct course. Lesson 6 placed a human at the escalation point on purpose. This lesson removes the person entirely, and the removal is the point. An unattended agent is the purest test of your architecture, because nobody is there to catch it. Every decision you have practiced, what the model decides, what the code guarantees, what earns a seat in context, must now be made in advance and written down. When the check runs at 4:52 on a Friday, there is no one to ask.
+
+The good news: you have already built the pieces. This lesson is mostly about connecting them.
+
+## Headless mode: the keyboard is gone
+
+An interactive Claude Code session assumes a person. It asks permission before risky actions. It pauses when it needs a decision. In a pipeline, every one of those pauses is a deadlock: a job waiting for an answer that will never come.
+
+So Claude Code has a non-interactive mode. Add the print flag (`-p`, or `--print`) to a command and Claude runs the prompt once, prints the result, and exits. It reads standard input and writes standard output, which means it behaves like any other command-line tool. You can pipe a diff in and redirect the findings out.
+
+```bash
+git diff main | claude -p "List any typos in this diff, one per line"
+```
+
+Two consequences follow, and both are architecture.
+
+First, permissions must be decided in advance. There is no prompt to answer, so you grant tools up front with the allowed tools flag (`--allowedTools`), or set a session baseline with a permission mode; the documentation points at the deny-by-default mode (`dontAsk`) for locked-down CI runs. An action the run was never granted ends the run instead of hanging it. In a pipeline, a fast failure beats a silent wait every time.
+
+Second, the prompt has to carry everything, because the agent cannot ask a clarifying question. Instructions that work fine interactively, where the model can check back with you, become coin flips in a pipeline. You will feel this again in every section below.
+
+One more flag is worth meeting before you wire anything into CI. By default, a headless run loads the same context an interactive session would: project memory, rules files, hooks, plugins. A bare mode flag (`--bare`) skips all of that discovery. In the documentation's words: "Bare mode is useful for CI and scripts where you need the same result on every machine." With bare mode, you pass context explicitly through flags instead. Hold that thought; it matters in a moment.
+
+## Output a script can parse
+
+An interactive session ends with a human reading the answer. A pipeline ends with a script, and scripts do not read prose.
+
+The output format flag (`--output-format`) controls what a headless run emits. The default is plain text (`text`). The JSON option (`json`) returns what the documentation describes as "structured JSON with result, session ID, and metadata", including the run's total cost in dollars in a named field (`total_cost_usd`). The streaming option (`stream-json`) emits newline-delimited JSON events as the run progresses, for the cases where something downstream wants live progress instead of one final blob.
+
+When you need the findings themselves in a fixed shape, not just the envelope around them, there is a schema flag (`--json-schema`). Pass a JSON Schema and the run returns structured output conforming to it, in its own field of the response. If that sounds familiar, it should. It is lesson 3's whole argument, schemas that refuse to lie, resurfacing as a command-line flag. A finding with a required file, line, and reason cannot melt into friendly prose.
+
+This is what makes the Friday scene work mechanically. The check pipes the diff in, gets JSON back, parses the findings, and posts each one as a pull request comment through the code host's ordinary API. Claude never touches the pull request directly. A dozen lines of script do, and those lines are plain code you can test.
+
+```bash
+gh pr diff 214 | claude -p "Review this diff. Report each finding with file, line, and reason." \
+  --output-format json \
+  --allowedTools "Read" \
+  --max-turns 12
+```
+
+## The newest teammate arrives already onboarded
+
+Now the lesson 2 investment pays out. Remember what that lesson made you build: project memory carrying the team's standards, rules files scoped to the code they govern, settings enforcing the must-hold rules. The frame was configuration as a product, and the reason given was that every fresh session is a new teammate who arrives knowing nothing.
+
+The CI agent is that teammate in the most literal form you will ever meet. It has no history, no habits, no memory of last night's run. Everything it knows about your team, it knows because a checked-in file told it. And by default, a headless run reads exactly the files lesson 2 taught you to write: project memory loads, and scoped rules load when the matching code is touched. Anthropic's managed GitHub integration makes the same promise in its own feature list: "Claude respects your CLAUDE.md guidelines and existing code patterns." The official guidance for that integration is to put review criteria and project rules in project memory. In other words, the documentation assumes you did lesson 2.
+
+So the testing standards you wrote down, the fixture conventions, the review criteria: the CI agent inherits all of it, because the repository delivers configuration to every session that opens it, human or not. If your team skipped lesson 2 and the standards live in one person's home directory, the CI agent is Marcus: same model, none of the judgment. Configuration drift has a new victim, and this one posts its mistakes in public.
+
+One honest wrinkle. Bare mode, from the first section, skips project memory along with everything else, and the documentation recommends it for scripted calls precisely because implicit loading can differ from machine to machine. That is not a contradiction. It is lesson 2's audience question wearing CI clothes. The checked-in files remain the single source of truth; the decision is delivery. Either let the run discover them, which is simple and is the default today, or pass them explicitly with the system prompt file flag (`--append-system-prompt-file`), which is verbose and identical on every machine. Either way, what the CI agent knows stays versioned, reviewed, and visible in the repository. What it must never be is a prompt string pasted into a workflow file that nobody reviews.
+
+## Generator and reviewer: never the same instance
+
+Time to make this concrete. Priya's team maintains a web app that local sports clubs use to schedule fields and courts. They add two automated jobs to the repository.
+
+The first is a nightly generator. At two in the morning, a headless run reads the coverage report, picks the least-tested module, drafts tests following the fixture conventions in the rules file, runs them, and opens a small pull request with whatever passes.
+
+The second is a pre-merge reviewer. On every pull request, a headless run reads the diff and posts findings as comments. It is a required check: narrow, fast, blocking.
+
+The tempting shortcut is to merge them. When the nightly job finishes its tests, why not have the same run review its own output before opening the pull request? It already has everything in context.
+
+That is exactly why it must not. An instance reviewing code it just generated carries its own reasoning in context: the assumptions it made, the interpretation it chose, the corners it decided were fine to cut. It reads the code the way an author proofreads their own draft, seeing what it meant rather than what it wrote. Ask it to check its work and it will, sincerely, inside the same frame that produced the mistakes. It goes easy on itself, not out of anything like loyalty, but because the context that misled the generation is still sitting on the desk, misleading the review.
+
+Lesson 6 named the principle: a review is only worth as much as the reviewer's independence. In CI, the principle becomes mechanics. The reviewer is a separate invocation. Fresh process, fresh context window, no shared session. It never sees the generator's reasoning, only the artifact: the diff, the standards, the criteria. Same model, possibly the same machine; what makes it independent is everything it does not know. In particular, do not connect the two runs with the conversation flags (`--continue`, or `--resume`). Those exist to share context across runs, which is precisely what independence forbids.
+
+On Priya's team, the nightly generator's pull requests go through the same pre-merge reviewer as everyone else's. The newest teammate gets code review too. Nobody is exempt, least of all the team member who works at two in the morning.
+
+## Re-runs without the noise
+
+A pull request is not reviewed once. The author pushes a fix, and the check runs again. A naive reviewer, stateless by design, rediscovers every finding it already posted and posts them all again. Three pushes in, the pull request holds three copies of the same comment, and the humans have stopped reading any of them.
+
+The fix is context, not memory. Before invoking the agent, the script fetches the comments the bot has already posted on this pull request, includes them in the prompt, and instructs plainly:
+
+```text
+Prior findings already posted on this pull request:
+1. routes/booking.ts, line 41: request body used without validation.
+2. tests/booking.test.ts, line 12: a test with no assertion.
+
+Review the new diff. Report only findings that are new, or prior
+findings the new changes still do not address. Do not repeat
+resolved items.
+```
+
+Notice the carry-versus-fetch trade-off doing quiet work here. The agent does not remember the previous run, and it should not; fresh context on every run is a feature you just paid for. Instead, the pipeline carries the one small slice of history that matters, the prior findings, and nothing else. State lives in the pull request, where humans can see it, not inside an agent, where nobody can.
+
+## Precision is a spec, not a mood
+
+The most common failure of automated review is not missing bugs. It is finding too many things that are not bugs.
+
+Imagine the instruction "review this diff, be conservative, and only report things that matter." Every word of it is a mood and none of it is a spec. What matters? Conservative by whose lights? The agent will answer those questions differently on every run, and on its generous days it will bury the pull request in advice.
+
+The alternative is explicit criteria with concrete examples, checked in as a rules file so the humans and the CI agent inherit the same standard. Lesson 2 again.
+
+```markdown
+# Automated review criteria
+
+Report a finding only for:
+
+- A route handler that uses request input without validating it.
+  Example: reading request body fields with no schema check.
+- A test that can never fail.
+  Example: a test body containing no assertion.
+- A secret, key, or token written into source.
+
+Never report style, naming, formatting, or missing comments.
+The linter owns those. Finding nothing is an acceptable result.
+```
+
+The example lines are load-bearing. "Be conservative" asks the model to guess where your threshold sits; an example pins the threshold the way a definition cannot. And the last line matters most: an agent told that silence is acceptable stops inventing findings to look thorough.
+
+Why so strict? Because the economics of trust are brutal and run in one direction. A reviewer that floods a pull request with twelve pedantic comments does not get twelve fractions of attention; it gets muted. Developers learn within a week to scroll past the bot. Then, the day it catches something real, that finding scrolls past with the noise, and the system now has negative value: it costs money and provides false comfort. A false-positive flood does not merely waste time. It spends the only currency an automated reviewer holds, which is the team's willingness to read it.
+
+## Two kinds of jobs, two kinds of budgets
+
+Priya's two jobs also differ in a way that has nothing to do with what they know, and everything to do with who is waiting.
+
+The nightly generator is batch work. Nobody is watching at two in the morning. If it takes forty minutes, nothing is lost. So it gets a wide scope, a generous turn allowance, and a forgiving failure policy: log it, skip it, try again tomorrow night. Its budget is measured in dollars, and the JSON output's cost field gives you the per-run number to watch.
+
+The pre-merge reviewer is a blocking check. A developer is sitting there, waiting to merge. Every minute the check takes is a minute of someone's afternoon, and a blocking check that is slow or moody gets deleted within a month, which deletes everything you built above. So it gets the opposite discipline: a narrow scope (the diff, never the whole repository), a tight cap through the turn limit flag (`--max-turns`), which ends the run with an error when the cap is reached, a spend ceiling through the budget flag (`--max-budget-usd`), and a workflow-level timeout above all of it so no single run can hold the pipeline hostage. Predictability is itself a feature: similar pull requests should cost similar minutes.
+
+The mistake to avoid is one configuration for both. Same model, same repository, opposite budgets. Deciding what each job may cost, in time and in money, is the same act as deciding what it may touch. Both are architecture.
+
+And underneath both jobs, the oldest rule in this track still applies. Neither of these is a free-roaming agent. The nightly job follows a drawn route: read the coverage report, draft tests, run them, open a pull request. The reviewer follows a shorter one. The model does focused work inside each step of a path the team drew in advance. Simplicity did not stop being the default just because nobody is watching.
+
+## Why this matters when you use AI
+
+- **You will meet these reviewers from the other side.** Automated AI review is arriving in ordinary repositories, and the bot commenting on your pull request was configured by a person making exactly these choices. You can now tell a well-built one, precise, deduplicated, fast, from a noisy one, and you know the fix to request: criteria with examples, not "please be more careful."
+- **The trust economics govern every automation, not just this one.** Alerts, monitors, spam filters, fraud checks: any unattended system that cries wolf gets muted, and a muted system is worse than no system. Designing for precision first when nobody reviews the output before it ships is a principle you can carry into any field.
+- **Unattended is where this is all heading.** Scheduled agents, event-triggered agents, overnight batch runs: the vendors are racing to offer them. The discipline in this lesson, permissions decided in advance, machine-readable output, independent review, explicit budgets, is the entry fee for every one of them.
+
+## Common pitfalls
+
+**Letting the generator review itself.** It already has the context, so it feels efficient. But the context is exactly the problem: the assumptions that produced the bug will excuse the bug. Review means a separate invocation that knows nothing but the artifact and the standards.
+
+**Shipping the reviewer without criteria.** "Be conservative" is a mood, and the model will interpret it fresh on every run. Write the finding types down, give each one a concrete example, and state what must never be flagged. Say plainly that finding nothing is acceptable.
+
+**Reposting the same findings on every push.** Statelessness is a feature of the agent, not of the pipeline. Feed the bot's prior comments back into context and instruct it to report only what is new or still unaddressed. Duplicate noise trains humans to ignore the whole channel.
+
+**One budget for every job.** A nightly batch run and a blocking pre-merge check need opposite treatment. Give the overnight job room and forgiveness; give the blocking check a narrow scope, a turn cap, a spend ceiling, and a timeout. A slow blocking check does not get tolerated. It gets removed.
+
+## What you should remember
+
+- Headless mode runs one prompt and exits (the print flag). There is nobody to ask, so permissions, context, and instructions must all be decided in advance.
+- Output format flags turn an agent's findings into JSON a script can parse and post as pull request comments; a schema makes the shape of those findings a guarantee rather than a hope.
+- The CI agent is the newest teammate. By default it inherits the checked-in configuration layer from lesson 2, which is where its standards must live: versioned and reviewed, never pasted into a workflow file.
+- Generator and reviewer are separate invocations with separate contexts. An instance reviewing its own output goes easy on itself; independence here is mechanical, not moral.
+- On re-runs, carry prior findings into context and ask only for new or still-unaddressed issues. State lives in the pull request, not in the agent.
+- Explicit criteria with concrete examples beat vague caution, because a false-positive flood destroys the trust the entire system runs on.
+- Batch jobs and blocking checks need opposite budgets. A blocking check must be fast and predictable, or it will be deleted along with everything it guards.
+
+## What's next
+
+Lesson 8 is the capstone. No new machinery: you will design, build, and defend a small agentic system of your own, end to end. Every trade-off this track has taught, where judgment lives, what code guarantees, who reviews whom, what each run may cost, shows up in the defense, because defending the trade-offs is the part that makes you an architect rather than an assembler.
+
+## If you remember one thing
+
+**An unattended agent is the purest test of your architecture.**\
+**Nobody is there to catch it, so the design must.**\
+**Build the pipeline as if nobody is watching, because nobody is.**

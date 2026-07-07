@@ -4198,6 +4198,42 @@ export default defineConfig({
 								{ label: 'References', slug: 'lessons/engineering-agentic-systems/tools-other-agents-can-trust/references' },
 							],
 						},
+						{
+							label: 'Orchestration that survives contact',
+							collapsed: true,
+							items: [
+								{ label: 'Brief', slug: 'lessons/engineering-agentic-systems/orchestration-that-survives-contact/brief' },
+								{ label: 'Lesson', slug: 'lessons/engineering-agentic-systems/orchestration-that-survives-contact/lesson' },
+								{ label: 'Practice', slug: 'lessons/engineering-agentic-systems/orchestration-that-survives-contact/practice' },
+								{ label: 'Summary', slug: 'lessons/engineering-agentic-systems/orchestration-that-survives-contact/summary' },
+								{ label: 'Cheatsheet', slug: 'lessons/engineering-agentic-systems/orchestration-that-survives-contact/cheatsheet' },
+								{ label: 'References', slug: 'lessons/engineering-agentic-systems/orchestration-that-survives-contact/references' },
+							],
+						},
+						{
+							label: 'Reliability is a design choice',
+							collapsed: true,
+							items: [
+								{ label: 'Brief', slug: 'lessons/engineering-agentic-systems/reliability-is-a-design-choice/brief' },
+								{ label: 'Lesson', slug: 'lessons/engineering-agentic-systems/reliability-is-a-design-choice/lesson' },
+								{ label: 'Practice', slug: 'lessons/engineering-agentic-systems/reliability-is-a-design-choice/practice' },
+								{ label: 'Summary', slug: 'lessons/engineering-agentic-systems/reliability-is-a-design-choice/summary' },
+								{ label: 'Cheatsheet', slug: 'lessons/engineering-agentic-systems/reliability-is-a-design-choice/cheatsheet' },
+								{ label: 'References', slug: 'lessons/engineering-agentic-systems/reliability-is-a-design-choice/references' },
+							],
+						},
+						{
+							label: 'Agents in the pipeline',
+							collapsed: true,
+							items: [
+								{ label: 'Brief', slug: 'lessons/engineering-agentic-systems/agents-in-the-pipeline/brief' },
+								{ label: 'Lesson', slug: 'lessons/engineering-agentic-systems/agents-in-the-pipeline/lesson' },
+								{ label: 'Practice', slug: 'lessons/engineering-agentic-systems/agents-in-the-pipeline/practice' },
+								{ label: 'Summary', slug: 'lessons/engineering-agentic-systems/agents-in-the-pipeline/summary' },
+								{ label: 'Cheatsheet', slug: 'lessons/engineering-agentic-systems/agents-in-the-pipeline/cheatsheet' },
+								{ label: 'References', slug: 'lessons/engineering-agentic-systems/agents-in-the-pipeline/references' },
+							],
+						},
 					],
 				}
 			];

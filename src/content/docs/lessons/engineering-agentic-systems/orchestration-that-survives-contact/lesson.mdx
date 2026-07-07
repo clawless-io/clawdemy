@@ -1,0 +1,147 @@
+---
+title: "Orchestration that survives contact"
+description: "One coordinator, many subagents, real failures. Learn to brief agents that inherit nothing, split work cleanly, and keep sources attached."
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+import LessonStar from '../../../../../components/LessonStar.astro';
+
+<LessonStar slug="orchestration-that-survives-contact" />
+
+Rosa is back. The bike shop owner from lesson 4 is weighing a second store across town, and she wants a market landscape before she signs anything: who else sells cargo-bike gear in the region, at what prices, under what local rules. Her developer builds a small research crew for the job. One coordinator agent takes the question, splits it into pieces, and hands each piece to a subagent. Overnight, the crew produces a twelve page report. It is organized, confident, and fluently written. It is also missing every competitor that sells through a physical storefront. The coordinator asked one subagent to survey online retailers of cargo racks, and no other subagent was ever given the rest of the market. Nothing crashed. Nothing returned an error. The report is not wrong in any sentence you can point to. It is wrong in the gaps.
+
+Lesson 1 gave this track a rule for teams of agents: every seam must justify itself. The AI Agent Teams track showed you what the seams can buy; you watched a real team of agents argue, check each other's work, and decide. And lesson 4 closed with a promise: the tool contracts you learned to write would come back as something bigger, agreements between agents. This lesson keeps that promise. It is about what the seams actually cost, and about the plumbing that makes a team of agents reliable instead of merely impressive: how work gets cut, how context gets passed, how failure crosses a boundary, and how a fact keeps its source while moving through three pairs of hands.
+
+## One coordinator, many hands
+
+The shape this lesson studies has one agent in charge. Anthropic's engineering essay on agent patterns names it the orchestrator-workers workflow: "a central LLM dynamically breaks down tasks, delegates them to worker LLMs, and synthesizes their results." The same essay says it is suited to "complex tasks where you can't predict the subtasks needed." That last clause matters. If you can predict the subtasks, lesson 1 already told you what to do: draw them in code and skip the coordinator. The coordinator earns its seat only when deciding how to split the work is itself judgment work.
+
+This is not a whiteboard pattern. Anthropic built its own research feature this way and wrote publicly about what it took. A lead agent reads the query, thinks through a plan, and spawns subagents that search in parallel. Each subagent explores its slice, distills what it found, and returns findings to the lead, which synthesizes the final answer. Effort scales with the question: their team describes simple fact-finding as a job for one agent and a few tool calls, while comparing several options wants a handful of subagents working at once.
+
+Rosa's crew is the same shape at small scale. A coordinator holds her question. Under it sit three subagents: a competitor scanner, a pricing surveyor, and a regulation checker. Three seams. The rest of this lesson walks those seams one cost at a time.
+
+## A subagent starts with an empty desk
+
+Here is the fact everything else in this lesson leans on: a subagent inherits nothing automatically. In the Claude Agent SDK, each subagent runs in its own fresh conversation, with its own empty context window. The docs state the boundary exactly: "Intermediate tool calls and results stay inside the subagent; only its final message returns to the parent." The traffic in the other direction is just as narrow. The subagent never sees the coordinator's conversation, its history, or the results of anything the coordinator did before. The only channel in is the text of the delegation prompt itself.
+
+That isolation is a feature before it is a burden. It is lesson 1's carry-versus-fetch trade-off, solved structurally: a subagent can read forty documents, and not one of them lands on the coordinator's desk. The coordinator receives a distilled finding, not the pile. Anthropic's team describes its research subagents working exactly this way, each one condensing a large territory into a compact report for the lead.
+
+But isolation has a price, and the price is the brief. Everything the subagent needs to do its job has to be written into the delegation prompt, because nothing else will arrive. Anthropic's guidance from production is blunt about what a good brief contains: "Each subagent needs an objective, an output format, guidance on the tools and sources to use, and clear task boundaries." Four elements. Here is what they look like for Rosa's pricing surveyor:
+
+```text
+OBJECTIVE: Survey retail prices for cargo racks and cargo-bike
+accessories sold in the metro region. Rosa's shop is opening a
+second store; she needs to know the price bands she will compete in.
+
+OUTPUT FORMAT: A list of entries. Each entry: product category,
+low price, high price, seller name, and the source URL where
+each price was observed.
+
+TOOLS AND SOURCES: Use the web search tool. Prefer seller sites
+over aggregator listings. The competitor list from the scanner
+is attached below; price those sellers first.
+
+BOUNDARIES: Prices only. Do not assess competitor quality or
+strategy; the scanner owns that. If a price cannot be verified
+on a seller page, mark it unverified rather than estimating.
+```
+
+Read the boundaries line twice. It names the sibling subagent and draws the property line between them, exactly the way lesson 4 taught you to name a tool's nearest sibling in its description. That is not a coincidence. A tool description is written for a reader who cannot ask follow-up questions. A delegation brief is the same discipline pointed at an agent instead of a tool. This is what lesson 4's closing line meant: the brief, plus the output format the coordinator will hold the subagent to, is a contract between agents. When a run misbehaves, the contract is the first place you look.
+
+The most common orchestration bug in practice is not exotic. It is a coordinator that delegates as if the subagent were in the room: "check the prices for those shops we discussed." No subagent discussed anything. The pronoun points at context that was never passed, and the subagent does its confident best with a sentence that refers to nothing.
+
+## Cutting the work is where reports get holes
+
+Decomposition looks like the easy step. The coordinator reads a broad task and writes a list of subtasks. What could go wrong is precisely what went wrong in Rosa's report, and it fails silently in two directions.
+
+The first direction is the gap. If the subtasks, added together, cover less than the original task, the remainder is assigned to nobody, and nobody is exactly who reports its absence. Rosa's coordinator turned "who else sells cargo-bike gear in the region" into "survey online retailers of cargo racks." Every word of narrowing felt reasonable, and each one quietly cut territory: physical stores gone, gear other than racks gone. A too-narrow decomposition does not fail loudly. It produces a well-written report about a smaller question than the one that was asked.
+
+The second direction is the overlap. If two briefs claim the same territory, two subagents burn tokens researching the same sellers, and the coordinator then has to reconcile two versions of the same facts that rarely match exactly. Anthropic's team saw early versions of this in production, with vaguely briefed subagents duplicating each other's work and leaving other parts uncovered. Their fix was the same as the cure for gaps: detailed objectives and explicit boundaries in every brief.
+
+So test a decomposition in both directions before spawning anything. Ask the gap question: what part of the original task belongs to no subtask on this list? Then ask the overlap question: which two briefs could plausibly return the same fact? The goal is a clean partition of the work, everything covered, each piece owned once. When territory genuinely must be shared, say who owns the conclusion, in both briefs, the way the pricing brief above cedes competitor strategy to the scanner.
+
+## Parallel when independent, serial when it is not
+
+The second thing a coordinator decides is timing. Subagents whose tasks do not depend on each other should be spawned together, not one after another. This is where a team pays for itself in wall-clock time: Anthropic reports that moving its research system to parallel subagents, each also calling tools in parallel, "cut research time by up to 90% for complex queries."
+
+The judgment call is the word independent. Rosa's regulation checker needs nothing from anyone; it can start immediately. Her pricing surveyor is different: it prices the competitors, so it does its best work after the competitor scanner has returned its list. The dependency test is one question per pair of subtasks: does this brief contain, or want to contain, the output of that one? If yes, they are serial, and the earlier output gets pasted into the later brief, because an empty desk means the surveyor will not see the scanner's list any other way. If no, spawn them together.
+
+Two mistakes mirror each other here. Running independent work serially wastes nothing but time, though on a research task time is often the point. Running dependent work in parallel is worse: the surveyor prices whatever sellers it happens to find, the scanner's carefully assembled list arrives too late to matter, and the final report quotes prices for one set of competitors and describes a different set.
+
+One cost stays fixed no matter the schedule. Parallelism buys back latency, never tokens. Anthropic is unusually candid that multi-agent systems burn many times the tokens of a single chat, an order of magnitude and more in their measurements. Every subagent re-reads its brief, re-fetches its sources, re-thinks its slice. That is the entry fee for the seams, and it is why lesson 1 told you to start with one agent and split only when the work itself splits.
+
+## Failure at the seams
+
+Anthropic's post states the production reality in four words: "Agents are stateful and errors compound." A subagent that hits a dead end is not an exception; on a long run it is a certainty. What matters is what crosses the seam when it happens, and there are two ways to get it wrong that between them cover most beginner orchestrators.
+
+The first anti-pattern is the silent swallow. The subagent hits a wall, shrugs, and returns a polished summary of whatever it did manage to find, with no mention of what it could not. Rosa's regulation checker finds the city permit portal down for maintenance, so it writes up the two ordinances it found cached elsewhere and says nothing about the portal. The coordinator reads a clean-looking finding and synthesizes it as if it were complete. A failure has just been laundered into a gap, and you already know from the decomposition section that gaps are invisible.
+
+The second anti-pattern is the kill switch: any subagent failure aborts the entire run. That is honest, at least. It is also a terrible trade. Two subagents finished good work; one hit a temporary outage; the coordinator threw away all three and Rosa got nothing. Lesson 4 taught you that for a single tool, an opaque error and a crashed process are both interface failures. At team scale, the same two failures are the swallow and the kill switch.
+
+The engineering answer is the same one lesson 4 gave for tools, one level up: failure is a finding, and it deserves structure. A subagent that cannot complete its brief should return three things: what failed, what was attempted, and what partial results survived.
+
+```text
+STATUS: incomplete
+FAILED: City permit portal unreachable (maintenance page,
+  three attempts over 40 minutes).
+ATTEMPTED: Portal search for retail-bicycle permits; cached
+  copies via web search; county-level registry as fallback.
+PARTIAL RESULTS: Two zoning ordinances relevant to retail
+  bicycle sales, from the county registry, sources attached.
+NOT COVERED: City-level permit requirements. Unknown whether
+  any exist.
+```
+
+Now the coordinator can act, because the failure report answers the question every error should answer, the one lesson 4 drilled: what should I do next? A transient outage invites a retry later in the run. A wall that will not move invites a reroute, a fresh subagent pointed at a different source. And if neither works, the coordinator proceeds and annotates the gap in the final report, so Rosa reads "city permit status could not be verified" instead of a confident silence. Retry, reroute, or proceed with the gap on the record. All three are legitimate. Choosing among them is the coordinator's job, and it can only choose if the seam carried structure instead of a shrug.
+
+## A claim without its source is a rumor by hop two
+
+There is one more thing that dies at the seams if you let it: attribution. Watch what happens to a fact in Rosa's crew. The regulation checker reads a county ordinance and writes a finding. The coordinator reads the finding and writes a report section. Rosa reads the report. That fact made two hops, and if the first hop dropped the URL, no downstream agent can ever get it back. The coordinator is not being careless when it writes "sellers in the region are subject to local permit rules" with no source; it never had one. Summarization strips provenance by default, and in a multi-agent system everything is summarized at every seam.
+
+The fix is not a smarter coordinator. It is a rule in every output format: findings travel with their sources attached. You have already seen it twice in this lesson without the label. The pricing brief demanded a source URL on every price. The failure report attached sources to its partial results. That is the pattern: claim and source move as one unit through every hop, so the final synthesis can cite what it asserts. Anthropic's research system takes this seriously enough to give it a dedicated stage: after synthesis, a citation-focused agent goes back through the report and the source documents to pin every claim to where it came from, so the answer ships with its receipts.
+
+The rule of thumb is worth memorizing in its blunt form. A finding that crosses an agent boundary without its source arrives as a rumor. One hop later it is background truth that nobody can check. If you have ever chased a confident unsourced sentence backward through an organization of humans, you have already debugged this failure. Multi-agent systems just reproduce it faster.
+
+## The bill, itemized
+
+Step back and total what the seams cost Rosa's crew, because this is the lesson's frame in one place. Every seam costs tokens: each subagent rebuilds its understanding from a brief. Every seam risks a gap: decomposition can silently shrink the task. Every seam risks duplication: overlapping briefs buy the same fact twice. Every seam can launder a failure: what crosses must be structured or it will be swallowed. And every seam strips provenance unless the output format forbids it. None of these costs makes teams a bad idea. They are why lesson 1 said every seam must justify itself, and they are all payable, with a briefing discipline, a partition test, a dependency test, a failure format, and a source rule. That is orchestration engineering: not spawning agents, but pricing seams and paying deliberately.
+
+## Why this matters when you use AI
+
+- **You already use systems built this way.** The research and deep-report features shipping in AI products are coordinator-and-subagents under the hood. When one hands you a confident report, you now know the three questions that find its weak points: what subtasks were actually assigned, what failed quietly along the way, and can each claim be traced to a source?
+- **The brief is a transferable skill.** Objective, output format, sources, boundaries: that is simply good delegation, and it works on subagents, contractors, and new teammates alike. If you can write a brief that survives an empty desk, you can delegate to anything.
+- **Confident and complete are different properties.** The scariest failure in this lesson produced no error at all, just a fluent report about a smaller question. Learning to ask "what is missing?" instead of "is this wrong?" changes how you read every AI-generated summary from now on.
+
+## Common pitfalls
+
+**Delegating as if the subagent were in the room.** Pronouns and references to "the list we discussed" point at context the subagent never received. If the brief does not contain it, it does not exist. Paste in what is needed, every time.
+
+**Decomposing by what is easy to name.** "Online retailers" is a crisp subtask and a hole-shaped one. Test the subtask list against the original task in both directions: what belongs to nobody, and what belongs to two.
+
+**Serializing everything, or parallelizing everything.** Both are ways of skipping the dependency test. Ask per pair: does this brief need that output? Serial if yes, parallel if no, and paste the dependency into the later brief.
+
+**Accepting prose apologies as failure reports.** "I could not find much on permits" gives the coordinator nothing to act on. Require the structured form: what failed, what was attempted, what partial results survived.
+
+**Letting synthesis strip sources.** Every summarization hop drops provenance by default. If the output format does not demand claim-plus-source pairs, your final report will assert things nobody can check.
+
+## What you should remember
+
+- The coordinator decomposes, delegates, and aggregates. It earns its seat only when the subtasks cannot be predicted in advance; otherwise draw the steps in code.
+- A subagent inherits nothing automatically. It starts with an empty desk, and the delegation brief is its entire world. Objective, output format, tools and sources, boundaries.
+- Test every decomposition in both directions: gaps (task territory assigned to nobody) and overlaps (two briefs that could return the same fact).
+- Spawn independent subagents in parallel; chain dependent ones and paste the earlier output into the later brief. Parallelism buys back latency, never tokens.
+- Failure is a finding. A subagent should return what failed, what was attempted, and what partial results survived, so the coordinator can retry, reroute, or proceed with the gap annotated. Swallowing errors and killing the run are the two ways to waste a seam.
+- Findings travel with their sources attached, through every hop, or attribution dies in the middle and the report becomes uncheckable.
+
+## What's next
+
+A crew that survives failure still needs to know when it should not proceed at all. Lesson 6 is reliability: escalation paths, human review, and the judgment about which decisions an agent team may make alone and which must stop and wait for a person. The gap annotations you learned to write here become the trigger for something new: knowing when a gap is too important to ship around.
+
+## If you remember one thing
+
+**A subagent inherits nothing; the brief is its world.**\
+**A failure is a finding; make it cross the seam with structure.**\
+**A claim without its source arrives as a rumor.**

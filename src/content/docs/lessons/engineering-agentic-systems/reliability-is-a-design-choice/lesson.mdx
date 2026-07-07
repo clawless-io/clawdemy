@@ -1,0 +1,131 @@
+---
+title: "Reliability is a design choice"
+description: "Escalation criteria that work, human review where it pays, and independent multi-pass checking. Design when a person decides, not if."
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+import LessonStar from '../../../../../components/LessonStar.astro';
+
+<LessonStar slug="reliability-is-a-design-choice" />
+
+Walk into any emergency room and you will see reliability engineering that is older than software. The triage nurse does not treat anyone. The nurse decides who gets treated first, and by whom, using criteria written down long before tonight's patients arrived. Chest pain goes one way. A sprained ankle goes another. And notice what the nurse never does: ask patients to rate their own severity and take the answer at face value. People in real trouble often say they are fine. People who are fine often insist they are dying. The signal that matters is not how the case feels about itself. It is a set of observable criteria, decided in advance, by someone who studied the failures.
+
+Agentic systems need the same thing, and almost nobody builds it. Teams pour weeks into prompts and tools, then handle the question "when should this hand off to a person?" with a vague instruction like "escalate when you're unsure." This lesson is about doing it properly: escalation criteria that actually work, human review placed where it pays, and review structures that catch what a system cannot catch about itself. None of it is exotic. All of it is design, decided in advance, by you.
+
+## The trade-off reaches its human end
+
+This track opened with one sentence: architecture is deciding where judgment lives. Lesson 1 gave you the first split, what the model decides versus what the code guarantees. Every lesson since has worked that seam. Schemas force honesty. Tool boundaries limit damage. Orchestration, in the last lesson, split work across a crew and carried failure honestly across the seams.
+
+There is a third place judgment can live, and it has been waiting at the edge of every lesson so far: a person. Some calls belong to neither the model nor the code. A claim that sits exactly on a policy boundary. A situation the rules never anticipated. A person who has asked, in plain words, to talk to a human being. The model can flag these. The code can route them. But the judgment itself belongs to someone with authority, context, and accountability that neither one has.
+
+You have already seen one version of this shape. In the AI Agent Teams track, the risk gate lesson showed a Portfolio Manager with real veto power: a separate role that reads everything and can confirm, soften, or overrule the work. That gate was a model. This lesson asks the next question, the architect's question: which cases should flow to a gate that is a person, and how do you write the criteria that decide? A gate is only as good as the rules that feed it.
+
+## The worked example: claims intake at Meridian
+
+To make this concrete, picture a system Clawdemy will use for the rest of the lesson. Meridian is an imagined mid-size insurer. Its intake pipeline is agentic: when a claim arrives, an agent reads the documents (an accident report, repair invoices, medical bills, sometimes a handwritten witness statement), extracts the key fields into a schema like the ones you built in lesson 3, checks the claim against the policy, and either routes it for straight-through processing or sends it to a human adjuster with a summary of why.
+
+Most claims are routine. A fender bender with a typed repair invoice and a clean policy match needs no human at all, and forcing an adjuster to click through it wastes the scarcest resource in the building: trained human attention. The design problem is the other cases. Which claims must reach a person, and how does the system know?
+
+## Escalation criteria that actually work
+
+Here is the version that fails: "escalate to an adjuster if you are not confident." It reads like a safety measure. It is actually a blank cheque, because it delegates the escalation decision to the exact component whose judgment you were worried about.
+
+The version that works is explicit, rule-based, and full of examples. Meridian's escalation criteria look like this:
+
+```yaml
+escalate_when:
+  - claimed amount exceeds 25,000
+  - a required document is still missing after two requests
+  - dates or amounts conflict across documents
+  - the policy language does not clearly cover the situation
+  - the claimant asks for a person, in any words
+```
+
+Read those in plain English, because each one earns its place. Escalate when the claimed amount crosses a threshold, because stakes alone justify a human look. Escalate when a required document is still missing after two requests, because the agent has exhausted its safe moves. Escalate when dates or amounts conflict across documents, because contradictions mean someone must decide which source to trust. Escalate when the policy language does not clearly cover the situation. And escalate the moment the claimant asks for a person, however they phrase it.
+
+Notice what these rules have in common. Every one of them is checkable. A person auditing the system can look at any escalated claim and see which rule fired. A person debugging it can look at a claim that should have escalated and see which rule was too narrow. Compare that to "escalate when unsure," which can never be audited, because there is nothing to check it against.
+
+Two of the rules deserve to be pulled out and framed, because they are not Meridian-specific. They belong in every agentic system that touches people.
+
+**A request for a human is honored immediately.** Not after one more clarifying question, not after the agent takes one more shot at resolving things. Immediately. The moment a system starts negotiating with someone who asked for a person, it has converted a routine handoff into a trust failure, and trust failures are the ones that end up in screenshots. This rule costs almost nothing to honor and almost everything to break.
+
+**When the policy is ambiguous or silent, escalate rather than improvise.** An agent that meets a situation its rules do not cover will still produce an answer, fluently and confidently, because producing answers is what models do. That fluency is the trap. A gap in the policy is not a gap the model should fill with plausible reasoning; it is precisely the judgment that belongs to a person, because filling it sets a precedent the organization has to live with. Anthropic's engineering essay on building effective agents describes the same instinct as a design feature: "Agents can then pause for human feedback at checkpoints or when encountering blockers." An uncovered situation is a blocker. Treat it like one. The last lesson ended on exactly this threshold: a crew that annotates its gaps still needs a rule for when a gap is too important to ship around. This rule is that rule. A gap in the evidence is an annotation; a gap in the policy is an escalation.
+
+### Two proxies that feel right and fail
+
+Once teams accept that "when unsure" is too vague, two tempting substitutes appear. Both are unreliable, and this judgment comes from engineering experience with these systems, so take it as Clawdemy's design position rather than vendor doctrine.
+
+The first is sentiment-based escalation: route to a human when the person sounds upset. It sounds humane. The problem is that emotion is poorly correlated with difficulty. A furious claimant with a routine, fully documented fender bender needs patience, not an adjuster. A polite, cheerful claimant whose file quietly contradicts itself in three places is exactly the case that needs one. Escalating on sentiment spends your scarcest resource on the loudest cases instead of the hardest ones, and it teaches persistent users that anger is the price of service.
+
+The second is the model's self-reported confidence: ask the model to rate its certainty and escalate below a threshold. The number you get back is fluent, plausible, and poorly calibrated to real difficulty. A model can report high confidence on a subtly contradictory file and hedge on a trivial one, because the score is one more generated output, produced by the same process that produced the answer, not a measurement taken from outside it. If you remember lesson 3, this rhymes: a schema forces honesty because it is enforced from outside the model. A self-reported confidence score has no outside.
+
+What should you use instead of either proxy? Observable signals. Did the extraction fail schema validation? Did two passes over the same document disagree? Is a required field missing? Is the document type one the system has historically done badly on? Every one of those is measured by code, from outside the model, and each can be audited after the fact. That is the difference between a feeling and a criterion.
+
+## Spend reviewer attention where it pays
+
+Escalation rules decide which cases reach a person. The second half of human-in-the-loop design is subtler: you have a limited pool of human attention, and where you spend it decides whether the loop is real or ceremonial.
+
+The failing pattern is uniform sampling. Meridian's adjusters review a random ten percent of everything, get a comfortable accuracy number, and sign off. The working pattern routes reviewer attention toward the cases where it changes outcomes: the low-signal cases, the ambiguous ones, the segments with a track record of trouble. A reviewer who spends the morning confirming ninety-nine clean typed invoices has been used as decoration.
+
+This is where one aggregate number becomes actively dangerous. Suppose Meridian's extraction accuracy is 96 percent overall. Wonderful. Now cut it by segment: typed repair invoices, 99 percent. Medical bills, 97. Handwritten witness statements, 71. The strong overall average was hiding a segment that fails almost a third of the time, because handwritten statements are rare enough not to dent the mean. Any system evaluated on one number will hide its weakest segment inside its strongest one. Measure by segment, and route the weak segments to people until the numbers say otherwise. Anthropic's engineering account of building its multi-agent research system makes the companion point about where humans fit in evaluation: "Human evaluation catches what automation misses." People find the edge cases the metrics were not measuring, which is exactly why their attention is too valuable to spread evenly.
+
+One refinement worth stealing: even in the segments the system handles well, keep sampling a small random slice for human review. Not because you expect failures, but because your segment statistics are only trustworthy if something keeps checking them. Calibration decays quietly; a standing sample is the smoke alarm.
+
+## The reviewer that is not you
+
+So far the human has been the reviewer. But some review does not need a person; it needs independence, and independence is something you can get from a model, as long as it is not the model instance that did the work.
+
+Here is the design fact, and again this is Clawdemy's position drawn from engineering experience: a fresh model instance reviewing a piece of work catches errors that self-review misses. The reason is context. The instance that authored the work carries its entire reasoning history in its window. Its assumptions, its interpretation of the documents, its early decisions all sit there, shaping every later token. Ask it to double-check itself and it re-reads the work through the same assumptions that produced the mistakes. It rarely questions its own decisions for the same reason you cannot proofread your own essay minutes after writing it: you see what you meant, not what is there. A fresh instance has no investment in the conclusions. It reads what is actually on the page.
+
+Anthropic's building-effective-agents essay gives this shape a name at the workflow level. "In the evaluator-optimizer workflow, one LLM call generates a response while another provides evaluation and feedback in a loop," and it works best "when we have clear evaluation criteria, and when iterative refinement provides measurable value." The same essay's examples of parallelization include a guardrail built the same way, one model instance handling user queries while a second instance screens them. Different jobs, same principle: the checker is not the doer.
+
+At Meridian, this is a second, clean-context instance that receives only the source documents and the extracted fields, with one job: verify that every field is supported by the documents. It does not know how the first instance reasoned, which is precisely the point. And the pattern generalizes far beyond insurance. A fresh instance reviewing a code diff it did not write. A fresh instance checking a summary against the article. A fresh instance reading your agent's draft report against the sources. Any generated work, reviewed by an instance that did not generate it. If you work in Claude Code, you have the mechanism at hand: a subagent starts with its own clean context, which is exactly what a reviewer needs. And when the checker must be a person, the Claude Agent SDK ships the seam ready-made: declarative permission rules decide what runs automatically, and anything else falls through to a callback where your application can put a human approval in front of the action.
+
+## One pass per item, one pass across
+
+The last reliability structure is for large inputs, and it comes from the same budget you met in lesson 1: attention.
+
+A serious claim at Meridian is not one document. It is a file: fourteen documents, sixty pages, three months of correspondence. The tempting design is one giant review pass, the whole file in the window, one instruction: "check everything." It fails predictably. Attention dilutes across a large input; the model skims exactly the way a tired human skims, and errors on page forty-one survive because page forty-one got a fraction of the scrutiny page one did.
+
+The structure that works is multi-pass. First, per-item passes: one focused review per document, each pass responsible for one thing and small enough to do it well. Is this invoice internally consistent? Is this medical bill coded plausibly? Then, separately, a cross-item pass with a different job: not re-reading everything, but checking the relationships. Do the dates line up across documents? Do the amounts sum to the claimed total? Does the witness statement describe the same accident as the police report? Per-item passes catch local errors. The cross-item pass catches contradictions, which no per-item pass can see, because a contradiction lives between documents, not inside one.
+
+If this sounds like orchestration, it is. Each pass is a step with one job, and the seams between passes are seams you design, exactly as in the last lesson. Reliability at this level is not a property you add at the end. It is the shape of the flow itself.
+
+## Why this matters when you use AI
+
+- **You can now interrogate any AI product that claims a human safety net.** Ask what, specifically, triggers escalation. If the answer is a version of "the AI knows when it's unsure," you have learned something important about the product. Rule-based criteria can be shown to you; vibes cannot.
+- **Aggregate accuracy numbers should make you ask one question: by segment?** A vendor quoting 96 percent overall may be hiding a 71 percent segment that happens to be the one you care about. This applies to every metric anyone shows you, in any field, forever.
+- **You can use independent review today, without building anything.** When a chat assistant produces work that matters, open a fresh conversation and ask the new instance to check it against the source. Asking the same conversation "are you sure?" invites the author to defend its work. A fresh instance has nothing to defend.
+
+## Common pitfalls
+
+**Escalating on vibes.** "Escalate when unsure" delegates the escalation decision to the component you were unsure about. If a rule cannot be audited after the fact, it is not a rule.
+
+**Trusting the model's self-reported confidence.** The score is one more generated output, produced inside the same process it claims to measure. Route on observable signals (validation failures, disagreement between passes, missing fields, weak segments) instead.
+
+**Treating escalation as failure.** Punish escalation in your metrics and the system learns to improvise instead, which converts visible handoffs into invisible errors. An escalation on an ambiguous case is the design working.
+
+**Self-review theater.** Asking the authoring instance to double-check its own work feels like review and inherits every assumption that produced the errors. Independence is the ingredient; a fresh instance is the cheapest place to buy it.
+
+**One giant pass over a large input.** Attention dilutes; page forty-one loses. Per-item passes plus a cross-item pass cost more calls and catch what one pass structurally cannot.
+
+## What you should remember
+
+- Escalation criteria must be explicit, rule-based, and auditable. Sentiment and self-reported confidence both feel like signals and are poorly calibrated to real difficulty.
+- Two escalations are never optional: a person who asks for a human gets one immediately, and a situation the policy does not cover goes to a person rather than being improvised.
+- Human attention is a budget. Route the low-signal and ambiguous cases to people, measure accuracy by segment rather than one aggregate, and keep a small random sample as a smoke alarm.
+- A fresh model instance catches what self-review misses, because the author carries its own reasoning context and rarely questions its own decisions. This applies to code, extractions, and any generated work.
+- For large inputs, per-item passes plus a separate cross-item pass beat one giant pass where attention dilutes.
+
+## What's next
+
+Every human touchpoint in this lesson assumed someone is there to touch. Lesson 7 removes that assumption: agents running inside CI/CD pipelines, headless, with nobody at the keyboard. The escalation criteria you learned to write here stop being one safeguard among several and become the only human presence in the system. That is where designing them well stops being good practice and starts being the whole game.
+
+## If you remember one thing
+
+**Code enforces. Models judge.**\
+**Some judgment belongs to a person.**\
+**Reliability is deciding when, in advance.**
