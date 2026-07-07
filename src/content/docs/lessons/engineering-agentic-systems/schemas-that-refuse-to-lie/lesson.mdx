@@ -1,0 +1,181 @@
+---
+title: "Schemas that refuse to lie"
+description: "A required field on a document that lacks the answer pressures the model to invent one. Learn to design schemas where the truth always fits."
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+import ReadAlongDim from '../../../../../components/ReadAlongDim.astro';
+import LessonStar from '../../../../../components/LessonStar.astro';
+
+<LessonStar slug="schemas-that-refuse-to-lie" />
+
+<ReadAlongDim
+  src="https://audio.clawdemy.org/lessons/schemas-that-refuse-to-lie-lesson.mp3"
+  slug="schemas-that-refuse-to-lie"
+  cacheVersion="20260707"
+  approxMinutes={21}
+/>
+
+An accounts team pilots an extraction assistant. Feed it a supplier invoice, get back tidy fields: supplier name, invoice number, date, purchase order reference, total. For three weeks it is flawless. Then a small supplier sends an invoice with no purchase order reference on it anywhere, and the system returns one anyway: PO-2311, plausible, well formatted, and entirely invented. Nothing crashed. The JSON parsed. The row landed in the database looking exactly like every honest row around it, and nobody looked twice until a payment reconciliation failed a month later.
+
+Here is the uncomfortable part. The model did not go rogue. The schema declared the purchase order field required. The document contained no purchase order. Something had to fill the slot, and the model did what it always does with a gap it is not allowed to leave open: it wrote something plausible. The lie was designed in, by whoever wrote the schema.
+
+This lesson is about structured output as honesty engineering. You will learn how to get output whose shape is guaranteed, what each enforcement mode actually promises, and then the part most tutorials skip: how to design the shape itself so that "this information is not here" is always a legal answer. A schema is powerful precisely because the model cannot argue with it. That power cuts both ways.
+
+## A schema is enforcement
+
+Lesson 1 gave this track its spine: architecture is deciding where judgment lives, and an instruction is a request while code is a guarantee. You can write "respond only in valid JSON with these exact fields" into a prompt, and the model will comply almost every time. "Almost" is what breaks pipelines. A JSON Schema attached to a tool definition moves that rule out of the request pile and into the guarantee pile. It is code-level enforcement of output shape, the first place in this track where the decide-versus-enforce trade-off touches the model's output directly.
+
+But enforcement is a power tool, and pointed the wrong way it enforces lying. The schema in the invoice story was enforced perfectly. That is exactly why the fabricated purchase order looked indistinguishable from a real one. So structured output engineering is two jobs, not one: guarantee the shape, and design the shape so the truth always fits inside it. The first job is a feature you switch on. The second is judgment, and it is the heart of this lesson.
+
+## Getting shape you can rely on
+
+The Building with Claude track covered how tool calling works, so this lesson will not re-teach the mechanics. The one-paragraph recap: a tool definition has a name, a description, and an input schema written in JSON Schema (input_schema). When the model calls the tool, its arguments arrive as structured JSON shaped by that schema. The classic extraction move follows immediately: define a tool whose input is the record you want, and the model's "call" is your data.
+
+Here is a first attempt for the invoice pipeline. It is the naive version, and it contains the bug from the opening story:
+
+```json
+{
+  "name": "record_invoice",
+  "description": "Record the fields extracted from one supplier invoice.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "supplier_name": { "type": "string" },
+      "invoice_number": { "type": "string" },
+      "invoice_date": { "type": "string", "format": "date" },
+      "purchase_order": { "type": "string" },
+      "total_amount": { "type": "number" },
+      "currency": { "type": "string", "enum": ["USD", "EUR", "GBP"] }
+    },
+    "required": [
+      "supplier_name", "invoice_number", "invoice_date",
+      "purchase_order", "total_amount", "currency"
+    ],
+    "additionalProperties": false
+  }
+}
+```
+
+Before fixing it, two settings turn "the model usually calls this correctly" into "every run produces this shape."
+
+### What tool choice actually guarantees
+
+The tool choice parameter (tool_choice) controls whether the model must call a tool. Three of its modes form a ladder of guarantees; a fourth mode, none, forbids tool calls entirely and has no role in an extraction pipeline, so this lesson sets it aside.
+
+**Auto, the default.** The model decides whether to call any tool at all. It may answer in plain prose instead. This is the right mode for agents doing open-ended work, and the wrong mode for a pipeline: it guarantees nothing about the shape of what comes back.
+
+**Any.** The model must call one of the tools you provided, but it picks which. Some tool's schema will be honored on every run. This fits when you offer several extractors, say one per document type, and you want the model to route: it must pick a recorder, it cannot drift into prose.
+
+**A specific tool, forced by name.** The model must call the tool you named. For an extraction pipeline this is the mode you want: force the invoice recorder (tool_choice with type tool and the tool's name) and every single run yields that schema's shape. No prose preamble, no "I could not find a purchase order, but here are my thoughts." The shape is no longer a request.
+
+Read the ladder as a decide-versus-enforce dial. Auto leaves the whole decision with the model. Any enforces "structured, not prose" but leaves routing to model judgment. Forcing a specific tool enforces everything about the envelope. Pick the rung that matches how much of this decision you are willing to leave to judgment.
+
+### From almost to always
+
+Forcing the tool guarantees a call to it. Historically it did not, by itself, guarantee the arguments matched the schema perfectly: a number could arrive as a string, an off-schema field could sneak in. Setting the strict flag to true on the tool definition (`"strict": true`) closes that last gap. Anthropic's documentation explains the mechanism: conformance is achieved "by constraining the model's token sampling to schema-valid outputs (a technique called grammar-constrained sampling)". In plain terms, the model is never allowed to generate a token that would break your schema. Malformed output stops being a failure mode you write handlers for.
+
+Two footnotes for completeness. First, the same guarantee exists for whole responses, not just tool calls: the platform's structured outputs feature applies a JSON Schema to the response body itself through the output configuration field (output_config). The Building with Claude track drew the line between the two; the design thinking in this lesson applies identically to both. Second, the guarantee has edges the docs are honest about: "While structured outputs guarantee schema compliance in most cases, there are scenarios where the output may not match your schema", specifically a safety refusal or a response cut off by the token limit. Check for those, then trust the shape.
+
+So: shape solved. The naive schema above will be honored, token by token, every time. Which is exactly the problem. It will be honored on the invoice that has no purchase order, too.
+
+## Required fields are fabrication engines
+
+Walk through what the naive schema does to the model on that document. The purchase order field is required and typed as a string. The grammar constraint means the model must emit a string there. The document contains nothing to put in it. The honest answers, "there is no purchase order on this invoice" or simply refusing the field, are not in the grammar. You have made the truth syntactically illegal. What comes out is whatever string best fits the pattern of the surrounding data, which is how PO-2311 was born.
+
+This is the anti-fabrication argument in one sentence: **a required field on a document that lacks the information does not make the model more diligent, it makes the model invent.** The fix is to make absence representable. In JSON Schema, allow the null type alongside the real one:
+
+```json
+"purchase_order": {
+  "type": ["string", "null"],
+  "description": "The purchase order reference printed on the invoice. Use null if the invoice shows none. Never guess."
+}
+```
+
+Notice the field stays in the required list. That sounds contradictory and is actually the point. There are two ways to permit absence, and they are not equal. You could make the field optional by dropping it from the required list, so the model may omit it. Or you can keep it required and make it nullable, so the model must address it and null is a legal verdict. Prefer the second. An omitted optional field is ambiguous: did the document lack a purchase order, or did the model simply not look? A required nullable field forces an explicit answer to the question "did you find it?", and null means "I looked, and it is not there." Required plus nullable turns absence from a silence into a statement.
+
+One platform note before you apply this everywhere: strict schemas cap how many union-typed fields (like this string-or-null pair) a request can carry, because each one makes the constrained grammar more expensive. The structured outputs documentation's limits table has the current numbers. On a very wide schema, spend the nullable slots where fabrication would hurt most.
+
+The field description carries weight here too. The schema makes null possible; the description makes it expected. "Use null if the invoice shows none. Never guess" tells the model that null is the correct behavior, not a failure it should paper over. The same discipline belongs in the tool's top-level description: this tool records what the document says, not what a typical invoice would say.
+
+## Enums need an escape hatch
+
+The naive schema has a second, quieter fabrication engine: the currency field's enum allows exactly three values (USD, EUR, GBP). The first invoice that arrives in Swiss francs meets a grammar in which Swiss francs do not exist. The model must pick one of the three. It will pick the most plausible neighbor, the amount will silently change meaning, and every downstream sum is now wrong in a way no validator that only checks the schema can see.
+
+Enums are excellent enforcement. A fixed vocabulary keeps downstream code simple and typo-free. But an enum is a claim that you have enumerated the world, and on real documents that claim is usually false. The fix is an escape hatch: add a catch-all value, paired with a detail field that captures what was actually seen.
+
+```json
+"currency": {
+  "type": "string",
+  "enum": ["USD", "EUR", "GBP", "OTHER"]
+},
+"currency_detail": {
+  "type": ["string", "null"],
+  "description": "The currency exactly as printed on the invoice, only when currency is OTHER. Otherwise null."
+}
+```
+
+Now the Swiss franc invoice comes back as OTHER with the printed currency preserved in the detail field, and your pipeline can route it to a human instead of mispricing it. The pattern generalizes to any classification field: document type, payment method, department code. The escape value is not an admission that your categories failed. It is a sensor. If ten percent of documents come back OTHER, you have learned something real about your inputs, which is strictly better than having ten percent of documents silently force-fitted into the wrong bucket.
+
+## Valid is not the same as true
+
+With the forced tool call, strict mode, nullable fields, and escape hatches in place, every run now produces JSON that parses, type-checks, and permits honesty. It is tempting to declare victory. Resist, because the guarantee you bought has a precise boundary: it is syntactic, not semantic.
+
+Syntax validity means the output matches the schema: right fields, right types, legal enum values. That is what grammar-constrained sampling promises, and it promises nothing else. Semantic validity means the values are actually correct, and no schema can promise that. The total amount can be a perfectly typed number that does not equal the sum of the line items. The invoice date can be a beautifully formatted date that is actually the delivery date from two lines below. Supplier and customer can swap on an unusual layout, each landing in the other's correctly typed field. Every one of these sails through the strictest schema on earth, because the schema checks shape and these are errors of content.
+
+The practical consequence: schema-constrained output does not remove the need for validation, it changes what validation is for. You no longer write code asking "is this parseable?" You write code asking "is this consistent and plausible?" Do the line items sum to the total? Is the invoice date within a sane window? If currency is OTHER, is the detail field filled in? These are cross-field checks and business rules, cheap deterministic code sitting downstream of the model. In track-spine terms they are the enforce half of decide-versus-enforce, applied to content: the model exercised judgment reading the document, and your validators guarantee the parts that must hold.
+
+## The retry judgment
+
+Suppose a validator fires: the line items sum to 4,120.00 but the total field says 4,210.00. Now what? The productive move is a validation-and-retry loop: send the output back to the model with the specific validation error, and ask it to correct the record. Specificity is what makes this work. "Validation failed" gives the model nothing to reason about. This gives it everything:
+
+```text
+The line_items amounts sum to 4120.00 but total_amount is 4210.00.
+Re-read the invoice and correct whichever field was misread.
+```
+
+A message like that often fixes the problem in one round trip, because the information was in the document all along and the model merely misread or misplaced it. Digit transpositions, swapped fields, a subtotal grabbed instead of a grand total: these are errors of reading, and a pointed second look resolves them.
+
+But here is the judgment call, and it decides whether your loop is a repair tool or a fabrication machine. **A retry can only help when the correct answer exists in the source.** Before you retry, ask that one question. A sum mismatch, a malformed date, an inconsistent pair of fields: the answer is on the page, retry with the specific error. A null purchase order on a document that has no purchase order: the answer is not on the page, and there is nothing a retry can find. If your loop responds to null by re-asking with mounting insistence, you have rebuilt the required-field trap with extra steps: you are pressuring the model to invent, and by attempt three it will oblige. Null passing through an absence-tolerant validator is not an error. It is the system working.
+
+So give the loop a shape: validate, retry format-and-consistency failures with the exact error message, accept honest nulls as final, and cap retries at one or two before escalating to a human queue. Where that escalation path goes, and when a person belongs in the loop at all, is lesson 6's territory. For now the design rule is enough: the loop exists to correct reading errors, never to negotiate with reality.
+
+## Why this matters when you use AI
+
+- **You can hear vendor claims precisely now.** "Our extraction is guaranteed valid JSON, one hundred percent" is a true statement about syntax and an empty one about truth. You now know the follow-up questions: what happens when a field is absent from the document, where is the escape hatch on your categories, and what do your semantic validators check?
+- **You will recognize fabrication pressure in systems you merely use.** Any AI feature that must fill a form, a summary template with fixed headings, a mandatory rating, a required date, faces the invoice problem. When an AI-populated record looks suspiciously complete, you now know to ask whether the design ever allowed it to say "not found."
+- **The honesty pattern transfers to how you ask AI anything.** Give the model an explicit permitted way out ("if the document does not say, tell me it does not say") and answers get more trustworthy. That is required-plus-nullable, practiced in plain conversation, in Clawless or anywhere else you work with a model.
+
+## Common pitfalls
+
+**Requiring a field the source might not contain.** The original sin of extraction schemas. Every required, non-nullable field is a bet that the information exists on every document you will ever process. Lose the bet once and the model fills the slot with fiction. Audit the required list against your ugliest real documents, not your nicest sample.
+
+**Enums with no escape hatch.** A closed vocabulary on an open world force-fits reality into the nearest legal value, silently. Add a catch-all value plus a detail string, and treat its frequency as a sensor on your inputs.
+
+**Trusting syntax as truth.** The schema guarantees shape. Sums, dates, and field placement can all be wrong inside a perfectly valid envelope. Semantic validators, cheap cross-field checks in code, are not optional just because parsing errors are gone.
+
+**Retrying against absence.** Feeding a validation error back works when the model misread something that exists. Re-asking because a nullable field came back null is fabrication pressure with a delay timer. Ask "is the answer in the source?" before every retry.
+
+**Making honesty optional instead of explicit.** Dropping a field from the required list feels permissive but produces silent ambiguity: absent from the document, or just skipped? Required plus nullable forces a verdict on every field, every time.
+
+## What you should remember
+
+- A schema on a tool definition is code-level enforcement of output shape: decide-versus-enforce, applied to the model's output itself.
+- The tool choice ladder: auto guarantees nothing about shape, any guarantees some tool's schema, and forcing a specific tool guarantees that schema on every run. Strict mode (`strict: true`) makes conformance token-level certain.
+- Enforcement cuts both ways. A required field on a document that lacks the information pressures the model to invent. Make absence representable: required plus nullable, with a description that says null is correct, beats optional.
+- Give every enum an escape hatch: a catch-all value plus a detail string, so real-world variety gets flagged instead of force-fitted.
+- Schema validity is syntactic. Values can still be wrong, sums can disagree, fields can swap. Semantic validation is deterministic code downstream, and it is still your job.
+- Retry with the specific validation error when the answer exists in the source. When it does not, null is the correct final answer, and retrying only manufactures confidence.
+
+## What's next
+
+A schema disciplines what comes out of the model. Lesson 4 turns to the other half of the tool contract: what the model reaches for. Tool design is where descriptions, boundaries, and error messages decide whether an agent uses your tools the way you meant, and it is the difference between a toolbox and a trap.
+
+## If you remember one thing
+
+**A schema is a contract the model cannot break.**\
+**So write a contract the truth can always satisfy.**\
+**"Not in the document" must be a legal answer.**

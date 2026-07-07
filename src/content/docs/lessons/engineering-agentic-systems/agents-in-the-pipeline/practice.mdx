@@ -1,0 +1,157 @@
+---
+title: "Practice: Agents in the pipeline"
+description: "A self-check on headless CI concepts, a design exercise for an automated review check on your own project, and flashcards for retrieval."
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Seven short questions. Answer each in your head before opening the collapsible. Active retrieval is where the learning sticks.
+
+**1. What does the print flag do, and why does a pipeline need it?**
+
+<details>
+<summary>Show answer</summary>
+
+The print flag runs Claude Code non-interactively: one prompt in, the result printed, then exit. It reads standard input and writes standard output like any command-line tool. A pipeline needs it because an interactive session pauses for permissions and decisions, and in continuous integration (CI), the automated pipeline that checks every change, every pause is a deadlock: the job would hang waiting for an answer that will never come.
+
+</details>
+
+**2. There is no permission prompt in a headless run. What replaces it?**
+
+<details>
+<summary>Show answer</summary>
+
+Permissions decided in advance: tools granted up front with the allowed tools flag, or a session baseline set with a permission mode (the docs point at the deny-by-default mode for locked-down CI). An action the run was never granted ends the run instead of hanging it, and in a pipeline a fast failure beats a silent wait.
+
+</details>
+
+**3. How do the findings from a headless review run become pull request comments?**
+
+<details>
+<summary>Show answer</summary>
+
+The run emits machine-readable output: the JSON output format returns structured JSON with the result, session ID, metadata, and cost, and a schema flag can fix the shape of the findings themselves. A small script parses that JSON and posts each finding as a comment through the code host's ordinary API. The agent never touches the pull request directly; testable script code does.
+
+</details>
+
+**4. How does a CI-invoked Claude know your team's testing standards and review criteria?**
+
+<details>
+<summary>Show answer</summary>
+
+Through the checked-in configuration layer from lesson 2. By default a headless run loads the same project memory and scoped rules files an interactive session would, so the CI agent inherits the standards the repository delivers to every session, human or not. If standards live in one person's home directory instead, the CI agent never receives them: configuration drift, with a victim that posts in public.
+
+</details>
+
+**5. Why must the reviewer be a separate invocation from the generator (the run that produced the work)?**
+
+<details>
+<summary>Show answer</summary>
+
+An instance reviewing code it just generated still carries the reasoning that produced the code: the assumptions, the chosen interpretation, the corners it decided to cut. It reads what it meant rather than what it wrote and goes easy on itself. A separate invocation with fresh context sees only the artifact and the standards, so it catches more. Independence here is mechanical: no shared session, no conversation-continuation flags between the two runs.
+
+</details>
+
+**6. The review bot posts the same three findings after every push. What is the fix?**
+
+<details>
+<summary>Show answer</summary>
+
+Carry the history in context. Before invoking the agent, fetch the comments the bot already posted on the pull request, include them in the prompt, and instruct it to report only findings that are new or still unaddressed. The agent stays stateless between runs, which preserves its independence; the pipeline carries the one slice of history that matters. State lives in the pull request, not in the agent.
+
+</details>
+
+**7. Why do a nightly job and a blocking pre-merge check need different budgets?**
+
+<details>
+<summary>Show answer</summary>
+
+Because of who is waiting. Nobody waits on a nightly batch run, so it can be slow, wide in scope, and forgiving of failure. A developer waits on a blocking check, so it must be narrow (the diff, not the repository), fast, and predictable, with a turn cap, a spend ceiling, and a timeout. A slow or moody blocking check gets deleted within a month, taking the whole system with it.
+
+</details>
+
+## Try it yourself
+
+**Design exercise: specify a pre-merge review check.**
+
+Pick a real project you know, yours or your team's. On paper or in a note, design its automated review check in four steps:
+
+1. **Write the criteria file.** List at most three finding types the bot may report. Give each one a concrete example, the way the lesson's rules file does. Then write the "never flag" list, and end with the sentence granting permission to find nothing.
+2. **Decide the delivery of context.** Which checked-in files should the CI agent inherit: project memory, which rules files? Is there any standard currently living in someone's head or home directory that the bot would miss? Write down what needs promoting.
+3. **Plan the re-run behavior.** Where will prior findings come from, and what exact instruction tells the agent to report only new or still-unaddressed issues?
+4. **Set the budget.** Give the check a turn cap, a spend ceiling per run, and a wall-clock timeout, and write one sentence justifying each number to the developer who will be waiting on it.
+
+Keep the sketch. In the capstone lesson you will design a full system of your own, and an automated check like this one makes a strong candidate for its job.
+
+## Flashcards
+
+<FlashcardSet>
+
+<Flashcard question="What is headless mode in one sentence?">
+
+A non-interactive run: the print flag takes one prompt, prints the result, and exits, reading standard input and writing standard output like any command-line tool.
+
+</Flashcard>
+
+<Flashcard question="Why can a pipeline run never wait for input?">
+
+There is no human to answer. Any pause for permission or clarification is a deadlock, so permissions and instructions must all be decided in advance.
+
+</Flashcard>
+
+<Flashcard question="What do the output format options give an automated caller?">
+
+Plain text by default, structured JSON with result, session ID, metadata, and cost, or a newline-delimited JSON event stream. A schema flag can additionally fix the shape of the findings themselves.
+
+</Flashcard>
+
+<Flashcard question="How do findings become pull request comments?">
+
+A script parses the run's JSON output and posts each finding through the code host's API. The agent produces findings; plain, testable code does the posting.
+
+</Flashcard>
+
+<Flashcard question="Who onboards the CI agent?">
+
+The repository. By default a headless run inherits the checked-in configuration layer: project memory, scoped rules, review criteria. The CI agent is the newest teammate, not a special case.
+
+</Flashcard>
+
+<Flashcard question="Why must the reviewer never share the generator's context?">
+
+The generator's context holds the assumptions that produced the mistakes, so a self-review reads what was meant, not what was written. A fresh invocation that knows only the artifact and the standards catches more.
+
+</Flashcard>
+
+<Flashcard question="What is the recipe for re-runs without duplicate comments?">
+
+Fetch the bot's prior comments, include them in the prompt, and instruct the agent to report only new or still-unaddressed issues. State lives in the pull request, not in the agent.
+
+</Flashcard>
+
+<Flashcard question="What beats the instruction to be conservative?">
+
+Explicit criteria with concrete examples, a list of what never to flag, and permission to find nothing. Examples pin the threshold; moods get reinterpreted every run.
+
+</Flashcard>
+
+<Flashcard question="What does a false-positive flood actually cost?">
+
+The team's willingness to read the bot, which is the only currency it holds. A muted reviewer has negative value: it costs money and provides false comfort.
+
+</Flashcard>
+
+<Flashcard question="Batch job versus blocking check: what differs?">
+
+Who is waiting. Batch runs can be slow, wide, and forgiving. Blocking checks must be narrow, fast, and predictable, with a turn cap, a spend ceiling, and a timeout, or they get deleted.
+
+</Flashcard>
+
+</FlashcardSet>

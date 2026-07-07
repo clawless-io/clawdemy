@@ -1,0 +1,88 @@
+---
+title: "Schemas that refuse to lie: cheatsheet"
+description: "Quick reference: tool_choice modes and their guarantees, honest-absence patterns, enum escape hatches, and the retry decision table."
+sidebar:
+  order: 5
+  label: Cheatsheet
+artifact: cheatsheet
+tableOfContents: false
+---
+
+## The tool choice guarantee ladder
+
+| Mode | What it guarantees | Use for |
+| --- | --- | --- |
+| `auto` (default) | Nothing about shape; model may answer in prose | Open-ended agent work |
+| `any` | Some provided tool is called; some schema honored | Model routes among several extractors |
+| `tool` (specific, by name) | That tool's schema on every run | Extraction pipelines |
+
+**Not on the ladder:** a fourth mode, `none`, forbids tool calls entirely; no role in extraction pipelines.
+
+**Plus strict mode:** `strict: true` on the tool definition constrains token sampling so arguments cannot break the schema. Whole-response equivalent: the structured outputs feature (output_config).
+
+**Spine:** a prompt format instruction is a request; a schema is a guarantee.
+
+## Honest-absence patterns
+
+| Pattern | Effect | Verdict |
+| --- | --- | --- |
+| Required, non-nullable | Absent data forces a plausible invention | Fabrication engine |
+| Optional (not in required) | Model may silently skip; absent vs skipped is ambiguous | Avoid |
+| Required + nullable | Model must answer; null means "looked, not there" | Use this |
+
+**Field description carries weight:** "Use null if the document shows none. Never guess."
+
+## Enum escape hatch
+
+| Without | With |
+| --- | --- |
+| Closed list force-fits reality into nearest legal value, silently | Catch-all value ("other") + nullable detail string preserving what was seen |
+| Misclassification is invisible | Catch-all frequency is a sensor on your inputs |
+
+## Valid vs true
+
+| Guaranteed by schema (syntax) | Never guaranteed (semantics) |
+| --- | --- |
+| Parseable JSON, right fields | Values actually correct |
+| Correct types | Sums match across fields |
+| Legal enum values | Right value in the right field |
+
+**Edge cases even for shape:** a safety refusal or a hit token limit can produce off-schema output. Check, then trust.
+
+## Semantic validators (cheap code, downstream)
+
+| Check | Example |
+| --- | --- |
+| Cross-field arithmetic | Line items sum to total |
+| Range sanity | Invoice date within a sane window |
+| Conditional consistency | Enum is "other" implies detail is filled; decision null implies owner null |
+
+## The retry decision
+
+| Validator fires because... | Is the answer in the source? | Action |
+| --- | --- | --- |
+| Sum mismatch, transposed digits, swapped fields | Yes, misread | Retry once with the specific error |
+| Malformed or inconsistent pair of fields | Yes, mismapped | Retry once with the specific error |
+| Nullable field came back null | No | Accept; null is the system working |
+| Two retries already spent | Either | Escalate to a human queue |
+
+**Retry message rule:** name the exact failure and point back at the source. "Validation failed" gives the model nothing.
+
+## Pitfalls
+
+| Pitfall | Correction |
+| --- | --- |
+| Required field the source might lack | Audit required list against your ugliest documents |
+| Enum with no escape hatch | Catch-all value + detail string |
+| Trusting syntax as truth | Semantic validators stay in code |
+| Retrying against absence | Fabrication pressure with a delay timer; accept the null |
+| Optional as honesty | Silent ambiguity; use required + nullable |
+
+## One-liners
+
+| Line | Meaning |
+| --- | --- |
+| The lie was designed in | Fabrication traces to the schema, not the model's mood |
+| A required field is a bet the information always exists | Lose the bet once, get fiction |
+| Valid is not the same as true | Schemas check shape, not content |
+| Never negotiate with reality | Retries fix misreadings, not absence |

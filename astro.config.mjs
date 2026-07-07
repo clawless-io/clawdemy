@@ -4146,6 +4146,107 @@ export default defineConfig({
 								],
 							}
 ],
+				},
+				{
+					label: 'Track 26: Agentic Systems',
+					items: [
+						{
+							label: 'Thinking like an architect',
+							collapsed: true,
+							items: [
+								{ label: 'Brief', slug: 'lessons/engineering-agentic-systems/thinking-like-an-architect/brief' },
+								{ label: 'Lesson', slug: 'lessons/engineering-agentic-systems/thinking-like-an-architect/lesson' },
+								{ label: 'Practice', slug: 'lessons/engineering-agentic-systems/thinking-like-an-architect/practice' },
+								{ label: 'Summary', slug: 'lessons/engineering-agentic-systems/thinking-like-an-architect/summary' },
+								{ label: 'Cheatsheet', slug: 'lessons/engineering-agentic-systems/thinking-like-an-architect/cheatsheet' },
+								{ label: 'References', slug: 'lessons/engineering-agentic-systems/thinking-like-an-architect/references' },
+							],
+						},
+						{
+							label: 'CLAUDE.md at team scale',
+							collapsed: true,
+							items: [
+								{ label: 'Brief', slug: 'lessons/engineering-agentic-systems/claude-md-at-team-scale/brief' },
+								{ label: 'Lesson', slug: 'lessons/engineering-agentic-systems/claude-md-at-team-scale/lesson' },
+								{ label: 'Practice', slug: 'lessons/engineering-agentic-systems/claude-md-at-team-scale/practice' },
+								{ label: 'Summary', slug: 'lessons/engineering-agentic-systems/claude-md-at-team-scale/summary' },
+								{ label: 'Cheatsheet', slug: 'lessons/engineering-agentic-systems/claude-md-at-team-scale/cheatsheet' },
+								{ label: 'References', slug: 'lessons/engineering-agentic-systems/claude-md-at-team-scale/references' },
+							],
+						},
+						{
+							label: 'Schemas that refuse to lie',
+							collapsed: true,
+							items: [
+								{ label: 'Brief', slug: 'lessons/engineering-agentic-systems/schemas-that-refuse-to-lie/brief' },
+								{ label: 'Lesson', slug: 'lessons/engineering-agentic-systems/schemas-that-refuse-to-lie/lesson' },
+								{ label: 'Practice', slug: 'lessons/engineering-agentic-systems/schemas-that-refuse-to-lie/practice' },
+								{ label: 'Summary', slug: 'lessons/engineering-agentic-systems/schemas-that-refuse-to-lie/summary' },
+								{ label: 'Cheatsheet', slug: 'lessons/engineering-agentic-systems/schemas-that-refuse-to-lie/cheatsheet' },
+								{ label: 'References', slug: 'lessons/engineering-agentic-systems/schemas-that-refuse-to-lie/references' },
+							],
+						},
+						{
+							label: 'Tools other agents can trust',
+							collapsed: true,
+							items: [
+								{ label: 'Brief', slug: 'lessons/engineering-agentic-systems/tools-other-agents-can-trust/brief' },
+								{ label: 'Lesson', slug: 'lessons/engineering-agentic-systems/tools-other-agents-can-trust/lesson' },
+								{ label: 'Practice', slug: 'lessons/engineering-agentic-systems/tools-other-agents-can-trust/practice' },
+								{ label: 'Summary', slug: 'lessons/engineering-agentic-systems/tools-other-agents-can-trust/summary' },
+								{ label: 'Cheatsheet', slug: 'lessons/engineering-agentic-systems/tools-other-agents-can-trust/cheatsheet' },
+								{ label: 'References', slug: 'lessons/engineering-agentic-systems/tools-other-agents-can-trust/references' },
+							],
+						},
+						{
+							label: 'Orchestration that survives contact',
+							collapsed: true,
+							items: [
+								{ label: 'Brief', slug: 'lessons/engineering-agentic-systems/orchestration-that-survives-contact/brief' },
+								{ label: 'Lesson', slug: 'lessons/engineering-agentic-systems/orchestration-that-survives-contact/lesson' },
+								{ label: 'Practice', slug: 'lessons/engineering-agentic-systems/orchestration-that-survives-contact/practice' },
+								{ label: 'Summary', slug: 'lessons/engineering-agentic-systems/orchestration-that-survives-contact/summary' },
+								{ label: 'Cheatsheet', slug: 'lessons/engineering-agentic-systems/orchestration-that-survives-contact/cheatsheet' },
+								{ label: 'References', slug: 'lessons/engineering-agentic-systems/orchestration-that-survives-contact/references' },
+							],
+						},
+						{
+							label: 'Reliability is a design choice',
+							collapsed: true,
+							items: [
+								{ label: 'Brief', slug: 'lessons/engineering-agentic-systems/reliability-is-a-design-choice/brief' },
+								{ label: 'Lesson', slug: 'lessons/engineering-agentic-systems/reliability-is-a-design-choice/lesson' },
+								{ label: 'Practice', slug: 'lessons/engineering-agentic-systems/reliability-is-a-design-choice/practice' },
+								{ label: 'Summary', slug: 'lessons/engineering-agentic-systems/reliability-is-a-design-choice/summary' },
+								{ label: 'Cheatsheet', slug: 'lessons/engineering-agentic-systems/reliability-is-a-design-choice/cheatsheet' },
+								{ label: 'References', slug: 'lessons/engineering-agentic-systems/reliability-is-a-design-choice/references' },
+							],
+						},
+						{
+							label: 'Agents in the pipeline',
+							collapsed: true,
+							items: [
+								{ label: 'Brief', slug: 'lessons/engineering-agentic-systems/agents-in-the-pipeline/brief' },
+								{ label: 'Lesson', slug: 'lessons/engineering-agentic-systems/agents-in-the-pipeline/lesson' },
+								{ label: 'Practice', slug: 'lessons/engineering-agentic-systems/agents-in-the-pipeline/practice' },
+								{ label: 'Summary', slug: 'lessons/engineering-agentic-systems/agents-in-the-pipeline/summary' },
+								{ label: 'Cheatsheet', slug: 'lessons/engineering-agentic-systems/agents-in-the-pipeline/cheatsheet' },
+								{ label: 'References', slug: 'lessons/engineering-agentic-systems/agents-in-the-pipeline/references' },
+							],
+						},
+						{
+							label: 'The capstone: design, build, defend',
+							collapsed: true,
+							items: [
+								{ label: 'Brief', slug: 'lessons/engineering-agentic-systems/design-build-defend/brief' },
+								{ label: 'Lesson', slug: 'lessons/engineering-agentic-systems/design-build-defend/lesson' },
+								{ label: 'Practice', slug: 'lessons/engineering-agentic-systems/design-build-defend/practice' },
+								{ label: 'Summary', slug: 'lessons/engineering-agentic-systems/design-build-defend/summary' },
+								{ label: 'Cheatsheet', slug: 'lessons/engineering-agentic-systems/design-build-defend/cheatsheet' },
+								{ label: 'References', slug: 'lessons/engineering-agentic-systems/design-build-defend/references' },
+							],
+						},
+					],
 				}
 			];
 					const __top = __groups.filter((g) => !/^Track \d+/.test(g.label));

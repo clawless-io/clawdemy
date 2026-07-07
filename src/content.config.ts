@@ -37,6 +37,7 @@ export const collections = {
 						'build-nns-from-scratch', // Track 13: Karpathy Neural Networks Zero to Hero
 						'ai-agents-and-tool-use', // Track 20: Microsoft AI Agents for Beginners + Berkeley CS294
 						'ai-agent-teams', // Track 25: Anatomy of an AI Agent Team (TradingAgents case study)
+						'engineering-agentic-systems', // Track 26: Engineering Agentic Systems (advanced layer atop Track 22)
 						'neural-network-intuition', // Track 11: 3Blue1Brown Neural Networks series
 						'practical-transformers', // Track 14: Hugging Face LLM Course
 						'reinforcement-learning-foundations', // Track 17: David Silver UCL RL Course

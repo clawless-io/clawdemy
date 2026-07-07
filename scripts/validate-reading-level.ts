@@ -41,6 +41,7 @@ const THRESHOLDS: Record<string, number> = {
 	'openclaw-deep-dive': 40,
 	'ai-foundations': 40,
 	'git-workflow': 40,
+	'engineering-agentic-systems': 40,
 };
 
 interface ScoreRow {

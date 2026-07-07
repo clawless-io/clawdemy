@@ -384,6 +384,7 @@ const BriefSchema = z.object({
 		'building-with-claude',
 		'ai-safety-and-alignment',
 		'git-workflow',
+		'engineering-agentic-systems',
 	]),
 	difficulty: z.enum(['intro', 'standard', 'deep']),
 	estimated_read_minutes: z.number().int().positive(),
