@@ -1,0 +1,198 @@
+---
+title: "Tools other agents can trust"
+description: "An agent chooses tools by reading your descriptions. Learn to write tools, name them, design errors agents can recover from, and build an MCP server."
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+import LessonStar from '../../../../../components/LessonStar.astro';
+
+<LessonStar slug="tools-other-agents-can-trust" />
+
+Picture a small bike shop with a back room full of parts. The owner, Rosa, wires an AI assistant to the shop's inventory system so it can answer the question she hears all day: do we have this in stock? The assistant has two tools. One searches the catalog by keyword. One returns the stock count for an exact part number. On the first afternoon, a customer asks about a cargo rack. The assistant calls the stock-count tool with the words "cargo rack," the lookup finds no such part number, and the assistant tells the customer the rack is sold out. It was on the shelf, eleven units, four meters away.
+
+Nothing in that failure was the model's fault. The model did what models do: it read the two tool descriptions it was given and made its best guess. The stock-count tool was described in three words, "check item stock." Nothing said it needs an exact part number. Nothing said the search tool exists precisely for keywords. Nothing said what a failed lookup means. The assistant was set up to fail by an interface, and interfaces are written by people.
+
+That is this lesson's territory. Lesson 3 taught you to make a model's answers honest with schemas. This lesson turns around and faces the other direction: the tools your agent calls, and how to build them so an agent can use them the way you meant. The track's spine runs straight through it. A tool's interface is where one agent's judgment meets another system's guarantees. The model brings the judgment. Your tool has to bring the guarantees, and it has to describe itself well enough that judgment has something to grip.
+
+Anthropic's engineers, after building tools for their own agents and watching hundreds of teams do the same, open their public guidance with a sentence worth keeping: "Agents are only as effective as the tools we give them."
+
+## The description is the tool
+
+Here is the fact this whole lesson hangs on: when an agent decides which tool to call, it does not read your source code. It reads the tool's name, its description, and its input schema. Nothing else. To the model, the description is not documentation attached to the tool. The description is the tool.
+
+That explains why a minimal description makes selection unreliable. Give a model a three-word description and you have given it a coin to flip. It will pick the right tool often, and "often" is exactly the property lesson 1 taught you to distrust in a system that runs unattended.
+
+A description that earns reliable selection states five things:
+
+- **Purpose.** What job this tool does, in one plain sentence.
+- **Expected inputs.** What each parameter means, with the format made explicit and an example where format matters.
+- **What comes back.** The shape and meaning of the result, including what an empty result means.
+- **Boundaries.** What the tool will not do, whether it changes anything or only reads.
+- **When to use it, and when not to.** How it differs from its nearest sibling, named outright.
+
+Compare the description that sank Rosa's afternoon with one that would have saved it. First the original:
+
+```json
+{
+  "name": "check",
+  "description": "Check item stock."
+}
+```
+
+Now the version that gives judgment something to grip:
+
+```json
+{
+  "name": "inventory_check_stock",
+  "description": "Return the current stock count for one product,
+    identified by its exact SKU (for example RACK-CT-114). Returns the
+    count, shelf location, and last delivery date. Requires a SKU: if
+    you only have a product name or keywords, call
+    inventory_search_catalog first to find the SKU. Read-only: this
+    tool never changes stock levels."
+}
+```
+
+Anthropic's advice for writing these is disarmingly human: describe the tool the way you would describe it to a new hire on your team. A new hire does not know your abbreviations, your data formats, or which of two similar systems to reach for. Neither does the model. Their team also reports that small, careful refinements to descriptions produced outsized gains in how well agents used the tools. The description field is the most consequential text most tool builders never revise.
+
+## One tool, one job
+
+The second most common tool-design failure is the do-everything tool. It usually looks like this: one tool named for the whole domain (`manage_inventory`) with a mode switch (an action parameter) that takes values like "search," "check," "reserve," and "adjust," plus a pile of parameters where each one is required for some actions and forbidden for others.
+
+A human reads the docs and copes. An agent has to guess which parameter combinations are valid, and the schema cannot help, because a single schema now has to permit every combination any action might need. You built a schema that cannot refuse to lie. Lesson 3 worked hard for that property; the do-everything tool throws it away.
+
+The fix is to split along jobs. Each purpose-specific tool gets its own contract: a search tool (`inventory_search_catalog`) that takes keywords and returns matching products, a stock checker (`inventory_check_stock`) that takes one SKU, a reservation tool (`inventory_reserve_stock`) that takes a SKU and a quantity and actually changes state. Now each schema can be strict, each description can be short and sharp, and each error can be specific.
+
+One counterweight, so you do not over-rotate: the right unit is a job the agent performs, not an endpoint your backend happens to have. Anthropic's guidance points the same way from the other side: when an agent must always chain the same three little calls to get anything done, merge them into one tool that does the whole job. Splitting the overloaded tool and consolidating the fragmented ones are the same principle. One tool, one job, where "job" is defined by the work, not by your API's history.
+
+## Names that cannot be confused
+
+Names do quiet work in selection. When forty tools sit in the same context window, the model leans on names to narrow the field before descriptions settle the choice. Two rules follow.
+
+First, use a shared prefix to group tools from the same system, a practice usually called namespacing. All of Rosa's tools start with the same word (`inventory_`), so they cluster together and cannot be mistaken for the calendar server's tools sitting beside them. Anthropic's engineers note that grouping related tools under common prefixes helps draw boundaries when many tools are loaded, and that MCP clients sometimes apply a server prefix automatically.
+
+Second, make sibling names non-interchangeable. Names like a lookup tool (`get_item`) next to a fetch tool (`fetch_item`) are a trap: nothing in the names says which one takes a SKU and which takes keywords. Rosa's pair, a catalog search (`inventory_search_catalog`) and a stock check (`inventory_check_stock`), pass a simple test: cover the descriptions, show a colleague only the names, and ask which tool answers "do we have cargo racks?" If they hesitate, rename.
+
+## Errors an agent can act on
+
+When a tool fails for a human, the human investigates. When a tool fails for an agent, the agent reads the error text and decides its next move on the spot. That makes the error message part of the interface, exactly as much as the description. Anthropic's guidance says error responses should be written to "clearly communicate specific and actionable improvements" rather than returning opaque codes or stack traces.
+
+An actionable error answers the one question the agent is actually asking: what should I do now? Different failures deserve different answers, and your errors should keep four cases distinct.
+
+- **Transient failures.** A timeout, a briefly unreachable upstream service. Say so, and say that retrying is likely to help.
+- **Business-rule refusals.** The request was understood and rejected: reserving twelve units when three exist. Retrying the identical call can never help. Say what would.
+- **Permission problems.** This caller is not allowed to do this at all. Retrying can never help; the answer is a different caller or a human sign-off.
+- **Empty results.** The most damaging confusion in the whole taxonomy, and the one that misled Rosa's assistant: "the query failed" and "the query succeeded and found nothing" are different facts. Zero matches is a successful answer about the world. Never report it in the shape of an error.
+
+Here is what the distinction looks like in practice, as three responses from Rosa's server:
+
+```text
+ERROR (transient): Supplier stock feed timed out after 10 seconds.
+Retrying shortly usually succeeds. Local shelf counts are unaffected.
+
+REFUSED (business rule): Cannot reserve 12 units of RACK-CT-114;
+only 3 are in stock. Retrying the same request will not help.
+Reserve 3 or fewer, or check the next delivery date first.
+
+OK (empty result): No products match "carbon mudguard". The search
+succeeded; the catalog has no such item. Try broader keywords
+before concluding the shop does not carry it.
+```
+
+An agent reading those three responses recovers differently from each, which is the entire point. An agent reading "Error 500" three times learns nothing three times.
+
+## Fewer tools, deliberately given
+
+There is a strong instinct, once the tools are well made, to give every agent all of them. Resist it, for two reasons.
+
+The first is reliability. Every tool an agent carries takes space on the desk from lesson 1, and every overlapping option makes the choice harder. Anthropic's engineers observed that giving agents too many tools, or tools with overlapping purposes, can pull them away from efficient strategies. Selection quality degrades as the menu grows. A focused toolset is not a limitation; it is an accuracy feature.
+
+The second is safety, and it is lesson 1's decide-versus-enforce trade-off wearing work clothes. An instruction that says "never adjust stock levels" is a request. Not handing the agent the stock-adjustment tool is a guarantee. Rosa's storefront assistant gets the search, check, and reserve tools, and physically cannot do more. The nightly reordering agent gets the reporting and purchase-order tools, and cannot touch a customer reservation. Give each agent only the tools its role needs. This is least privilege, the oldest rule in security, applied to tool distribution, and it costs you nothing but the restraint to apply it.
+
+## Building the server side of MCP
+
+In the Building with Claude track you consumed MCP: you connected existing servers and used their tools. Everything in this lesson so far is the knowledge you need to stand on the other side of that protocol and build one.
+
+An MCP server can expose three kinds of capability, and the official tutorial defines the first two crisply: resources are "File-like data that can be read by clients," and tools are "Functions that can be called by the LLM (with user approval)." The third, prompts, are pre-written templates a user can invoke. The design question this split hands you is worth pausing on: if the agent only ever needs to read something, such as the shop's current price list, expose it as a resource instead of building yet another tool. Tools are for acting; resources are for reading. Fewer tools, again.
+
+The official Python SDK makes the mechanics almost anticlimactic. You create a server object (`FastMCP`), and each tool is a typed function under a decorator (`@mcp.tool()`), whose docstring becomes the tool definition the model reads:
+
+```python
+from mcp.server.fastmcp import FastMCP
+
+mcp = FastMCP("inventory")
+
+@mcp.tool()
+async def inventory_check_stock(sku: str) -> str:
+    """Return the current stock count for one product by exact SKU.
+
+    Args:
+        sku: Exact product SKU, for example RACK-CT-114. If you only
+             have keywords, call inventory_search_catalog first.
+    """
+    ...
+```
+
+Read that docstring again. It is the description from earlier in this lesson, landing in its real home. Everything this lesson taught about purpose, inputs, boundaries, and sibling tools gets written right there, in the docstring and the type hints, because that is exactly the text the model will read when it decides whether to call your function. The full walkthrough, including running the server and connecting a client over standard input and output, is the build-server tutorial at modelcontextprotocol.io, and it is shorter than you expect.
+
+## Configuration that keeps secrets out of git
+
+A server your whole team should use has to be configured somewhere, and where matters. Claude Code gives MCP configuration three scopes. Local scope is the default: the server is available only to you, only in the current project. User scope is personal too, but follows you across all your projects. Project scope is the shared one: the configuration lives in a file at the project root (`.mcp.json`) that is designed to be checked into version control, so every teammate gets the same tools. Claude Code asks each person for approval before first using a project-scoped server, which is the right paranoia for configuration that arrives via a repository.
+
+Checked into version control raises the obvious question: what about the supplier API key? This is what environment-variable expansion is for. The committed file references a variable by name, and each machine supplies its own value at load time:
+
+```json
+{
+  "mcpServers": {
+    "inventory": {
+      "command": "python",
+      "args": ["servers/inventory.py"],
+      "env": {
+        "SUPPLIER_API_KEY": "${SUPPLIER_API_KEY}"
+      }
+    }
+  }
+}
+```
+
+The expansion syntax supports a plain variable reference (`${VAR}`) and a fallback form with a default (`${VAR:-default}`), and it works in the command, arguments, environment, URL, and header fields of a server entry. The committed file names the secret; it never contains it. And if a required variable is missing with no default, Claude Code refuses to load the configuration rather than starting a half-configured server. That should sound familiar: it is lesson 3's fail-loudly principle, enforced on configuration instead of output.
+
+## Why this matters when you use AI
+
+- **You will judge connectors even if you never build one.** Every integration you attach to an AI product is somebody's tool design. You now know what separates a good one: descriptions that state boundaries, errors that distinguish failure from emptiness, scopes that keep secrets out of shared files. Those are inspection questions you can ask before trusting a connector with real work.
+- **Vague tools explain "dumb agent" moments.** When an assistant confidently tells you something false is out of stock, sold out, or not found, the cause is often not model stupidity. It is an interface that reported an error in the shape of an answer, or an empty result in the shape of an error. You will start recognizing the difference.
+- **Least privilege transfers to everything you grant.** The habit of asking "does this agent need this capability for its role" applies to every AI product that requests access to your calendar, files, or accounts. Fewer, sharper grants beat a master key, for agents and for you.
+
+## Common pitfalls
+
+**Writing descriptions for readers who can ask follow-ups.** Human documentation survives gaps because humans ask. A model cannot ask. Every piece of implicit context, formats, units, sibling tools, has to be made explicit, or it does not exist.
+
+**One tool with a mode switch.** A do-everything tool with an action parameter forces one schema to permit every combination, which means it can no longer refuse invalid ones. Split along jobs, one contract each.
+
+**Errors that only say something failed.** An agent cannot recover from "Error 500." Say whether retrying can help, what rule refused the request, and above all never dress an empty result as a failure or a failure as an empty result.
+
+**Giving every agent every tool.** The menu itself degrades selection, and every unneeded tool is unenforced risk. Distribution is a design decision, not a default.
+
+**Secrets in shared configuration.** The moment a key lands in a committed file, it is in the repository's history for good. Commit variable names, never values, and let expansion do the rest.
+
+## What you should remember
+
+- To the model, the description is the tool. It reads the name, description, and schema, never your code. Write those for a reader who cannot ask questions.
+- A selection-worthy description states purpose, inputs, outputs, boundaries, and when to use the tool versus its named siblings.
+- One tool, one job, where jobs are defined by the agent's work, not your backend's endpoints. Split mode-switch tools; merge always-chained fragments.
+- Errors are interface. Distinguish transient failures, business-rule refusals, and permission problems, and never confuse "failed" with "found nothing."
+- Give each agent only its role's tools. A tool never granted is a guarantee; an instruction not to use it is a request.
+- An MCP server exposes tools for acting and resources for reading. Project scope shares the configuration through version control; environment-variable expansion keeps the credentials out of it.
+
+## What's next
+
+Lesson 5 is orchestration: putting several agents to work on one problem and keeping the whole thing standing when a step fails. The tools you learned to build here become the hands of that team, and the contracts you learned to write become something bigger: agreements between agents. Everything about descriptions, errors, and least privilege comes back at team scale.
+
+## If you remember one thing
+
+**A model reads your description, not your code.**\
+**An error is part of the interface.**\
+**Write both for a reader who cannot ask.**

@@ -1,0 +1,167 @@
+---
+title: "CLAUDE.md at team scale"
+description: "Configuration is how an architect's decisions become durable for a team. Read the CLAUDE.md hierarchy, scoped rules, shared commands, and plan mode."
+artifact: lesson
+sidebar:
+  order: 2
+  label: Lesson
+---
+
+import LessonStar from '../../../../../components/LessonStar.astro';
+
+<LessonStar slug="claude-md-at-team-scale" />
+
+Two developers, same team, same repository, same Claude Code. On Priya's machine, Claude writes the test first, names branches the team's way, and never touches the generated folder. On Marcus's machine, three desks away, the same model working in the same codebase does none of those things. His pull requests keep failing review for the same three reasons, and he is starting to suspect Priya somehow got a smarter model.
+
+She did not. Months ago, Priya spent an evening writing the team's standards down: run the linter before committing, keep tests next to the code they cover, never edit generated files. She put those instructions in her personal configuration, the memory file in her home directory that Claude reads at the start of every session she runs. That file has never been read on Marcus's machine. It lives on hers.
+
+Nothing here is broken, which is exactly what makes it dangerous. Every tool is behaving as designed. The team simply made an architectural decision without noticing they were making one: the standards live with a person instead of with the project. This lesson is about noticing, and about the configuration layer that lets you put each decision where it belongs.
+
+Lesson 1 gave you the track's spine, architecture is deciding where judgment lives, and three trade-offs to carry: decide versus enforce, one versus many, carry versus fetch. Configuration is where the first and third of those stop being ideas and become files you can read. This is also the track's first code-reading lesson, and the code is deliberately gentle: markdown files, a little YAML, a folder layout. The judgment is in where the files go.
+
+One more frame before we start, because it organizes everything below. Treat your team's configuration as a product. It has users: every teammate, plus every fresh Claude session, which arrives knowing nothing. It has releases: commits. It has bugs: drift. And like any product, it deserves review before it ships. Hold that frame. We will come back to it.
+
+## The hierarchy: every location is an audience
+
+Claude Code reads persistent instructions from memory files, most of them named CLAUDE.md. The mechanics are simple. The architecture is in a single question: where you put a file decides who receives it.
+
+There are four locations you will use every week, plus one for organizations.
+
+- **User memory** lives in your home directory (`~/.claude/CLAUDE.md`). Everything in it applies to every project you open, and to nobody but you. This is where Priya's team standards went, which is the whole problem.
+- **Project memory** lives at the project root (`CLAUDE.md`, or `.claude/CLAUDE.md`). It is checked into version control, so everyone who clones the repository receives it. This is where team decisions belong.
+- **Local project memory** is a gitignored file at the project root (`CLAUDE.local.md`). Project-specific and personal, never shared: your sandbox URLs, your preferred test data.
+- **Subdirectory memory** files sit deeper in the tree and load on demand, when Claude works with files in those directories. A monorepo package can carry instructions that only appear when someone is actually inside it.
+- **Managed policy** is the organization tier: a memory file deployed by IT to a system location, received by every user on the machine, and impossible for individuals to exclude.
+
+Here is the same list as a layout you can read at a glance.
+
+```text
+~/.claude/CLAUDE.md            you, in every project
+your-project/
+├── CLAUDE.md                  the whole team (committed)
+├── CLAUDE.local.md            you, this project (gitignored)
+├── .claude/
+│   └── rules/
+│       ├── testing.md         the team, loaded every session
+│       └── api-design.md      the team, loads for matching files
+└── packages/
+    └── billing/
+        └── CLAUDE.md          loads when Claude works in billing
+```
+
+Two mechanical facts keep the mental model honest. First, nothing overrides anything. The documentation is explicit: "All discovered files are concatenated into context rather than overriding each other." Broad scopes load first and the files closest to your working directory load last, but every loaded instruction is present. Second, a memory file can pull in other files through an import syntax, an at sign followed by a path (`@docs/git-workflow.md`). Imports load at launch and can nest up to four hops deep. They help you organize; they do not save context.
+
+So the architect's move at this layer is not technical at all. For every instruction you write, ask: who needs to receive this decision? A personal preference goes in your home directory. A team decision goes in the repository. A machine-only detail goes in the local file. Answer the audience question correctly and the hierarchy runs itself.
+
+## Requests are not guarantees
+
+Before you move your team's rules into project memory, be honest about what memory can do. The documentation says Claude treats memory files as "context, not enforced configuration". A memory file shapes the model's judgment. It does not constrain the model's actions. Instructions in it will be followed almost every time, and lesson 1 already told you what "almost" is worth when a rule must hold without exception.
+
+For those rules, Claude Code has a second configuration surface: settings files. Permission rules in settings are enforced by the tool itself, regardless of what the model decides. So are hooks, scripts that run at fixed points in the session. Settings mirror the memory hierarchy: a user file in your home directory (`~/.claude/settings.json`), a committed project file (`.claude/settings.json`), a gitignored local file (`.claude/settings.local.json`), and managed organization settings that nothing else can override.
+
+That gives the configuration layer two halves. Memory shapes judgment; settings constrain action. Sorting each team rule into the correct half is the decide-versus-enforce trade-off from lesson 1, executed in files. Style guidance, naming conventions, workflow preferences: memory. Never push to the main branch, never touch the secrets folder: settings and hooks, where "never" actually means never.
+
+## Rules files: instructions scoped to the code they govern
+
+Project memory has a failure mode you can predict from lesson 1: it grows. Every instruction in it loads into every session and competes for the model's attention, and the documentation is blunt about the cost, advising you to target under 200 lines because longer files reduce adherence. This is carry versus fetch, applied to configuration. Not every instruction deserves a permanent seat on the desk.
+
+The answer is the rules directory (`.claude/rules/`). Instead of one long memory file, the team keeps small topic files: one for testing conventions, one for API design, one for security requirements. A rule file with no scoping loads at launch, just like project memory. But add a paths field to its YAML frontmatter and it becomes conditional: it loads only when Claude works with files matching the listed glob patterns.
+
+Here is a complete, real one.
+
+```markdown
+---
+paths:
+  - "src/api/**/*.ts"
+---
+
+# API development rules
+
+- Every endpoint validates its inputs
+- Use the standard error response shape
+- Document each route with an OpenAPI comment
+```
+
+Read what this file achieves. The whole team receives it, because it is committed. But nobody pays its context cost until a session actually touches a TypeScript file under the API directory (`src/api/`). The instruction arrives exactly when the code it governs arrives. There is a personal tier here too, a rules folder in your home directory (`~/.claude/rules/`), and the ordering favors the team: "User-level rules are loaded before project rules, giving project rules higher priority."
+
+## Slash commands: a workflow you can hand to a teammate
+
+Memory files hold facts and standing rules. For repeatable procedures, Claude Code has custom slash commands: a markdown file whose content becomes the prompt when someone types the command's name. The current documentation folds these into a broader feature, stating plainly that "Custom commands have been merged into skills." A file in the project commands folder (`.claude/commands/deploy.md`) and a skill folder in the project (`.claude/skills/deploy/SKILL.md`) both create the same deploy command (`/deploy`). Existing command files keep working; skills add extras such as bundled supporting files.
+
+The audience question returns unchanged. A command defined inside the project ships with the repository, so every teammate gets it. A command defined in your home directory follows you across projects and is invisible to everyone else. Team workflow, project folder. Personal shortcut, home folder.
+
+Here is a project command worth committing. It uses the arguments placeholder (`$ARGUMENTS`), which is replaced by whatever the user types after the command name.
+
+```markdown
+---
+description: Fix a GitHub issue by number
+---
+
+Fix GitHub issue $ARGUMENTS following the team checklist:
+
+1. Read the issue and restate it in one sentence.
+2. Write a failing test that reproduces it.
+3. Fix it, run the full test suite, and reference the
+   issue number in the commit message.
+```
+
+Save that as a fix-issue file in the project commands folder, and any teammate can type the command with an issue number (`/fix-issue 123`) to run the whole procedure. Look at what just happened architecturally. A workflow that used to live in one senior developer's habits is now a file: proposed in a pull request, reviewed by the team, versioned, and improvable by anyone. That is configuration as a product, in miniature.
+
+## Plan mode is a risk decision
+
+Everything so far configures what Claude knows. One more decision configures how much room Claude gets to act, and it deserves the same architectural treatment.
+
+By default, Claude Code proposes and applies edits as it works, inside whatever permissions you have granted. Plan mode is the alternative: "Claude reads files and proposes a plan but makes no edits until you approve." You can toggle it mid-session with a keyboard shortcut (Shift+Tab) or start a session in it with a launch flag (`--permission-mode plan`).
+
+When should you use which? Treat it as pricing risk, using lesson 1's language: for this specific change, where should judgment live? A small, well-scoped change, a rename, a bug with a failing test already pointing at it, carries little risk. Let Claude execute directly and review the diff afterward; a plan step would just be tax. A large, ambiguous change is different: many files, an approach that is genuinely unclear, or a sensitive area like billing, authentication, or database migrations. There, judgment should stay with the human until the route is approved. Reviewing a plan costs you two minutes. Unwinding a wrong forty-file change costs an afternoon, and some trust.
+
+Notice that this decision, too, can be configured rather than remembered. A single line of project memory, an instruction to use plan mode for any change under the billing directory, turns one careful developer's habit into the team's default. The official documentation uses exactly this kind of line as its example of a project instruction. Risk policy, like style policy, can live in the repository.
+
+## Diagnosing drift: works on my machine, for judgment
+
+Now we can name what happened to Priya and Marcus precisely. Configuration drift is when the instructions that different teammates' sessions actually receive have quietly diverged. Its most common cause is the one this lesson opened with: a team decision written into a user-level file, where only one person's sessions can hear it.
+
+You already know the symptoms. A convention holds in some people's pull requests and not others, with no difference in skill that explains it. A rule everyone "agreed on" is followed religiously by one person's Claude and ignored by the rest. Onboarding happens by verbal correction: "oh, we never edit that folder, everyone knows that." Every one of those sentences is a configuration bug report.
+
+The diagnosis is a three-step routine.
+
+1. **Inventory.** Run the memory command (`/memory`) inside a session. It lists every memory and rules file currently loaded. Have two teammates run it in the same repository and compare the lists. Drift is visible as instructions that exist on one machine and not the other.
+2. **Sort by audience.** For each divergent instruction, ask whose decision it encodes. Personal taste stays where it is. Team judgment gets promoted: moved into project memory or a scoped rules file, committed, and reviewed in a pull request like any other change to a product.
+3. **Sort by force.** While you are in there, find the must-hold rules hiding in memory files and move them again, out of memory entirely, into committed settings or hooks, where they become guarantees instead of requests.
+
+This is where the product frame pays off. Configuration that is versioned and reviewed survives the person who wrote it. Priya's evening of good judgment, trapped in her home directory, becomes a forty-line pull request the whole team can read, argue with, and inherit. The architect's decisions outlive the architect's attention. That is the entire point of writing them down where the team can receive them.
+
+## Why this matters when you use AI
+
+- **Every fresh session is a new teammate.** This lesson is not only about teams of people. A context window starts empty every time, so configuration is the only onboarding a session ever gets. Even working alone, you and you-in-three-months are two teammates who drift, and the same discipline, decisions in the project, preferences in the home directory, keeps you consistent.
+- **You can read a team's maturity in its repository.** Joining a project, auditing a vendor, or evaluating a consultancy, look for committed configuration: project memory, rules files, shared commands. A team whose AI standards live in one person's head, or one person's home directory, has a bus problem wearing a productivity costume.
+- **The audience question outlives this tool.** Editors, linters, and CI systems all layer configuration the same way: personal scope, project scope, organization scope. Deciding which layer a decision belongs to is architecture, whatever the tool. Learn it here, spend it everywhere.
+
+## Common pitfalls
+
+**Team decisions in personal config.** The drift factory. The test is simple: if a new teammate would need the instruction to be productive, it does not belong in your home directory. Promote it to the project and let the repository deliver it.
+
+**Treating memory as enforcement.** Memory files shape judgment; they cannot guarantee behavior. If breaking a rule once is unacceptable, the rule needs to live in settings or hooks, where the tool enforces it no matter what the model decides. Prose in a memory file is a request wearing a stern voice.
+
+**The 900-line memory file.** Every line loads into every session, everything competes for attention, and adherence drops as the file grows. The documentation's target is under 200 lines. The cure is structural: split topics into rules files, scope them with path patterns, and move procedures into commands that load only when invoked.
+
+**Plan mode as a personality instead of a decision.** Some people leave plan mode on always and pay a tax on every trivial edit; others never touch it and get surprised by sprawling changes. Both have stopped deciding. It is a per-change risk call: direct execution for small and well-scoped, a reviewed plan for large, ambiguous, or sensitive.
+
+## What you should remember
+
+- Where a configuration file lives decides who receives it: home directory (just you), project root (the whole team, via version control), local gitignored file (you, this project only), subdirectories (loaded on demand).
+- Loaded memory files concatenate; they do not override each other. The audience question, who needs to receive this decision, does most of the architectural work.
+- Memory is a request; settings and hooks are guarantees. Sorting rules between them is lesson 1's decide-versus-enforce trade-off, executed in files.
+- Rules files with path scoping load instructions only when Claude touches matching files: carry versus fetch, applied to configuration.
+- A slash command committed to the project is a workflow decision made once, reviewed once, and shipped to everyone.
+- Plan mode is pricing risk per change: judgment stays with the human until the plan is approved. Config drift is "works on my machine" for judgment; inventory with the memory command, then promote team decisions into the repository.
+
+## What's next
+
+Configuration shapes what the model knows and how much room it gets. Lesson 3 turns to what the model says back: structured output, and schemas that make an answer machine-checkable and honest about what it does not know. That is where the code-reading gets one notch more serious.
+
+## If you remember one thing
+
+**A standard in one head is a habit.**\
+**A standard in the repository is a product.**\
+**Put each decision where the team receives it.**

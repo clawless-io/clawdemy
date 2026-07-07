@@ -1,0 +1,189 @@
+---
+title: "Practice: Schemas that refuse to lie"
+description: "A self-check on honest schema design, a schema-repair exercise on a fabrication-prone tool definition, and flashcards built for retrieval."
+artifact: practice
+sidebar:
+  order: 3
+  label: Practice
+---
+
+import Flashcard from '../../../../../components/Flashcard.astro';
+import FlashcardSet from '../../../../../components/FlashcardSet.astro';
+
+## Self-check
+
+Six short questions. Answer each in your head before opening the collapsible. Active retrieval is where the learning sticks.
+
+**1. What does each tool choice mode guarantee: auto, any, and a forced specific tool?**
+
+<details>
+<summary>Show answer</summary>
+
+Auto, the default, guarantees nothing about shape: the model decides whether to call a tool at all and may answer in prose. Any guarantees the model calls some tool you provided, so some schema is honored, but the model picks which. Forcing a specific tool by name guarantees that tool's schema on every run, which is the mode extraction pipelines want.
+
+</details>
+
+**2. What does strict mode add on top of a forced tool call, and how does it work?**
+
+<details>
+<summary>Show answer</summary>
+
+Forcing the tool guarantees a call; strict mode (setting the strict flag to true on the tool definition) guarantees the arguments match the schema exactly. It works by constraining the model's token sampling so that no token which would break the schema can be generated. Malformed output stops being a failure mode you handle in code.
+
+</details>
+
+**3. Why does a required, non-nullable field cause fabrication on documents that lack the information?**
+
+<details>
+<summary>Show answer</summary>
+
+The grammar constraint means the model must emit a value of the required type. If the document contains nothing to put there, the honest answer ("it is not on this document") is syntactically illegal. The model fills the slot with whatever is most plausible, which reads exactly like real data. The lie is designed into the schema, not chosen by the model.
+
+</details>
+
+**4. Why does required-plus-nullable beat making the field optional?**
+
+<details>
+<summary>Show answer</summary>
+
+An omitted optional field is ambiguous: was the information absent from the document, or did the model simply skip the field? A required nullable field forces an explicit verdict every time, so null carries a clear meaning: "I looked, and it is not there." Absence becomes a statement instead of a silence.
+
+</details>
+
+**5. A schema-valid extraction can still be wrong. Give two examples, and name what kind of validity is missing.**
+
+<details>
+<summary>Show answer</summary>
+
+Semantic validity. Examples: a correctly typed total that does not equal the sum of the line items; a well-formatted date that is actually the delivery date placed in the invoice date field; supplier and customer swapped into each other's fields on an unusual layout. The schema guarantees shape (syntax); the values themselves can still be wrong, so cross-field validation in code remains your job.
+
+</details>
+
+**6. When does a validation-and-retry loop help, and when does it become a fabrication machine?**
+
+<details>
+<summary>Show answer</summary>
+
+It helps when the correct answer exists in the source and the model misread it: sum mismatches, transposed digits, swapped fields. Feed back the specific error and the model usually corrects in one round trip. It becomes a fabrication machine when it retries against absence: re-asking because a nullable field came back null pressures the model to invent, and by attempt three it will. Ask "is the answer in the source?" before every retry.
+
+</details>
+
+## Try it yourself
+
+**Schema-repair exercise: find the fabrication engines.**
+
+Below is a tool definition for extracting fields from meeting notes. It contains at least three honesty defects of the kinds this lesson covered. Find them, then rewrite the schema so the truth always fits.
+
+```json
+{
+  "name": "record_meeting",
+  "description": "Record the fields extracted from one set of meeting notes.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "meeting_date": { "type": "string", "format": "date" },
+      "decision_made": { "type": "string" },
+      "decision_owner": { "type": "string" },
+      "next_meeting_date": { "type": "string", "format": "date" },
+      "meeting_type": {
+        "type": "string",
+        "enum": ["standup", "planning", "retrospective"]
+      }
+    },
+    "required": [
+      "meeting_date", "decision_made", "decision_owner",
+      "next_meeting_date", "meeting_type"
+    ],
+    "additionalProperties": false
+  }
+}
+```
+
+Work through it in Clawless: paste the schema in, describe a set of meeting notes where no decision was made and no next meeting was scheduled, and ask what the schema forces the model to do with each field. Then apply the fixes yourself before comparing.
+
+<details>
+<summary>Show one possible repair</summary>
+
+The defects: the decision fields and the next meeting date are required and non-nullable, but plenty of meetings produce no decision, name no owner, and schedule no follow-up, so all three are fabrication engines. The meeting type enum has no escape hatch, so an all-hands or a vendor call gets force-fitted into one of three values.
+
+The repair: make the decision fields and the next meeting date nullable (allow the null type) while keeping them required, and state in each description that null is correct when the notes are silent. Add a catch-all value to the meeting type enum (for example, an "other" entry) plus a nullable detail field capturing the type as described in the notes. Afterward, add one semantic validator in code: if a decision is null, its owner must be null too.
+
+</details>
+
+## Flashcards
+
+<FlashcardSet>
+
+<Flashcard question="What is a JSON Schema on a tool definition, in track-spine terms?">
+
+Code-level enforcement of output shape. A prompt instruction about format is a request; a schema is a guarantee. Decide-versus-enforce, applied to the model's output.
+
+</Flashcard>
+
+<Flashcard question="What does the auto tool choice mode guarantee about output shape?">
+
+Nothing. The model decides whether to call a tool at all and may answer in prose. Right for open-ended agents, wrong for pipelines.
+
+</Flashcard>
+
+<Flashcard question="What does the any tool choice mode guarantee?">
+
+Some tool you provided will be called, so some schema is honored on every run. The model picks which tool, so routing stays with model judgment.
+
+</Flashcard>
+
+<Flashcard question="What does forcing a specific tool by name guarantee?">
+
+That tool is called on every run, so its schema shapes every response. No prose, no drift. The extraction-pipeline mode.
+
+</Flashcard>
+
+<Flashcard question="What does strict mode do, and by what mechanism?">
+
+It guarantees tool arguments match the schema exactly by constraining the model's token sampling to schema-valid output. The model cannot emit a token that breaks the schema.
+
+</Flashcard>
+
+<Flashcard question="Why is a required, non-nullable field a fabrication engine?">
+
+On a document that lacks the information, the honest answer is syntactically illegal. The model must fill the slot, so it fills it with something plausible.
+
+</Flashcard>
+
+<Flashcard question="Required-plus-nullable versus optional: which is more honest, and why?">
+
+Required plus nullable. An omitted optional field is ambiguous (absent, or skipped?). A required nullable field forces a verdict: null means "I looked, and it is not there."
+
+</Flashcard>
+
+<Flashcard question="What is the enum escape-hatch pattern?">
+
+A catch-all value (such as "other") plus a nullable detail string capturing what was actually seen. Real-world variety gets flagged for routing instead of silently force-fitted.
+
+</Flashcard>
+
+<Flashcard question="What is the difference between syntactic and semantic validity?">
+
+Syntactic: the output matches the schema (shape, types, enum values), which the platform can guarantee. Semantic: the values are actually correct, which no schema can guarantee. Sums can disagree and fields can swap inside valid JSON.
+
+</Flashcard>
+
+<Flashcard question="When can a validation retry help, and when can it not?">
+
+It helps when the answer exists in the source and was misread: feed back the specific error. It cannot help when the information is absent: retrying a null pressures the model to invent. Ask "is the answer in the source?" first.
+
+</Flashcard>
+
+<Flashcard question="What should a retry message contain?">
+
+The specific validation failure and a pointed instruction, for example: the line items sum to 4,120.00 but the total says 4,210.00, re-read and correct whichever field was misread. "Validation failed" alone gives the model nothing.
+
+</Flashcard>
+
+<Flashcard question="What is the one-sentence honesty rule for schema design?">
+
+Write a contract the truth can always satisfy: "not in the document" must be a legal answer to every question the schema asks.
+
+</Flashcard>
+
+</FlashcardSet>

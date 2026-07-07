@@ -4162,6 +4162,42 @@ export default defineConfig({
 								{ label: 'References', slug: 'lessons/engineering-agentic-systems/thinking-like-an-architect/references' },
 							],
 						},
+						{
+							label: 'CLAUDE.md at team scale',
+							collapsed: true,
+							items: [
+								{ label: 'Brief', slug: 'lessons/engineering-agentic-systems/claude-md-at-team-scale/brief' },
+								{ label: 'Lesson', slug: 'lessons/engineering-agentic-systems/claude-md-at-team-scale/lesson' },
+								{ label: 'Practice', slug: 'lessons/engineering-agentic-systems/claude-md-at-team-scale/practice' },
+								{ label: 'Summary', slug: 'lessons/engineering-agentic-systems/claude-md-at-team-scale/summary' },
+								{ label: 'Cheatsheet', slug: 'lessons/engineering-agentic-systems/claude-md-at-team-scale/cheatsheet' },
+								{ label: 'References', slug: 'lessons/engineering-agentic-systems/claude-md-at-team-scale/references' },
+							],
+						},
+						{
+							label: 'Schemas that refuse to lie',
+							collapsed: true,
+							items: [
+								{ label: 'Brief', slug: 'lessons/engineering-agentic-systems/schemas-that-refuse-to-lie/brief' },
+								{ label: 'Lesson', slug: 'lessons/engineering-agentic-systems/schemas-that-refuse-to-lie/lesson' },
+								{ label: 'Practice', slug: 'lessons/engineering-agentic-systems/schemas-that-refuse-to-lie/practice' },
+								{ label: 'Summary', slug: 'lessons/engineering-agentic-systems/schemas-that-refuse-to-lie/summary' },
+								{ label: 'Cheatsheet', slug: 'lessons/engineering-agentic-systems/schemas-that-refuse-to-lie/cheatsheet' },
+								{ label: 'References', slug: 'lessons/engineering-agentic-systems/schemas-that-refuse-to-lie/references' },
+							],
+						},
+						{
+							label: 'Tools other agents can trust',
+							collapsed: true,
+							items: [
+								{ label: 'Brief', slug: 'lessons/engineering-agentic-systems/tools-other-agents-can-trust/brief' },
+								{ label: 'Lesson', slug: 'lessons/engineering-agentic-systems/tools-other-agents-can-trust/lesson' },
+								{ label: 'Practice', slug: 'lessons/engineering-agentic-systems/tools-other-agents-can-trust/practice' },
+								{ label: 'Summary', slug: 'lessons/engineering-agentic-systems/tools-other-agents-can-trust/summary' },
+								{ label: 'Cheatsheet', slug: 'lessons/engineering-agentic-systems/tools-other-agents-can-trust/cheatsheet' },
+								{ label: 'References', slug: 'lessons/engineering-agentic-systems/tools-other-agents-can-trust/references' },
+							],
+						},
 					],
 				}
 			];
