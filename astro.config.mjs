@@ -4262,6 +4262,10 @@ export default defineConfig({
 				// Adds a legal-links row + parent-company line under Starlight's
 				// default footer (edit-link / last-updated / pagination stay).
 				Footer: './src/components/Footer.astro',
+				// Adds a persistent site nav (Mission / Tracks / Podcast / Trust) to
+				// the header so orientation pages are reachable from the homepage,
+				// which renders no sidebar (founder, 2026-07-07).
+				Header: './src/components/Header.astro',
 				// Adds an auto-detected acronym glossary under the right-rail
 				// table of contents. See src/components/overrides/PageSidebar.astro
 				// + src/data/acronyms.ts.
