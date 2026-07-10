@@ -385,6 +385,7 @@ const BriefSchema = z.object({
 		'ai-safety-and-alignment',
 		'git-workflow',
 		'engineering-agentic-systems',
+	'generative-ai-in-the-real-world',
 	]),
 	difficulty: z.enum(['intro', 'standard', 'deep']),
 	estimated_read_minutes: z.number().int().positive(),

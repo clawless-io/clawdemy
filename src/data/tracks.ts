@@ -404,6 +404,17 @@ export const TRACKS: Track[] = [
 		status: 'live',
 		href: '/lessons/engineering-agentic-systems/thinking-like-an-architect/lesson/',
 	},
+	{
+		id: 27,
+		slug: 'generative-ai-in-the-real-world',
+		title: 'Generative AI in the Real World',
+		blurb: 'Use generative AI well and judge what it means for your work, adapted from a Harvard Kennedy School course.',
+		theme: 'specialized',
+		level: 'Beginner',
+		lessons: 9,
+		status: 'live',
+		href: '/lessons/generative-ai-in-the-real-world/what-generative-ai-actually-is/lesson/',
+	},
 
 	// --- Planned (not yet built; rendered only where status is surfaced) ----
 	{

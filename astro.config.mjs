@@ -4247,6 +4247,23 @@ export default defineConfig({
 							],
 						},
 					],
+				},
+				{
+					label: 'Track 27: Generative AI',
+					items: [
+						{
+							label: 'What generative AI actually is',
+							collapsed: true,
+							items: [
+								{ label: 'Brief', slug: 'lessons/generative-ai-in-the-real-world/what-generative-ai-actually-is/brief' },
+								{ label: 'Lesson', slug: 'lessons/generative-ai-in-the-real-world/what-generative-ai-actually-is/lesson' },
+								{ label: 'Practice', slug: 'lessons/generative-ai-in-the-real-world/what-generative-ai-actually-is/practice' },
+								{ label: 'Summary', slug: 'lessons/generative-ai-in-the-real-world/what-generative-ai-actually-is/summary' },
+								{ label: 'Cheatsheet', slug: 'lessons/generative-ai-in-the-real-world/what-generative-ai-actually-is/cheatsheet' },
+								{ label: 'References', slug: 'lessons/generative-ai-in-the-real-world/what-generative-ai-actually-is/references' },
+							],
+						},
+					],
 				}
 			];
 					const __top = __groups.filter((g) => !/^Track \d+/.test(g.label));
