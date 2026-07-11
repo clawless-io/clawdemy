@@ -4311,6 +4311,18 @@ export default defineConfig({
 								{ label: 'References', slug: 'lessons/generative-ai-in-the-real-world/ai-on-a-real-project/references' },
 							],
 						},
+						{
+							label: 'The risk map',
+							collapsed: true,
+							items: [
+								{ label: 'Brief', slug: 'lessons/generative-ai-in-the-real-world/the-risk-map/brief' },
+								{ label: 'Lesson', slug: 'lessons/generative-ai-in-the-real-world/the-risk-map/lesson' },
+								{ label: 'Practice', slug: 'lessons/generative-ai-in-the-real-world/the-risk-map/practice' },
+								{ label: 'Summary', slug: 'lessons/generative-ai-in-the-real-world/the-risk-map/summary' },
+								{ label: 'Cheatsheet', slug: 'lessons/generative-ai-in-the-real-world/the-risk-map/cheatsheet' },
+								{ label: 'References', slug: 'lessons/generative-ai-in-the-real-world/the-risk-map/references' },
+							],
+						},
 					],
 				}
 			];
