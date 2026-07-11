@@ -4287,6 +4287,18 @@ export default defineConfig({
 								{ label: 'References', slug: 'lessons/generative-ai-in-the-real-world/beyond-the-chat-window/references' },
 							],
 						},
+						{
+							label: 'Should AI do this task?',
+							collapsed: true,
+							items: [
+								{ label: 'Brief', slug: 'lessons/generative-ai-in-the-real-world/should-ai-do-this-task/brief' },
+								{ label: 'Lesson', slug: 'lessons/generative-ai-in-the-real-world/should-ai-do-this-task/lesson' },
+								{ label: 'Practice', slug: 'lessons/generative-ai-in-the-real-world/should-ai-do-this-task/practice' },
+								{ label: 'Summary', slug: 'lessons/generative-ai-in-the-real-world/should-ai-do-this-task/summary' },
+								{ label: 'Cheatsheet', slug: 'lessons/generative-ai-in-the-real-world/should-ai-do-this-task/cheatsheet' },
+								{ label: 'References', slug: 'lessons/generative-ai-in-the-real-world/should-ai-do-this-task/references' },
+							],
+						},
 					],
 				}
 			];
