@@ -4347,6 +4347,18 @@ export default defineConfig({
 								{ label: 'References', slug: 'lessons/generative-ai-in-the-real-world/will-ai-take-my-job/references' },
 							],
 						},
+						{
+							label: 'Lies at scale',
+							collapsed: true,
+							items: [
+								{ label: 'Brief', slug: 'lessons/generative-ai-in-the-real-world/lies-at-scale/brief' },
+								{ label: 'Lesson', slug: 'lessons/generative-ai-in-the-real-world/lies-at-scale/lesson' },
+								{ label: 'Practice', slug: 'lessons/generative-ai-in-the-real-world/lies-at-scale/practice' },
+								{ label: 'Summary', slug: 'lessons/generative-ai-in-the-real-world/lies-at-scale/summary' },
+								{ label: 'Cheatsheet', slug: 'lessons/generative-ai-in-the-real-world/lies-at-scale/cheatsheet' },
+								{ label: 'References', slug: 'lessons/generative-ai-in-the-real-world/lies-at-scale/references' },
+							],
+						},
 					],
 				}
 			];
