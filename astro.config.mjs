@@ -4263,6 +4263,18 @@ export default defineConfig({
 								{ label: 'References', slug: 'lessons/generative-ai-in-the-real-world/what-generative-ai-actually-is/references' },
 							],
 						},
+						{
+							label: 'Asking well: a good prompt',
+							collapsed: true,
+							items: [
+								{ label: 'Brief', slug: 'lessons/generative-ai-in-the-real-world/asking-well/brief' },
+								{ label: 'Lesson', slug: 'lessons/generative-ai-in-the-real-world/asking-well/lesson' },
+								{ label: 'Practice', slug: 'lessons/generative-ai-in-the-real-world/asking-well/practice' },
+								{ label: 'Summary', slug: 'lessons/generative-ai-in-the-real-world/asking-well/summary' },
+								{ label: 'Cheatsheet', slug: 'lessons/generative-ai-in-the-real-world/asking-well/cheatsheet' },
+								{ label: 'References', slug: 'lessons/generative-ai-in-the-real-world/asking-well/references' },
+							],
+						},
 					],
 				}
 			];
