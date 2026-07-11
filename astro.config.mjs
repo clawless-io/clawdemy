@@ -4275,6 +4275,18 @@ export default defineConfig({
 								{ label: 'References', slug: 'lessons/generative-ai-in-the-real-world/asking-well/references' },
 							],
 						},
+						{
+							label: 'Beyond the chat window',
+							collapsed: true,
+							items: [
+								{ label: 'Brief', slug: 'lessons/generative-ai-in-the-real-world/beyond-the-chat-window/brief' },
+								{ label: 'Lesson', slug: 'lessons/generative-ai-in-the-real-world/beyond-the-chat-window/lesson' },
+								{ label: 'Practice', slug: 'lessons/generative-ai-in-the-real-world/beyond-the-chat-window/practice' },
+								{ label: 'Summary', slug: 'lessons/generative-ai-in-the-real-world/beyond-the-chat-window/summary' },
+								{ label: 'Cheatsheet', slug: 'lessons/generative-ai-in-the-real-world/beyond-the-chat-window/cheatsheet' },
+								{ label: 'References', slug: 'lessons/generative-ai-in-the-real-world/beyond-the-chat-window/references' },
+							],
+						},
 					],
 				}
 			];
