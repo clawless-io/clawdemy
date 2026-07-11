@@ -4323,6 +4323,18 @@ export default defineConfig({
 								{ label: 'References', slug: 'lessons/generative-ai-in-the-real-world/the-risk-map/references' },
 							],
 						},
+						{
+							label: 'Who owns AI\'s words and pictures?',
+							collapsed: true,
+							items: [
+								{ label: 'Brief', slug: 'lessons/generative-ai-in-the-real-world/who-owns-ai-words-and-pictures/brief' },
+								{ label: 'Lesson', slug: 'lessons/generative-ai-in-the-real-world/who-owns-ai-words-and-pictures/lesson' },
+								{ label: 'Practice', slug: 'lessons/generative-ai-in-the-real-world/who-owns-ai-words-and-pictures/practice' },
+								{ label: 'Summary', slug: 'lessons/generative-ai-in-the-real-world/who-owns-ai-words-and-pictures/summary' },
+								{ label: 'Cheatsheet', slug: 'lessons/generative-ai-in-the-real-world/who-owns-ai-words-and-pictures/cheatsheet' },
+								{ label: 'References', slug: 'lessons/generative-ai-in-the-real-world/who-owns-ai-words-and-pictures/references' },
+							],
+						},
 					],
 				}
 			];
