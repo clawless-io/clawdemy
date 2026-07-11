@@ -4335,6 +4335,18 @@ export default defineConfig({
 								{ label: 'References', slug: 'lessons/generative-ai-in-the-real-world/who-owns-ai-words-and-pictures/references' },
 							],
 						},
+						{
+							label: 'Will AI take my job?',
+							collapsed: true,
+							items: [
+								{ label: 'Brief', slug: 'lessons/generative-ai-in-the-real-world/will-ai-take-my-job/brief' },
+								{ label: 'Lesson', slug: 'lessons/generative-ai-in-the-real-world/will-ai-take-my-job/lesson' },
+								{ label: 'Practice', slug: 'lessons/generative-ai-in-the-real-world/will-ai-take-my-job/practice' },
+								{ label: 'Summary', slug: 'lessons/generative-ai-in-the-real-world/will-ai-take-my-job/summary' },
+								{ label: 'Cheatsheet', slug: 'lessons/generative-ai-in-the-real-world/will-ai-take-my-job/cheatsheet' },
+								{ label: 'References', slug: 'lessons/generative-ai-in-the-real-world/will-ai-take-my-job/references' },
+							],
+						},
 					],
 				}
 			];
