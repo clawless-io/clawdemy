@@ -4299,6 +4299,18 @@ export default defineConfig({
 								{ label: 'References', slug: 'lessons/generative-ai-in-the-real-world/should-ai-do-this-task/references' },
 							],
 						},
+						{
+							label: 'AI on a real project',
+							collapsed: true,
+							items: [
+								{ label: 'Brief', slug: 'lessons/generative-ai-in-the-real-world/ai-on-a-real-project/brief' },
+								{ label: 'Lesson', slug: 'lessons/generative-ai-in-the-real-world/ai-on-a-real-project/lesson' },
+								{ label: 'Practice', slug: 'lessons/generative-ai-in-the-real-world/ai-on-a-real-project/practice' },
+								{ label: 'Summary', slug: 'lessons/generative-ai-in-the-real-world/ai-on-a-real-project/summary' },
+								{ label: 'Cheatsheet', slug: 'lessons/generative-ai-in-the-real-world/ai-on-a-real-project/cheatsheet' },
+								{ label: 'References', slug: 'lessons/generative-ai-in-the-real-world/ai-on-a-real-project/references' },
+							],
+						},
 					],
 				}
 			];
