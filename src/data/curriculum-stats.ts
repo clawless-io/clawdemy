@@ -27,10 +27,10 @@ export interface CurriculumStat {
 // (2x2 mobile / 4-up desktop). If you add or remove a stat, update the
 // nth-child divider suppression in StatBanner.astro to match.
 export const CURRICULUM_STATS: readonly CurriculumStat[] = [
-	// 26 tracks / 318 lessons as of Track 26 (Engineering Agentic Systems,
-	// 8 planned lessons) joining the scope on 2026-07-06.
-	{ value: '26', label: 'Tracks' },
-	{ value: '318', label: 'Lessons' },
+	// 27 tracks / 327 lessons as of Track 27 (Generative AI in the Real World,
+	// 9 planned lessons) joining the scope on 2026-07-10.
+	{ value: '27', label: 'Tracks' },
+	{ value: '327', label: 'Lessons' },
 	{ value: '1.5M+', label: 'Words', srText: 'More than 1.5 million words' },
 	{ value: 'Free', label: 'No signup' },
 ] as const;

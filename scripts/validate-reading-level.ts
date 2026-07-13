@@ -37,6 +37,8 @@ const THRESHOLDS: Record<string, number> = {
 	'use-case-cookbook': 60,
 	'agent-building-101': 60,
 	'privacy-local-first': 60,
+	// Track 27: Beginner mission-core track; floor 55 per the frozen outline.
+	'generative-ai-in-the-real-world': 55,
 	'pain-point-library': 60,
 	'openclaw-deep-dive': 40,
 	'ai-foundations': 40,

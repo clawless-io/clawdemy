@@ -4247,6 +4247,119 @@ export default defineConfig({
 							],
 						},
 					],
+				},
+				{
+					label: 'Track 27: Generative AI',
+					items: [
+						{
+							label: 'What generative AI actually is',
+							collapsed: true,
+							items: [
+								{ label: 'Brief', slug: 'lessons/generative-ai-in-the-real-world/what-generative-ai-actually-is/brief' },
+								{ label: 'Lesson', slug: 'lessons/generative-ai-in-the-real-world/what-generative-ai-actually-is/lesson' },
+								{ label: 'Practice', slug: 'lessons/generative-ai-in-the-real-world/what-generative-ai-actually-is/practice' },
+								{ label: 'Summary', slug: 'lessons/generative-ai-in-the-real-world/what-generative-ai-actually-is/summary' },
+								{ label: 'Cheatsheet', slug: 'lessons/generative-ai-in-the-real-world/what-generative-ai-actually-is/cheatsheet' },
+								{ label: 'References', slug: 'lessons/generative-ai-in-the-real-world/what-generative-ai-actually-is/references' },
+							],
+						},
+						{
+							label: 'Asking well: a good prompt',
+							collapsed: true,
+							items: [
+								{ label: 'Brief', slug: 'lessons/generative-ai-in-the-real-world/asking-well/brief' },
+								{ label: 'Lesson', slug: 'lessons/generative-ai-in-the-real-world/asking-well/lesson' },
+								{ label: 'Practice', slug: 'lessons/generative-ai-in-the-real-world/asking-well/practice' },
+								{ label: 'Summary', slug: 'lessons/generative-ai-in-the-real-world/asking-well/summary' },
+								{ label: 'Cheatsheet', slug: 'lessons/generative-ai-in-the-real-world/asking-well/cheatsheet' },
+								{ label: 'References', slug: 'lessons/generative-ai-in-the-real-world/asking-well/references' },
+							],
+						},
+						{
+							label: 'Beyond the chat window',
+							collapsed: true,
+							items: [
+								{ label: 'Brief', slug: 'lessons/generative-ai-in-the-real-world/beyond-the-chat-window/brief' },
+								{ label: 'Lesson', slug: 'lessons/generative-ai-in-the-real-world/beyond-the-chat-window/lesson' },
+								{ label: 'Practice', slug: 'lessons/generative-ai-in-the-real-world/beyond-the-chat-window/practice' },
+								{ label: 'Summary', slug: 'lessons/generative-ai-in-the-real-world/beyond-the-chat-window/summary' },
+								{ label: 'Cheatsheet', slug: 'lessons/generative-ai-in-the-real-world/beyond-the-chat-window/cheatsheet' },
+								{ label: 'References', slug: 'lessons/generative-ai-in-the-real-world/beyond-the-chat-window/references' },
+							],
+						},
+						{
+							label: 'Should AI do this task?',
+							collapsed: true,
+							items: [
+								{ label: 'Brief', slug: 'lessons/generative-ai-in-the-real-world/should-ai-do-this-task/brief' },
+								{ label: 'Lesson', slug: 'lessons/generative-ai-in-the-real-world/should-ai-do-this-task/lesson' },
+								{ label: 'Practice', slug: 'lessons/generative-ai-in-the-real-world/should-ai-do-this-task/practice' },
+								{ label: 'Summary', slug: 'lessons/generative-ai-in-the-real-world/should-ai-do-this-task/summary' },
+								{ label: 'Cheatsheet', slug: 'lessons/generative-ai-in-the-real-world/should-ai-do-this-task/cheatsheet' },
+								{ label: 'References', slug: 'lessons/generative-ai-in-the-real-world/should-ai-do-this-task/references' },
+							],
+						},
+						{
+							label: 'AI on a real project',
+							collapsed: true,
+							items: [
+								{ label: 'Brief', slug: 'lessons/generative-ai-in-the-real-world/ai-on-a-real-project/brief' },
+								{ label: 'Lesson', slug: 'lessons/generative-ai-in-the-real-world/ai-on-a-real-project/lesson' },
+								{ label: 'Practice', slug: 'lessons/generative-ai-in-the-real-world/ai-on-a-real-project/practice' },
+								{ label: 'Summary', slug: 'lessons/generative-ai-in-the-real-world/ai-on-a-real-project/summary' },
+								{ label: 'Cheatsheet', slug: 'lessons/generative-ai-in-the-real-world/ai-on-a-real-project/cheatsheet' },
+								{ label: 'References', slug: 'lessons/generative-ai-in-the-real-world/ai-on-a-real-project/references' },
+							],
+						},
+						{
+							label: 'The risk map',
+							collapsed: true,
+							items: [
+								{ label: 'Brief', slug: 'lessons/generative-ai-in-the-real-world/the-risk-map/brief' },
+								{ label: 'Lesson', slug: 'lessons/generative-ai-in-the-real-world/the-risk-map/lesson' },
+								{ label: 'Practice', slug: 'lessons/generative-ai-in-the-real-world/the-risk-map/practice' },
+								{ label: 'Summary', slug: 'lessons/generative-ai-in-the-real-world/the-risk-map/summary' },
+								{ label: 'Cheatsheet', slug: 'lessons/generative-ai-in-the-real-world/the-risk-map/cheatsheet' },
+								{ label: 'References', slug: 'lessons/generative-ai-in-the-real-world/the-risk-map/references' },
+							],
+						},
+						{
+							label: 'Who owns AI\'s words and pictures?',
+							collapsed: true,
+							items: [
+								{ label: 'Brief', slug: 'lessons/generative-ai-in-the-real-world/who-owns-ai-words-and-pictures/brief' },
+								{ label: 'Lesson', slug: 'lessons/generative-ai-in-the-real-world/who-owns-ai-words-and-pictures/lesson' },
+								{ label: 'Practice', slug: 'lessons/generative-ai-in-the-real-world/who-owns-ai-words-and-pictures/practice' },
+								{ label: 'Summary', slug: 'lessons/generative-ai-in-the-real-world/who-owns-ai-words-and-pictures/summary' },
+								{ label: 'Cheatsheet', slug: 'lessons/generative-ai-in-the-real-world/who-owns-ai-words-and-pictures/cheatsheet' },
+								{ label: 'References', slug: 'lessons/generative-ai-in-the-real-world/who-owns-ai-words-and-pictures/references' },
+							],
+						},
+						{
+							label: 'Will AI take my job?',
+							collapsed: true,
+							items: [
+								{ label: 'Brief', slug: 'lessons/generative-ai-in-the-real-world/will-ai-take-my-job/brief' },
+								{ label: 'Lesson', slug: 'lessons/generative-ai-in-the-real-world/will-ai-take-my-job/lesson' },
+								{ label: 'Practice', slug: 'lessons/generative-ai-in-the-real-world/will-ai-take-my-job/practice' },
+								{ label: 'Summary', slug: 'lessons/generative-ai-in-the-real-world/will-ai-take-my-job/summary' },
+								{ label: 'Cheatsheet', slug: 'lessons/generative-ai-in-the-real-world/will-ai-take-my-job/cheatsheet' },
+								{ label: 'References', slug: 'lessons/generative-ai-in-the-real-world/will-ai-take-my-job/references' },
+							],
+						},
+						{
+							label: 'Lies at scale',
+							collapsed: true,
+							items: [
+								{ label: 'Brief', slug: 'lessons/generative-ai-in-the-real-world/lies-at-scale/brief' },
+								{ label: 'Lesson', slug: 'lessons/generative-ai-in-the-real-world/lies-at-scale/lesson' },
+								{ label: 'Practice', slug: 'lessons/generative-ai-in-the-real-world/lies-at-scale/practice' },
+								{ label: 'Summary', slug: 'lessons/generative-ai-in-the-real-world/lies-at-scale/summary' },
+								{ label: 'Cheatsheet', slug: 'lessons/generative-ai-in-the-real-world/lies-at-scale/cheatsheet' },
+								{ label: 'References', slug: 'lessons/generative-ai-in-the-real-world/lies-at-scale/references' },
+							],
+						},
+					],
 				}
 			];
 					const __top = __groups.filter((g) => !/^Track \d+/.test(g.label));

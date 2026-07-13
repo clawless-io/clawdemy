@@ -38,6 +38,7 @@ export const collections = {
 						'ai-agents-and-tool-use', // Track 20: Microsoft AI Agents for Beginners + Berkeley CS294
 						'ai-agent-teams', // Track 25: Anatomy of an AI Agent Team (TradingAgents case study)
 						'engineering-agentic-systems', // Track 26: Engineering Agentic Systems (advanced layer atop Track 22)
+						'generative-ai-in-the-real-world', // Track 27: Generative AI in the Real World (HKS DPI-681M adaptation)
 						'neural-network-intuition', // Track 11: 3Blue1Brown Neural Networks series
 						'practical-transformers', // Track 14: Hugging Face LLM Course
 						'reinforcement-learning-foundations', // Track 17: David Silver UCL RL Course
