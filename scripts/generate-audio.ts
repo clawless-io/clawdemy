@@ -251,28 +251,26 @@ export function mdxToProse(mdx: string): string {
 	// ai-agent-teams L2 while ear-checking the code-lesson narration.
 	text = text.replace(/\{\/\*[\s\S]*?\*\/\}/g, '');
 
-	// Starlight asides (:::note[Title] ... :::). The rendered DOM puts the aside
-	// TITLE in a <p class="starlight-aside__title"> and the BODY in <p> tags, both
-	// BLOCK_TAGS the ReadAlongDim walker counts (the title's icon is an SVG, a
-	// SKIP_TAG, so only the title's text words are counted). So the narration must
-	// speak title-then-body, in document order, or every word after the aside
-	// drifts out of sync with the highlight. Convert the opener to its title as a
-	// sentence (trailing period for a natural pause, mirroring the heading pass)
-	// and drop the closing ::: fence. Untitled directives fall back to the type's
-	// default Starlight label ("Note"/"Tip"/"Caution"/"Danger"). Runs before the
-	// horizontal-rule pass, which matches --- not :::, so the two never collide.
+	// Starlight asides (:::note[Title] ... :::). Drop the opener line ENTIRELY
+	// (title included) and the closing ::: fence, keeping only the aside body.
+	// Why drop the title: Starlight renders the aside title as
+	// <p class="starlight-aside__title" aria-hidden="true">, and the ReadAlongDim
+	// DOM walker skips every aria-hidden element, so the title's words are NEVER
+	// wrapped as highlight words. The aside BODY <p> is NOT aria-hidden and IS
+	// walked. So narration must skip the title and keep the body, or the highlight
+	// runs ahead by the title's word count for the rest of the lesson. (This is
+	// also the accessibility-consistent choice: screen readers skip the aria-hidden
+	// title too; the icon conveys the callout type.) Runs before the horizontal-
+	// rule pass, which matches --- not :::, so the two never collide.
 	// Added 2026-07-12 for T27 L7 (who-owns-ai-words-and-pictures), the first
-	// lesson body to use directive callouts (its legal-landscape banner + the
-	// education-not-legal-advice disclaimer). Verify by ear before any R2 regen.
+	// lesson body with directive callouts (legal-landscape banner + education-not-
+	// legal-advice disclaimer). Corrected same day after a founder read-along
+	// review caught the title-highlight drift; the earlier version spoke the title
+	// as a sentence, which the aria-hidden title p could never highlight. The body
+	// is still narrated and highlighted. Verify by ear before any R2 regen.
 	text = text.replace(
-		/^:::(note|tip|caution|danger|warning|important)(?:\[([^\]]*)\])?[ \t]*$/gim,
-		(_m, type, title) => {
-			const label =
-				title && title.trim()
-					? title.trim()
-					: type.charAt(0).toUpperCase() + type.slice(1);
-			return `${label}.`;
-		},
+		/^:::(?:note|tip|caution|danger|warning|important)(?:\[[^\]]*\])?[ \t]*$/gim,
+		'',
 	);
 	text = text.replace(/^:::[ \t]*$/gm, '');
 
