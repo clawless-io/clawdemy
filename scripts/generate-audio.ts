@@ -251,6 +251,31 @@ export function mdxToProse(mdx: string): string {
 	// ai-agent-teams L2 while ear-checking the code-lesson narration.
 	text = text.replace(/\{\/\*[\s\S]*?\*\/\}/g, '');
 
+	// Starlight asides (:::note[Title] ... :::). The rendered DOM puts the aside
+	// TITLE in a <p class="starlight-aside__title"> and the BODY in <p> tags, both
+	// BLOCK_TAGS the ReadAlongDim walker counts (the title's icon is an SVG, a
+	// SKIP_TAG, so only the title's text words are counted). So the narration must
+	// speak title-then-body, in document order, or every word after the aside
+	// drifts out of sync with the highlight. Convert the opener to its title as a
+	// sentence (trailing period for a natural pause, mirroring the heading pass)
+	// and drop the closing ::: fence. Untitled directives fall back to the type's
+	// default Starlight label ("Note"/"Tip"/"Caution"/"Danger"). Runs before the
+	// horizontal-rule pass, which matches --- not :::, so the two never collide.
+	// Added 2026-07-12 for T27 L7 (who-owns-ai-words-and-pictures), the first
+	// lesson body to use directive callouts (its legal-landscape banner + the
+	// education-not-legal-advice disclaimer). Verify by ear before any R2 regen.
+	text = text.replace(
+		/^:::(note|tip|caution|danger|warning|important)(?:\[([^\]]*)\])?[ \t]*$/gim,
+		(_m, type, title) => {
+			const label =
+				title && title.trim()
+					? title.trim()
+					: type.charAt(0).toUpperCase() + type.slice(1);
+			return `${label}.`;
+		},
+	);
+	text = text.replace(/^:::[ \t]*$/gm, '');
+
 	// References / bibliography section: drop from the "## References" heading to
 	// the end of the document. Bibliography entries are URLs, arXiv IDs, author
 	// lists, DOIs, and venue names that the TTS mispronounces ("arXiv:1805.00909"
