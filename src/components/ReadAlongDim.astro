@@ -18,21 +18,21 @@
  *      gaps are vanishingly small, so we surface the word-level cursor
  *      visitors actually want to follow.
  *
- *   2. Self-managed wallclock, not audio.currentTime. After the first
- *      `play` event, the component captures `t0 = performance.now() -
- *      audio.currentTime * 1000` as the wallclock origin, then NEVER
- *      reads `audio.currentTime` again. On pause it captures
- *      `pausedAt`; on resume it shifts `t0` forward by the paused
- *      duration. This removes the only browser-fragile dependency the
- *      previous design had: Chrome's `audio.currentTime` after buffer
- *      eviction can be stale or lying, and the 250ms poll attempt to
- *      fix it (commit df77070) failed real-browser testing. The
- *      wallclock cannot lie because we own it.
+ *   2. `audio.currentTime` is the single source of truth, sampled once
+ *      per animation frame while playing (commit 3b17925 dropped the
+ *      earlier self-managed wallclock, which could not follow a manual
+ *      scrub). Everything the cursor derives comes from that media
+ *      timestamp, never from elapsed listening time.
  *
- *      Trade-off: if the user manually scrubs the audio backward, the
- *      dim cursor doesn't follow (it keeps its wallclock pace). The
- *      visible dim state stays internally consistent with how long the
- *      listener has been listening. We accept that trade.
+ *      This distinction is what makes the cursor correct at non-1x
+ *      playback speeds: media time is rate-independent, so the timing
+ *      JSON stays valid whatever rate the listener picks. Any wallclock
+ *      constant layered on top (a poll interval, a CSS transition) does
+ *      NOT scale with rate, and shows up as a cursor that drifts further
+ *      behind the faster the audio plays. Two such constants caused
+ *      exactly that (fixed 2026-07-28); see `startTick` and
+ *      `syncFadeToRate`. Treat any new wallclock timer in this component
+ *      as suspect until checked at 2x and 3x.
  *
  *   3. Always-on as of 2026-05-13. The component used to be gated on
  *      `?readalong=paragraph` during the prototype phase. After the
@@ -376,7 +376,6 @@ const playerId = `rad-${slug}-${Math.random().toString(36).slice(2, 8)}`;
 
 		// Mode-specific dim cursors. Each tracks the highest index currently
 		// marked .ra-past in its own collection (wordSpans or blockEls).
-		let tickHandle = null;
 		let lastPastWordIdx = -1;
 		let lastPastBlockIdx = -1;
 		let lastScrollBlockIdx = -1;
@@ -425,7 +424,16 @@ const playerId = `rad-${slug}-${Math.random().toString(36).slice(2, 8)}`;
 					: -1;
 				applyBlockDelta(currentBlockIdx - 1);
 			}
-			// Block-change scroll-into-view, throttled to once per 700ms.
+			// Block-change scroll-into-view, throttled to once per 700ms of
+			// wallclock (a comfort limit on smooth-scroll animations, so it
+			// stays in wallclock rather than media time even at high playback
+			// rates). `lastScrollBlockIdx` is advanced ONLY when the scroll
+			// actually ran: a throttled scroll must stay pending so the next
+			// tick retries it. Otherwise, at elevated playback rates where
+			// consecutive short blocks (headings, list items) go by in under
+			// 700ms, the skipped scroll is never re-attempted and the viewport
+			// sits a whole block behind the narrator until the block after
+			// next.
 			if (currentIdx >= 0 && currentIdx < N) {
 				const blockIdx = wordBlockIdx[currentIdx];
 				if (blockIdx !== lastScrollBlockIdx) {
@@ -433,11 +441,24 @@ const playerId = `rad-${slug}-${Math.random().toString(36).slice(2, 8)}`;
 					if (now - lastScrollAt > 700) {
 						blockEls[blockIdx].scrollIntoView({ block: 'center', behavior: 'smooth' });
 						lastScrollAt = now;
+						lastScrollBlockIdx = blockIdx;
 					}
-					lastScrollBlockIdx = blockIdx;
 				}
 			}
 		}
+
+		// The dim transition is a wallclock CSS duration, so at 2x it covers
+		// twice as much narration as at 1x and the fade visibly trails the
+		// voice. Compress it in proportion to the playback rate so the fade
+		// always spans the same amount of *content*. Floored so the dimming
+		// never becomes an abrupt flicker.
+		function syncFadeToRate() {
+			const rate = audio.playbackRate || 1;
+			const secs = Math.max(0.12, 0.35 / rate);
+			container.style.setProperty('--ra-fade', `${secs.toFixed(2)}s`);
+		}
+		audio.addEventListener('ratechange', syncFadeToRate);
+		syncFadeToRate();
 
 		function clearAllDim() {
 			// Pull both class sets in case mode just flipped. Cheap relative
@@ -478,18 +499,42 @@ const playerId = `rad-${slug}-${Math.random().toString(36).slice(2, 8)}`;
 			});
 		}
 
+		// Frame-driven tick, not a fixed-interval poll.
+		//
+		// The previous 250ms setInterval sampled the dim boundary on a
+		// WALLCLOCK schedule while the boundary itself advances in MEDIA
+		// time. Those are the same thing only at 1x. At playback rate R,
+		// each 250ms tick lets R x 250ms of narration go by, so the dim
+		// cursor sits up to ~0.6 words behind at 1x but ~1.7 words behind
+		// at 3x: the faster you play, the further out of sync it looks.
+		// (Reported 2026-07-28; measured against the per-word timings,
+		// which average ~0.45s/word.)
+		//
+		// requestAnimationFrame removes the constant entirely rather than
+		// re-tuning it: we resample once per painted frame, so the cursor
+		// is at most one frame stale at any rate, and no `ratechange`
+		// bookkeeping is needed. Per-frame cost is one binary search over
+		// the timing array plus the delta update, which early-returns on
+		// the frames where the boundary has not moved.
+		//
+		// rAF pauses in background tabs. That is fine here: `tick` computes
+		// the boundary from an absolute timestamp rather than accumulating,
+		// so the first frame after the tab is refocused lands on the right
+		// word in a single delta pass.
+		let rafHandle = null;
+		function frame() {
+			tick();
+			rafHandle = requestAnimationFrame(frame);
+		}
 		function startTick() {
-			if (tickHandle !== null) return;
-			// 250ms tick: at typical narration ~3 words/sec, the dim
-			// boundary advances ~0-1 words per tick. Cheap because of
-			// the delta-only update.
-			tickHandle = setInterval(tick, 250);
+			if (rafHandle !== null) return;
+			rafHandle = requestAnimationFrame(frame);
 			tick();
 		}
 		function stopTick() {
-			if (tickHandle !== null) {
-				clearInterval(tickHandle);
-				tickHandle = null;
+			if (rafHandle !== null) {
+				cancelAnimationFrame(rafHandle);
+				rafHandle = null;
 			}
 		}
 
@@ -665,7 +710,9 @@ const playerId = `rad-${slug}-${Math.random().toString(36).slice(2, 8)}`;
 <style is:global>
 	.ra-past {
 		opacity: 0.55;
-		transition: opacity 0.35s ease;
+		/* Duration is rescaled per playback rate by syncFadeToRate(); the
+		   literal here is the 1x value and the no-JS fallback. */
+		transition: opacity var(--ra-fade, 0.35s) ease;
 	}
 	@media (prefers-reduced-motion: reduce) {
 		.ra-past {
