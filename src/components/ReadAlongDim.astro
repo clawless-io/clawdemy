@@ -107,6 +107,15 @@ const {
  */
 const STYLE_TOGGLE_ENABLED = true;
 
+/**
+ * Single global flag for the floating play/pause control. When true, a small
+ * fixed-corner play/pause button appears once the listener has started audio
+ * AND the inline player has scrolled out of view, so they can pause to think
+ * (or resume) without scrolling back up or knowing the spacebar shortcut
+ * (issue #72). Flip to false to remove it site-wide (kill-switch). No MDX edits.
+ */
+const FLOATING_PLAYER_ENABLED = true;
+
 const cacheQuery = cacheVersion ? `?v=${cacheVersion}` : '';
 const audioSrc = `${src}${cacheQuery}`;
 const timingSrc = `/read-along/${slug}.timing.json${cacheQuery}`;
@@ -159,7 +168,7 @@ const playerId = `rad-${slug}-${Math.random().toString(36).slice(2, 8)}`;
 	)}
 </aside>
 
-<script define:vars={{ playerId, timingSrc, styleToggleEnabled: STYLE_TOGGLE_ENABLED }}>
+<script define:vars={{ playerId, timingSrc, styleToggleEnabled: STYLE_TOGGLE_ENABLED, floatingPlayerEnabled: FLOATING_PLAYER_ENABLED }}>
 	(async function initReadAlongDim() {
 		const root = document.querySelector(`[data-player-id="${playerId}"]`);
 		if (!root) return;
@@ -557,6 +566,59 @@ const playerId = `rad-${slug}-${Math.random().toString(36).slice(2, 8)}`;
 		audio.addEventListener('play', () => {
 			playbackEngaged = true;
 		});
+
+		// Floating play/pause control (issue #72, Carsten Krueger). Appears in a
+		// fixed corner once the listener has started playback AND the inline
+		// player has scrolled out of view, so they can pause to think or resume
+		// without scrolling back up or knowing the spacebar shortcut. It reuses
+		// the single <audio> element as the source of truth, so it inherits the
+		// existing highlight/tick wiring for free. Hidden for readers who never
+		// press play. Full-page nav tears it down (no view transitions here).
+		// Global kill-switch: floatingPlayerEnabled.
+		let floatingBtn = null;
+		if (floatingPlayerEnabled && 'IntersectionObserver' in window) {
+			const PLAY_SVG =
+				'<svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>';
+			const PAUSE_SVG =
+				'<svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>';
+			let playerVisible = true;
+			floatingBtn = document.createElement('button');
+			floatingBtn.type = 'button';
+			floatingBtn.className = 'cw-ra-float';
+			floatingBtn.hidden = true;
+			const syncIcon = () => {
+				const playing = !audio.paused && !audio.ended;
+				floatingBtn.innerHTML = playing ? PAUSE_SVG : PLAY_SVG;
+				floatingBtn.setAttribute('aria-label', playing ? 'Pause narration' : 'Play narration');
+			};
+			const updateFloat = () => {
+				floatingBtn.hidden = !(playbackEngaged && !playerVisible);
+			};
+			floatingBtn.addEventListener('click', () => {
+				if (audio.paused) {
+					audio.play().catch(() => {});
+				} else {
+					audio.pause();
+				}
+			});
+			['play', 'playing', 'pause', 'ended'].forEach((ev) =>
+				audio.addEventListener(ev, () => {
+					syncIcon();
+					updateFloat();
+				}),
+			);
+			document.body.appendChild(floatingBtn);
+			syncIcon();
+			const io = new IntersectionObserver(
+				(entries) => {
+					for (const entry of entries) playerVisible = entry.isIntersecting;
+					updateFloat();
+				},
+				{ threshold: 0 },
+			);
+			io.observe(root);
+		}
+
 		function isTypingTarget(el) {
 			if (!el) return false;
 			const tag = el.tagName;
@@ -571,6 +633,10 @@ const playerId = `rad-${slug}-${Math.random().toString(36).slice(2, 8)}`;
 				if (!playbackEngaged) return;
 				if (isTypingTarget(e.target)) return;
 				if (root.contains(e.target)) return;
+				// Skip when the floating button has focus: its native activation
+				// already toggles playback, so letting this handler also fire
+				// would double-toggle (net no-op).
+				if (floatingBtn && floatingBtn.contains(e.target)) return;
 				e.preventDefault();
 				if (audio.paused) {
 					audio.play().catch(() => {});
@@ -717,6 +783,46 @@ const playerId = `rad-${slug}-${Math.random().toString(36).slice(2, 8)}`;
 	@media (prefers-reduced-motion: reduce) {
 		.ra-past {
 			transition: none;
+		}
+	}
+
+	/* Floating play/pause control (issue #72). Appended to <body>, so styled
+	   globally. Fixed to the viewport corner; shown/hidden via the `hidden`
+	   attribute (the explicit [hidden] rule below beats `display: grid`). */
+	.cw-ra-float {
+		position: fixed;
+		right: 1.25rem;
+		bottom: 1.25rem;
+		z-index: 200;
+		width: 3.25rem;
+		height: 3.25rem;
+		padding: 0;
+		border: none;
+		border-radius: 50%;
+		display: grid;
+		place-items: center;
+		color: #fff;
+		background: var(--clawdemy-blue, #1f6feb);
+		box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
+		cursor: pointer;
+		transition: opacity 0.18s ease, transform 0.18s ease;
+	}
+	.cw-ra-float:hover {
+		transform: scale(1.06);
+	}
+	.cw-ra-float:focus-visible {
+		outline: 3px solid var(--clawdemy-blue, #1f6feb);
+		outline-offset: 3px;
+	}
+	.cw-ra-float[hidden] {
+		display: none;
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.cw-ra-float {
+			transition: none;
+		}
+		.cw-ra-float:hover {
+			transform: none;
 		}
 	}
 </style>
