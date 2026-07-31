@@ -135,7 +135,7 @@ export default defineConfig({
 					],
 				},
 				{
-					label: '1.6  How Clawless remembers',
+					label: '1.6  How Clawless Computer remembers',
 					collapsed: true,
 					items: [
 						{ label: 'Brief', slug: 'lessons/getting-started/memory-system-overview/brief' },
