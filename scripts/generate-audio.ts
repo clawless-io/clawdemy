@@ -33,9 +33,17 @@
  * Lesson slugs are the directory names under
  *   src/content/docs/lessons/<track>/<slug>/
  *
- * Pricing context (consumer ElevenLabs tiers): about $0.30 per 1,000
- * characters. A typical 12,000-character Clawdemy lesson runs about
- * $3.60 at full re-render. Hash caching means most runs cost $0.
+ * COST CONTEXT, in credits (corrected 2026-09-30). Billing is in ElevenLabs
+ * CREDITS, not pay-as-you-go dollars. eleven_flash_v2_5 costs about 0.5 credits
+ * per character (half of Multilingual v2), so a 12,000-character lesson is
+ * roughly 6,000 credits. On a 360,000-credit monthly plan that is about 1.7% of
+ * the allowance per lesson. Hash caching means most runs cost 0.
+ *
+ * The `estCost` dollar figure printed below assumes consumer pay-as-you-go at
+ * $0.30/1K chars and DOES NOT describe a credit plan. It overstates real cost by
+ * roughly 10x on a $20/360K plan (where a credit is about $0.0000556, making a
+ * 12,000-char lesson about $0.33 of plan value, not $3.60). Treat the printed
+ * dollars as a relative size signal only; budget in credits.
  */
 
 import { mkdir, readFile, writeFile, readdir, stat, copyFile, rename } from 'node:fs/promises';

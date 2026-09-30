@@ -6,8 +6,14 @@
  * renders one of three states, computed at build time (no client JS):
  *
  *   - Fresh   (updated after publish, <=30 days): green tip, "Recently updated".
- *   - Silent  (new lesson, or 31-180 days):       nothing rendered.
- *   - Stale   (>180 days):                        yellow caution, "Verify…".
+ *   - Silent  (new lesson, or inside the window): nothing rendered.
+ *   - Stale   (past the review window):           yellow caution, "Verify…".
+ *
+ * The stale window is PER TRACK, not a flat number (founder-approved
+ * 2026-09-29). It comes from src/data/review-cadence.ts: 3 months for vendor and
+ * product tracks, 6 for framework tracks, 12 for conceptual and math tracks. A
+ * flat line used to mark 237 timeless math lessons stale in one month while
+ * saying nothing about vendor lessons that were already a quarter overdue.
  *
  * Why the published_at gate (added 2026-06-03):
  *   The fresh signal is for returning readers, "the body changed since your
@@ -16,8 +22,8 @@
  *   last_reviewed AFTER published_at. We only show the "recently updated" banner
  *   when last_reviewed is strictly later than published_at, so new lessons stay
  *   silent and only real post-publication revisions flag a re-read. The stale
- *   signal (Doc/lesson-framework.md §5, >6 months) is independent and always
- *   fires regardless of new-vs-updated.
+ *   signal is independent of that and always fires once the track's review
+ *   window has passed, regardless of new-vs-updated.
  *
  * Why date format, not relative time:
  *   CDN-cached HTML can outlive its build. "Updated 2 days ago" lies if the
@@ -29,16 +35,35 @@
  */
 
 import { Aside } from '@astrojs/starlight/components';
+import { cadenceDays, resolveCadenceMonths } from '../data/review-cadence';
 
 interface Props {
 	lastReviewed?: Date | string;
 	publishedAt?: Date | string;
+	/**
+	 * Per-lesson cadence override in months. Omit it and the track tier from
+	 * src/data/review-cadence.ts applies, which is what nearly every lesson
+	 * wants. Pass `frontmatter.review_cadence_months` only where a single
+	 * lesson needs a tighter clock than its track.
+	 */
+	cadenceMonths?: number;
 }
 
-const { lastReviewed, publishedAt } = Astro.props;
+const { lastReviewed, publishedAt, cadenceMonths } = Astro.props;
 
 const FRESH_DAYS = 30;
-const STALE_DAYS = 180;
+
+// Track slug is the second path segment of a lesson URL:
+// /lessons/<track>/<lesson>/<artifact>/ . Deriving it here rather than taking a
+// prop keeps all 300+ existing call sites unchanged when the cadence policy
+// moves. Same approach as src/components/Head.astro.
+const pathSegments = Astro.url.pathname.split('/').filter(Boolean);
+const trackSlug = pathSegments[0] === 'lessons' ? (pathSegments[1] ?? null) : null;
+
+// The staleness window is per-track now, not a flat 180 days. A conceptual
+// track stays quiet for a year; a vendor-coupled track speaks up after a
+// quarter. See src/data/review-cadence.ts for the tiers and the reasoning.
+const STALE_DAYS = cadenceDays(resolveCadenceMonths(trackSlug, cadenceMonths));
 
 function toDate(input: Date | string | undefined): Date | null {
 	if (!input) return null;
