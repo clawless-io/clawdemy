@@ -33,17 +33,23 @@
  * Lesson slugs are the directory names under
  *   src/content/docs/lessons/<track>/<slug>/
  *
- * COST CONTEXT, in credits (corrected 2026-09-30). Billing is in ElevenLabs
- * CREDITS, not pay-as-you-go dollars. eleven_flash_v2_5 costs about 0.5 credits
- * per character (half of Multilingual v2), so a 12,000-character lesson is
- * roughly 6,000 credits. On a 360,000-credit monthly plan that is about 1.7% of
- * the allowance per lesson. Hash caching means most runs cost 0.
+ * COST CONTEXT, in credits. MEASURED, not assumed (2026-09-30).
+ * Billing is in ElevenLabs CREDITS, not pay-as-you-go dollars.
+ *
+ * EMPIRICAL RATE for eleven_flash_v2_5: about **0.22 credits per character**.
+ * Derived from a real 24-lesson batch: 228,676 characters billed 50,309 credits.
+ * Do NOT use 0.5 credits/char. That is the "half of Multilingual v2" figure and
+ * it overestimates by roughly 2.3x (it predicted 114,338 for that same batch).
+ *
+ * So a 12,000-character lesson is roughly 2,600 credits, and a full 24-lesson
+ * batch is about 50,000. On a 360,000-credit monthly plan that is ~0.7% per
+ * lesson and ~14% for a batch of 24. Hash caching means most runs cost 0.
  *
  * The `estCost` dollar figure printed below assumes consumer pay-as-you-go at
  * $0.30/1K chars and DOES NOT describe a credit plan. It overstates real cost by
- * roughly 10x on a $20/360K plan (where a credit is about $0.0000556, making a
- * 12,000-char lesson about $0.33 of plan value, not $3.60). Treat the printed
- * dollars as a relative size signal only; budget in credits.
+ * roughly 13x on a $20/360K plan: a credit is about $0.0000556, so a
+ * 12,000-char lesson is about $0.15 of plan value, not $3.60. Treat the printed
+ * dollars as a relative size signal only; budget in credits at 0.22/char.
  */
 
 import { mkdir, readFile, writeFile, readdir, stat, copyFile, rename } from 'node:fs/promises';
@@ -708,12 +714,48 @@ async function ensureUploadedToR2(
 	return 'uploaded';
 }
 
+/**
+ * Markers that must never reach the voice.
+ *
+ * mdxToProse strips JSX expression comments, so clean source cannot produce
+ * these. If one appears in the prose anyway, a strip rule has a hole and the
+ * narrator is about to read an internal production note aloud to learners. That
+ * exact failure shipped on 24 lessons between 2026-05 and 2026-09-30 and went
+ * unnoticed for four months, because source greps cannot see it once the
+ * placeholder comment is later replaced by a real diagram.
+ *
+ * This guard runs BEFORE the cache check, the dry-run branch, and any API call,
+ * so a hole costs an error message rather than credits and a bad upload.
+ * The post-hoc catcher for already-shipped audio is
+ * scripts/check-narration-integrity.ts (bun run validate:narration).
+ */
+const NARRATION_LEAK_MARKERS = ['{/', 'DIAGRAM PLACEHOLDER', 'COMPONENT PLACEHOLDER'];
+
+function assertNoInternalNotes(slug: string, prose: string): void {
+	const hits = NARRATION_LEAK_MARKERS.filter((m) => prose.includes(m));
+	if (hits.length === 0) return;
+
+	const marker = hits[0];
+	const at = prose.indexOf(marker);
+	const context = prose.slice(Math.max(0, at - 60), at + 120).replace(/\s+/g, ' ');
+	throw new Error(
+		`${slug}: narrated prose contains an internal note, refusing to render.\n` +
+			`  marker found: ${hits.map((h) => JSON.stringify(h)).join(', ')}\n` +
+			`  context: ...${context}...\n` +
+			`  The voice would read that aloud. Either the MDX comment syntax is\n` +
+			`  malformed (so mdxToProse could not strip it), or a new component form\n` +
+			`  needs adding to the strip rules. Fix the source, do not bypass this.`,
+	);
+}
+
 async function generateOne(
 	lesson: Lesson,
 	opts: { dryRun: boolean; force: boolean; upload: boolean },
 ) {
 	const mdx = await readFile(lesson.mdxPath, 'utf-8');
 	const prose = mdxToProse(mdx);
+	// Before anything else: never let an internal note reach the voice.
+	assertNoInternalNotes(lesson.slug, prose);
 	const hash = createHash('sha256').update(prose).digest('hex');
 
 	const outMp3 = join(AUDIO_OUT, `${lesson.slug}-lesson.mp3`);
