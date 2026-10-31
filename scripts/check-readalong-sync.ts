@@ -27,11 +27,33 @@
  * prose extractor having been refined since those renders. That reports and
  * exits 0, so the real signal is not buried under it.
  *
- * NOT IN validate:all YET. On the day this was written 9 lessons already had
- * word-level desync, so wiring it into the build would have shipped a red
- * gate. Same path validate:freshness and validate:narration took: report-only
- * until the queue clears, then promoted. Promote it the moment
- * `bun run validate:readalong-sync` exits 0.
+ * NOT IN validate:all YET, AND HERE IS THE PROMOTION CONDITION. On the day
+ * this was written 9 lessons already had word-level desync, so wiring it into
+ * the build would have shipped a red gate. Same path validate:freshness and
+ * validate:narration took: report-only until the queue clears.
+ *
+ * THE PR THAT CLOSES THE LAST MISMATCH ALSO WIRES THIS INTO validate:all AND
+ * INTO .github/workflows/ci.yml. Not a separate follow-up, not "later". That
+ * is whichever change makes `bun run validate:readalong-sync` exit 0, whether
+ * that is re-rendering the nine or restoring the stripped markup to the
+ * narration. If you are reading this and the command exits 0, promoting it is
+ * part of your change.
+ *
+ * WHY THOSE 9 WERE OUT OF SYNC, measured 2026-10-31. Not what it looks like.
+ * The lesson bodies were NOT shortened: running today's mdxToProse over each
+ * lesson.mdx AS IT STOOD AT ITS RENDER COMMIT gives the same lower word count
+ * it gives today (how-rag-works: 3601 then, 3601 now, 3814 recorded in the
+ * timing file). The extractor changed, not the text. Diffing each stale
+ * timing file against its current prose names the cause exactly:
+ *   8 of 9   the audio reads a markdown TABLE out loud, pipes and all
+ *            ("pipe Stage pipe Symptom pipe Common cause pipe pipe dash...")
+ *   1 of 9   the audio reads Starlight directive syntax out loud
+ *            (":::note[A gotcha worth banking now]", ":::warning[...]")
+ * mdxToProse's strip-set was extended to match the ReadAlongDim walker's skip
+ * set, which is correct, and the lessons rendered before each extension were
+ * never re-rendered. So this is the same defect family as the 24-lesson
+ * internal-notes leak that check-narration-integrity.ts exists for: narration
+ * speaking markup aloud to a learner. It is not cosmetic drift.
  *
  * WHAT IT DOES NOT CATCH. It cannot see what R2 is actually serving, because
  * R2 is outside git. It catches the git half, which is the half we control at
@@ -175,8 +197,10 @@ async function main(): Promise<void> {
 		console.error(
 			'\nA word-count mismatch means one of two things, and both ship a broken\n' +
 				'read-along highlight:\n' +
-				'  1. The lesson body changed and the audio was never re-rendered. The\n' +
-				'     narration then speaks text that is no longer on the page.\n' +
+				'  1. The narrated prose changed and the audio was never re-rendered,\n' +
+				'     either because the body was edited or because mdxToProse learned\n' +
+				'     to strip something it used to narrate. Either way the audio now\n' +
+				'     speaks text the reader cannot see.\n' +
 				'     Fix: bun run audio:generate --force <slug>, bump cacheVersion,\n' +
 				'     commit the regenerated timing JSON. This costs credits.\n' +
 				'  2. A render happened and its timing JSON was not committed. R2 already\n' +
