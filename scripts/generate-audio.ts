@@ -246,6 +246,24 @@ async function uploadToR2(slug: string, body: Buffer): Promise<void> {
  *   - Headings (#, ##, ...): become sentences ending with a period, so the
  *     TTS engine inserts a natural pause.
  *   - List bullets (-, *, 1.): markers stripped; items separated by periods.
+ *
+ * STANDING RULE FOR ANY CHANGE TO THE STRIP-SET BELOW. Adding a rule here does
+ * not only affect future renders. It silently invalidates the audio of every
+ * lesson ALREADY rendered that contained the construct you just started
+ * stripping: that audio keeps speaking the construct, the walker no longer
+ * sees it, and the read-along highlight drifts. A change to this function is
+ * therefore INCOMPLETE until the lessons it invalidates are re-rendered, or
+ * the change is reverted. There is no third option.
+ *
+ * `bun run validate:readalong-sync` is the gate that enforces it: run it
+ * immediately after touching this function and treat every lesson it names as
+ * a render queue, not as noise. Four extensions between 2026-05-29 and
+ * 2026-07-12 (table rows, the References section, :::directive asides,
+ * aria-hidden aside titles) shipped without that step. Only the JSX-comment
+ * one was ever backfilled, and nine published lessons spent months reading
+ * markdown tables and :::note syntax out loud to learners before anything
+ * noticed. See scripts/check-readalong-sync.ts and
+ * scripts/check-narration-integrity.ts.
  */
 export function mdxToProse(mdx: string): string {
 	let text = mdx;
