@@ -21,6 +21,14 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          # Full history on purpose. astro.config.mjs derives each lesson
+          # artifact's sitemap lastmod from the last commit touching its .mdx.
+          # actions/checkout defaults to fetch-depth: 1, a shallow clone, which
+          # collapses every file onto one commit; the shallow guard then
+          # suppresses lastmod entirely and CI would never exercise the real
+          # path. See scripts/check-sitemap-lastmod.ts.
+          fetch-depth: 0
 
       # Node is required by `astro check`, `astro build`, and `astro preview`,
       # which Bun-run scripts shell out to. Astro requires Node >=22.12.
@@ -75,8 +83,25 @@ jobs:
       - name: Validate narration integrity (no internal notes in audio)
         run: bun run validate:narration -- --strict
 
+      # Fails on a code fence that opens while another is still open and carries
+      # an info string (```python inside ```yaml). Markdown cannot nest
+      # same-length fences, so the inner one becomes literal content and the
+      # next bare ``` closes the outer block early. agent-skills-and-claude-code
+      # shipped that way: ~42% of its body rendered inside one <pre> with a
+      # heading buried in it, and its read-along ran 980 words out of sync.
+      # astro build accepted it, because the MDX was still valid.
+      - name: Validate code-fence pairing
+        run: bun run validate:fences
+
       - name: Build site (includes Pagefind index)
         run: bun run build
+
+      # Reads the BUILT sitemap. Fails if lastmod is present but near-uniform,
+      # which is worse than absent (it trains crawlers to ignore the field).
+      # Absent lastmod passes with a warning: that is the legitimate
+      # shallow-clone fallback. Requested by SEO Specialist 2026-10-26.
+      - name: Validate sitemap lastmod carries information
+        run: bun run validate:sitemap-lastmod
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v6
@@ -84,6 +109,11 @@ jobs:
           name: dist-${{ github.sha }}
           path: dist/
           retention-days: 7
+          # dist/.well-known/security.txt is a DOTFILE directory. upload-artifact
+          # excludes hidden files by default, so the link-check job downloaded a
+          # dist with no .well-known/ and reported our own security.txt as a
+          # broken link. The file was never missing from the site.
+          include-hidden-files: true
 
   link-check:
     name: Check links in built site

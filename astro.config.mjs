@@ -4,6 +4,77 @@ import starlight from '@astrojs/starlight';
 import sitemap from '@astrojs/sitemap';
 import tailwindcss from '@tailwindcss/vite';
 import rehypeExternalLinks from 'rehype-external-links';
+import { execSync } from 'node:child_process';
+
+// Sitemap lastmod, per page, from the content's real last-commit date.
+//
+// WHY NOT BUILD TIME. Stamping every URL with the build timestamp tells Google
+// all 939 pages changed on every deploy, which is false. Google learns to
+// distrust the signal and ignores lastmod entirely, which is worse than having
+// none (SEO Specialist's constraint, 2026-10-26). So this reads the actual last
+// commit that touched each artifact's source file.
+//
+// WHY IT MAY RETURN NULL. A shallow clone (common on CI) has one commit, so
+// every file would resolve to the same date: build time wearing a disguise.
+// Rather than emit a date we cannot stand behind, we emit NO lastmod. Omitting
+// is the status quo and is safe; lying is not.
+//
+// Dates the artifact's .mdx source, so ANY commit touching that file moves
+// lastmod, including a frontmatter cacheVersion bump. What does NOT move it are
+// the out-of-repo artifacts: the MP3 in R2 and the read-along timing JSON. That
+// is the right boundary, since those do not change the indexable page.
+function buildContentModifiedMap() {
+	try {
+		const shallow = execSync('git rev-parse --is-shallow-repository', {
+			encoding: 'utf-8',
+			stdio: ['ignore', 'pipe', 'ignore'],
+		}).trim();
+		if (shallow !== 'false') return null;
+
+		const log = execSync(
+			'git log --no-merges --pretty=format:%cI --name-only -- src/content src/pages',
+			{ encoding: 'utf-8', maxBuffer: 256 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'] },
+		);
+
+		const map = new Map();
+		let date = null;
+		for (const line of log.split('\n')) {
+			const trimmed = line.trim();
+			if (!trimmed) continue;
+			if (/^\d{4}-\d{2}-\d{2}T/.test(trimmed)) {
+				date = trimmed;
+				continue;
+			}
+			// git lists newest commits first, so the first date we see for a path
+			// is its most recent change.
+			if (date && !map.has(trimmed)) map.set(trimmed, date);
+		}
+		return map.size > 0 ? map : null;
+	} catch {
+		return null;
+	}
+}
+
+const CONTENT_MODIFIED = buildContentModifiedMap();
+
+/**
+ * Maps a lesson-artifact URL back to the .mdx that produced it.
+ *
+ * @param {string} url Absolute URL of a built page, as the sitemap emits it.
+ * @returns {string | null} Repo-relative .mdx path, or null when the URL is not
+ *   a lesson artifact (or the tree is a shallow clone, where there is no map).
+ */
+function lessonSourceForUrl(url) {
+	let pathname;
+	try {
+		pathname = new URL(url).pathname;
+	} catch {
+		return null;
+	}
+	const match = pathname.match(/^\/lessons\/([^/]+)\/([^/]+)\/([^/]+)\/?$/);
+	if (!match) return null;
+	return `src/content/docs/lessons/${match[1]}/${match[2]}/${match[3]}.mdx`;
+}
 
 // https://astro.build/config
 export default defineConfig({
@@ -56,6 +127,17 @@ export default defineConfig({
 					!/\/(summary|practice|references)\/?$/.test(page) &&
 					(page.includes('/legal/licensing/') ||
 						(!page.includes('/legal/') && !page.includes('/trust/'))),
+			// lastmod per lesson artifact, from its source file's last commit.
+			// Pages we cannot date (hubs, legal) get no lastmod rather than a
+			// guess. See buildContentModifiedMap above for why never build time.
+			serialize: (item) => {
+				if (!CONTENT_MODIFIED) return item;
+				const source = lessonSourceForUrl(item.url);
+				if (!source) return item;
+				const modified = CONTENT_MODIFIED.get(source);
+				if (modified) item.lastmod = modified;
+				return item;
+			},
 		}),
 		starlight({
 			title: 'Clawdemy',

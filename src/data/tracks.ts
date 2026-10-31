@@ -161,7 +161,7 @@ export const TRACKS: Track[] = [
 	{
 		id: 5,
 		slug: 'ai-foundations',
-		title: 'Transformers and LLMs',
+		title: 'AI Foundations',
 		blurb: 'Attention, transformers, and how modern AI actually works.',
 		theme: 'transformers',
 		level: 'Foundations',
