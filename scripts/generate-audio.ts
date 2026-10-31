@@ -56,7 +56,7 @@ import { mkdir, readFile, writeFile, readdir, stat, copyFile, rename } from 'nod
 import { existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { createHash } from 'node:crypto';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { S3Client, PutObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
 
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
@@ -711,7 +711,40 @@ async function ensureUploadedToR2(
 	process.stdout.write(`> upload  ${slug.padEnd(30)} ${sizeMb} MB...`);
 	await uploadToR2(slug, body);
 	console.log(' ok');
+	stageTimingJson(slug);
 	return 'uploaded';
+}
+
+/**
+ * Stage the timing JSON the moment its audio reaches R2.
+ *
+ * WHY. R2 publishes to production immediately and is decoupled from git, so
+ * the instant an upload succeeds production is serving audio whose word
+ * timings exist only in this working tree. On 2026-10-31 three lessons were
+ * uploaded and their regenerated timing JSON was never committed, leaving
+ * production pairing new audio with old timings for hours
+ * (agent-skills-and-claude-code: 2336 committed entries, 2420 spoken words).
+ * Staging it here means the file is already in the index when the operator
+ * commits, so forgetting it takes deliberate effort rather than none.
+ *
+ * Best-effort on purpose: a failure here must never fail a paid render that
+ * has already succeeded. It warns loudly instead, and
+ * scripts/check-readalong-sync.ts is the backstop that catches the mismatch
+ * at review time.
+ */
+function stageTimingJson(slug: string): void {
+	const timingPath = join(TIMING_OUT, `${slug}.timing.json`);
+	if (!existsSync(timingPath)) return;
+	const res = spawnSync('git', ['add', '--', timingPath], { encoding: 'utf8' });
+	if (res.status === 0) {
+		console.log(`= staged  ${slug.padEnd(30)} ${timingPath}`);
+		return;
+	}
+	console.warn(
+		`! WARNING  could not stage ${timingPath} (${(res.stderr || res.error?.message || '').trim()}).\n` +
+			`  R2 now serves the new audio for ${slug}. COMMIT THAT FILE, or the\n` +
+			`  read-along highlight will be out of sync on production until you do.`,
+	);
 }
 
 /**
@@ -996,7 +1029,14 @@ async function main() {
 	}
 }
 
-main().catch((err) => {
-	console.error(err);
-	process.exit(1);
-});
+// Only run the CLI when this file IS the entry point. Guarded so other
+// scripts can import mdxToProse without firing a render; scripts/
+// check-readalong-sync.ts needs the exact same prose extraction the renderer
+// uses, and reimplementing it there would reintroduce the drift it exists to
+// catch.
+if (import.meta.main) {
+	main().catch((err) => {
+		console.error(err);
+		process.exit(1);
+	});
+}
