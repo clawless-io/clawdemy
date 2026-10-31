@@ -57,7 +57,13 @@ function buildContentModifiedMap() {
 
 const CONTENT_MODIFIED = buildContentModifiedMap();
 
-/** Maps a lesson-artifact URL back to the .mdx that produced it. */
+/**
+ * Maps a lesson-artifact URL back to the .mdx that produced it.
+ *
+ * @param {string} url Absolute URL of a built page, as the sitemap emits it.
+ * @returns {string | null} Repo-relative .mdx path, or null when the URL is not
+ *   a lesson artifact (or the tree is a shallow clone, where there is no map).
+ */
 function lessonSourceForUrl(url) {
 	let pathname;
 	try {
