@@ -45,18 +45,26 @@
  * batch is about 50,000. On a 360,000-credit monthly plan that is ~0.7% per
  * lesson and ~14% for a batch of 24. Hash caching means most runs cost 0.
  *
- * The `estCost` dollar figure printed below assumes consumer pay-as-you-go at
- * $0.30/1K chars and DOES NOT describe a credit plan. It overstates real cost by
- * roughly 13x on a $20/360K plan: a credit is about $0.0000556, so a
- * 12,000-char lesson is about $0.15 of plan value, not $3.60. Treat the printed
- * dollars as a relative size signal only; budget in credits at 0.22/char.
+ * THE PRINTED DOLLARS ARE NOT MONEY. `estCost` multiplies characters by
+ * COST_PER_1K_CHARS, a pay-as-you-go list rate, and says nothing about a
+ * credit plan. On a $20 / 360,000-credit plan a credit is about $0.0000556,
+ * so the real plan value of a character is 0.22 * $0.0000556, about
+ * $0.0122 per 1000 characters. A 12,000-character lesson is therefore about
+ * 2,600 credits and about $0.15 of plan value.
+ *
+ * Budget in CREDITS at 0.22/char. That is the binding constraint, because the
+ * plan allowance runs out before the dollars matter. Treat the printed dollars
+ * as a relative size signal between lessons and nothing more. This warning is
+ * here because on 2026-10-31 the printed figure was quoted to the founder as
+ * real spend, 4x over, on three separate estimates before anyone re-read this
+ * paragraph.
  */
 
 import { mkdir, readFile, writeFile, readdir, stat, copyFile, rename } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { createHash } from 'node:crypto';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { S3Client, PutObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
 
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
@@ -246,6 +254,24 @@ async function uploadToR2(slug: string, body: Buffer): Promise<void> {
  *   - Headings (#, ##, ...): become sentences ending with a period, so the
  *     TTS engine inserts a natural pause.
  *   - List bullets (-, *, 1.): markers stripped; items separated by periods.
+ *
+ * STANDING RULE FOR ANY CHANGE TO THE STRIP-SET BELOW. Adding a rule here does
+ * not only affect future renders. It silently invalidates the audio of every
+ * lesson ALREADY rendered that contained the construct you just started
+ * stripping: that audio keeps speaking the construct, the walker no longer
+ * sees it, and the read-along highlight drifts. A change to this function is
+ * therefore INCOMPLETE until the lessons it invalidates are re-rendered, or
+ * the change is reverted. There is no third option.
+ *
+ * `bun run validate:readalong-sync` is the gate that enforces it: run it
+ * immediately after touching this function and treat every lesson it names as
+ * a render queue, not as noise. Four extensions between 2026-05-29 and
+ * 2026-07-12 (table rows, the References section, :::directive asides,
+ * aria-hidden aside titles) shipped without that step. Only the JSX-comment
+ * one was ever backfilled, and nine published lessons spent months reading
+ * markdown tables and :::note syntax out loud to learners before anything
+ * noticed. See scripts/check-readalong-sync.ts and
+ * scripts/check-narration-integrity.ts.
  */
 export function mdxToProse(mdx: string): string {
 	let text = mdx;
@@ -711,7 +737,40 @@ async function ensureUploadedToR2(
 	process.stdout.write(`> upload  ${slug.padEnd(30)} ${sizeMb} MB...`);
 	await uploadToR2(slug, body);
 	console.log(' ok');
+	stageTimingJson(slug);
 	return 'uploaded';
+}
+
+/**
+ * Stage the timing JSON the moment its audio reaches R2.
+ *
+ * WHY. R2 publishes to production immediately and is decoupled from git, so
+ * the instant an upload succeeds production is serving audio whose word
+ * timings exist only in this working tree. On 2026-10-31 three lessons were
+ * uploaded and their regenerated timing JSON was never committed, leaving
+ * production pairing new audio with old timings for hours
+ * (agent-skills-and-claude-code: 2336 committed entries, 2420 spoken words).
+ * Staging it here means the file is already in the index when the operator
+ * commits, so forgetting it takes deliberate effort rather than none.
+ *
+ * Best-effort on purpose: a failure here must never fail a paid render that
+ * has already succeeded. It warns loudly instead, and
+ * scripts/check-readalong-sync.ts is the backstop that catches the mismatch
+ * at review time.
+ */
+function stageTimingJson(slug: string): void {
+	const timingPath = join(TIMING_OUT, `${slug}.timing.json`);
+	if (!existsSync(timingPath)) return;
+	const res = spawnSync('git', ['add', '--', timingPath], { encoding: 'utf8' });
+	if (res.status === 0) {
+		console.log(`= staged  ${slug.padEnd(30)} ${timingPath}`);
+		return;
+	}
+	console.warn(
+		`! WARNING  could not stage ${timingPath} (${(res.stderr || res.error?.message || '').trim()}).\n` +
+			`  R2 now serves the new audio for ${slug}. COMMIT THAT FILE, or the\n` +
+			`  read-along highlight will be out of sync on production until you do.`,
+	);
 }
 
 /**
@@ -988,15 +1047,30 @@ async function main() {
 
 	if (targets.length > 1) {
 		const billable = totalChars - totalCachedChars;
-		const cost = (billable / 1000) * 0.3;
+		// Same rate as the per-lesson estCost line, so the total agrees with the
+		// parts. This used 0.3 while estCost used COST_PER_1K_CHARS, which made
+		// a batch total six times the sum of its own lessons. Both are list-rate
+		// signals, not plan value: see the cost note at the head of this file.
+		const cost = (billable / 1000) * COST_PER_1K_CHARS;
 		console.log('---');
 		console.log(`total: ${targets.length} lesson(s)`);
 		console.log(`billable chars: ${billable} (skipped ${totalCachedChars} cached)`);
-		console.log(`estimated cost: $${cost.toFixed(2)}`);
+		console.log(`estimated cost: $${cost.toFixed(2)} (list rate, NOT plan value)`);
+		console.log(
+			`credits at 0.22/char: ${Math.round(billable * 0.22).toLocaleString()}` +
+				` (about $${(billable * 0.22 * (20 / 360000)).toFixed(2)} of a $20/360K plan)`,
+		);
 	}
 }
 
-main().catch((err) => {
-	console.error(err);
-	process.exit(1);
-});
+// Only run the CLI when this file IS the entry point. Guarded so other
+// scripts can import mdxToProse without firing a render; scripts/
+// check-readalong-sync.ts needs the exact same prose extraction the renderer
+// uses, and reimplementing it there would reintroduce the drift it exists to
+// catch.
+if (import.meta.main) {
+	main().catch((err) => {
+		console.error(err);
+		process.exit(1);
+	});
+}
