@@ -45,11 +45,19 @@
  * batch is about 50,000. On a 360,000-credit monthly plan that is ~0.7% per
  * lesson and ~14% for a batch of 24. Hash caching means most runs cost 0.
  *
- * The `estCost` dollar figure printed below assumes consumer pay-as-you-go at
- * $0.30/1K chars and DOES NOT describe a credit plan. It overstates real cost by
- * roughly 13x on a $20/360K plan: a credit is about $0.0000556, so a
- * 12,000-char lesson is about $0.15 of plan value, not $3.60. Treat the printed
- * dollars as a relative size signal only; budget in credits at 0.22/char.
+ * THE PRINTED DOLLARS ARE NOT MONEY. `estCost` multiplies characters by
+ * COST_PER_1K_CHARS, a pay-as-you-go list rate, and says nothing about a
+ * credit plan. On a $20 / 360,000-credit plan a credit is about $0.0000556,
+ * so the real plan value of a character is 0.22 * $0.0000556, about
+ * $0.0122 per 1000 characters. A 12,000-character lesson is therefore about
+ * 2,600 credits and about $0.15 of plan value.
+ *
+ * Budget in CREDITS at 0.22/char. That is the binding constraint, because the
+ * plan allowance runs out before the dollars matter. Treat the printed dollars
+ * as a relative size signal between lessons and nothing more. This warning is
+ * here because on 2026-10-31 the printed figure was quoted to the founder as
+ * real spend, 4x over, on three separate estimates before anyone re-read this
+ * paragraph.
  */
 
 import { mkdir, readFile, writeFile, readdir, stat, copyFile, rename } from 'node:fs/promises';
@@ -1039,11 +1047,19 @@ async function main() {
 
 	if (targets.length > 1) {
 		const billable = totalChars - totalCachedChars;
-		const cost = (billable / 1000) * 0.3;
+		// Same rate as the per-lesson estCost line, so the total agrees with the
+		// parts. This used 0.3 while estCost used COST_PER_1K_CHARS, which made
+		// a batch total six times the sum of its own lessons. Both are list-rate
+		// signals, not plan value: see the cost note at the head of this file.
+		const cost = (billable / 1000) * COST_PER_1K_CHARS;
 		console.log('---');
 		console.log(`total: ${targets.length} lesson(s)`);
 		console.log(`billable chars: ${billable} (skipped ${totalCachedChars} cached)`);
-		console.log(`estimated cost: $${cost.toFixed(2)}`);
+		console.log(`estimated cost: $${cost.toFixed(2)} (list rate, NOT plan value)`);
+		console.log(
+			`credits at 0.22/char: ${Math.round(billable * 0.22).toLocaleString()}` +
+				` (about $${(billable * 0.22 * (20 / 360000)).toFixed(2)} of a $20/360K plan)`,
+		);
 	}
 }
 
