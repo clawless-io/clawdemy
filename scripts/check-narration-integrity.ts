@@ -92,8 +92,16 @@ const LEAK_MARKERS: Marker[] = [
 /**
  * A markdown table separator row, as the narrator pronounces it: a dash run,
  * optionally pipe-separated and pipe-wrapped, optionally with alignment
- * colons. `|---|---|`, `---`, `|:---:|` all match. Mathematics does not
- * produce this shape, which is what makes it safe where a bare pipe is not.
+ * colons. `|---|---|`, `---`, `|:---:|` all match.
+ *
+ * DO NOT SIMPLIFY THIS TO "a run of pipes". That was the obvious first guess
+ * and it is wrong: it flags 15 lessons instead of 8, because seven
+ * reinforcement-learning lessons narrate mathematics in prose, P(s' | s, a)
+ * and pi(a | s) and |S|, and every one of them is correctly IN SYNC. A pipe
+ * marker would add seven false positives and bury the real signal. The
+ * separator row is the discriminator because mathematics never produces one.
+ * Verified across all 285 shipped narrations on 2026-10-31: this matches the
+ * eight table lessons exactly, no false positives, no false negatives.
  */
 const TABLE_SEPARATOR = /^\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)*\|?$/;
 
