@@ -35,7 +35,7 @@
  */
 
 import { Aside } from '@astrojs/starlight/components';
-import { cadenceDays, resolveCadenceMonths } from '../data/review-cadence';
+import { freshnessState } from '../lib/freshness';
 
 interface Props {
 	lastReviewed?: Date | string;
@@ -51,8 +51,6 @@ interface Props {
 
 const { lastReviewed, publishedAt, cadenceMonths } = Astro.props;
 
-const FRESH_DAYS = 30;
-
 // Track slug is the second path segment of a lesson URL:
 // /lessons/<track>/<lesson>/<artifact>/ . Deriving it here rather than taking a
 // prop keeps all 300+ existing call sites unchanged when the cadence policy
@@ -60,48 +58,20 @@ const FRESH_DAYS = 30;
 const pathSegments = Astro.url.pathname.split('/').filter(Boolean);
 const trackSlug = pathSegments[0] === 'lessons' ? (pathSegments[1] ?? null) : null;
 
-// The staleness window is per-track now, not a flat 180 days. A conceptual
-// track stays quiet for a year; a vendor-coupled track speaks up after a
-// quarter. See src/data/review-cadence.ts for the tiers and the reasoning.
-const STALE_DAYS = cadenceDays(resolveCadenceMonths(trackSlug, cadenceMonths));
+// The rules themselves live in src/lib/freshness.ts as a pure function taking
+// `now`, so the date boundaries can be unit-tested at fixed dates instead of
+// being asserted through a browser against today's calendar. See the WHY note
+// at the head of that file.
+const { state, formatted } = freshnessState({
+	lastReviewed,
+	publishedAt,
+	trackSlug,
+	cadenceMonths,
+	now: new Date(),
+});
 
-function toDate(input: Date | string | undefined): Date | null {
-	if (!input) return null;
-	const d = input instanceof Date ? input : new Date(input);
-	return Number.isNaN(d.getTime()) ? null : d;
-}
-
-function dayDiff(a: Date, b: Date): number {
-	const ms = a.getTime() - b.getTime();
-	return Math.floor(ms / (1000 * 60 * 60 * 24));
-}
-
-function formatDate(d: Date): string {
-	// Format in UTC. ISO-only frontmatter dates (e.g. "2026-04-24") parse as UTC
-	// midnight, and localizing them to the build server's TZ would show the
-	// prior day in any zone west of UTC.
-	return d.toLocaleDateString('en-US', {
-		year: 'numeric',
-		month: 'long',
-		day: 'numeric',
-		timeZone: 'UTC',
-	});
-}
-
-const now = new Date();
-const reviewed = toDate(lastReviewed);
-const published = toDate(publishedAt);
-const ageDays = reviewed ? Math.max(0, dayDiff(now, reviewed)) : null;
-const formatted = reviewed ? formatDate(reviewed) : null;
-
-// A genuine post-publication revision: reviewed strictly after published.
-// A brand-new lesson has reviewed == published (same day) and stays silent.
-// If published_at is missing, we conservatively treat it as new (no fresh banner).
-const updatedAfterPublish =
-	reviewed !== null && published !== null && dayDiff(reviewed, published) > 0;
-
-const showFresh = ageDays !== null && ageDays <= FRESH_DAYS && updatedAfterPublish;
-const showStale = ageDays !== null && ageDays > STALE_DAYS;
+const showFresh = state === 'fresh';
+const showStale = state === 'stale';
 ---
 
 {
