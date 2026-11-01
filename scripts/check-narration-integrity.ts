@@ -131,7 +131,7 @@ const MARKUP_MARKERS: Marker[] = [
  * --strict, so flipping it now would fail every run for a reason nobody can
  * fix in the moment.
  */
-const STRICT_INCLUDES_MARKUP = false;
+const STRICT_INCLUDES_MARKUP = true;
 
 interface Hit {
 	slug: string;
