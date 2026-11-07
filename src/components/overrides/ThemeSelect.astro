@@ -1,0 +1,131 @@
+---
+/**
+ * ThemeSelect override: light is the first-visit default, and "Auto" is
+ * stored as a real value instead of an empty string.
+ *
+ * Founder decision, 2026-11-07: the production default is light mode.
+ *
+ * WHY THIS COMPONENT HAD TO CHANGE TOO
+ *
+ * Overriding ThemeProvider alone does not work, and the first attempt at this
+ * change failed exactly that way. Starlight's stock ThemeSelect runs
+ * `onThemeChange(loadTheme())` in its constructor on EVERY page load, which
+ * does two things microseconds after the inline provider has run:
+ *
+ *   1. it sets `document.documentElement.dataset.theme` from the OS, and
+ *   2. it calls `storeTheme('auto')`, which writes the EMPTY STRING.
+ *
+ * So the provider's decision is overwritten on load, and the distinction
+ * between "never chose" (null) and "chose Auto" ('') is destroyed on the very
+ * first visit. Caught by setting storage, reloading and reading the live DOM.
+ * An earlier check that re-implemented the provider's logic in the test
+ * reported all six cases passing, because it was testing a copy of the logic
+ * rather than the page. That check was worthless and this one replaced it.
+ *
+ * THE CONTRACT, shared with overrides/ThemeProvider.astro
+ *
+ *   key absent (null) -> first visit, no choice made -> LIGHT
+ *   'auto'            -> reader chose Auto           -> follow the OS
+ *   ''                -> legacy Auto, written by stock Starlight before this
+ *                        change -> follow the OS, so existing readers keep
+ *                        the behaviour they already had
+ *   'light' / 'dark'  -> explicit choice             -> honoured as-is
+ *
+ * Both files must agree. Changing one alone reintroduces the bug above.
+ *
+ * Storing the literal 'auto' also makes the legal copy truer rather than
+ * falser: legal/cookies.mdx and legal/privacy.mdx both describe this key as
+ * "Theme preference (light / dark / auto)", which stock Starlight satisfies
+ * only loosely by writing an empty string. No copy change is needed.
+ *
+ * Everything else is the stock component. On a Starlight upgrade, re-diff
+ * against node_modules/@astrojs/starlight/components/ThemeSelect.astro and
+ * keep only the two replaced functions.
+ */
+import Select from '@astrojs/starlight/components/Select.astro';
+---
+
+<starlight-theme-select>
+	<Select
+		icon="laptop"
+		label={Astro.locals.t('themeSelect.accessibleLabel')}
+		options={[
+			{ label: Astro.locals.t('themeSelect.dark'), selected: false, value: 'dark' },
+			{ label: Astro.locals.t('themeSelect.light'), selected: false, value: 'light' },
+			{ label: Astro.locals.t('themeSelect.auto'), selected: true, value: 'auto' },
+		]}
+		width="6.25em"
+	/>
+</starlight-theme-select>
+
+{/* Inlined to avoid FOUC. Uses global scope from `ThemeProvider.astro` */}
+<script is:inline>
+	StarlightThemeProvider.updatePickers();
+</script>
+
+<script>
+	type Theme = 'auto' | 'dark' | 'light';
+
+	/** Key in `localStorage` to store color theme preference at. */
+	const storageKey = 'starlight-theme';
+
+	/** Get a typesafe theme string from any JS value (unknown values are coerced to `'auto'`). */
+	const parseTheme = (theme: unknown): Theme =>
+		theme === 'auto' || theme === 'dark' || theme === 'light' ? theme : 'auto';
+
+	/**
+	 * Load the reader's preference.
+	 *
+	 * CHANGED FROM STOCK: an absent key means nobody has chosen yet, so it
+	 * resolves to the brand default rather than to 'auto'. An empty string is
+	 * legacy Auto written by stock Starlight and still parses to 'auto', so
+	 * readers who were already here keep following their OS.
+	 */
+	const loadTheme = (): Theme => {
+		const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(storageKey) : null;
+		if (raw === null) return 'light';
+		return parseTheme(raw);
+	};
+
+	/**
+	 * Store the reader's preference.
+	 *
+	 * CHANGED FROM STOCK: 'auto' is written literally. Stock wrote '' for it,
+	 * which made "chose Auto" indistinguishable from "never chose" and is the
+	 * reason the first version of this change did not work.
+	 */
+	function storeTheme(theme: Theme): void {
+		if (typeof localStorage !== 'undefined') {
+			localStorage.setItem(storageKey, theme);
+		}
+	}
+
+	/** Get the preferred system color scheme. */
+	const getPreferredColorScheme = (): Theme =>
+		matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+
+	/** Update select menu UI, document theme, and local storage state. */
+	function onThemeChange(theme: Theme): void {
+		StarlightThemeProvider.updatePickers(theme);
+		document.documentElement.dataset.theme = theme === 'auto' ? getPreferredColorScheme() : theme;
+		storeTheme(theme);
+	}
+
+	// React to changes in system color scheme.
+	matchMedia(`(prefers-color-scheme: light)`).addEventListener('change', () => {
+		if (loadTheme() === 'auto') onThemeChange('auto');
+	});
+
+	class StarlightThemeSelect extends HTMLElement {
+		constructor() {
+			super();
+			onThemeChange(loadTheme());
+			this.querySelector('select')?.addEventListener('change', (e) => {
+				if (e.currentTarget instanceof HTMLSelectElement) {
+					onThemeChange(parseTheme(e.currentTarget.value));
+				}
+			});
+		}
+	}
+	customElements.define('starlight-theme-select', StarlightThemeSelect);
+</script>
