@@ -4,6 +4,7 @@ import starlight from '@astrojs/starlight';
 import sitemap from '@astrojs/sitemap';
 import tailwindcss from '@tailwindcss/vite';
 import rehypeExternalLinks from 'rehype-external-links';
+import remarkGfm from 'remark-gfm';
 import { execSync } from 'node:child_process';
 
 // Sitemap lastmod, per page, from the content's real last-commit date.
@@ -80,6 +81,38 @@ function lessonSourceForUrl(url) {
 export default defineConfig({
 	site: 'https://clawdemy.org',
 	markdown: {
+		/*
+		 * GitHub Flavored Markdown, registered EXPLICITLY.
+		 *
+		 * This is not belt-and-braces. Astro 6.4 deprecated `markdown.gfm` by
+		 * dropping its schema default (`z.boolean().default(...)` became
+		 * `z.boolean().optional()`), so the resolved config now carries
+		 * `gfm: undefined`.
+		 *
+		 * For .md that is harmless: @astrojs/markdown-remark falls back to its
+		 * own `markdownConfigDefaults`, where gfm is still true. But
+		 * @astrojs/mdx reads the Astro config value directly
+		 * (`gfm: options.gfm ?? defaults.gfm`) and then gates the plugin on it
+		 * (`if (mdxOptions.gfm)`). Undefined is falsy, so remark-gfm was never
+		 * added for .mdx at all. Every file we publish is .mdx.
+		 *
+		 * The visible cost while it was off: 1,244 table separator rows and
+		 * 7,512 table rows across 362 files rendered as literal pipes and
+		 * dashes in a paragraph, worst on cheatsheets, plus 49 task-list items.
+		 *
+		 * Registering the plugin here instead of setting `gfm: true` is
+		 * deliberate: the flag is deprecated and will be removed, which would
+		 * silently break tables a second time. A plugin in this array cannot be
+		 * deprecated out from under us. There are zero .md files in
+		 * src/content, so nothing receives remark-gfm twice; if a .md is ever
+		 * added, set `gfm: false` here so this stays the only registration.
+		 *
+		 * Gated by tests/gfm.spec.ts, which asserts against the built page that
+		 * a known table renders as a <table> and that no page serves a literal
+		 * separator row. It broke silently because nothing checked.
+		 */
+		remarkPlugins: [remarkGfm],
+
 		// Every external link in MDX content gets target=_blank + secure rel attrs.
 		// Required for security per Doc/lesson-framework.md done-criteria; protects
 		// against tabnabbing and unwanted referrer leakage.
