@@ -29,7 +29,7 @@
  */
 import { TRACKS, THEMES } from '../../data/tracks';
 import type { ThemeKey } from '../../data/tracks';
-import { trackMetrics } from '../../data/curriculum-metrics';
+import { compactDurationLabel, trackMetrics } from '../../data/curriculum-metrics';
 
 interface Props {
 	/** Small uppercase label above the grid. */
@@ -156,7 +156,16 @@ const tiles = WALL_ORDER.map((slug, index) => {
 		stagger: index % 6,
 		size: BIG.has(slug) ? 'w-big' : WIDE.has(slug) ? 'w-wide' : '',
 		lessonsLabel: `${track.lessons} ${track.lessons === 1 ? 'lesson' : 'lessons'}`,
+		/*
+		 * Two forms of the same figure. The tile shows the compact one because
+		 * its meta line is about 18 characters wide and the full phrase was
+		 * being ellipsised mid-unit ("3.0 h..."), which reads as a rendering
+		 * fault. The full phrase goes in the accessible label, so a screen
+		 * reader still hears "3.1 hours narrated" rather than "three point one
+		 * h".
+		 */
 		narrationLabel: metrics && metrics.seconds > 0 ? metrics.hoursLabel : null,
+		narrationShort: metrics && metrics.seconds > 0 ? compactDurationLabel(metrics.seconds) : null,
 	};
 });
 ---
@@ -165,7 +174,7 @@ const tiles = WALL_ORDER.map((slug, index) => {
 	<p class="v2-wall__label">{label}</p>
 	<ul class="v2-wall__grid">
 		{
-			tiles.map(({ track, theme, stagger, size, lessonsLabel, narrationLabel }) => {
+			tiles.map(({ track, theme, stagger, size, lessonsLabel, narrationLabel, narrationShort }) => {
 				const planned = track.status !== 'live';
 				const classes = ['wt', `t-${theme.key}`, size, planned ? 'is-planned' : '']
 					.filter(Boolean)
@@ -198,12 +207,24 @@ const tiles = WALL_ORDER.map((slug, index) => {
 							<span class="wt-meta">
 								{planned ? (
 									'Coming soon'
-								) : (
+								) : narrationShort ? (
 									<>
-										{lessonsLabel}
-										{narrationLabel && <span aria-hidden="true"> &middot; </span>}
-										{narrationLabel && <>{narrationLabel} narrated</>}
+										{/*
+										 * Visible text is "15 lessons, 3.1h"; the spoken text
+										 * is "15 lessons, 3.1 hours narrated". Done with
+										 * .sr-only and aria-hidden rather than an aria-label
+										 * on this span, because aria-label on a generic
+										 * element with no role is unreliably announced, and
+										 * because this is the pattern StatBanner and StatBand
+										 * already use for an abbreviated figure.
+										 */}
+										<span class="sr-only">{`${lessonsLabel}, ${narrationLabel} narrated`}</span>
+										<span aria-hidden="true">
+											{lessonsLabel} &middot; {narrationShort}
+										</span>
 									</>
+								) : (
+									lessonsLabel
 								)}
 							</span>
 						</Tag>
@@ -220,6 +241,18 @@ const tiles = WALL_ORDER.map((slug, index) => {
 	   part of this build. Every colour below is an existing token, so the wall
 	   follows the theme and the paper surface without a second palette. */
 	.v2-wall {
+		/*
+		 * The wall sizes its columns against ITS OWN width, not the viewport's.
+		 *
+		 * This is not a preference. The hero stays two columns down to 64rem,
+		 * so between about 1030 and 1180 CSS pixels the wall is squeezed into a
+		 * narrow grid column while the viewport still looks wide. Measured
+		 * there: tiles fell to 87 to 102px, the "TRACK 26" eyebrow wrapped onto
+		 * a second line on up to 20 tiles, and the extra line pushed the meta
+		 * out of the tile again. A viewport media query cannot see that,
+		 * because the viewport is not what changed.
+		 */
+		container-type: inline-size;
 		position: relative;
 		min-width: 0;
 	}
@@ -239,11 +272,50 @@ const tiles = WALL_ORDER.map((slug, index) => {
 		padding: 0;
 		display: grid;
 		grid-template-columns: repeat(6, minmax(0, 1fr));
-		grid-auto-rows: 5.35rem;
+		/*
+		 * One row height, shared with the scrolling strip below, because a
+		 * tile has to fit the same contents in both layouts.
+		 *
+		 * It was 5.35rem, which was measured against a one-line title. Most
+		 * track names take two lines at this column width, and a tile that
+		 * holds TRACK 9, two lines of "Statistics & Probability for AI" and a
+		 * lesson count measures 92.9px of content: 9.6 padding, 17.9 for the
+		 * eyebrow row, two 0.15rem gaps, 31.2 for the clamped title, 19 for
+		 * the meta line and 8.8 padding. Every one of those heights is a fixed
+		 * font-size times an inherited line-height ratio, so they do not move
+		 * between engines, but 6rem leaves 3px of slack rather than betting on
+		 * that.
+		 */
+		--wt-row: 6rem;
+		grid-auto-rows: var(--wt-row);
 		gap: 0.5rem;
 		/* dense lets the wide and big tiles backfill the gaps they would
 		   otherwise leave in the grid. */
 		grid-auto-flow: dense;
+	}
+
+	/*
+	 * Fewer, wider columns as the wall narrows. The thresholds come from the
+	 * measurement above: a tile needs about 108px for "TRACK 26" to stay on
+	 * one line beside its icon and for "12 lessons, 3.8h" to fit without an
+	 * ellipsis. Six columns hold that down to a 43rem wall, five down to
+	 * 36rem, and below that four, which is still wide enough at the point the
+	 * hero has already dropped to a single column and handed the wall the
+	 * whole width.
+	 *
+	 * The wide and big tiles keep spanning two columns at every count, so the
+	 * editorial emphasis survives; only the grid around them gets coarser.
+	 */
+	@container (max-width: 43rem) {
+		.v2-wall__grid {
+			grid-template-columns: repeat(5, minmax(0, 1fr));
+		}
+	}
+
+	@container (max-width: 36rem) {
+		.v2-wall__grid {
+			grid-template-columns: repeat(4, minmax(0, 1fr));
+		}
 	}
 
 	.wt {
@@ -325,6 +397,21 @@ const tiles = WALL_ORDER.map((slug, index) => {
 
 	.wt-meta {
 		margin-top: auto;
+		/*
+		 * The line that was being sliced in half.
+		 *
+		 * .wt-in is a flex column with overflow: hidden, and a flex item
+		 * shrinks by default. On every tile whose title wrapped to two lines
+		 * the meta box was squeezed from 19px to 11.3px, its own glyphs
+		 * overflowed it, and the panel clipped them, so the reader saw the top
+		 * half of "13 lessons, 3.0 h" and nothing else. The element reported
+		 * no overflow, because the box really had been made small enough to
+		 * fit; only the text inside it had not.
+		 *
+		 * flex: none stops the squeeze. The row height above is what then
+		 * makes the honest height fit.
+		 */
+		flex: none;
 		font-size: 0.68rem;
 		font-weight: 600;
 		color: var(--sl-color-gray-3);
@@ -386,7 +473,7 @@ const tiles = WALL_ORDER.map((slug, index) => {
 
 		.v2-wall__grid {
 			grid-template-columns: none;
-			grid-template-rows: repeat(2, 5.35rem);
+			grid-template-rows: repeat(2, var(--wt-row));
 			grid-auto-flow: column;
 			grid-auto-columns: 9.5rem;
 			overflow-x: auto;

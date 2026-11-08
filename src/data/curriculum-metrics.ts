@@ -163,6 +163,25 @@ function hoursLabelFor(seconds: number): string {
 }
 
 /**
+ * The same duration, short enough for a catalog tile.
+ *
+ * A standard tile on the homepage wall gives its meta line about 106px, which
+ * is roughly 18 characters at that font size. "15 lessons, 3.1 hours narrated"
+ * does not fit and was being cut to "3.1 h" with an ellipsis, which reads as a
+ * broken unit rather than an abbreviation. "3.1h" fits with room to spare.
+ *
+ * It lives next to hoursLabelFor deliberately: the two must agree on when a
+ * duration stops being minutes and starts being hours, and a second copy of
+ * that threshold somewhere else would drift.
+ */
+export function compactDurationLabel(seconds: number): string {
+	if (seconds <= 0) return '';
+	const hours = seconds / 3600;
+	if (hours < 1) return `${Math.round(seconds / 60)}m`;
+	return `${hours.toFixed(1)}h`;
+}
+
+/**
  * Distinct cited sources, read from every lesson's references.mdx.
  *
  * DEFINITION, because two reasonable people counted this and got 921 and 927.
