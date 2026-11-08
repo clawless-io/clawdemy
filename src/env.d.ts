@@ -21,3 +21,20 @@ declare module 'text-readability' {
 	};
 	export default rs;
 }
+
+/**
+ * Global installed by src/components/overrides/ThemeProvider.astro.
+ *
+ * That component's inline script assigns `window.StarlightThemeProvider`
+ * before first paint, and ThemeSelect.astro's module script then calls it.
+ * Stock Starlight does the same thing, but its copy lives in node_modules and
+ * is never typechecked, so the missing declaration only surfaced once we
+ * overrode the pair into src/. It failed the "Build, typecheck, validate
+ * content" CI job on PR #110.
+ *
+ * Declared, not imported: the provider must stay an inline script so the theme
+ * is set before paint, which means there is no module to import it from.
+ */
+declare const StarlightThemeProvider: {
+	updatePickers(theme?: 'auto' | 'dark' | 'light'): void;
+};
