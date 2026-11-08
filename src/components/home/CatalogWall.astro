@@ -1,0 +1,441 @@
+---
+/**
+ * The catalog wall: every track in the manifest as one tile, so the whole
+ * library is visible in the first screen instead of hiding behind links.
+ *
+ * Founder, 2026-11-07: "when someone arrives, they should get the sense that
+ * they're entering a universe of AI education material... can we build
+ * perceived value in the first three seconds on the page?"
+ *
+ * WHAT IS DERIVED AND WHAT IS EDITORIAL
+ *
+ * Every NUMBER on a tile is derived. Lesson counts come from the manifest and
+ * narration comes from the measured timing files, so no figure here is typed
+ * by hand and none can drift from what is actually published. The estimator
+ * that used to produce track hours was removed for exactly that reason: it
+ * multiplied total lessons by a flat 18 minutes and advertised hours for three
+ * tracks that have no audio at all.
+ *
+ * ORDER and SIZE are editorial and live in this file as data. They are visual
+ * balance judgements from the design mock, not facts about the catalog: the
+ * production group runs 7, 20, 22, 17, 18, 21, 25, 26, which is not an order
+ * any sort of the manifest produces. Deriving them would mean inventing a rule
+ * that happens to fit today and quietly reshuffles the page the next time a
+ * track ships.
+ *
+ * Because they are hand-maintained, both are asserted against the manifest at
+ * build time. Adding a track to tracks.ts without placing it here fails the
+ * build with the slug named, rather than silently dropping it from the wall.
+ */
+import { TRACKS, THEMES } from '../../data/tracks';
+import type { ThemeKey } from '../../data/tracks';
+import { trackMetrics } from '../../data/curriculum-metrics';
+
+interface Props {
+	/** Small uppercase label above the grid. */
+	label?: string;
+}
+
+const { label = 'The catalog' } = Astro.props;
+
+/**
+ * Tile order, taken from the mock. Grouped by theme, then arranged inside each
+ * group for visual balance rather than by track number.
+ */
+const WALL_ORDER = [
+	'visual-math-linear-algebra',
+	'visual-math-calculus',
+	'statistics-and-probability',
+	'classical-machine-learning',
+	'neural-network-intuition',
+	'intro-to-deep-learning',
+	'build-nns-from-scratch',
+	'ai-foundations',
+	'practical-transformers',
+	'build-an-llm-from-scratch',
+	'multimodal-ai',
+	'git-workflow',
+	'ai-agents-and-tool-use',
+	'building-with-claude',
+	'reinforcement-learning-foundations',
+	'deep-reinforcement-learning',
+	'llm-ops-and-production',
+	'ai-agent-teams',
+	'engineering-agentic-systems',
+	'privacy-local-first',
+	'computer-vision',
+	'generative-models-and-diffusion',
+	'ai-safety-and-alignment',
+	'generative-ai-in-the-real-world',
+	'getting-started',
+	'use-case-cookbook',
+	'agent-building-101',
+] as const;
+
+/** Double-width tiles. */
+const WIDE = new Set([
+	'visual-math-linear-algebra',
+	'build-an-llm-from-scratch',
+	'git-workflow',
+	'deep-reinforcement-learning',
+	'computer-vision',
+	'generative-models-and-diffusion',
+]);
+
+/** The one tile that anchors the wall, at double width and double height. */
+const BIG = new Set(['ai-foundations']);
+
+/**
+ * Build-time guard. The wall is hand-ordered, so it can fall out of step with
+ * the manifest in three ways, and all three are silent in the browser: a new
+ * track never appears, a removed track throws at render, and a duplicated slug
+ * renders twice. Each one fails the build here instead, naming the slug.
+ */
+function assertWallCoversManifest(): void {
+	const manifest = new Set(TRACKS.map((track) => track.slug));
+	const wall = new Set<string>();
+
+	for (const slug of WALL_ORDER) {
+		if (wall.has(slug)) {
+			throw new Error(`[CatalogWall] '${slug}' is listed twice in WALL_ORDER.`);
+		}
+		wall.add(slug);
+		if (!manifest.has(slug)) {
+			throw new Error(
+				`[CatalogWall] WALL_ORDER lists '${slug}', which is not in src/data/tracks.ts. ` +
+					`Remove it here, or restore it there.`,
+			);
+		}
+	}
+
+	const missing = [...manifest].filter((slug) => !wall.has(slug));
+	if (missing.length > 0) {
+		throw new Error(
+			`[CatalogWall] ${missing.length} track(s) in src/data/tracks.ts are not placed on ` +
+				`the wall: ${missing.join(', ')}. Add each one to WALL_ORDER, and decide whether ` +
+				`it is a standard, wide or big tile. Placement is an editorial choice, which is ` +
+				`why it is not derived.`,
+		);
+	}
+
+	for (const slug of [...WIDE, ...BIG]) {
+		if (!manifest.has(slug)) {
+			throw new Error(`[CatalogWall] '${slug}' is sized but is not a track in tracks.ts.`);
+		}
+	}
+}
+
+assertWallCoversManifest();
+
+/**
+ * One abstract mark per theme, from the mock. Geometric on purpose: no faces,
+ * no logos, no photography. Only the inner shapes are stored, because every
+ * icon shares the same svg element and stroke settings.
+ */
+const ICON_PATHS: Record<ThemeKey, string> = {
+	foundations: '<circle cx="8" cy="8" r="5"/><circle cx="16" cy="16" r="5"/>',
+	'nn-dl':
+		'<circle cx="5" cy="6" r="2"/><circle cx="5" cy="18" r="2"/><circle cx="19" cy="12" r="2"/><path d="M7 6.5 17 11.5M7 17.5 17 12.5"/>',
+	transformers:
+		'<rect x="3" y="4" width="18" height="3" rx="1"/><rect x="3" y="10.5" width="18" height="3" rx="1"/><rect x="3" y="17" width="18" height="3" rx="1"/>',
+	production: '<path d="M12 3a9 9 0 1 1-7 3.3"/><path d="M5 3v4h4"/>',
+	specialized: '<path d="M12 3 20 7.5v9L12 21 4 16.5v-9z"/>',
+	product: '<rect x="4" y="4" width="16" height="16" rx="4"/><path d="M12 8v8M8 12h8"/>',
+};
+
+const bySlug = new Map(TRACKS.map((track) => [track.slug, track]));
+
+const tiles = WALL_ORDER.map((slug, index) => {
+	const track = bySlug.get(slug)!;
+	const metrics = track.status === 'live' ? trackMetrics(slug) : null;
+
+	return {
+		track,
+		theme: THEMES[track.theme],
+		/** Drift stagger: the mock cycles six offsets so tiles do not pulse in unison. */
+		stagger: index % 6,
+		size: BIG.has(slug) ? 'w-big' : WIDE.has(slug) ? 'w-wide' : '',
+		lessonsLabel: `${track.lessons} ${track.lessons === 1 ? 'lesson' : 'lessons'}`,
+		narrationLabel: metrics && metrics.seconds > 0 ? metrics.hoursLabel : null,
+	};
+});
+---
+
+<section class="v2-wall" aria-label="Every track on Clawdemy">
+	<p class="v2-wall__label">{label}</p>
+	<ul class="v2-wall__grid">
+		{
+			tiles.map(({ track, theme, stagger, size, lessonsLabel, narrationLabel }) => {
+				const planned = track.status !== 'live';
+				const classes = ['wt', `t-${theme.key}`, size, planned ? 'is-planned' : '']
+					.filter(Boolean)
+					.join(' ');
+
+				// A planned track has no page to open, so it is not a link. Rendering
+				// it as one would promise a destination that does not exist.
+				const Tag = planned ? 'div' : 'a';
+
+				return (
+					<li class={classes} style={`--accent: ${theme.accent}; --i: ${stagger}`}>
+						<Tag class="wt-in" {...(planned ? {} : { href: track.href })}>
+							<span class="wt-num">
+								<span class="wt-ico" aria-hidden="true">
+									<svg
+										viewBox="0 0 24 24"
+										width="14"
+										height="14"
+										fill="none"
+										stroke="currentColor"
+										stroke-width="1.6"
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										set:html={ICON_PATHS[theme.key]}
+									/>
+								</span>
+								Track {track.id}
+							</span>
+							<span class="wt-title">{track.title}</span>
+							<span class="wt-meta">
+								{planned ? (
+									'Coming soon'
+								) : (
+									<>
+										{lessonsLabel}
+										{narrationLabel && <span aria-hidden="true"> &middot; </span>}
+										{narrationLabel && <>{narrationLabel} narrated</>}
+									</>
+								)}
+							</span>
+						</Tag>
+					</li>
+				);
+			})
+		}
+	</ul>
+</section>
+
+<style>
+	/* Layout and tile styling are GSD's mock, reproduced here rather than
+	   linked, because the mock's stylesheet is a static audit artifact and not
+	   part of this build. Every colour below is an existing token, so the wall
+	   follows the theme and the paper surface without a second palette. */
+	.v2-wall {
+		position: relative;
+		min-width: 0;
+	}
+
+	.v2-wall__label {
+		margin: 0 0 0.6rem;
+		font-size: 0.74rem;
+		font-weight: 800;
+		letter-spacing: 0.1em;
+		text-transform: uppercase;
+		color: var(--sl-color-gray-3);
+	}
+
+	.v2-wall__grid {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: grid;
+		grid-template-columns: repeat(6, minmax(0, 1fr));
+		grid-auto-rows: 5.35rem;
+		gap: 0.5rem;
+		/* dense lets the wide and big tiles backfill the gaps they would
+		   otherwise leave in the grid. */
+		grid-auto-flow: dense;
+	}
+
+	.wt {
+		min-width: 0;
+		animation: cw-drift 7s ease-in-out infinite alternate;
+		animation-delay: calc(var(--i, 0) * -1.15s);
+	}
+
+	.wt.w-wide {
+		grid-column: span 2;
+	}
+
+	.wt.w-big {
+		grid-column: span 2;
+		grid-row: span 2;
+	}
+
+	.wt-in {
+		position: relative;
+		display: flex;
+		flex-direction: column;
+		gap: 0.15rem;
+		height: 100%;
+		overflow: hidden;
+		padding: 0.6rem 0.7rem 0.55rem;
+		border-radius: 11px;
+		text-decoration: none;
+		color: inherit;
+		background: color-mix(in srgb, var(--accent) 6%, var(--fl-card));
+		border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--fl-line));
+		box-shadow: var(--fl-shadow);
+		transition:
+			transform 0.15s ease,
+			border-color 0.15s ease,
+			box-shadow 0.15s ease;
+	}
+
+	a.wt-in:hover {
+		transform: translateY(-2px);
+		border-color: var(--accent);
+		box-shadow: var(--fl-shadow-lift);
+	}
+
+	.wt-in::before {
+		content: '';
+		position: absolute;
+		inset: 0 auto 0 0;
+		width: 3px;
+		background: var(--accent);
+	}
+
+	.wt-num {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.3rem;
+		font-size: 0.64rem;
+		font-weight: 800;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		color: var(--accent);
+	}
+
+	.wt-ico {
+		display: inline-flex;
+	}
+
+	.wt-title {
+		font-size: 0.78rem;
+		font-weight: 700;
+		line-height: 1.25;
+		flex: none;
+		color: var(--fl-ink);
+		display: -webkit-box;
+		-webkit-line-clamp: 2;
+		line-clamp: 2;
+		-webkit-box-orient: vertical;
+		overflow: hidden;
+	}
+
+	.wt-meta {
+		margin-top: auto;
+		font-size: 0.68rem;
+		font-weight: 600;
+		color: var(--sl-color-gray-3);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	.w-big .wt-in {
+		padding: 0.9rem 1rem;
+		gap: 0.4rem;
+		background: color-mix(in srgb, var(--accent) 10%, var(--fl-card));
+	}
+
+	.w-big .wt-title {
+		font-size: 1.2rem;
+	}
+
+	.w-big .wt-num {
+		font-size: 0.72rem;
+	}
+
+	.w-big .wt-meta {
+		font-size: 0.8rem;
+	}
+
+	/* A planned track is drawn as an outline: present in the catalog, clearly
+	   not yet a destination. */
+	.wt.is-planned .wt-in {
+		background: transparent;
+		border-style: dashed;
+		box-shadow: none;
+		opacity: 0.8;
+	}
+
+	.wt.is-planned .wt-in::before {
+		background: var(--sl-color-gray-5);
+	}
+
+	@keyframes cw-drift {
+		from {
+			transform: translateY(0);
+		}
+		to {
+			transform: translateY(-4px);
+		}
+	}
+
+	/* Phone: the wall becomes a two-row strip that scrolls inside itself, so
+	   the whole catalog stays visible without a wall of tiny squares. */
+	@media (max-width: 50rem) {
+		.v2-wall {
+			margin-inline: calc(-1 * var(--fl-gutter));
+		}
+
+		.v2-wall__label {
+			padding-inline: var(--fl-gutter);
+		}
+
+		.v2-wall__grid {
+			grid-template-columns: none;
+			grid-template-rows: repeat(2, 5.35rem);
+			grid-auto-flow: column;
+			grid-auto-columns: 9.5rem;
+			overflow-x: auto;
+			overscroll-behavior-x: contain;
+			scroll-snap-type: x proximity;
+			padding: 0.25rem var(--fl-gutter) 0.6rem;
+			scroll-padding-inline: var(--fl-gutter);
+			scrollbar-width: thin;
+		}
+
+		.wt {
+			scroll-snap-align: start;
+			animation: none;
+		}
+
+		.wt.w-wide,
+		.wt.w-big {
+			grid-column: auto;
+			grid-row: auto;
+		}
+
+		.w-big .wt-in {
+			padding: 0.6rem 0.7rem 0.55rem;
+		}
+
+		.w-big .wt-title {
+			font-size: 0.8rem;
+		}
+
+		.w-big .wt-num {
+			font-size: 0.64rem;
+		}
+
+		.w-big .wt-meta {
+			font-size: 0.68rem;
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.wt {
+			animation: none;
+		}
+
+		.wt-in {
+			transition: none;
+		}
+
+		.v2-wall__grid {
+			scroll-behavior: auto;
+		}
+	}
+</style>
