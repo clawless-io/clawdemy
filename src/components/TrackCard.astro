@@ -9,15 +9,36 @@
 // Reads all data from the track manifest (src/data/tracks.ts), the single
 // source of truth. No commerce signals (no ratings/price/enrollment) per §5.
 import type { Track } from '../data/tracks';
-import { trackHours } from '../data/tracks';
+import { trackMetrics } from '../data/curriculum-metrics';
 
 interface Props {
 	track: Track;
 }
 
 const { track } = Astro.props;
-const hours = trackHours(track);
 const isLive = track.status === 'live';
+
+/*
+ * Narration time is MEASURED, not estimated.
+ *
+ * This card used to call trackHours(), which multiplied the lesson count by a
+ * flat 18 minutes. That was wrong in both directions and wrong in a way a
+ * reader could notice: the real catalog average is 14.8 minutes, so Visual
+ * Math: Linear Algebra advertised about 5 hours against 3.1 measured, while
+ * Git Workflow understated at 5 against 7.1. Worse, it multiplied TOTAL
+ * lessons rather than narrated ones, so three tracks with no audio at all
+ * still showed an hours figure.
+ *
+ * curriculum-metrics derives this by summing the end timestamp of the last
+ * word in each public/read-along/<slug>.timing.json, which is the same number
+ * the read-along player scrubs against.
+ *
+ * A track with no narration shows no time at all rather than a zero or an
+ * invented estimate. The lesson count beside it already conveys the size.
+ */
+const metrics = trackMetrics(track.slug);
+const hasNarration = metrics.seconds > 0;
+const narrationLabel = metrics.hoursLabel;
 
 // Per-theme abstract geometric icon (inline SVG, 24x24, currentColor).
 // Calm brand: simple shapes, no imagery.
@@ -71,8 +92,8 @@ const linkAttrs = isLive
 		{isLive
 			? <span class="track-card__lessons">{track.lessons} lessons</span>
 			: <span class="track-card__lessons">Coming soon</span>}
-		{isLive && <span class="track-card__dot" aria-hidden="true">·</span>}
-		{isLive && <span class="track-card__time">~{hours}h</span>}
+		{isLive && hasNarration && <span class="track-card__dot" aria-hidden="true">·</span>}
+		{isLive && hasNarration && <span class="track-card__time">{narrationLabel} narrated</span>}
 		<span class="track-card__level">{track.level}</span>
 	</div>
 </Tag>
