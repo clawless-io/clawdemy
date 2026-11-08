@@ -17,11 +17,15 @@ import { expect, test, type Page } from '@playwright/test';
  * reports whatever is near-white, which is the same method that produced the
  * fix and will catch a surface nobody has thought of yet.
  *
- * Measured at the time of writing, across the four states below: the only
- * near-white surfaces were the table-of-contents rail, the pagination cards,
- * the star button and the footer LinkedIn pill, all of them --fl-card. Code
- * blocks are rgb(246,247,249), which is Expressive Code's own light theme and
- * deliberately out of scope here.
+ * That is not hypothetical. A hand inventory of the complaint found four
+ * near-white surfaces, all of them --fl-card: the table-of-contents rail, the
+ * pagination cards, the star button and the footer LinkedIn pill. This sweep
+ * found a fifth on its first run, the Pagefind search input, which takes its
+ * colour from a Starlight variable no file in this repo mentions. It is fixed
+ * in global.css next to the --fl-card block.
+ *
+ * Code blocks are rgb(246,247,249), which is Expressive Code's own light
+ * theme and deliberately out of scope here.
  */
 
 /** All channels at or above this count as white enough to glare on paper. */
@@ -161,6 +165,14 @@ test('the search dialog is paper too', async ({ page }) => {
 	await page.goto(LESSON);
 	await page.locator('site-search button').first().click();
 	await expect(page.locator('dialog[open]')).toBeVisible();
+
+	// Wait for the INPUT, not just the dialog. Pagefind's UI is fetched and
+	// mounted after the dialog opens, so a sweep that only waits for
+	// dialog[open] can run against an empty dialog, find nothing and pass
+	// while checking nothing. A hand sweep did exactly that and missed the
+	// white input this test then caught.
+	await expect(page.locator('.pagefind-ui__search-input')).toBeVisible();
+
 	expect(await nearWhiteSurfaces(page)).toEqual([]);
 });
 
