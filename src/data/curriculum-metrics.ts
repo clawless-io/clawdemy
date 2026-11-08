@@ -162,6 +162,68 @@ function hoursLabelFor(seconds: number): string {
 	return `${hours.toFixed(1)} hours`;
 }
 
+/**
+ * Distinct cited sources, read from every lesson's references.mdx.
+ *
+ * DEFINITION, because two reasonable people counted this and got 921 and 927.
+ * A "source" is one distinct external URL after normalization:
+ *   - trailing punctuation and closing brackets removed (markdown leaves them)
+ *   - #fragment and ?utm... dropped, so one page is not counted twice
+ *   - one trailing slash dropped
+ *   - creativecommons.org excluded: a licence link is not a source
+ * Everything else counts, including documentation and repositories, because a
+ * lesson that cites a doc page genuinely rests on it.
+ *
+ * arXiv papers are counted by IDENTIFIER, not URL, so /abs/, /pdf/ and
+ * versioned variants of one paper collapse to one. Counting URLs here was the
+ * mistake that produced an inflated "501 papers" when the real figure is 277.
+ */
+function readCitations(bySlug: Map<string, string>): {
+	sources: number;
+	domains: number;
+	arxivPapers: number;
+} {
+	const sources = new Set<string>();
+	const domains = new Set<string>();
+	const arxiv = new Set<string>();
+
+	for (const [lessonSlug, trackSlug] of bySlug) {
+		const file = join(LESSONS_DIR, trackSlug, lessonSlug, 'references.mdx');
+		if (!existsSync(file)) continue;
+		const body = readFileSync(file, 'utf8');
+
+		for (const rawMatch of body.matchAll(/https?:\/\/[^\s)\]"'`<>]+/g)) {
+			let url = rawMatch[0]
+				.replace(/[.,;:!]+$/, '')
+				.replace(/[)\]]+$/, '')
+				.replace(/#.*$/, '')
+				.replace(/\?utm[^#]*$/, '')
+				.replace(/\/$/, '');
+			if (!url) continue;
+
+			let host: string;
+			try {
+				host = new URL(url).hostname.replace(/^www\./, '').toLowerCase();
+			} catch {
+				continue; // not a parseable URL; do not count a malformed string
+			}
+			if (host === 'creativecommons.org') continue;
+
+			const arxivId = url.match(/arxiv\.org\/(?:abs|pdf)\/([0-9]{4}\.[0-9]{4,5})/i);
+			if (arxivId) {
+				arxiv.add(arxivId[1]);
+				// Collapse every variant of this paper to one canonical source entry.
+				url = `arxiv:${arxivId[1]}`;
+			}
+
+			sources.add(url);
+			domains.add(host);
+		}
+	}
+
+	return { sources: sources.size, domains: domains.size, arxivPapers: arxiv.size };
+}
+
 function compute() {
 	const { bySlug, perTrack } = readLessonIndex();
 
@@ -260,10 +322,18 @@ function compute() {
 		byTheme.set(track.theme, acc);
 	}
 
+	const citations = readCitations(bySlug);
+
 	return {
 		byTrack,
 		byTheme,
 		totals: {
+			/** Distinct cited sources. See readCitations() for the definition. */
+			citedSources: citations.sources,
+			/** Distinct domains those sources live on. */
+			citedDomains: citations.domains,
+			/** Distinct arXiv papers, counted by identifier. */
+			arxivPapers: citations.arxivPapers,
 			/** Tracks readers can open today. */
 			liveTracks: liveTracks.length,
 			/** Tracks in the manifest, live plus planned. */

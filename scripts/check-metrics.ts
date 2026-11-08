@@ -31,6 +31,9 @@ console.log(`  Mean lesson length     ${t.narrationAvgMinutes} min`);
 console.log(`  Lessons live           ${t.liveLessons}`);
 console.log(`  Tracks live            ${t.liveTracks}`);
 console.log(`  Tracks in manifest     ${t.manifestTracks}  (live plus planned)`);
+console.log(`  Cited sources          ${t.citedSources}`);
+console.log(`  Cited domains          ${t.citedDomains}`);
+console.log(`  arXiv papers           ${t.arxivPapers}`);
 
 console.log('\nBY THEME (live tracks)');
 console.log('-'.repeat(64));
