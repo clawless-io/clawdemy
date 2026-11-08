@@ -221,6 +221,15 @@ export const collections = {
 					})
 					.optional(),
 
+				// Layout: let a marketing page ask for the full-bleed canvas from
+				// src/components/overrides/ContentPanel.astro, which lifts the
+				// 45rem content cap so a section can paint edge to edge. Only
+				// honoured on `template: splash` pages, so a lesson cannot opt in
+				// by mistake. Set it ONLY on a page that actually supplies
+				// full-bleed sections: on a page of prose it widens paragraphs to
+				// an unreadable line length instead of helping.
+				full_bleed: z.boolean().optional(),
+
 				// Artifact type — lets the validator know which rules apply
 				artifact: z
 					.enum(['brief', 'lesson', 'summary', 'practice', 'cheatsheet', 'references'])

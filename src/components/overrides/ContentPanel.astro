@@ -1,0 +1,136 @@
+---
+/**
+ * ContentPanel override: a full-bleed canvas for the marketing surface.
+ *
+ * WHY THIS EXISTS
+ *
+ * The founder's brief (2026-11-07) is that a first-time visitor should feel
+ * they are "entering a universe of AI education material", with the value
+ * legible in the first three seconds. Our homepage could not do that, and the
+ * reason was one declaration: stock ContentPanel caps its inner container at
+ * `max-width: var(--sl-content-width)`, which is 45rem (720px). Everything
+ * else about the page being sidebar-free was already true, because index.mdx
+ * uses `template: splash`. So the "it looks like a wiki" feeling on the
+ * homepage was a 720px prose column, not the framework.
+ *
+ * This override lifts that cap for the marketing routes only, which is what
+ * lets a section own the full viewport width and carry its own background.
+ * Astro and Starlight needed no replacing to get there.
+ *
+ * IMPORTANT, THE REASON THIS FILE COPIES STOCK CSS
+ *
+ * Overriding a Starlight component means the stock component never renders,
+ * so ITS <style> block never ships either. The stock rules below are
+ * reproduced verbatim from
+ * node_modules/@astrojs/starlight/components/ContentPanel.astro so that the
+ * 1,868 pages which are NOT marketing routes render byte-identically. On a
+ * Starlight upgrade, re-diff against that file. If the stock rules change and
+ * this copy does not, every lesson page silently loses the fix.
+ *
+ * SCOPE, deliberately narrow, and INERT UNTIL A PAGE ASKS
+ *
+ * Full bleed is opt-in from the page's own frontmatter (`full_bleed: true`)
+ * and additionally requires `template: splash`. Two independent conditions,
+ * because the cost of a false positive is high.
+ *
+ * NO PAGE OPTS IN YET, deliberately. The first version of this change opted
+ * the homepage in immediately, and measuring it showed why that was wrong:
+ * lifting the cap on the EXISTING prose homepage produced paragraphs 1425px
+ * wide at a 1440px viewport, about 166 characters per line against a readable
+ * 45 to 75. Full bleed only helps a page that SUPPLIES edge-to-edge sections;
+ * on a page of prose it is a regression. So the canvas ships first and unused,
+ * and a page joins it in the same commit as the sections that use it.
+ *
+ * The flag lives on the page rather than in an allowlist here because that is
+ * where the knowledge belongs: a page knows whether it has full-bleed
+ * sections. It also makes joining a one-line change.
+ *
+ * Read-along safety: this changes layout only. It adds and removes no DOM text
+ * node, so narration word indices cannot shift. It also never renders on a
+ * lesson route.
+ */
+const { entry } = Astro.locals.starlightRoute;
+
+/*
+ * `full_bleed` is an optional boolean we add to the docs schema in
+ * src/content.config.ts. Starlight types `starlightRoute.entry.data` from its
+ * OWN base schema and does not thread user extensions through, so the field is
+ * invisible to TypeScript here and a direct read fails `astro check`. The
+ * narrow local type below is the documented shape of what we read, and nothing
+ * more, so a typo in either field still fails the build.
+ */
+const data = entry.data as typeof entry.data & {
+	template?: string;
+	full_bleed?: boolean;
+};
+
+// The `template: splash` interlock means a lesson cannot opt in even by
+// mistake, because lessons are never splash routes.
+const isSplash = data.template === 'splash';
+const fullBleed = isSplash && data.full_bleed === true;
+---
+
+<div class="content-panel" data-full-bleed={fullBleed ? 'true' : undefined}>
+	<div class="sl-container"><slot /></div>
+</div>
+
+<style>
+	@layer starlight.core {
+		/* --- Stock Starlight rules, reproduced verbatim. Do not edit. --- */
+		.content-panel {
+			padding: 1.5rem var(--sl-content-pad-x);
+		}
+		.content-panel + .content-panel {
+			border-top: 1px solid var(--sl-color-hairline);
+		}
+		.sl-container {
+			max-width: var(--sl-content-width);
+		}
+
+		.sl-container > :global(* + *) {
+			margin-top: 1.5rem;
+		}
+
+		@media (min-width: 72rem) {
+			.sl-container {
+				margin-inline: var(--sl-content-margin-inline, auto);
+			}
+		}
+
+		/* --- Clawdemy addition: the full-bleed marketing canvas. --- */
+
+		/*
+		 * Drop the panel's own gutter so a section can paint to both edges. A
+		 * section that wants a readable text column re-establishes one itself,
+		 * which is the right place for that decision: per section, not for the
+		 * whole page.
+		 */
+		.content-panel[data-full-bleed] {
+			padding: 0;
+		}
+
+		/* The cap itself, and the auto-centering that goes with it. */
+		.content-panel[data-full-bleed] > .sl-container {
+			max-width: none;
+			margin-inline: 0;
+		}
+
+		/*
+		 * Stock puts 1.5rem between adjacent children. Full-bleed bands set
+		 * their own vertical rhythm, and an inherited margin between them
+		 * would show as a stripe of page background between sections.
+		 */
+		.content-panel[data-full-bleed] > .sl-container > :global(* + *) {
+			margin-top: 0;
+		}
+
+		/*
+		 * Stock draws a hairline between stacked panels. On a designed landing
+		 * page that reads as an accidental rule across the layout.
+		 */
+		.content-panel[data-full-bleed] + .content-panel,
+		.content-panel + .content-panel[data-full-bleed] {
+			border-top: 0;
+		}
+	}
+</style>

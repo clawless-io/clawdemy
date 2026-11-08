@@ -4494,6 +4494,12 @@ export default defineConfig({
 				// re-applies the theme and rewrites storage on every page load,
 				// so overriding the provider alone does nothing. See the comment
 				// block in ThemeSelect.astro.
+				// Full-bleed canvas for the marketing routes (homepage today,
+				// /tracks/ next). Stock caps its container at 45rem, which is what
+				// made the homepage read as a document. This override REPRODUCES the
+				// stock CSS, because overriding a component stops its own <style>
+				// from shipping; re-diff it on a Starlight upgrade.
+				ContentPanel: './src/components/overrides/ContentPanel.astro',
 				ThemeProvider: './src/components/overrides/ThemeProvider.astro',
 				ThemeSelect: './src/components/overrides/ThemeSelect.astro',
 				// Adds og:image and twitter:image to every page; Starlight 0.38
