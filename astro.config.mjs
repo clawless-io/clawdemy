@@ -4499,6 +4499,12 @@ export default defineConfig({
 				// made the homepage read as a document. This override REPRODUCES the
 				// stock CSS, because overriding a component stops its own <style>
 				// from shipping; re-diff it on a Starlight upgrade.
+				// The homepage hero. Starlight renders its own PageTitle when a page
+				// has no hero, so the marketing hero had to be an override rather than
+				// a component in the page body, which would have put a second h1 on
+				// the homepage. The stock markup AND the stock styles are reproduced
+				// inside it for every other hero page; re-diff on a Starlight upgrade.
+				Hero: './src/components/overrides/Hero.astro',
 				ContentPanel: './src/components/overrides/ContentPanel.astro',
 				ThemeProvider: './src/components/overrides/ThemeProvider.astro',
 				ThemeSelect: './src/components/overrides/ThemeSelect.astro',
