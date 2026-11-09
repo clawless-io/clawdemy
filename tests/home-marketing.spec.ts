@@ -208,6 +208,67 @@ test.describe('at desktop width', () => {
 	});
 });
 
+test('the stat band lines up with the hero above it, at every desktop width', async ({ page }) => {
+	/*
+	 * Found by the founder looking at the page, not by any check here: "that
+	 * strip is left-justified. Should it be center-justified?"
+	 *
+	 * It should, and the stylesheet said so. The declarations were being
+	 * discarded. The band's grid is a <ul> rendered into the page body, so it
+	 * sits inside .sl-markdown-content, where Starlight ships
+	 * `.sl-markdown-content ul { margin: 0 0 1.25rem; padding-left: 1.3rem }`
+	 * at specificity (0,1,1). Astro scopes component styles with
+	 * :where(.astro-hash), which adds nothing, so our (0,1,0) rule lost its
+	 * auto margins, its left padding and its zero bottom margin.
+	 *
+	 * The contract is not "has auto margins", which is a restatement of the
+	 * CSS. It is that the band occupies the SAME horizontal band as the hero,
+	 * because that is what a reader sees. Both are capped at --v2-wrap, so
+	 * their edges must agree whatever the viewport does.
+	 *
+	 * Below 90rem the cap stops binding and both simply fill the width, which
+	 * the same assertion still describes correctly.
+	 */
+	for (const width of [1440, 1680, 1920, 2200, 2560]) {
+		await page.setViewportSize({ width, height: 900 });
+		await page.goto('/');
+
+		const edges = await page.evaluate(() => {
+			const box = (sel: string) => {
+				const el = document.querySelector(sel);
+				if (!el) return null;
+				const r = el.getBoundingClientRect();
+				return { left: Math.round(r.left), right: Math.round(r.right) };
+			};
+			const grid = document.querySelector('.v2-stats__grid')!;
+			const cs = getComputedStyle(grid);
+			return {
+				hero: box('.v2-hero__inner'),
+				band: box('.v2-stats__grid'),
+				padLeft: cs.paddingLeft,
+				padRight: cs.paddingRight,
+			};
+		});
+
+		expect(edges.hero, 'hero inner must exist').not.toBeNull();
+		expect(edges.band, 'stat grid must exist').not.toBeNull();
+
+		// 1px of slack for sub-pixel rounding at odd viewport widths.
+		expect(
+			Math.abs(edges.band!.left - edges.hero!.left),
+			`band left ${edges.band!.left} vs hero left ${edges.hero!.left} at ${width}px`,
+		).toBeLessThanOrEqual(1);
+		expect(
+			Math.abs(edges.band!.right - edges.hero!.right),
+			`band right ${edges.band!.right} vs hero right ${edges.hero!.right} at ${width}px`,
+		).toBeLessThanOrEqual(1);
+
+		// The asymmetric gutter was the same bug wearing a different hat:
+		// Starlight's padding-left won while our padding-right stood.
+		expect(edges.padLeft, `asymmetric gutter at ${width}px`).toBe(edges.padRight);
+	}
+});
+
 test('the page does not scroll sideways, at desktop or on a phone', async ({ page }) => {
 	/*
 	 * Full-bleed sections paint to the viewport edges and the catalog wall
