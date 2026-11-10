@@ -24,8 +24,10 @@ quizzes, and certifications. No lesson ships without human approval.
 
 ## Brand rules and editorial discipline (non-negotiable)
 
-- **Clawless is closed-source. OpenClaw is open-source. Never conflate them in
-  user-facing copy.**
+- **Clawless Computer is free software, licensed under the GNU AGPL v3.
+  OpenClaw is a separate open-source project, licensed under MIT. Never
+  conflate them in user-facing copy, and never describe Clawless Computer as
+  closed source.**
 - **Companion-not-competitor.** We boost the things we cite (Stanford, Khan
   Academy, 3Blue1Brown, OpenClaw). We don't position against them.
 - **Clawless is the worked environment.** Every lesson's worked example and
