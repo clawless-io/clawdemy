@@ -165,6 +165,36 @@ test.describe('at desktop width', () => {
 		}
 	});
 
+	test('the wall ends with a link to /tracks/ that resolves', async ({ page }) => {
+		await page.goto('/');
+		const more = page.locator('.v2-wall .v2-wall__more a');
+		await expect(more).toHaveCount(1);
+		await expect(more).toHaveAttribute('href', '/tracks/');
+		await expect(more).toBeVisible();
+		const res = await page.request.get('/tracks/');
+		expect(res.status()).toBe(200);
+
+		// The plain brand blue measured 3.65:1 here in light mode. Hold 4.5.
+		for (const theme of ['light', 'dark']) {
+			const ratio = await page.evaluate((t) => {
+				document.documentElement.dataset.theme = t;
+				const lum = (c: string) => {
+					const m = (c.match(/[\d.]+/g) || []).map(Number);
+					const scale = c.startsWith('color(') ? 255 : 1;
+					const f = (v: number) => {
+						v = (v * scale) / 255;
+						return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+					};
+					return 0.2126 * f(m[0]) + 0.7152 * f(m[1]) + 0.0722 * f(m[2]);
+				};
+				const a = lum(getComputedStyle(document.querySelector('.v2-wall__more a')!).color);
+				const b = lum(getComputedStyle(document.body).backgroundColor);
+				return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+			}, theme);
+			expect(ratio, `${theme} mode link contrast`).toBeGreaterThanOrEqual(4.5);
+		}
+	});
+
 	test('the stat band shows eight figures and the big one does not break in two', async ({
 		page,
 	}) => {
