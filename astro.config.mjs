@@ -4484,6 +4484,30 @@ export default defineConfig({
 					return [...__top, ...__tracks];
 				})(),
 			components: {
+				// Makes LIGHT the first-visit default (founder, 2026-11-07).
+				// Starlight's own provider falls back to dark unless the OS asks
+				// for light. This override branches on localStorage returning
+				// null (never chose) versus '' (chose Auto), which is the only
+				// way to change the default without breaking Auto. Full
+				// reasoning is in the component.
+				// These two are ONE change and must stay in sync. Stock ThemeSelect
+				// re-applies the theme and rewrites storage on every page load,
+				// so overriding the provider alone does nothing. See the comment
+				// block in ThemeSelect.astro.
+				// Full-bleed canvas for the marketing routes (homepage today,
+				// /tracks/ next). Stock caps its container at 45rem, which is what
+				// made the homepage read as a document. This override REPRODUCES the
+				// stock CSS, because overriding a component stops its own <style>
+				// from shipping; re-diff it on a Starlight upgrade.
+				// The homepage hero. Starlight renders its own PageTitle when a page
+				// has no hero, so the marketing hero had to be an override rather than
+				// a component in the page body, which would have put a second h1 on
+				// the homepage. The stock markup AND the stock styles are reproduced
+				// inside it for every other hero page; re-diff on a Starlight upgrade.
+				Hero: './src/components/overrides/Hero.astro',
+				ContentPanel: './src/components/overrides/ContentPanel.astro',
+				ThemeProvider: './src/components/overrides/ThemeProvider.astro',
+				ThemeSelect: './src/components/overrides/ThemeSelect.astro',
 				// Adds og:image and twitter:image to every page; Starlight 0.38
 				// already emits the rest of the OG / Twitter Card meta automatically.
 				Head: './src/components/Head.astro',

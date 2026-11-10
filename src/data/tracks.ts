@@ -473,8 +473,18 @@ export function startHereTracks(): Track[] {
 	);
 }
 
-/** Rough reading/listening time for a track, derived from lesson count. */
-export function trackHours(t: Track): number {
-	// ~18 narrated minutes per lesson on average across the catalog.
-	return Math.max(1, Math.round((t.lessons * 18) / 60));
-}
+/*
+ * trackHours() was REMOVED on 2026-11-07.
+ *
+ * It estimated listening time as lessonCount * 18 minutes. The measured
+ * catalog average is 14.8 minutes, so it overstated some tracks (Visual Math:
+ * Linear Algebra showed about 5 hours against 3.1 measured) and understated
+ * others (Git Workflow, 5 against 7.1). It also multiplied TOTAL lessons
+ * rather than narrated ones, so the three tracks with no audio advertised an
+ * hours figure anyway.
+ *
+ * Use `trackMetrics(slug)` from src/data/curriculum-metrics.ts instead. It
+ * sums the real read-along timing files. Do not reintroduce an estimate here:
+ * this module is the manifest, and it deliberately holds no derived numbers,
+ * which is also why curriculum-metrics imports it and not the reverse.
+ */

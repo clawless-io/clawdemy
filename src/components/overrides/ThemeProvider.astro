@@ -1,0 +1,87 @@
+---
+/**
+ * ThemeProvider override: light is the first-visit default.
+ *
+ * Founder decision, 2026-11-07: the production default is light mode. Paired
+ * with internal/Doc/brand.md, whose visual-direction line said "Dark mode
+ * default" and is updated in the same change.
+ *
+ * THIS FILE IS HALF THE CHANGE. The other half is
+ * src/components/overrides/ThemeSelect.astro, and NEITHER WORKS ALONE.
+ * Stock ThemeSelect re-applies the theme and rewrites storage on every page
+ * load, so a provider-only change is overwritten microseconds after it runs.
+ * The full explanation of that failure is in ThemeSelect.astro; read it before
+ * touching either file.
+ *
+ * THE CONTRACT, shared between the two:
+ *
+ *   key absent (null) -> first visit, no choice made -> LIGHT
+ *   'auto'            -> reader chose Auto           -> follow the OS
+ *   ''                -> legacy Auto, written by stock Starlight before this
+ *                        change -> follow the OS, so existing readers keep
+ *                        the behaviour they already had
+ *   'light' / 'dark'  -> explicit choice             -> honoured as-is
+ *
+ * The reader's own choice always wins. Nothing already in storage changes
+ * meaning. Only the very first page view moves, from dark to light.
+ *
+ * Starlight's own line was:
+ *   storedTheme || (matchMedia('(prefers-color-scheme: light)').matches
+ *     ? 'light' : 'dark')
+ * which gives a first-time visitor dark unless their OS asks for light.
+ *
+ * The picker is told the RESOLVED theme on a first visit rather than
+ * Starlight's default of 'auto', because a light page with the control
+ * reading "Auto" on a dark-OS machine is simply untrue.
+ *
+ * Kept inline, like the stock component, so the theme is set before first
+ * paint. A deferred script here would flash dark and then repaint light.
+ */
+// Icon lives in Starlight's user-components/ directory, so the public barrel
+// export is the right import here. The stock component reaches it with a
+// relative '../user-components/Icon.astro', which does not resolve from ours.
+import { Icon } from '@astrojs/starlight/components';
+---
+
+{/* Intentionally inlined to avoid a flash of the wrong theme. */}
+<script is:inline>
+	window.StarlightThemeProvider = (() => {
+		const raw =
+			typeof localStorage !== 'undefined' ? localStorage.getItem('starlight-theme') : null;
+
+		// See the contract in the comment above before changing any branch.
+		const explicit = raw === 'light' || raw === 'dark';
+		const neverChose = raw === null || raw === undefined;
+		const prefersLight =
+			typeof window !== 'undefined' &&
+			window.matchMedia('(prefers-color-scheme: light)').matches;
+
+		const resolved = neverChose ? 'light' : explicit ? raw : prefersLight ? 'light' : 'dark';
+
+		document.documentElement.dataset.theme = resolved === 'light' ? 'light' : 'dark';
+
+		return {
+			updatePickers(theme = neverChose ? resolved : explicit ? raw : 'auto') {
+				document.querySelectorAll('starlight-theme-select').forEach((picker) => {
+					const select = picker.querySelector('select');
+					if (select) select.value = theme;
+					/** @type {HTMLTemplateElement | null} */
+					const tmpl = document.querySelector(`#theme-icons`);
+					const newIcon = tmpl && tmpl.content.querySelector('.' + theme);
+					if (newIcon) {
+						const oldIcon = picker.querySelector('svg.label-icon');
+						if (oldIcon) {
+							oldIcon.replaceChildren(...newIcon.cloneNode(true).childNodes);
+						}
+					}
+				});
+			},
+		};
+	})();
+</script>
+
+<template id="theme-icons">
+	<Icon name="sun" class="light" />
+	<Icon name="moon" class="dark" />
+	<Icon name="laptop" class="auto" />
+</template>
