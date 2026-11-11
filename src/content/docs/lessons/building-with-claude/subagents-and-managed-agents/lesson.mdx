@@ -28,11 +28,11 @@ import SourceLecture from '../../../../../components/SourceLecture.astro';
 
 Lesson 8 built the loop substrate. Lesson 9 catalogued six canonical patterns. Lesson 10 added Agent Skills (durable instructions) plus Claude Code (one worked harness). This lesson covers two Anthropic-specific primitives that realize patterns 4 (orchestrator-workers) and 6 (autonomous agent) directly. **Subagents** are how a parent agent spawns focused inner loops, one per subtask, each with its own fresh context, its own optional tool restriction, and (optionally) its own smaller cheaper model. **Claude Managed Agents** is the Anthropic-hosted harness: instead of building your own loop, sandbox, and tool execution, you POST user events and Anthropic runs the agent.
 
-The capability the lesson builds: **pick the right primitive for an agent workload** (a single L8-style loop, a Subagent fan-out inside it, or Claude Managed Agents if you would rather not run the harness yourself), **define a Subagent and a Managed Agent end to end**, and **reason about the cost, isolation, and data-retention trade-offs**.
+The capability the lesson builds: **pick the right primitive for an agent workload** (a single lesson 8 style loop, a Subagent fan-out inside it, or Claude Managed Agents if you would rather not run the harness yourself), **define a Subagent and a Managed Agent end to end**, and **reason about the cost, isolation, and data-retention trade-offs**.
 
 ## Subagents (the focused-inner-loop primitive)
 
-The Anthropic docs frame Subagents this way verbatim: *Subagents are separate agent instances that your main agent can spawn to handle focused subtasks. Use them to isolate context, run multiple analyses in parallel, and apply specialized instructions without adding to the main agent's prompt.* The mechanism lives in the Claude Agent SDK; the parent agent calls the *Agent* tool, the SDK spawns a subagent, and the subagent runs an inner L8-style loop until it produces a final message.
+The Anthropic docs frame Subagents this way verbatim: *Subagents are separate agent instances that your main agent can spawn to handle focused subtasks. Use them to isolate context, run multiple analyses in parallel, and apply specialized instructions without adding to the main agent's prompt.* The mechanism lives in the Claude Agent SDK; the parent agent calls the *Agent* tool, the SDK spawns a subagent, and the subagent runs an inner lesson 8 style loop until it produces a final message.
 
 The four benefits the docs name are worth memorizing because they map back to lesson 9 directly.
 
@@ -106,7 +106,7 @@ The docs are explicit about the channel between parent and subagent: *The only c
 | Project *CLAUDE.md* (loaded via *settingSources*) | Preloaded Skill content unless listed in *AgentDefinition.skills* |
 | Tool definitions (inherited from parent, or the subset in *tools*) | The parent's system prompt |
 
-One thing to plan around: **subagents can nest**. A subagent can spawn subagents of its own, up to a configurable depth limit, so one prompt can grow into a tree of agents. A subagent at the bottom layer cannot spawn, so it does its delegated work itself. If one subagent should never delegate, such as a read-only reviewer, leave the Agent tool out of its tool list. You can also cap how many subagents run at once and how much the whole query may spend. Managed Agents, covered next, has its own multiagent setting with tighter limits. The table below lists the defaults for both.
+One thing to plan around: **subagents can nest**. A subagent can spawn subagents of its own, up to a configurable depth limit, so one prompt can grow into a tree of agents. A subagent at the bottom layer cannot spawn, so it does its delegated work itself. If one subagent should never delegate, such as a read-only reviewer, leave the Agent tool out of its tool list. You can also cap how many subagents run at once and how much the whole query may spend. Managed Agents, covered next, has its own multiagent setting with its own limits; delegation there is one level deep. The table below lists the defaults for both.
 
 | As of November 2026 | Claude Agent SDK and Claude Code | Claude Managed Agents (multiagent setting) |
 | --- | --- | --- |
@@ -122,7 +122,7 @@ For runs that coordinate dozens to hundreds of agents, the docs point to the *Wo
 
 The mapping is direct. **Pattern 4 (orchestrator-workers)**: the parent loop is the orchestrator; the subagents are the workers; the orchestrator decides what to spawn at runtime based on the input, satisfying the "subtasks not pre-defined" criterion. **Pattern 3 (parallelization, sectioning sub-type)**: multiple subagents run concurrently on independent slices. **Pattern 6 (autonomous agent)**: the parent agent can spawn many subagents over a long run, each focused on a sub-goal, while keeping the main context clean.
 
-One cost angle worth pulling out. Because subagents can run on a smaller model than the parent, the per-subagent model choice is a real cost lever (lesson 3's mix-and-match pattern, now per-subagent), once your evaluation shows the smaller tier holds quality. The docs' worked example builds a security reviewer at query time: strict reviews run on the most capable tier, and balanced reviews on the balanced tier.
+One cost angle worth pulling out. Because subagents can run on a smaller model than the parent, the per-subagent model choice is a real cost lever (lesson 3's mix-and-match pattern, now per-subagent), once your evaluation shows the smaller tier holds quality. The docs' worked example builds a security reviewer at query time: strict reviews run on a more capable tier, and balanced reviews on the balanced tier.
 
 ## Claude Managed Agents (the hosted harness)
 
@@ -145,7 +145,7 @@ Five steps, per the docs:
 
 1. **Create an agent.** Define the model, system prompt, tools, MCP servers, and Skills. Create the agent once and reference it by ID across sessions.
 2. **Create an environment.** Configure the sandbox (cloud or self-hosted).
-3. **Start a session.** Launch a session referencing the agent + environment.
+3. **Start a session.** Launch a session referencing the agent and environment.
 4. **Send events and stream responses.** Send user messages as events; Claude autonomously executes tools and streams results back as server-sent events (SSE). Event history is persisted server-side and can be fetched in full.
 5. **Steer or interrupt.** Send more user events to guide the agent while it runs, or interrupt it to change direction.
 
@@ -217,11 +217,11 @@ More important for production decisions: **Claude Managed Agents is stateful by 
 
 The clean version, applied per workload:
 
-- **A single L8-style loop in your code.** When the task fits one agent loop, when you want full control of the harness, when ZDR matters, when latency is dominated by your tool side rather than the loop.
+- **A single lesson 8 style loop in your code.** When the task fits one agent loop, when you want full control of the harness, when ZDR matters, when latency is dominated by your tool side rather than the loop.
 - **Subagents (Agent SDK) inside that loop.** When you want pattern 4 (orchestrator-workers) or pattern 3 (parallelization) without writing the spawn-and-context-isolation primitive yourself, when per-subagent tool restriction is a real safety win, when running some subtasks on a smaller cheaper model is a real cost win.
 - **Claude Managed Agents.** When the agent runs for minutes or hours, when you do not want to run the sandbox, when stateful sessions are useful, when ZDR is not a constraint. The first call you make creates the agent; the rest is mostly sending events and receiving events.
 
-The three are composable. You can write your own L8 loop that calls Subagents for fan-out, and reach for Managed Agents only on the workloads where the loop or sandbox is the actual constraint. Most production stacks end up with a mix, the same way they end up with a mix of models from lesson 3.
+The three are composable. You can write your own lesson 8 loop that calls Subagents for fan-out, and reach for Managed Agents only on the workloads where the loop or sandbox is the actual constraint. Most production stacks end up with a mix, the same way they end up with a mix of models from lesson 3.
 
 ## Why this matters when you use Claude
 
@@ -234,12 +234,12 @@ The lesson 12 closer turns whichever path you chose into a shipped production ap
 - **Subagents (verbatim):** *separate agent instances that your main agent can spawn to handle focused subtasks*. Three creation paths: programmatic (the *agents* option on the SDK *query* call), filesystem-based (markdown files in *.claude/agents/*), or the built-in *general-purpose* subagent.
 - **Four Subagent benefits:** context isolation (only the final message returns to the parent), parallelization (concurrent subagents), specialized instructions (per-subagent system prompt), and tool restrictions (per-subagent tools whitelist).
 - **Agent definition essentials:** the description routes; the prompt defines behavior; the tool list restricts; the model choice can put a subagent on a smaller, cheaper tier (a per-step instance of lesson 3's mix-and-match); the effort dial applies. Subagents can nest up to a configurable depth limit; leave the Agent tool out of a subagent's tools when it should not delegate.
-- **Subagents realize the L9 patterns** directly: pattern 4 (orchestrator-workers) = parent loop + worker subagents; pattern 3 (parallelization, sectioning) = concurrent subagents; pattern 6 (autonomous agent) = parent loop spawning many subagents over a long run.
+- **Subagents realize the lesson 9 patterns** directly: pattern 4 (orchestrator-workers) equals parent loop plus worker subagents; pattern 3 (parallelization, sectioning) equals concurrent subagents; pattern 6 (autonomous agent) equals parent loop spawning many subagents over a long run.
 - **Beyond dozens to hundreds of subagents:** the *Workflow* tool moves orchestration into a script outside the per-turn context.
 - **Claude Managed Agents (verbatim):** *Pre-built, configurable agent harness that runs in managed infrastructure. Best for long-running tasks and asynchronous work*. Anthropic provides the agent loop, sandbox, tool execution, and runtime; you POST events and receive SSE events.
 - **Four core concepts:** Agent, Environment, Session, Events. Three endpoints, one each to create an agent, an environment, and a session, plus a beta header that the SDK sets for you.
 - **Built-in tools** via the agent toolset: Bash, file operations, web search and fetch, MCP servers.
 - **When to choose Managed Agents (six signals):** long-running execution; cloud infrastructure; self-hosted execution; minimal infrastructure (no harness to build); stateful sessions; scheduled execution. **NOT for ZDR-required workloads** (stateful by design; not ZDR or HIPAA BAA eligible).
-- **Decision frame:** L8-style self-built loop for full control or ZDR; Subagents inside that loop for orchestrator-workers / parallelization / cheaper subagents; Managed Agents for long-running asynchronous work where you skip the harness. The three compose; most production stacks mix them.
+- **Decision frame:** A lesson 8 style self-built loop for full control or ZDR; Subagents inside that loop for orchestrator-workers or parallelization or cheaper subagents; Managed Agents for long-running asynchronous work where you skip the harness. The three compose; most production stacks mix them.
 
-A loop in lesson 8. Patterns in lesson 9. Skills + Claude Code in lesson 10. Subagents and Managed Agents here. Lesson 12 ships the result to production.
+A loop in lesson 8. Patterns in lesson 9. Skills and Claude Code in lesson 10. Subagents and Managed Agents here. Lesson 12 ships the result to production.

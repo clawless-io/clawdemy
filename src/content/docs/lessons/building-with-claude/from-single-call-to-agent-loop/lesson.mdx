@@ -20,7 +20,7 @@ import SourceLecture from '../../../../../components/SourceLecture.astro';
 
 <LessonFreshness lastReviewed={frontmatter.last_reviewed} />
 
-<SourceLecture url="https://www.anthropic.com/research/building-effective-agents" title="Anthropic engineering, 'Building Effective AI Agents' (Erik S. and Barry Zhang, 2024-12-19) + Anthropic public Tool use overview" instructor="Anthropic" />
+<SourceLecture url="https://www.anthropic.com/research/building-effective-agents" title="Anthropic engineering, 'Building effective AI agents' (Erik S. and Barry Zhang, 2024-12-19) + Anthropic public Tool use overview" instructor="Anthropic" />
 
 
 
@@ -34,7 +34,7 @@ Phase 3 opens here. Lesson 9 will catalog the canonical patterns the loop can ta
 
 ## Workflows and agents
 
-The cleanest framing in the field comes from the Anthropic engineering post *Building Effective AI Agents* (Erik S. and Barry Zhang, 2024-12-19). The post draws a single distinction worth memorizing verbatim:
+The cleanest framing in the field comes from the Anthropic engineering post *Building effective AI agents* (Erik S. and Barry Zhang, published in December 2024). The post draws a single distinction worth memorizing verbatim:
 
 - **A workflow** is a system where *LLMs and tools are orchestrated through predefined code paths*.
 - **An agent** is a system where *LLMs dynamically direct their own processes and tool usage, maintaining control over how they accomplish tasks*.
@@ -45,7 +45,7 @@ The post is direct about the trade-off the choice makes. Workflows give you *pre
 
 ## The augmented LLM, again
 
-Underneath every workflow and every agent in the post sits one building block: an augmented LLM. The model itself, plus three capabilities it can actively use: **retrieval** (over your data, often via a search tool), **tools** (the union of L4 custom + L5 server / Anthropic-schema + L6 MCP from your earlier lessons), and **memory** (persistent state across turns or sessions). T22 has covered all three lever-by-lever; this lesson is what wires them into a loop.
+Underneath every workflow and every agent in the post sits one building block: an augmented LLM. The model itself, plus three capabilities it can actively use: **retrieval** (over your data, often via a search tool), **tools** (the union of lesson 4 custom, lesson 5 server or Anthropic-schema, and lesson 6 MCP from your earlier lessons), and **memory** (persistent state across turns or sessions). Track 22 has covered all three lever-by-lever; this lesson is what wires them into a loop.
 
 The post's framing: do not start with a multi-step agent. Start by making the augmented LLM as strong as you can on a single call (tool definitions are good, retrieval is targeted, memory is shaped), then add looping only when a single call cannot do the job.
 
@@ -106,11 +106,11 @@ Lessons 1, 2, 5, and 7 each added a *stop_reason* the loop now has to dispatch o
 
 - ***end_turn***. The model is done. Return the response to the caller.
 - ***tool_use***. The assistant content includes one or more *tool_use* blocks. Execute them, append *tool_result* entries on a user turn, iterate.
-- ***pause_turn*** (from L5 server tools). The server-tool plumbing yielded mid-multi-iteration. Append the assistant turn unchanged and re-call to continue. No new tool dispatch on your side.
+- ***pause_turn*** (from lesson 5 server tools). The server-tool plumbing yielded mid-multi-iteration. Append the assistant turn unchanged and re-call to continue. No new tool dispatch on your side.
 - ***max_tokens***. The model hit the output cap mid-generation. Decide per use case: raise *max_tokens*, summarize, or surface the partial output.
 - ***stop_sequence***. A configured stop sequence triggered. The agent often treats this as *end_turn* with a known reason.
-- ***model_context_window_exceeded*** (from L7). The response filled the context window, so treat it as cut short. Either compact (if you opted in to *compact*) or fail with a clear error so the caller can shorten.
-- ***"compaction"*** (from L7, with *pause_after_compaction: true*). Compaction wrote a summary; do the manual preservation pattern (keep the most recent N turns), then re-call.
+- ***model_context_window_exceeded*** (from lesson 7). The response filled the context window, so treat it as cut short. Either compact (if you opted in to *compact*) or fail with a clear error so the caller can shorten.
+- ***"compaction"*** (from lesson 7, with *pause_after_compaction: true*). Compaction wrote a summary; do the manual preservation pattern (keep the most recent N turns), then re-call.
 - ***refusal***. The model's safety checks declined the request. It arrives as a normal response, not an error, and its stop details name the policy area and give a short explanation. Sending the same request to the same model usually earns another refusal, so do not loop until it gives in. The docs recommend retrying on a fallback model instead: the API, the SDK, or your own code can resend it to another Claude model (the table below lists the options). Where no fallback answers, surface the refusal to the caller. The dispatch is the same shape as the others (an explicit branch), and the discipline is the same: name it, handle it, do not let it fall through to the catch-all.
 
 | As of November 2026: refusal handling | Detail |
@@ -142,6 +142,9 @@ One cost fact from the Tool use overview: whenever a request carries tools, the 
 | Claude Fable 5.2 | Not listed in the Tool use overview table | Not listed | No; returns a 400 error |
 | Claude Opus 5.5 | 286 | None listed | No; returns a 400 error |
 | Claude Sonnet 5.5 | 286 | None listed | No; returns a 400 error |
+| Claude Mythos 5.2 | Not listed | Not listed | No; returns a 400 error |
+| Claude Fable 5.1 | Not listed | Not listed | No; returns a 400 error |
+| Claude Mythos 5.1 | Not listed | Not listed | No; returns a 400 error |
 | Claude Haiku 5.5 | 286 | 406 | Yes (a forced call skips thinking) |
 | Claude Opus 5 | 286 | 406 | Yes |
 | Claude Sonnet 5 | 354 | 474 | Yes |
@@ -155,11 +158,11 @@ One cost fact from the Tool use overview: whenever a request carries tools, the 
 
 ## The disciplines around the loop
 
-The same post that names workflows and agents is direct about what an agent demands: *agents handle open-ended problems where it's difficult or impossible to predict the required number of steps* but require *extensive testing in sandboxed environments* because higher costs and *compounding errors* are real. Four disciplines load-bearing for any agent loop you ship:
+The same post that names workflows and agents is direct about what an agent demands: agents suit open-ended problems where the number of steps is hard or impossible to predict, but they require *extensive testing in sandboxed environments* because higher costs and *compounding errors* are real. Four disciplines load-bearing for any agent loop you ship:
 
 - **Hard max-iterations.** The example above caps at 20. The number matters less than the cap existing; without one, a runaway plan is a runaway bill.
 - **Tool inventory is the surface area.** Every tool the loop has access to is a thing the model can decide to call. Computer-use tools (lesson 5) deserve sandboxed environments by default; MCP tools (lesson 6) deserve denylist-by-default for destructive operations; custom client tools (lesson 4) get auth and rate limits at the *execute_tool* boundary, not inside the loop.
-- **The L7 levers stay engaged.** Cache the system + tool stack so each iteration does not re-pay the prefix. If the loop runs long, opt in to compaction and cache the system end so it survives. For tool-heavy loops, tool result clearing trims old retrieval payloads. The loop is exactly where the cost-and-staleness frame from L7 stops being theoretical.
+- **The lesson 7 levers stay engaged.** Cache the system plus tool stack so each iteration does not re-pay the prefix. If the loop runs long, opt in to compaction and cache the system end so it survives. For tool-heavy loops, tool result clearing trims old retrieval payloads. The loop is exactly where the cost-and-staleness frame from lesson 7 stops being theoretical.
 - **Stop conditions are first-class.** A loop without explicit dispatch on every *stop_reason* will silently terminate at the wrong moments. The full vocabulary above is what you handle.
 
 ## Frameworks: not yet
@@ -168,7 +171,7 @@ The post's call on framework adoption is worth quoting against the urge to reach
 
 ## Why this matters when you use Claude
 
-The mental shift from "I make a request and get an answer" to "the model plans its own path through a tool set" is the single biggest one in this track. The augmented-LLM building block plus the loop above is enough to ship most useful agentic applications. The loop is small (the 30 lines above), the stop-reason vocabulary is finite (the list above), and the discipline carries over from the rest of T22 (cache the prefix, sandbox dangerous tools, denylist destructive operations, cap iterations).
+The mental shift from "I make a request and get an answer" to "the model plans its own path through a tool set" is the single biggest one in this track. The augmented-LLM building block plus the loop above is enough to ship most useful agentic applications. The loop is small (the 30 lines above), the stop-reason vocabulary is finite (the list above), and the discipline carries over from the rest of Track 22 (cache the prefix, sandbox dangerous tools, denylist destructive operations, cap iterations).
 
 The next four lessons specialize this substrate. Lesson 9 catalogs the canonical patterns the loop takes (prompt chaining, routing, parallelization, orchestrator-workers, evaluator-optimizer, and the open-ended agent). Lesson 10 covers Agent Skills and Claude Code (durable instructions and a worked agent harness reading them). Lesson 11 covers Subagents and Claude Managed Agents (spawning a focused loop from inside another). Lesson 12 closes the track with what changes when you take an agent loop from notebook to production.
 
@@ -177,10 +180,10 @@ The next four lessons specialize this substrate. Lesson 9 catalogs the canonical
 - **Workflow vs agent (verbatim).** A workflow is a system where *LLMs and tools are orchestrated through predefined code paths*; an agent is a system where *LLMs dynamically direct their own processes and tool usage*. The standing advice: begin by *finding the simplest solution possible, and only increasing complexity when needed*. Workflows for predictability; agents for flexibility at scale.
 - **The augmented LLM** is the building block underneath both: an LLM plus retrieval, tools, and memory. Maximize what a single call can do before adding looping.
 - **The canonical loop in 30 lines.** Append the assistant turn after each response. On *tool_use*, dispatch tool blocks and append *tool_result* entries on a follow-up user turn. On *pause_turn*, re-call with the assistant turn unchanged. On other stop reasons, surface to the caller. Cap at a max-iterations bound.
-- **The full *stop_reason* vocabulary** the loop dispatches on: *end_turn*, *tool_use*, *pause_turn* (L5), *max_tokens*, *stop_sequence*, *model_context_window_exceeded* (L7), the *"compaction"* value when *pause_after_compaction: true*, and *refusal* (a normal response whose stop details name the policy area; retry on a fallback model, because the same model usually refuses again; surface it if no fallback answers).
+- **The full *stop_reason* vocabulary** the loop dispatches on: *end_turn*, *tool_use*, *pause_turn* (lesson 5), *max_tokens*, *stop_sequence*, *model_context_window_exceeded* (lesson 7), the *"compaction"* value when *pause_after_compaction: true*, and *refusal* (a normal response whose stop details name the policy area; retry on a fallback model, because the same model usually refuses again; surface it if no fallback answers).
 - ***tool_choice* for steering.** *auto* (default; model decides per turn), *any* (must call a tool), *tool* with a specific *name* (must call this tool), *none* (must not call). Not every model accepts the two forcing modes; where they fail, keep *auto* with strict tools, or use structured outputs. Every request that carries tools pays a fixed tool-use system-prompt overhead, set per model (see the table).
-- **Four disciplines around any agent loop.** Hard max-iterations cap; tool inventory is the surface area (sandbox dangerous tools, denylist destructive ones, auth at the execute boundary); cache the prefix and consider compaction + tool result clearing (the L7 levers stay engaged in the loop); explicit dispatch on every *stop_reason*.
+- **Four disciplines around any agent loop.** Hard max-iterations cap; tool inventory is the surface area (sandbox dangerous tools, denylist destructive ones, auth at the execute boundary); cache the prefix and consider compaction plus tool result clearing (the lesson 7 levers stay engaged in the loop); explicit dispatch on every *stop_reason*.
 - **Direct API first.** Per the source post: *start by using LLM APIs directly: many patterns can be implemented in a few lines of code*. The 30-line loop above is the proof; reach for a framework only when patterns repeat and you understand the underlying code.
-- **Where this fits.** Phase 3 opener. L9 catalogs the canonical patterns this loop takes; L10 covers Agent Skills and Claude Code on top of the loop; L11 covers Subagents and Managed Agents; L12 covers shipping the result.
+- **Where this fits.** Phase 3 opener. Lesson 9 catalogs the canonical patterns this loop takes; lesson 10 covers Agent Skills and Claude Code on top of the loop; lesson 11 covers Subagents and Managed Agents; lesson 12 covers shipping the result.
 
 A single call is the building block. A loop with stop-condition dispatch and max-iterations is the substrate every agentic Claude application sits on. The next lesson is what shape that loop takes for each common job.
