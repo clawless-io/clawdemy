@@ -28,7 +28,7 @@ Often it's not easy. Two agents touched related code. One agent made a change th
 
 L14 is about navigating this. Three patterns for organizing the fleet. The lead's role inside each pattern. The class of failure (semantic conflicts) that git will not catch for you. And the practical orchestration moves: the sequence in which you integrate, what to test at each step, when to abort and re-run agents.
 
-This is the lesson that decides whether multi-agent AI development feels like a 10x speedup or a debugging nightmare. The patterns matter.
+This is the lesson that decides whether multi-agent AI development feels like a real speedup or a debugging nightmare. The patterns matter.
 
 ### What "integration" means in a multi-agent context
 
@@ -118,13 +118,17 @@ A pattern borrowed from the open-source world. Each agent has its OWN remote (a 
 
 **Setup:**
 
-Each agent operates in a worktree but pushes to its OWN remote, not the shared one:
+Each agent works in its OWN clone of its OWN fork, not in a worktree of the shared repo:
 
 ```bash
-cd ../agent-1
-git remote add origin git@example.com:agents/agent-1.git
+git clone git@example.com:agents/agent-1.git ~/agents/agent-1
+cd ~/agents/agent-1
+git switch -c agent-1/feature
+# ... the agent works and commits ...
 git push -u origin agent-1/feature
 ```
+
+Why a separate clone and not a worktree? Remotes live in the repository's shared configuration, so every worktree of one repository sees the same list of remotes. Inside a worktree, adding a remote named origin fails, because origin already exists, and any other remote you add there shows up in every worktree. A worktree cannot have a private remote; a separate clone can. In each agent's clone, origin means that agent's fork.
 
 The shared remote (your team's main remote) does NOT see the agent-1 feature branch. It lives only on agent-1's fork.
 
@@ -157,7 +161,7 @@ git push origin main      # or integration/<feature-name>
 - **Pro:** strongest isolation. Bad agent work cannot pollute the shared remote. Agent branches are quarantined on each agent's fork.
 - **Pro:** matches the forking workflow from L8/L9, your team likely knows it.
 - **Pro:** good fit for "untrusted" agents (e.g. agents authored by external parties, agents you're not 100% sure of, agents whose code you want to vet thoroughly before it touches the shared remote).
-- **Con:** more setup. Each agent needs its own remote. The lead needs to add each agent as a named remote.
+- **Con:** more setup. Each agent needs its own fork and its own clone. The lead needs to add each agent's fork as a named remote.
 - **Con:** slower iteration. The "push to my fork, lead fetches" cycle adds latency vs the shared-origin "everything is one remote" pattern.
 
 **When to use:** when you need hard isolation between agents and the shared codebase. Common cases: external contributors using AI agents, AI agents you're piloting and don't want to trust with push-to-main rights, security-sensitive contexts. Also useful when you want the OPTION to discard an agent's work entirely without leaving a trace on the shared remote.
@@ -301,19 +305,18 @@ This is why integration tests are valuable in a multi-agent workflow even when t
 
 This step is non-negotiable for production work. Skipping it is how multi-agent integrations ship bugs.
 
-### The Clawless Computer 2026-06-04 sprint, a real-world example
+### An illustrative example: the build that catches what per-agent tests miss
 
-In a documented multi-agent sprint, [Clawless](https://clawless.ai) ran six agents in parallel for several hours, producing roughly 300 commits across the fleet. The first pass of integration looked clean, git merges all succeeded, individual agent tests passed.
+Picture a team running six AI coding agents in parallel, each on its own branch, with one human reviewer merging their work. That reviewer is the lead, in this lesson's terms. Over a few hours the fleet produces a few hundred commits. The first pass of integration looks clean: git merges all succeed, and each agent's own tests pass.
 
-A lead-stage *bun astro build* (the lead's authoritative full-system build, after all integration merges) caught roughly 300 latent breakers that the per-agent tests had missed. The breakers fell into a handful of classes:
-- ~266 MDX autolink errors (a class of brace-handling pattern git could not see).
-- ~20 inequality syntax errors (similar, a parsing edge case).
-- ~15 YAML colon-space errors.
-- ~5 Bloom-taxonomy gaps (lesson structure rules that weren't enforced at the agent level).
+Then the lead runs the full project build, once, after all the integration merges. It fails with hundreds of errors that no per-agent test caught. Suppose they fall into a handful of classes:
+- Content files that break the site's parser in the same small way.
+- Syntax slips in configuration files.
+- Structure rules the project expects but no agent was checking.
 
-The root cause across the board: each agent was working with a SLIGHTLY different mental model of the project's parsing rules. Individually, each agent's diff looked fine. Integrated, the cumulative effect of small mismatches surfaced as a wave of build errors.
+The root cause across the board: each agent was working with a SLIGHTLY different mental model of the project's rules. Individually, each agent's diff looks fine. Integrated, the cumulative effect of small mismatches surfaces as a wave of build errors.
 
-The fix wasn't to make the agents smarter (they were already capable). The fix was the LEAD'S BUILD GATE, running the full system build at the integration step caught issues no per-agent test could see.
+The fix isn't to make the agents smarter. The fix is the LEAD'S BUILD GATE: running the full system build at the integration step catches issues no per-agent test can see.
 
 The takeaway for L14: the lead's integration build is the most important guardrail in a multi-agent workflow. Treat it as the primary gate, not a "we'll run it eventually" check.
 
@@ -486,7 +489,7 @@ bun test    # passes
 ```bash
 bun test    # passes
 # Lead-stage build
-bun astro build   # passes
+bun run build     # full project build passes
 ```
 
 Now push:
@@ -544,8 +547,8 @@ The new piece, and it's a real one, is the SCALE and FREQUENCY at which this hap
 When your team is starting multi-agent AI workflows, here's what's useful to know:
 
 - **The lead role is real and unstaffed by default.** Teams that just "launch some agents and see what they produce" without explicit lead orchestration get inconsistent quality. The lead role can be a human, a more capable AI agent, or a hybrid script-plus-human. Whatever the staffing model, recognize it as a role and resource it.
-- **Semantic-conflict catching is the differentiating skill.** Anyone can run agents. Catching the subtle cross-agent issues is what separates a productive fleet from a fleet that ships bugs. This skill grows with experience, leads who have integrated 50+ fleets are dramatically better at this than first-timers.
-- **The build gate is non-negotiable.** The Clawless 2026-06-04 sprint experience is canonical: per-agent tests are necessary but not sufficient. A full-system build at the integration step catches things nothing else will. Schedule and budget for this step.
+- **Semantic-conflict catching is the differentiating skill.** Anyone can run agents. Catching the subtle cross-agent issues is what separates a productive fleet from a fleet that ships bugs. This skill grows with experience; seasoned leads spot these issues much faster than first-timers.
+- **The build gate is non-negotiable.** As the six-agent example earlier shows, per-agent tests are necessary but not sufficient. A full-system build at the integration step catches things nothing else will. Schedule and budget for this step.
 - **Per-agent fork patterns are appropriate for vendor-managed agents.** If your team is contracting with an external AI services provider, per-agent fork is the right isolation pattern. It maps directly to "vendor pushes to their delivery branch; you pull and integrate."
 - **Multi-agent integration doesn't replace code review.** The lead reading the integrated diff IS code review (just done after integration instead of before). A separate human reviewer can also be in the loop if your team requires it.
 
@@ -589,13 +592,13 @@ The project's normal review process applies. The "lead" role is the maintainer w
 
 The full pattern. Multiple fleets per day. Lead role is well-defined and resourced. Build gates are automated and reliable. Semantic-conflict catching is a measured skill with feedback loops. Worktree setup is scripted. Cleanup is scripted. The mechanical overhead is near-zero; the human value-add is concentrated in scope planning and integration judgment.
 
-This is where multi-agent AI development reaches "10x productivity" territory, when the patterns are mature, automated where they can be, and the humans focus on the parts the machines genuinely can't do.
+This is where multi-agent AI development pays off most, when the patterns are mature, automated where they can be, and the humans focus on the parts the machines genuinely can't do.
 
 ### The stay-calm psychology for multi-agent integration
 
 The first time you run a multi-agent fleet, integration will be messy. You'll hit semantic conflicts you didn't expect. Tests will fail in surprising ways. You'll spend more time debugging than you thought.
 
-This is normal. The lead skill grows with reps. After 5-10 fleets, you start anticipating common semantic-conflict patterns. After 20-30, you start preventing them in agent prompts. After 50+, you're spotting issues in seconds that took 30 minutes the first time.
+This is normal. The lead skill grows with reps. After a few fleets, you start anticipating common semantic-conflict patterns. After more, you start preventing them in agent prompts. Eventually you spot in seconds issues that took 30 minutes the first time.
 
 The thing to internalize early: **the patterns are real, the failure modes are predictable, and the skill is learnable.** Multi-agent integration isn't black magic; it's a workflow with rules.
 

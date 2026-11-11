@@ -12,14 +12,15 @@ prerequisites:
   - "lessons/building-with-claude/lesson-01-your-first-claude-api-call"
 learning_outcomes:
   - Choose between streaming, standard, and batches by who is waiting and how long the work takes
-  - Dispatch on the stop_reason values for a non-tool-using call (end_turn, max_tokens, stop_sequence, tool_use, refusal) with the appropriate handler action per value (refusal surfaces with stop_details.category; no blind-retry)
+  - Dispatch on the stop_reason values for a non-tool-using call (end_turn, max_tokens, stop_sequence, tool_use, refusal) with the appropriate handler action per value (refusal is a normal response whose stop_details names the category; retry on a fallback model, not the same one)
   - Classify HTTP error codes (400 / 401 / 429 / 500 / 504 / 529) by retry policy, use the error response body shape, and log the request_id (and usage) on every API response so production failures can be debugged at Anthropic Support level
   - Use the official SDK's automatic retry behavior and reason about idempotency on the tool side
   - Submit and poll a Message Batches API job for non-interactive bulk work (50 percent cheaper, under-1-hour completion)
 authors:
   - clawdemy
 published_at: 2026-05-27
-last_reviewed: 2026-05-27
+last_reviewed: 2026-11-11
+last_revised: 2026-11-11
 status: published
 artifact: brief
 sidebar:
@@ -39,13 +40,13 @@ import SourceLecture from "../../../../../components/SourceLecture.astro";
 
 Lesson 1 made a working call on your laptop. This lesson is what changes when the call has to run behind real users. The single capability this lesson builds: **handle the production-side concerns the Messages API expects you to know (streaming, errors, retries, batches, and *request_id* logging) so the same primitive from lesson 1 stops being fragile under real traffic**.
 
-Concretely, you will know when to stream (interactive UIs, long generations), when to batch (bulk non-interactive work at 50 percent off), and when neither is needed; the *stop_reason* values for a non-tool-using call (*end_turn*, *max_tokens*, *stop_sequence*, *tool_use*, *refusal* for safety declines with *stop_details.category*) with one-line handler notes and forward-refs to lessons 5, 7, and 8 for the values that arrive in later phases; the small HTTP error map (400 / 401 / 402 / 403 / 413 / 429 / 500 / 504 / 529) and how to classify each by retry policy; what the official SDKs do for you automatically (the canonical retryable set: connection errors, 408, 409, 429, and any 5xx status code; about two retries via exponential backoff and jitter) and what they cannot decide (whether your specific request is **safe** to retry, which you fix on the tool side via deduplication keys); and the one production-debugging habit that pays back outsized (log the *request_id* on every response so Anthropic Support can find one specific call out of millions).
+Concretely, you will know when to stream (interactive UIs, long generations), when to batch (bulk non-interactive work at 50 percent off), and when neither is needed; the *stop_reason* values for a non-tool-using call (*end_turn*, *max_tokens*, *stop_sequence*, *tool_use*, *refusal* for safety declines, with *stop_details.category* and a retry on a fallback model) with one-line handler notes and forward-refs to lessons 5, 7, and 8 for the values that arrive in later phases; the small HTTP error map (400 / 401 / 402 / 403 / 404 / 409 / 413 / 429 / 500 / 504 / 529) and how to classify each by retry policy; what the official SDKs do for you automatically (the canonical retryable set: connection errors, 408, 409, 429, and any 5xx status code; two retries via exponential backoff by default) and what they cannot decide (whether your specific request is **safe** to retry, which you fix on the tool side via deduplication keys); and the one production-debugging habit that pays back outsized (log the *request_id* on every response so Anthropic Support can find one specific call out of millions).
 
-Every substantive claim verifies against the public Anthropic Claude documentation at [platform.claude.com/docs/](https://platform.claude.com/docs/) (Streaming messages, Batch processing, Errors, and Working with the Messages API pages).
+Every substantive claim verifies against the public Anthropic Claude documentation at [platform.claude.com/docs/](https://platform.claude.com/docs/) (Streaming messages, Batch processing, Errors, Stop reasons, Refusals and fallback, and Working with the Messages API pages).
 
 ## Where this fits
 
-This is lesson 2 of 12 of Track 22, the **second lesson of Phase 1** (foundations). Lesson 1 established the smallest primitive; this lesson is the same primitive made production-ready. Lesson 3 closes Phase 1 by going up the model-selection layer (Opus / Sonnet / Haiku, extended thinking, the *effort* dial). Together the three are everything the Phase 2 augmentation lessons (tools, MCP, caching, context management), Phase 3 agent lessons, and Phase 4 production lesson build on.
+This is lesson 2 of 12 of Track 22, the **second lesson of Phase 1** (foundations). Lesson 1 established the smallest primitive; this lesson is the same primitive made production-ready. Lesson 3 closes Phase 1 by going up the model-selection layer (the model tiers, thinking modes, the *effort* dial). Together the three are everything the Phase 2 augmentation lessons (tools, MCP, caching, context management), Phase 3 agent lessons, and Phase 4 production lesson build on.
 
 The cross-track companion is **Track 21 (LLM Ops and Production)**, where lesson 7 "LLMOps" covers the same observability discipline this lesson introduces at the provider-agnostic level. The *request_id* + *usage* logging habit here is the Anthropic-specific instance of that LLMOps principle.
 
@@ -64,7 +65,7 @@ None. The lesson is conceptual + practical: response delivery modes (streaming v
 The single capability this lesson builds: **handle the production-side concerns the Messages API expects you to know (streaming, errors, retries, batches, and request_id logging) so the same primitive from lesson 1 stops being fragile under real traffic** (the lesson's second-end-state capability, per the Phase 0 lesson 2 capability mapping). Concretely, you will be able to:
 
 - Choose between streaming, standard, and batches by who is waiting and how long the work takes
-- Dispatch on the *stop_reason* values for a non-tool-using call (*end_turn*, *max_tokens*, *stop_sequence*, *tool_use*, *refusal*) with the appropriate handler action per value (*refusal* surfaces with *stop_details.category*; no blind-retry)
+- Dispatch on the *stop_reason* values for a non-tool-using call (*end_turn*, *max_tokens*, *stop_sequence*, *tool_use*, *refusal*) with the appropriate handler action per value (*refusal* is a normal response whose *stop_details* names the category; retry on a fallback model, not the same one)
 - Classify HTTP error codes (400 / 401 / 429 / 500 / 504 / 529) by retry policy, use the error response body shape, and log the *request_id* (and *usage*) on every API response so production failures can be debugged at Anthropic Support level
 - Use the official SDK's automatic retry behavior and reason about idempotency on the tool side
 - Submit and poll a Message Batches API job for non-interactive bulk work (50 percent cheaper, under-1-hour completion)

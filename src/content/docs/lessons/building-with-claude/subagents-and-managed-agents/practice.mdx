@@ -19,11 +19,11 @@ Seven short questions. Answer each before opening the collapsible.
 <details>
 <summary>Show answer</summary>
 
-**Verbatim:** *Subagents are separate agent instances that your main agent can spawn to handle focused subtasks. Use subagents to isolate context for focused subtasks, run multiple analyses in parallel, and apply specialized instructions without bloating the main agent's prompt.*
+**Verbatim:** *Subagents are separate agent instances that your main agent can spawn to handle focused subtasks. Use them to isolate context, run multiple analyses in parallel, and apply specialized instructions without adding to the main agent's prompt.*
 
 **Four benefits the docs name:**
-- **Context isolation:** *each subagent runs in its own fresh conversation; intermediate tool calls and results stay inside the subagent; only its final message returns to the parent*.
-- **Parallelization:** multiple subagents run concurrently (style-checker + security-scanner + test-coverage in parallel during code review).
+- **Context isolation:** each subagent runs in its own conversation, which starts fresh unless it is a fork; either way, intermediate tool calls and results stay inside the subagent and only its final message returns to the parent.
+- **Parallelization:** multiple subagents run concurrently, so independent subtasks finish in the time of the slowest one (style-checker + security-scanner + test-coverage in parallel during code review).
 - **Specialized instructions:** per-subagent system prompt with focused expertise (database-migration agent carries SQL best practices the main agent does not need).
 - **Tool restrictions:** per-subagent tools whitelist (doc-reviewer with only *Read* and *Grep* cannot accidentally modify files).
 
@@ -35,7 +35,7 @@ Seven short questions. Answer each before opening the collapsible.
 <summary>Show answer</summary>
 
 - **Programmatic** (recommended for SDK applications): the *agents* parameter on the SDK's *query()* call, with each entry an *AgentDefinition* (TypeScript or Python).
-- **Filesystem-based:** markdown files in *.claude/agents/* directories. Loaded at Claude Code startup; new files require a restart.
+- **Filesystem-based:** markdown files in *.claude/agents/* directories. Claude Code watches those directories and picks up added or edited files within seconds; a restart is needed only in a few cases, such as the first file in an *agents* directory that did not exist when the session started.
 - **Built-in *general-purpose* agent:** Claude can spawn the built-in *general-purpose* subagent at any time via the *Agent* tool without you defining anything.
 
 The parent agent must include *Agent* in its *allowedTools* to auto-approve subagent invocations without a permission prompt.
@@ -52,16 +52,16 @@ The parent agent must include *Agent* in its *allowedTools* to auto-approve suba
 - ***prompt*** (string): the subagent's system prompt.
 
 **Key optional:**
-- ***tools*** (string array): allowed tool names; if omitted, inherits all of the parent's tools.
+- ***tools*** (string array): allowed tool names; if omitted, inherits every tool available to subagents.
 - ***disallowedTools*** (string array): tool names to remove.
-- ***model***: alias (*sonnet*, *opus*, *haiku*, *inherit*) or full model ID; defaults to main model. **This is the cost lever**, per lesson 3's mix-and-match.
+- ***model***: alias (*fable*, *opus*, *sonnet*, *haiku*, *inherit*) or full model ID; when omitted, Claude Code picks the model by its subagent model order. **This is the cost lever**, per lesson 3's mix-and-match.
 - ***skills*** (string array): Agent Skills (lesson 10) to preload.
 - ***mcpServers***: MCP servers (lesson 6) available to this subagent.
 - ***maxTurns***: per-subagent iteration cap (lesson 8's discipline).
 - ***effort***: lesson 3's effort dial, per subagent.
 - ***background***: run as a non-blocking background task.
 
-**Constraint:** subagents cannot spawn their own subagents. Do NOT include *Agent* in a subagent's *tools*.
+**Nesting:** subagents can spawn their own subagents, up to a configurable depth limit (as of November 2026 the Agent SDK default is three layers below the main agent; setting *CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH* to *1* turns nesting off). To keep one subagent from delegating, omit *Agent* from its *tools* or add it to *disallowedTools*.
 
 </details>
 
@@ -71,7 +71,7 @@ The parent agent must include *Agent* in its *allowedTools* to auto-approve suba
 <summary>Show answer</summary>
 
 **The Subagent receives:**
-- Its own system prompt (from *AgentDefinition.prompt*) plus the Agent tool's prompt string from the parent (this is the only channel from parent to subagent; include any file paths, errors, or decisions the subagent needs in this prompt).
+- Its own system prompt (from *AgentDefinition.prompt*) plus the Agent tool's prompt string from the parent (this is the only content the parent passes; include any file paths, errors, or decisions the subagent needs in this prompt).
 - Project *CLAUDE.md* (loaded via *settingSources*).
 - Tool definitions (inherited from parent, or the subset specified in *tools*).
 
@@ -80,7 +80,7 @@ The parent agent must include *Agent* in its *allowedTools* to auto-approve suba
 - Preloaded Skill content, unless listed in *AgentDefinition.skills*.
 - The parent's system prompt.
 
-This is the context-isolation property: the parent does not see (and does not pay for) the subagent's intermediate work; only the final message returns.
+This describes a non-fork subagent. A fork copies the conversation so far instead of starting fresh. Either way, the parent does not see (and does not pay for) the subagent's intermediate work; only the final message returns.
 
 </details>
 
@@ -91,7 +91,7 @@ This is the context-isolation property: the parent does not see (and does not pa
 
 **Verbatim (overview):** *Pre-built, configurable agent harness that runs in managed infrastructure. Best for long-running tasks and asynchronous work*.
 
-**Verbatim (positioning vs Messages API):** *Claude Managed Agents provides the harness and infrastructure for running Claude as an autonomous agent. Instead of building your own agent loop, tool execution, and runtime, you get a fully managed environment where Claude can read files, run commands, browse the web, and execute code securely*.
+**Verbatim (positioning vs Messages API):** *Claude Managed Agents provides the harness and infrastructure for running Claude as an autonomous agent. Instead of building your own agent loop, tool execution, and runtime, you get a fully managed environment where Claude can read files, run commands, browse the web, and run code securely*.
 
 **What Anthropic hosts:**
 - The agent loop (the L8-style loop, productionized).
@@ -124,7 +124,7 @@ This is the context-isolation property: the parent does not see (and does not pa
 2. **Create an environment** (*POST /v1/environments*): cloud sandbox or self-hosted.
 3. **Start a session** (*POST /v1/sessions*): launch a session referencing the agent + environment.
 4. **Send events and stream responses:** user events POSTed; agent events streamed back as SSE; event history persisted server-side.
-5. **Steer or interrupt:** send additional user events mid-run to guide or change direction.
+5. **Steer or interrupt:** send more user events to guide the agent while it runs, or interrupt it to change direction.
 
 **Beta header:** *managed-agents-2026-04-01* (SDK sets it automatically).
 
@@ -135,7 +135,7 @@ This is the context-isolation property: the parent does not see (and does not pa
 <details>
 <summary>Show answer</summary>
 
-**Data retention:** Claude Managed Agents is **stateful by design** (sessions, sandbox state, and outputs persisted server-side). Consequence: **NOT currently eligible for Zero Data Retention** or HIPAA Business Associate Agreement coverage. You retain control (delete sessions, delete uploaded files via the API), but ZDR-required workloads must stay on the Messages API path (self-built loop or Subagents).
+**Data retention:** Claude Managed Agents is **stateful by design** (conversation history, sandbox state, and outputs stored server-side). Consequence: **NOT currently eligible for Zero Data Retention** or HIPAA Business Associate Agreement coverage. You retain control (delete sessions, delete uploaded files via the API), but ZDR-required workloads must stay on the Messages API path (self-built loop or Subagents).
 
 **Decision frame:**
 
@@ -162,9 +162,9 @@ About 15 minutes. No code required; the exercise is reasoning + dispatch.
 <details>
 <summary>What you'll get (example answers, not the canonical ones)</summary>
 
-**Workload A: Self-built L8 loop + Subagents.** The orchestrator-workers pattern (L9.4) fits perfectly: a parent loop spawns three subagents in parallel (*style-checker*, *security-scanner*, *test-coverage*), each on a smaller model (Sonnet) with restricted tools (read-only for style and security; *Bash* + read for test-coverage). The parent aggregates the three final messages and posts the comment on Opus 4.8. Dominant constraint: cost (parallelization saves wall-clock; per-subagent smaller model saves tokens). Not Managed Agents because the runtime is short and the harness is small; you can ship this in a couple hundred lines of SDK code.
+**Workload A: Self-built L8 loop + Subagents.** The orchestrator-workers pattern (L9.4) fits perfectly: a parent loop spawns three subagents in parallel (*style-checker*, *security-scanner*, *test-coverage*), each on a smaller model (the balanced tier, Sonnet 5.5 as of November 2026, once your eval shows it holds quality) with restricted tools (read-only for style and security; *Bash* + read for test-coverage). The parent aggregates the three final messages and posts the comment on the flagship tier (Opus 5.5 as of November 2026). Dominant constraint: cost (parallelization saves wall-clock; per-subagent smaller model saves tokens). Not Managed Agents because the runtime is short and the harness is small; you can ship this in a couple hundred lines of SDK code.
 
-**Workload B: Self-built L8 loop, NO Subagents, NO Managed Agents.** ZDR is required and Managed Agents is not currently ZDR eligible, so Managed Agents is out. The task is short (under 5 turns, one tool), so Subagents add no value and the self-built loop from lesson 8 covers it directly. Cache the system prompt + tool definition (lesson 7); run on Haiku 4.5 or Sonnet 4.6 per lesson 3's effort dial. Dominant constraint: data retention.
+**Workload B: Self-built L8 loop, NO Subagents, NO Managed Agents.** ZDR is required and Managed Agents is not currently ZDR eligible, so Managed Agents is out. The task is short (under 5 turns, one tool), so Subagents add no value and the self-built loop from lesson 8 covers it directly. Cache the system prompt + tool definition (lesson 7); start where the Models overview points and let your eval move you down a tier (lesson 3); with only one tool call per turn, the fastest tier (Haiku 5.5 as of November 2026) is a likely landing spot. Check the ZDR eligibility of each feature you use. Dominant constraint: data retention.
 
 **Workload C: Claude Managed Agents.** Multi-hour run, must be resumable across browser sessions, stateful filesystem and conversation history are useful, no harness to build is a real saving. Create the agent with *agent_toolset_20260401* for built-in file ops + bash + web search; create a cloud sandbox environment; start a session; stream events. Resume by sending another user event to the same session ID. Dominant constraint: runtime length + resumability + minimal infrastructure. Acceptable as long as ZDR is not required (research on public + internal-but-non-PHI data, in this case).
 
@@ -180,13 +180,13 @@ Nine cards. Click any card to reveal the answer. Use the **Print flashcards** bu
 
 <Flashcard question="What is a Subagent (verbatim)?">
 
-*Subagents are separate agent instances that your main agent can spawn to handle focused subtasks. Use subagents to isolate context for focused subtasks, run multiple analyses in parallel, and apply specialized instructions without bloating the main agent's prompt.* Source: Anthropic Claude Agent SDK docs.
+*Subagents are separate agent instances that your main agent can spawn to handle focused subtasks. Use them to isolate context, run multiple analyses in parallel, and apply specialized instructions without adding to the main agent's prompt.* Source: Anthropic Claude Agent SDK docs.
 
 </Flashcard>
 
 <Flashcard question="The four benefits of Subagents?">
 
-**(1) Context isolation:** *only the final message returns to the parent*; intermediate tool calls stay inside the subagent. **(2) Parallelization:** concurrent subagents (style-checker + security-scanner + test-coverage in parallel). **(3) Specialized instructions:** per-subagent system prompt with focused expertise. **(4) Tool restrictions:** per-subagent tools whitelist (read-only doc-reviewer cannot modify).
+**(1) Context isolation:** *only its final message returns to the parent*; intermediate tool calls stay inside the subagent. **(2) Parallelization:** concurrent subagents (style-checker + security-scanner + test-coverage in parallel). **(3) Specialized instructions:** per-subagent system prompt with focused expertise. **(4) Tool restrictions:** per-subagent tools whitelist (read-only doc-reviewer cannot modify).
 
 </Flashcard>
 
@@ -198,7 +198,7 @@ Nine cards. Click any card to reveal the answer. Use the **Print flashcards** bu
 
 <Flashcard question="AgentDefinition required + key optional fields?">
 
-**Required:** *description* (the routing signal Claude reads to delegate) + *prompt* (subagent's system prompt). **Key optional:** *tools* (whitelist), *disallowedTools*, *model* (alias *sonnet* / *opus* / *haiku* / *inherit*; cost lever), *skills*, *mcpServers*, *maxTurns*, *effort*, *background*. **Constraint:** subagents cannot spawn subagents; do NOT include *Agent* in a subagent's *tools*.
+**Required:** *description* (the routing signal Claude reads to delegate) + *prompt* (subagent's system prompt). **Key optional:** *tools* (whitelist), *disallowedTools*, *model* (alias *fable* / *opus* / *sonnet* / *haiku* / *inherit*; cost lever), *skills*, *mcpServers*, *maxTurns*, *effort*, *background*. **Nesting:** subagents can spawn their own subagents up to a configurable depth limit; omit *Agent* from a subagent's *tools* to stop it delegating.
 
 </Flashcard>
 

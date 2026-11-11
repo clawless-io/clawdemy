@@ -26,7 +26,7 @@ Seven short questions. Answer each before opening the collapsible.
 
 **The difference is who decides the next step.** In a workflow, your code decides. In an agent, the model decides.
 
-**Which to pick by default:** the post's standing call is *find the simplest solution possible, and only increasing complexity when needed*. Workflows give *predictability and consistency for well-defined tasks*; agents give *flexibility and model-driven decision-making at scale*. Start with workflow; graduate to agent only when the task's shape demands it (steps not knowable in advance; right path depends on intermediate findings; "what tool to call next" is itself the hard problem).
+**Which to pick by default:** the post's standing advice is to begin by *finding the simplest solution possible, and only increasing complexity when needed*. Workflows give *predictability and consistency for well-defined tasks*; agents are the better option *when flexibility and model-driven decision-making are needed at scale*. Start with workflow; graduate to agent only when the task's shape demands it (steps not knowable in advance; right path depends on intermediate findings; "what tool to call next" is itself the hard problem).
 
 </details>
 
@@ -51,7 +51,7 @@ def run_agent(client, system, tools, user_message, max_iterations=20):
     messages = [{"role": "user", "content": user_message}]
     for _ in range(max_iterations):
         response = client.messages.create(
-            model="claude-opus-4-7", max_tokens=4096,
+            model="claude-opus-5-5", max_tokens=4096,
             system=system, tools=tools, messages=messages,
         )
         messages.append({"role": "assistant", "content": response.content})
@@ -99,7 +99,7 @@ def run_agent(client, system, tools, user_message, max_iterations=20):
 | *stop_sequence* | Configured stop sequence triggered | Often treat as *end_turn* with known reason |
 | *model_context_window_exceeded* (L7) | Context window hit | Compact (if opted in) or fail clearly |
 | *"compaction"* (L7, *pause_after_compaction: true*) | Summary written | Manual preservation (keep last N turns), re-call |
-| *refusal* | Model declined on safety (*stop_details.category* carries the specific category) | Surface the refusal to the caller; do not blind-retry the same prompt; do not loop until success |
+| *refusal* | Model declined on safety; a normal response, not an error (*stop_details.category* names the policy area) | Retry once on another Claude model as a fallback (the docs say this usually works); if that also declines, surface to the caller; never loop on the same model |
 
 **The discipline:** dispatch on every value explicitly. Silent fall-through is the failure mode that produces "the agent stopped and I do not know why" debugging.
 
@@ -113,13 +113,15 @@ def run_agent(client, system, tools, user_message, max_iterations=20):
 **Four modes:**
 
 - ***auto*** (default). Model decides per turn whether to call a tool or respond directly. **Use for:** agents (the model deciding is the whole point).
-- ***any***. Model MUST call a tool this turn; it picks which. **Use for:** workflow steps where a tool call is required but the model knows the best fit.
-- ***tool*** with a specific *name*. Model MUST call the named tool. **Use for:** workflow steps where a specific tool is the next deterministic action.
+- ***any***. Model MUST call a tool this turn; it picks which. **Use for:** workflow steps where a tool call is required but the model knows the best fit (only on models that accept forcing).
+- ***tool*** with a specific *name*. Model MUST call the named tool. **Use for:** workflow steps where a specific tool is the next deterministic action (only on models that accept forcing).
+
+**Forcing is not universal.** As of November 2026, Claude Fable 5.2, Opus 5.5 and Sonnet 5.5 return a 400 error for *any* and *tool*; there, use *auto* with strict tools, or structured outputs. Manual extended thinking rejects forcing on every model.
 - ***none***. Model MUST NOT call any tool. **Use for:** forced final-answer turns at the end of a workflow.
 
-**Soft lever (system prompt):** *"use the tools to investigate before responding"* increases tool use measurably; *"always call a tool first"* is stronger. Use *tool_choice* when you need a hard guarantee.
+**Soft lever (system prompt):** *"Use the tools to investigate before responding."* increases tool use; *"Always call a tool first before responding."* pushes further. Use *tool_choice* when you need a hard guarantee and the model accepts forcing.
 
-**Cost note:** *any* and *tool* slightly increase the auto-injected tool-use system-prompt token count vs *auto* and *none* (on Opus 4.7, 804 vs 675 tokens; on Opus 4.8, 410 vs 290). In a long loop, that adds up.
+**Cost note:** every request that carries tools pays a fixed, per-model tool-use system prompt on top of your tool definitions, so a loop pays it on every iteration. As of November 2026 it is 286 tokens for *auto* / *none* on Opus 5.5, Sonnet 5.5 and Haiku 5.5; where forcing is accepted, *any* / *tool* cost a little more (406 on Haiku 5.5). See the table in the lesson.
 
 </details>
 
@@ -140,7 +142,7 @@ def run_agent(client, system, tools, user_message, max_iterations=20):
 <details>
 <summary>Show answer</summary>
 
-**Verbatim from the post:** *Start by using LLM APIs directly: many patterns can be implemented in a few lines of code*. And: *If frameworks are used, ensure you understand the underlying code*.
+**Verbatim from the post:** *start by using LLM APIs directly: many patterns can be implemented in a few lines of code*. And: *If you do use a framework, ensure you understand the underlying code*.
 
 **Why it matters for a first agent:** the canonical loop is 30 lines; it fits on one screen; you can read every decision the model is making and every dispatch your code is making. A framework wraps the loop, often adds patterns you do not need, and trades visibility for convenience. For a first version, the convenience is not worth the loss of "I can debug exactly what is happening." Reach for a framework only when patterns repeat (parallel workers, evaluator-optimizer harnesses) AND you understand the underlying code well enough to know what the framework is doing for you.
 
@@ -158,7 +160,7 @@ About 15 minutes. You will need the SDK from lesson 1, an Anthropic API key, and
 
 **Part B: add the full *stop_reason* dispatch.** Extend the loop to explicitly handle *pause_turn* (re-call with assistant turn unchanged) and *max_tokens* (raise *max_tokens* once, then surface). Test *max_tokens* by setting it small (say, 50) on a prompt that needs more.
 
-**Part C: steering with *tool_choice*.** Add a *tool_choice* parameter to your *run_agent* signature. Run once with *tool_choice* set to *auto* (the model may or may not call the tool). Run again with *tool_choice* set to *tool* mode and the tool *name* set to *get_weather*, on the same prompt. Observe the forced call. Note the token-count difference in *response.usage.input_tokens* between the two modes (the *tool*-forced mode is slightly higher per the docs).
+**Part C: steering with *tool_choice*.** Add a *tool_choice* parameter to your *run_agent* signature. Run once with *tool_choice* set to *auto* (the model may or may not call the tool). Run again with *tool_choice* set to *none* on the same prompt and see the model answer without calling the tool. Then try *tool* mode with the tool *name* set to *get_weather*. On a model that rejects forcing (as of November 2026, Fable 5.2, Opus 5.5 and Sonnet 5.5), expect a 400 error: catch it and print the message, because your loop should fail loudly on it, not retry. On a model that accepts forcing (Haiku 5.5, for example), observe the forced call and compare *response.usage.input_tokens* with the *auto* run (the forced mode is slightly higher per the docs).
 
 <details>
 <summary>What you'll get (an example, not the canonical answer)</summary>
@@ -167,7 +169,7 @@ For Part A you will see the loop turn over twice: a *tool_use* response with one
 
 For Part B you will see *max_tokens* fire when the model would have produced a longer answer. The point is not the fix; it is the dispatch existing. Production failures of this shape are usually "the loop assumed *end_turn* and silently returned a truncated answer to the caller."
 
-For Part C you will see the model behave differently under the two *tool_choice* modes. With *auto*, the model may answer directly if the question is in its training distribution. With *tool*, the call is forced regardless. The choice is your contract with the model about who decides this iteration's step.
+For Part C you will see the model behave differently under each *tool_choice* mode. With *auto*, the model may answer directly if the question is in its training distribution. With *none*, it cannot call the tool. With *tool*, the call is forced regardless on a model that accepts forcing, and the request fails with a 400 error on one that does not. The choice is your contract with the model about who decides this iteration's step, and the model's support for forcing is part of that contract.
 
 The exercise's value is the muscle memory: a 30-line loop, a small *stop_reason* dispatch, and *tool_choice* awareness is enough to ship most useful agents on this track's substrate.
 
@@ -187,7 +189,7 @@ Nine cards. Click any card to reveal the answer. Use the **Print flashcards** bu
 
 <Flashcard question="When workflow vs when agent?">
 
-**Workflows:** *predictability and consistency for well-defined tasks*. **Agents:** *flexibility and model-driven decision-making at scale*. The standing call: *find the simplest solution possible, and only increasing complexity when needed*. Start with workflow; graduate to agent only when steps are not knowable in advance, the right path depends on intermediate findings, or "what tool to call next" is itself the hard problem.
+**Workflows:** *predictability and consistency for well-defined tasks*. **Agents:** the better option *when flexibility and model-driven decision-making are needed at scale*. The standing call: begin by *finding the simplest solution possible, and only increasing complexity when needed*. Start with workflow; graduate to agent only when steps are not knowable in advance, the right path depends on intermediate findings, or "what tool to call next" is itself the hard problem.
 
 </Flashcard>
 
@@ -205,13 +207,13 @@ A `while` (bounded by *max_iterations*) that calls *messages.create*, appends th
 
 <Flashcard question="The full stop_reason vocabulary the loop dispatches on?">
 
-*end_turn* (model done → return), *tool_use* (execute + append *tool_result* → iterate), *pause_turn* (L5; server-tool mid-loop yield → re-call), *max_tokens* (cap hit → raise / summarize / surface), *stop_sequence* (often treat as *end_turn* with known reason), *model_context_window_exceeded* (L7; compact if opted in or fail clearly), *"compaction"* (L7 with *pause_after_compaction: true*; preserve last N + re-call), *refusal* (model declined on safety; *stop_details.category* carries the category; surface, do not blind-retry).
+*end_turn* (model done → return), *tool_use* (execute + append *tool_result* → iterate), *pause_turn* (L5; server-tool mid-loop yield → re-call), *max_tokens* (cap hit → raise / summarize / surface), *stop_sequence* (often treat as *end_turn* with known reason), *model_context_window_exceeded* (L7; compact if opted in or fail clearly), *"compaction"* (L7 with *pause_after_compaction: true*; preserve last N + re-call), *refusal* (model declined on safety; *stop_details.category* names the policy area; retry once on a fallback model, then surface; never loop on the same model).
 
 </Flashcard>
 
 <Flashcard question="tool_choice: four modes + when to use?">
 
-***auto*** (default): model decides per turn. Use for agents. ***any***: must call a tool, picks which. Use for workflow steps where a call is required. ***tool*** with a specific *name*: must call the named tool. Use for deterministic workflow steps. ***none***: must not call. Use for forced final-answer turns. Cost note: *any* and *tool* cost slightly more in tool-use system-prompt tokens (Opus 4.7: 804 vs 675; Opus 4.8: 410 vs 290).
+***auto*** (default): model decides per turn. Use for agents. ***any***: must call a tool, picks which. Use for workflow steps where a call is required. ***tool*** with a specific *name*: must call the named tool. Use for deterministic workflow steps. ***none***: must not call. Use for forced final-answer turns. Not every model accepts *any* and *tool* (as of November 2026, Fable 5.2, Opus 5.5 and Sonnet 5.5 return a 400 error; use *auto* with strict tools, or structured outputs). Cost note: every request with tools pays a fixed per-model tool-use system prompt; where forcing is accepted, *any* and *tool* cost slightly more.
 
 </Flashcard>
 
@@ -223,7 +225,7 @@ A `while` (bounded by *max_iterations*) that calls *messages.create*, appends th
 
 <Flashcard question="Direct API vs framework for a first agent?">
 
-**Verbatim:** *Start by using LLM APIs directly: many patterns can be implemented in a few lines of code*. And: *If frameworks are used, ensure you understand the underlying code*. The 30-line loop is the proof. A framework wraps the loop, often adds patterns you do not need, and trades visibility for convenience. For a first agent, the convenience is not worth the loss of debuggability. Reach for a framework only when patterns repeat AND you understand the underlying code.
+**Verbatim:** *start by using LLM APIs directly: many patterns can be implemented in a few lines of code*. And: *If you do use a framework, ensure you understand the underlying code*. The 30-line loop is the proof. A framework wraps the loop, often adds patterns you do not need, and trades visibility for convenience. For a first agent, the convenience is not worth the loss of debuggability. Reach for a framework only when patterns repeat AND you understand the underlying code.
 
 </Flashcard>
 

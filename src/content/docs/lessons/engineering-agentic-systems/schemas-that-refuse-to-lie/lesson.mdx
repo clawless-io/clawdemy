@@ -60,27 +60,34 @@ Here is a first attempt for the invoice pipeline. It is the naive version, and i
 }
 ```
 
-Before fixing it, two settings turn "the model usually calls this correctly" into "every run produces this shape."
+Before fixing it, two settings turn "the model usually gets this shape right" into "whatever it produces has this shape."
 
 ### What tool choice actually guarantees
 
 The tool choice parameter (tool_choice) controls whether the model must call a tool. Three of its modes form a ladder of guarantees; a fourth mode, none, forbids tool calls entirely and has no role in an extraction pipeline, so this lesson sets it aside.
 
-**Auto, the default.** The model decides whether to call any tool at all. It may answer in plain prose instead. This is the right mode for agents doing open-ended work, and the wrong mode for a pipeline: it guarantees nothing about the shape of what comes back.
+**Auto, the default.** The model decides whether to call any tool at all. It may answer in plain prose instead. This is the right mode for agents doing open-ended work, but on its own it guarantees nothing about the shape of what comes back.
 
 **Any.** The model must call one of the tools you provided, but it picks which. Some tool's schema will be honored on every run. This fits when you offer several extractors, say one per document type, and you want the model to route: it must pick a recorder, it cannot drift into prose.
 
-**A specific tool, forced by name.** The model must call the tool you named. For an extraction pipeline this is the mode you want: force the invoice recorder (tool_choice with type tool and the tool's name) and every single run yields that schema's shape. No prose preamble, no "I could not find a purchase order, but here are my thoughts." The shape is no longer a request.
+**A specific tool, forced by name.** The model must call the tool you named. Where it is available, this is the tightest envelope: every run yields that schema's shape. No prose preamble, no "I could not find a purchase order, but here are my thoughts."
 
-Read the ladder as a decide-versus-enforce dial. Auto leaves the whole decision with the model. Any enforces "structured, not prose" but leaves routing to model judgment. Forcing a specific tool enforces everything about the envelope. Pick the rung that matches how much of this decision you are willing to leave to judgment.
+Now the catch: not every model accepts the forcing modes. On several current models, the platform documentation says, a request that sets any, or a specific tool, comes back as an error. Auto and none still work. On those models the top two rungs are gone, and the docs name two replacements. One is auto combined with strict tool use, which guarantees that any call the model makes has arguments matching your schema. The other is the structured outputs feature, for when you need the response itself in a fixed JSON shape. For a single-record pipeline like this one, structured outputs is the cleaner fit: the record is the answer, so there is no tool call to hope for.
+
+| As of November 2026: model | Forced tool choice (any, or a named tool) | What the docs say to use instead |
+| --- | --- | --- |
+| Claude Fable 5.2, Claude Opus 5.5, Claude Sonnet 5.5, Claude Fable 5.1 (and the Mythos 5.2 and 5.1 models) | Returns a 400 error | Auto plus strict tool use, or structured outputs |
+| Other models, such as Claude Opus 5, Claude Sonnet 5 and Claude Haiku 5.5 | Accepted (a forced call skips thinking), unless manual extended thinking is on | Forcing works; the replacements work too |
+
+Read the ladder as a decide-versus-enforce dial. Auto leaves the whole decision with the model. Any enforces "structured, not prose" but leaves routing to model judgment. Forcing a specific tool enforces everything about the envelope. Where forcing is off the table, you reach the same enforcement from the other side: let the model decide, and make whatever it produces schema-bound.
 
 ### From almost to always
 
-Forcing the tool guarantees a call to it. Historically it did not, by itself, guarantee the arguments matched the schema perfectly: a number could arrive as a string, an off-schema field could sneak in. Setting the strict flag to true on the tool definition (`"strict": true`) closes that last gap. Anthropic's documentation explains the mechanism: conformance is achieved "by constraining the model's token sampling to schema-valid outputs (a technique called grammar-constrained sampling)". In plain terms, the model is never allowed to generate a token that would break your schema. Malformed output stops being a failure mode you write handlers for.
+Choosing a mode settles whether a schema applies. It does not, by itself, guarantee the output matches the schema perfectly: historically a number could arrive as a string, an off-schema field could sneak in. Setting the strict flag to true on the tool definition closes that last gap. Anthropic's documentation explains the mechanism: conformance is achieved "by constraining the model's token sampling to schema-valid outputs (a technique called grammar-constrained sampling)". In plain terms, the model is never allowed to generate a token that would break your schema. Malformed output stops being a failure mode you write handlers for.
 
-Two footnotes for completeness. First, the same guarantee exists for whole responses, not just tool calls: the platform's structured outputs feature applies a JSON Schema to the response body itself through the output configuration field (output_config). The Building with Claude track drew the line between the two; the design thinking in this lesson applies identically to both. Second, the guarantee has edges the docs are honest about: "While structured outputs guarantee schema compliance in most cases, there are scenarios where the output may not match your schema", specifically a safety refusal or a response cut off by the token limit. Check for those, then trust the shape.
+Two footnotes for completeness. First, structured outputs applies the same grammar-constrained guarantee to the whole response through the output configuration field (output_config), and the two features can be combined in one request. The Building with Claude track drew the line between them; the design thinking in this lesson applies identically to both. Second, the guarantee has edges the docs are honest about: "Although structured outputs guarantee schema compliance in most cases, there are scenarios where the output might not match your schema". The docs name a safety refusal, a response cut off by the token limit, and the capitalization of enum values, which is not guaranteed. Check the stop reason, compare enum values without regard to case, then trust the shape.
 
-So: shape solved. The naive schema above will be honored, token by token, every time. Which is exactly the problem. It will be honored on the invoice that has no purchase order, too.
+So: shape solved. With structured outputs, or a forced strict tool where forcing is accepted, the naive schema above will be honored, token by token, every time. Which is exactly the problem. It will be honored on the invoice that has no purchase order, too.
 
 ## Required fields are fabrication engines
 
@@ -122,7 +129,7 @@ Now the Swiss franc invoice comes back as OTHER with the printed currency preser
 
 ## Valid is not the same as true
 
-With the forced tool call, strict mode, nullable fields, and escape hatches in place, every run now produces JSON that parses, type-checks, and permits honesty. It is tempting to declare victory. Resist, because the guarantee you bought has a precise boundary: it is syntactic, not semantic.
+With an enforcement mode chosen, strict mode on, nullable fields, and escape hatches in place, every run now produces JSON that parses, type-checks, and permits honesty. It is tempting to declare victory. Resist, because the guarantee you bought has a precise boundary: it is syntactic, not semantic.
 
 Syntax validity means the output matches the schema: right fields, right types, legal enum values. That is what grammar-constrained sampling promises, and it promises nothing else. Semantic validity means the values are actually correct, and no schema can promise that. The total amount can be a perfectly typed number that does not equal the sum of the line items. The invoice date can be a beautifully formatted date that is actually the delivery date from two lines below. Supplier and customer can swap on an unusual layout, each landing in the other's correctly typed field. Every one of these sails through the strictest schema on earth, because the schema checks shape and these are errors of content.
 
@@ -147,7 +154,7 @@ So give the loop a shape: validate, retry format-and-consistency failures with t
 
 - **You can hear vendor claims precisely now.** "Our extraction is guaranteed valid JSON, one hundred percent" is a true statement about syntax and an empty one about truth. You now know the follow-up questions: what happens when a field is absent from the document, where is the escape hatch on your categories, and what do your semantic validators check?
 - **You will recognize fabrication pressure in systems you merely use.** Any AI feature that must fill a form, a summary template with fixed headings, a mandatory rating, a required date, faces the invoice problem. When an AI-populated record looks suspiciously complete, you now know to ask whether the design ever allowed it to say "not found."
-- **The honesty pattern transfers to how you ask AI anything.** Give the model an explicit permitted way out ("if the document does not say, tell me it does not say") and answers get more trustworthy. That is required-plus-nullable, practiced in plain conversation, in [Clawless](https://clawless.ai) or anywhere else you work with a model.
+- **The honesty pattern transfers to how you ask AI anything.** Give the model an explicit permitted way out ("if the document does not say, tell me it does not say") and answers get more trustworthy. That is required-plus-nullable, practiced in plain conversation with any model. This lesson's practice is written for [Clawless Computer](https://clawless.ai), the free desktop home for OpenClaw that we build alongside Clawdemy.
 
 ## Common pitfalls
 
@@ -164,7 +171,7 @@ So give the loop a shape: validate, retry format-and-consistency failures with t
 ## What you should remember
 
 - A schema on a tool definition is code-level enforcement of output shape: decide-versus-enforce, applied to the model's output itself.
-- The tool choice ladder: auto guarantees nothing about shape, any guarantees some tool's schema, and forcing a specific tool guarantees that schema on every run. Strict mode (`strict: true`) makes conformance token-level certain.
+- The tool choice ladder: auto guarantees nothing about shape on its own, any guarantees some tool's schema, and forcing a specific tool guarantees that schema on every run. Several current models reject both forcing modes, so the documented path there is auto plus strict tools, or structured outputs for a fixed response shape. Strict mode makes conformance token-level certain.
 - Enforcement cuts both ways. A required field on a document that lacks the information pressures the model to invent. Make absence representable: required plus nullable, with a description that says null is correct, beats optional.
 - Give every enum an escape hatch: a catch-all value plus a detail string, so real-world variety gets flagged instead of force-fitted.
 - Schema validity is syntactic. Values can still be wrong, sums can disagree, fields can swap. Semantic validation is deterministic code downstream, and it is still your job.

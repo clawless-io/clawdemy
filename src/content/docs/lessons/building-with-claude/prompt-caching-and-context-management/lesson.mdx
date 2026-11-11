@@ -10,7 +10,6 @@ sidebar:
 import ReadAlongDim from '../../../../../components/ReadAlongDim.astro';
 import LessonFreshness from '../../../../../components/LessonFreshness.astro';
 import SourceLecture from '../../../../../components/SourceLecture.astro';
-import LessonUpdate from '../../../../../components/LessonUpdate.astro';
 
 <ReadAlongDim
   src="https://audio.clawdemy.org/lessons/prompt-caching-and-context-management-lesson.mp3"
@@ -25,28 +24,21 @@ import LessonUpdate from '../../../../../components/LessonUpdate.astro';
 
 
 
-<LessonUpdate
-  date="2026-10-17"
-  note="Since this lesson was drafted the model lineup has moved on. The current Opus and Sonnet are both version 5.5, while Haiku 4.5 is still current. The per-model tables below, which say what is gated to which version, predate the current generation and so read as incomplete rather than wrong. The caching mechanics themselves, prefix matching and where to place a breakpoint, are unchanged. The reasoning and the request shapes in this lesson are unchanged. Check the Models overview for today's model ids and prices before you build."
-  href="https://platform.claude.com/docs/en/models/overview"
-  linkText="Anthropic Models overview"
-/>
-
 ## Why this lesson
 
 After lessons 4, 5, and 6 your tool inventory has three layers (custom client, Anthropic-provided, MCP). After a few turns of a real conversation your context has a system prompt, tool definitions across those three layers, prior user messages, prior assistant turns, prior *tool_use* and *tool_result* blocks, and possibly *server_tool_use* and *mcp_tool_use* round-trips that produced result blocks inline. All of it counts as input tokens on every subsequent turn. Two problems compound from there.
 
-The first is **cost**. A 50,000-token system prompt with tools, sent on turn one, costs the standard input-token price for that turn. Sent again on turn two (unchanged), it costs the same again, and so on for every turn. A long session pays for the stable prefix once per turn rather than once. Prompt caching is the Anthropic-provided mechanism that turns repeated reads of a stable prefix into a sharp discount (around 90 percent of the input-token price for hits, per the published multipliers).
+The first is **cost**. Say your system prompt and tools come to fifty thousand tokens. Sent on turn one, they cost the standard input-token price for that turn. Sent again on turn two (unchanged), they cost the same again, and so on for every turn. A long session pays for the stable prefix once per turn rather than once. Prompt caching is the Anthropic-provided mechanism that turns repeated reads of a stable prefix into a sharp discount: a cached read costs a small fraction of the normal input price.
 
-The second is **staleness**. The context window is finite (1M tokens on current Opus and Sonnet 4.x; 200K on older models), and the Anthropic docs are direct about what happens before you hit the ceiling: *as token count grows, accuracy and recall degrade, a phenomenon known as context rot. This makes curating what's in context just as important as how much space is available*. Compaction and context editing are the two Anthropic-provided mechanisms for curating, server-side, what reaches the model.
+The second is **staleness**. The context window is finite, and the Anthropic docs are direct about what happens before you hit the ceiling: *As token count grows, accuracy and recall degrade, a phenomenon known as context rot. This makes curating what's in context just as important as how much space is available.* Compaction and context editing are the two Anthropic-provided mechanisms for curating, server-side, what reaches the model.
 
 This lesson covers all four pieces (prompt caching, the context-window picture, compaction, context editing) under one frame: **cache the stable parts, compact or clear the long parts, and pick the lever that matches your session's shape**. The capability the lesson builds maps directly onto that: cache long system prompts and stable context blocks; reason about what compaction and context editing do to a long-running session; trade cost against staleness deliberately rather than discovering both bills at month-end.
 
 ## Prompt caching (the cost lever)
 
-The Anthropic docs frame caching this way (verbatim): *Prompt caching optimizes your API usage by allowing resuming from specific prefixes in your prompts. This significantly reduces processing time and costs for repetitive tasks or prompts with consistent elements*.
+The Anthropic docs frame caching this way (verbatim): *Prompt caching optimizes your API usage by letting the API resume from specific prefixes in your prompts. This significantly reduces processing time and costs for repetitive tasks or prompts with consistent elements.*
 
-The mechanism is a single field, *cache_control*, attached to any block you want included in a cached prefix. The shape:
+The mechanism is a single field, *cache_control*, used in one of two ways. Put it once at the top level, and the API places the breakpoint for you and moves it forward as the conversation grows; the docs call this automatic caching and suggest starting there. Or attach it to each block you want in the cached prefix, for exact control. The shape:
 
 ```json
 { "cache_control": { "type": "ephemeral" } }
@@ -54,11 +46,22 @@ The mechanism is a single field, *cache_control*, attached to any block you want
 { "cache_control": { "type": "ephemeral", "ttl": "1h" } }
 ```
 
-There are three placement layers, and they are honored in the order they appear inside a request:
+```python
+# Automatic caching: one top-level field, the API places the breakpoint
+response = client.messages.create(
+    model="claude-opus-5-5",
+    max_tokens=1024,
+    cache_control={"type": "ephemeral"},
+    system="<long stable system prompt>",
+    messages=[{"role": "user", "content": "..."}],
+)
+```
+
+With explicit breakpoints, there are three placement layers, and they are honored in the order they appear inside a request:
 
 ```python
 response = client.messages.create(
-    model="claude-opus-4-8",
+    model="claude-opus-5-5",
     max_tokens=1024,
     system=[
         {
@@ -84,22 +87,40 @@ response = client.messages.create(
 )
 ```
 
-The placement order for cache-prefix construction is: *tools* → *system* → *messages*. The system checks at most 20 blocks back from each explicit breakpoint when looking for prior cache writes. Up to **four explicit cache breakpoints** are allowed per request; a fifth marker returns a 400 error.
+The placement order for cache-prefix construction is: tools, then system, then messages. A change at one level invalidates that level and everything after it. Each request allows only a small, fixed number of explicit breakpoints, and from each breakpoint the system looks back a limited number of blocks for an earlier cache write; the table below gives both numbers. The lookback only finds entries that earlier requests already wrote, so put the breakpoint on the last block that stays identical from one request to the next.
+
+| As of November 2026: caching rule | Value |
+| --- | --- |
+| Explicit breakpoints per request | Up to 4. A top-level (automatic) breakpoint uses one of the four slots; if four explicit breakpoints already exist, the API returns a 400 error |
+| Lookback window | 20 positions per breakpoint, counting the breakpoint itself |
+| Prefix order | `tools`, then `system`, then `messages` |
+| Cache lifetime | 5 minutes by default, refreshed at no extra cost each time the cached content is used; 1 hour with `"ttl": "1h"` |
+| Prompt below the minimum | Processed without caching; no error is returned |
+| Cache isolation | Per workspace on the Claude API, Claude Platform on AWS, and Microsoft Foundry; per organization on Claude Models on Google Cloud (Google managed) and Amazon Bedrock |
+| Sources | [Prompt caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching) |
 
 ### Pricing math worth memorizing
 
-The docs publish three multipliers (off the model's base input-token price). On a model like Opus 4.7 at five dollars per million input tokens, these come out to:
+The pricing works in multipliers off the model's base input-token price, and the principle is simple. Writing a prefix into the cache costs a little more than sending it normally, and the longer cache lifetime costs more to write than the short one. Reading the prefix back from the cache costs much less than sending it normally, and on the newest models the read discount is deeper still. The table has each model's numbers.
 
-| Token kind | Multiplier | Effective price on Opus 4.7 |
-| --- | --- | --- |
-| Standard (uncached) input | 1.0x | $5 / MTok |
-| 5-minute cache write | 1.25x | $6.25 / MTok |
-| 1-hour cache write | 2.0x | $10 / MTok |
-| Cache hit or refresh | 0.1x | $0.50 / MTok |
+| As of November 2026 (price per million tokens) | Base input | 5-minute cache write (1.25x) | 1-hour cache write (2x) | Cache hit or refresh | Minimum cacheable prompt |
+| --- | --- | --- | --- | --- | --- |
+| Claude Fable 5.2 | $8 | $10 | $16 | $0.20 (0.025x) | 512 tokens |
+| Claude Opus 5.5 | $4 | $5 | $8 | $0.20 (0.05x) | 512 tokens |
+| Claude Sonnet 5.5 | $2 | $2.50 | $4 | $0.10 (0.05x) | 512 tokens |
+| Claude Haiku 5.5, prompts up to 100,000 tokens | $0.10 | $0.125 | $0.20 | $0.01 (0.1x) | 512 tokens |
+| Claude Haiku 5.5, prompts over 100,000 tokens | $0.50 | $0.625 | $1 | $0.05 (0.1x) | 512 tokens |
+| Claude Opus 4.8 (legacy) | $5 | $6.25 | $10 | $0.50 (0.1x) | 1,024 tokens |
+| Claude Opus 4.7 (legacy) | $5 | $6.25 | $10 | $0.50 (0.1x) | 2,048 tokens |
+| Claude Opus 4.6 and 4.5 (legacy) | $5 | $6.25 | $10 | $0.50 (0.1x) | 4,096 tokens |
+| Claude Sonnet 4.6 (legacy) | $3 | $3.75 | $6 | $0.30 (0.1x) | 1,024 tokens |
+| Claude Haiku 4.5 (legacy) | $1 | $1.25 | $2 | $0.10 (0.1x) | 4,096 tokens |
+| Break-even, per the Pricing page | | After one cache read | After two cache reads | | |
+| Sources | [Prompt caching: pricing and cache limitations](https://platform.claude.com/docs/en/build-with-claude/prompt-caching), [Pricing](https://platform.claude.com/docs/en/about-claude/pricing). Minimums are for the Claude API, Claude Platform on AWS, Claude Models on Google Cloud (Google managed) and Microsoft Foundry; Bedrock publishes its own. | | | | |
 
-The shape of the trade-off: writing a cache costs 25 percent or 100 percent more than the standard input price (depending on TTL), reading a cache costs 90 percent less. The break-even for a 5-minute write happens after one hit within the TTL; everything after that is profit. For a 1-hour write, the break-even is closer to four hits, which suits long-running sessions and heavily-reused system prompts. Cache refreshes (re-reads within the TTL) cost the same 0.1x discounted price, not a new write cost.
+The shape of the trade-off: you pay a small premium once, on the write turn, and a deep discount on every read after it. The short-lived cache pays back after a single hit within its lifetime; everything after that is savings. The one-hour cache costs more to write, so it needs a couple of hits to pay back, which suits long-running sessions and heavily reused system prompts. Cache refreshes (re-reads within the lifetime) cost the same discounted read price, not a new write.
 
-Two floor rules worth knowing. There is a **minimum cacheable size** per model (currently 4,096 tokens for Opus 4.7 / 4.6 / 4.5 and Haiku 4.5; 1,024 tokens for Opus 4.8 / Sonnet 4.6 / Sonnet 4.5). Shorter prompts marked with *cache_control* are processed without caching; no error is returned. And caching is **exact-match**: a single character change anywhere in the cached span invalidates the prefix.
+Two floor rules worth knowing. There is a **minimum cacheable size** per model, and it differs a lot between models (the table lists it). Shorter prompts marked for caching are processed without caching, and no error is returned. And caching is **exact-match**: a single character change anywhere in the cached span invalidates the prefix.
 
 ### Reading whether your prefix is actually hitting
 
@@ -116,33 +137,48 @@ The *usage* object on every response tells you what happened:
 }
 ```
 
-The docs publish the identity: *total_input_tokens = cache_read_input_tokens + cache_creation_input_tokens + input_tokens*. *input_tokens* in this object means "tokens after the last cache breakpoint" (the part of the prefix that did not hit). When you log production traffic, watch the ratio of *cache_read_input_tokens* to the total; a healthy production stack with stable prompts often sees that ratio well over 90 percent, which is precisely the spend reduction the multipliers buy.
+The docs publish the identity: total input equals the cache-read tokens, plus the cache-creation tokens, plus the input tokens (literal below). The plain input-tokens field here means only the tokens after the last cache breakpoint (the part of the prompt that was neither read from nor written to the cache). If both cache fields are zero, nothing was cached, most often because the prompt was under the minimum. When you log production traffic, watch the share of cache-read tokens in the total; a production stack with stable prompts can push that share very high, and that share is exactly where the savings come from.
 
-Cache storage is isolated **per workspace** on the Claude API (and on Claude Platform on AWS, and Microsoft Foundry beta); organization-level on Bedrock and Vertex AI. If you split production and dev into separate workspaces, their caches do not see each other.
+```
+total_input_tokens = cache_read_input_tokens + cache_creation_input_tokens + input_tokens
+```
+
+Cache storage is isolated **per workspace** on the Claude API and on some cloud platforms, and per organization on others (the caching-rules table lists which). If you split production and dev into separate workspaces, their caches do not see each other.
 
 ## Context windows (the staleness ceiling)
 
-Two facts about context windows are load-bearing for this lesson. First, the actual size depends on the model: Opus 4.8 / Mythos Preview / Opus 4.7 / Opus 4.6 and Sonnet 4.6 have a **1M-token** window on the Claude API (and on Bedrock and Vertex AI); Sonnet 4.5 (and older deprecated models) sit at **200K**. A single request can include up to 600 images or PDF pages on a 1M-context model (100 on a 200K model).
+Two facts about context windows are load-bearing for this lesson. First, the actual size depends on the model. Current models have a very large window, older models a smaller one, and the number of images or document pages one request can carry depends on the window too. The table below has the values.
 
-Second, the published guidance is explicit that "fits in the window" is not the same as "works well in the window." The docs use the term **context rot** for the accuracy-and-recall degradation that grows with length; the line worth quoting: *as token count grows, accuracy and recall degrade, a phenomenon known as context rot. This makes curating what's in context just as important as how much space is available*. Curation is what the next two sections operationalize.
+| As of November 2026: context fact | Value |
+| --- | --- |
+| 1M-token context window | Claude Fable 5.2, Opus 5.5, Sonnet 5.5, Haiku 5.5; legacy Opus 4.8, 4.7, 4.6 and Sonnet 4.6 (full list on the Context windows page). Up to 128K output tokens per request |
+| 200K-token context window | Other models, including Claude Sonnet 4.5 (deprecated) and Claude Haiku 4.5 |
+| Images or PDF pages per request | Up to 600 (100 on models with a 200K window) |
+| Context awareness (injected budget tags) | Claude Sonnet 5, Sonnet 4.6, Sonnet 4.5 and Haiku 4.5. Opus 4.7 and later Opus models, Sonnet 5.5, Fable models and Haiku 5.5 do not receive the tags; use [task budgets](https://platform.claude.com/docs/en/build-with-claude/task-budgets) (beta) instead |
+| Input alone exceeds the window | 400 `invalid_request_error` ("prompt is too long") on every model |
+| Input plus `max_tokens` exceeds the window | Claude 4.5 models and newer accept the request and stop with `stop_reason: "model_context_window_exceeded"`; earlier models return a validation error unless you send the `model-context-window-exceeded-2025-08-26` beta header |
+| Sources | [Context windows](https://platform.claude.com/docs/en/build-with-claude/context-windows), [Models overview](https://platform.claude.com/docs/en/models/overview) |
 
-Two helpful properties on current Claude 4.x models. **Context awareness** (on Sonnet 4.6 / Sonnet 4.5 / Haiku 4.5) gives the model an explicit token budget at session start (a budget tag with token-budget set to one million, literal below) and an updated remaining-tokens warning after each tool call, so the model can pace itself rather than guess at remaining capacity:
+Second, the published guidance is explicit that "fits in the window" is not the same as "works well in the window." The docs use the term **context rot** for the accuracy-and-recall degradation that grows with length; the line worth quoting: *As token count grows, accuracy and recall degrade, a phenomenon known as context rot. This makes curating what's in context just as important as how much space is available.* Curation is what the next two sections operationalize.
+
+Two helpful properties. **Context awareness**, on the models that have it, tells the model its total token budget at the start (the API injects a budget tag like the one below) and its remaining tokens after each tool call, so the model can pace itself rather than guess. Some newer models do not get these tags; for them the docs describe task budgets instead, and the table says which is which.
 
 ```xml
 <budget:token_budget>1000000</budget:token_budget>
 ```
 
-**Overflow handling**: on Claude 4.5 and newer, if input plus *max_tokens* exceeds the window, the API accepts the request and stops with *stop_reason: model_context_window_exceeded*; on earlier models you opt into that behavior with the *model-context-window-exceeded-2025-08-26* beta header rather than getting a validation error upfront. The token-counting API is available for pre-flight estimation.
+**Overflow handling**: if the input alone is too big for the window, the API rejects it on every model. If the input fits but the input plus your maximum output does not, recent models accept the request and stop cleanly with a stop reason that says the context window was exceeded; older models need a beta header for that behavior and otherwise return a validation error upfront. The token-counting API is available for pre-flight estimation.
 
 ## Compaction (the long-session lever)
 
-The docs name compaction's job in one sentence: *server-side context compaction for managing long conversations that approach context window limits*. The why, with the staleness frame from the previous section: *as conversations get longer, models struggle to maintain focus across the full history. Compaction keeps the active context focused and performant by replacing stale content with concise summaries*.
+The docs name compaction's job in two sentences: *Compaction replaces the older turns of a conversation with a summary that Claude writes on the server, so you need no summarization code of your own. It keeps a long conversation or agent task inside the context window, and it keeps the active context small, because response quality degrades as a conversation grows.*
 
-Mechanically, you opt in with a beta header (*compact-2026-01-12*) and a *context_management* entry on the request:
+There are two ways to run it. With **compaction on demand**, your application decides when: it sends a compaction request, gets back one summary block instead of a reply, and puts that block first in the next request in place of the messages it summarizes. With **compaction at a token threshold**, the API decides: you set a trigger, and the API summarizes inside the request that reaches it. The docs advise the on-demand kind wherever it is available; the threshold kind is the one-parameter version, and the worked example here. You opt in with a beta header and a *context_management* entry on the request:
 
 ```python
+# Compaction at a token threshold
 response = client.beta.messages.create(
-    model="claude-opus-4-8",
+    model="claude-opus-5-5",
     max_tokens=4096,
     messages=conversation,
     context_management={
@@ -156,9 +192,29 @@ response = client.beta.messages.create(
     },
     betas=["compact-2026-01-12"],
 )
+
+# Compaction on demand (a separate request; cannot be combined
+# with context_management on the same request)
+summary = client.beta.messages.create(
+    model="claude-opus-5-5",
+    max_tokens=4096,
+    messages=conversation,
+    compaction={"type": "summarize"},
+    betas=["compact-2026-09-04"],
+)
 ```
 
-The default trigger threshold is 150,000 input tokens (minimum 50,000). When the threshold is crossed, the API generates a summary and emits a *compaction* block in the response that stands in for the older conversation; on subsequent requests, the API drops all message blocks prior to that *compaction* block, so you continue from a shorter history. If you set *pause_after_compaction* to true, the response stops with *stop_reason: "compaction"* after writing the summary, which lets you manually preserve recent turns verbatim. A common pattern is the compaction block followed by the last three messages (literal below):
+| As of November 2026: compaction | On demand | At a token threshold |
+| --- | --- | --- |
+| Who decides when | Your application, by sending a compaction request | The API, when input tokens reach your trigger |
+| Beta header | `compact-2026-09-04` | `compact-2026-01-12` |
+| Request shape | Top-level `"compaction": {"type": "summarize"}` | A `compact_20260112` entry in `context_management.edits` |
+| Trigger | Not applicable | 150,000 input tokens by default; at least 50,000 |
+| Models on the Claude API (beta) | Claude Fable 5.2, Opus 5.5, Sonnet 5.5, Haiku 5.5; legacy Opus 4.8, 4.7, 4.6 and Sonnet 4.6; also Fable 5.1, Fable 5, Opus 5, Sonnet 5 and the Mythos models | Same list |
+| Docs advice (verbatim from the Compaction overview) | "Use on-demand compaction wherever it is available." | |
+| Sources | [Compaction overview](https://platform.claude.com/docs/en/build-with-claude/compaction), [Compaction on demand](https://platform.claude.com/docs/en/build-with-claude/compaction-on-demand), [Compaction at a token threshold](https://platform.claude.com/docs/en/build-with-claude/compaction-threshold) | |
+
+In the threshold mode there is a default trigger and a floor below which you cannot set it (the table has both). When the threshold is crossed, the API generates a summary and emits a *compaction* block in the response that stands in for the older conversation; on subsequent requests, the API drops everything before that *compaction* block, so you continue from a shorter history. If you turn on the pause-after-compaction option, the response stops with a compaction stop reason after writing the summary, which lets you manually preserve recent turns verbatim. A common pattern is the compaction block followed by the last three messages (literal below):
 
 ```
 [compaction_block, last 3 messages]
@@ -166,9 +222,9 @@ The default trigger threshold is 150,000 input tokens (minimum 50,000). When the
 
 Then you continue.
 
-Supported on Opus 4.8 / Mythos Preview / Opus 4.7 / Opus 4.6 and Sonnet 4.6 today, in beta. Eligible for Zero Data Retention.
+Both kinds run on a list of models that changes as new ones ship; the table lists them and their status. Threshold compaction is eligible for Zero Data Retention.
 
-Two compaction-specific costs that change how you reason about a long session. **Compaction itself runs as an extra sampling step**, billed separately; the response's *usage.iterations* surfaces the breakdown (a *compaction* entry with its input and output tokens, and a *message* entry for the regular turn). The top-level *input_tokens* and *output_tokens* do not include the compaction cost, so production monitoring needs to sum across iterations. And the **same model is used to write the summary**; there is no option to delegate summarization to a cheaper model.
+Two threshold-compaction costs that change how you reason about a long session. **Compaction itself runs as an extra sampling step**, billed separately; the response's *usage.iterations* surfaces the breakdown (a *compaction* entry with its input and output tokens, and a *message* entry for the regular turn). The top-level *input_tokens* and *output_tokens* do not include the compaction cost, so production monitoring needs to sum across iterations. And the **same model is used to write the summary**; there is no option to delegate summarization to a cheaper model.
 
 Compaction interacts cleanly with prompt caching if you put a cache breakpoint at the end of your system prompt. The recommended pattern, per the docs: cache the system prompt separately, so the post-compaction request can read the system from cache and only write the (much shorter) summary fresh. Without that breakpoint, compaction can invalidate a previously-cached system prefix.
 
@@ -176,43 +232,53 @@ One pitfall to plan for: when tools are defined, the model occasionally calls a 
 
 ## Context editing (the surgical lever)
 
-The docs frame context editing as the finer-grained alternative: *context editing allows you to selectively clear specific content from conversation history as it grows. Beyond optimizing costs and staying within limits, this is about actively curating what Claude sees*. Where compaction summarizes the older half of the conversation wholesale, context editing clears specific block types (server-side, before the prompt reaches the model) and replaces them with placeholder text.
+The docs frame context editing as the finer-grained alternative: *Context editing allows you to selectively clear specific content from conversation history as it grows. Beyond optimizing costs and staying within limits, this is about actively curating what Claude receives: context is a finite resource with diminishing returns, and irrelevant content degrades model focus.* Where compaction summarizes the older part of the conversation wholesale, context editing clears specific block types (server-side, before the prompt reaches the model) and replaces them with placeholder text.
 
-Two server-side strategies today, both gated by the *context-management-2025-06-27* beta header.
+Two server-side strategies today, both gated by one beta header (the table below names it).
 
 **Tool result clearing** (*clear_tool_uses*): clears the oldest *tool_result* blocks in chronological order when the conversation exceeds a configurable threshold. Best for agentic workflows where old tool results (file contents, search dumps, *mcp_tool_result* blocks) are no longer needed once Claude has acted on them. The optional *clear_tool_inputs* flag also clears the corresponding *tool_use* parameters; *clear_at_least* sets a minimum tokens-cleared-per-edit floor.
 
-**Thinking block clearing** (*clear_thinking*): clears *thinking* blocks from extended-thinking sessions. The *keep* parameter controls how many recent thinking blocks survive; the default varies by model class (current Opus 4.5-and-later and Sonnet 4.6-and-later default to keeping all prior thinking; older Opus / older Sonnet / all Haiku default to keeping only the last turn's thinking).
+**Thinking block clearing** (*clear_thinking*): clears *thinking* blocks from earlier assistant turns. The *keep* parameter controls how many recent thinking blocks survive. When you leave the strategy out, the default depends on the model: newer models keep all prior thinking, while older ones keep thinking only for the turn in progress. The table lists the split. If your code runs across several models, set *keep* explicitly rather than rely on the default.
+
+| As of November 2026: context editing | Value |
+| --- | --- |
+| Beta header | `context-management-2025-06-27` |
+| Tool result clearing | `clear_tool_uses_20250919`, with optional `clear_tool_inputs` and `clear_at_least` |
+| Thinking block clearing | `clear_thinking_20251015`, with the `keep` parameter |
+| Default when the thinking strategy is left out: keep all prior thinking | Claude Opus 4.5 and later, Sonnet 4.6 and later, Haiku 5.5 and later, all Fable and Mythos models |
+| Default when the thinking strategy is left out: keep thinking only for the turn in progress | Claude Opus 4.1 and earlier, Sonnet 4.5 and earlier, Haiku 4.5 and earlier |
+| Supported models | All supported Claude models |
+| Sources | [Context editing](https://platform.claude.com/docs/en/build-with-claude/context-editing) |
 
 Two facts about context editing that matter for production. First, **it is server-side**; your client keeps the full unmodified history and the API applies the edits before the prompt reaches the model. You do not have to sync client state to the edited version. Second, **the interaction with caching is asymmetric**: tool result clearing invalidates cached prefixes at the clear point (use *clear_at_least* to make the invalidation worth the write cost); thinking-block clearing only invalidates the cache where blocks are actually cleared, so leaving thinking blocks in place preserves cache hits.
 
-The docs are explicit that compaction is the default and context editing is the specialist: *for most use cases, server-side compaction is the primary strategy for managing context in long-running conversations. The strategies on this page are useful for specific scenarios where you need more fine-grained control over what content is cleared*. Reach for editing when you have a specific block class to clear (mostly tool results in agentic workflows) and want to preserve the rest verbatim.
+The docs are explicit that compaction is the default and context editing is the specialist: *For most use cases, server-side compaction is the primary strategy for managing context in long-running conversations. The strategies on this page are useful for specific scenarios where you need more fine-grained control over what content is cleared.* Reach for editing when you have a specific block class to clear (mostly tool results in agentic workflows) and want to preserve the rest verbatim.
 
 ## Trading cost against staleness
 
 The three levers, summarized as a single decision per session:
 
-- **Cache the stable parts.** Anything whose text does not change for the run of the session (the system prompt, tool definitions across the L4 / L5 / L6 layers, *mcp_toolset* entries via their *cache_control*, any large stable reference passage in the first message) is a *cache_control* candidate. The break-even is one or two hits depending on TTL; a session that turns more than three or four times will almost always pay back a well-placed cache.
-- **Compact the long parts.** If your session is going to run past 100K input tokens, opt in to compaction with a trigger near 150K and put a cache breakpoint at the end of your system prompt. You get a focused active context, a cached system that survives compaction, and a small *compaction* iteration cost per crossing.
+- **Cache the stable parts.** Anything whose text does not change for the run of the session (the system prompt, tool definitions across the L4 / L5 / L6 layers, *mcp_toolset* entries via their *cache_control*, any large stable reference passage in the first message) is a caching candidate. The break-even is one or two hits depending on the cache lifetime; a session that turns more than a few times will almost always pay back a well-placed cache.
+- **Compact the long parts.** If your session is going to run long, opt in to compaction well before the window fills, and put a cache breakpoint at the end of your system prompt. You get a focused active context, a cached system that survives compaction, and a small compaction cost each time it runs.
 - **Clear the heavy parts.** If your session is agentic with many tool calls (web searches that pull pages, file reads, MCP tool results that get large), tool result clearing surgically pulls the old result content out of the context window without touching anything else. Combine with caching by using *clear_at_least* so the inevitable cache write pays back.
 
-The trade is not free in either direction. Caching saves money on hits but costs 25 to 100 percent more on the write turn; if a prefix never actually repeats, caching it wastes money. Compaction reduces token-budget pressure but spends a model sampling step on the summary; if a session stays well under the 1M window, you are buying focus you do not need. Context editing keeps the cache mostly intact (especially with thinking-block clearing where the default is "keep") but for tool result clearing you pay for cache invalidation at every clear. The lesson's call to action is to reach for each lever **deliberately** rather than turn them all on by default.
+The trade is not free in either direction. Caching saves money on hits but costs more on the write turn; if a prefix never actually repeats, caching it wastes money. Compaction reduces token-budget pressure but spends a model sampling step on the summary; if a session stays well inside the window, you are buying focus you do not need. Context editing keeps the cache mostly intact (especially with thinking-block clearing where the newer default is "keep") but for tool result clearing you pay for cache invalidation at every clear. The lesson's call to action is to reach for each lever **deliberately** rather than turn them all on by default.
 
 ## Why this matters when you use Claude
 
-The cost profile of a tool-heavy Claude application over a long conversation is dominated by repeated reads of a stable prefix and, eventually, by the context window filling up. The four mechanisms in this lesson are the production-grade levers for both. With a cached system prompt and tool stack, your input-token bill drops by close to 90 percent on repeat turns. With compaction enabled on long sessions, you push the context-rot ceiling back and keep the model focused. With tool result clearing in an agent loop, you stop carrying old retrieval payloads forever.
+The cost profile of a tool-heavy Claude application over a long conversation is dominated by repeated reads of a stable prefix and, eventually, by the context window filling up. The four mechanisms in this lesson are the production-grade levers for both. With a cached system prompt and tool stack, most of your input-token bill on repeat turns disappears. With compaction enabled on long sessions, you push the context-rot ceiling back and keep the model focused. With tool result clearing in an agent loop, you stop carrying old retrieval payloads forever.
 
 Phase 2 closes here. Lesson 8 opens Phase 3 by turning the per-step capability set you have now (custom client tools, Anthropic-provided tools, MCP tools, all sitting on a cached and curated prefix) into a multi-turn agent loop. Everything you cached and pruned in this lesson is what keeps that loop affordable and focused over many iterations.
 
 ## What you should remember
 
-- **Prompt caching is the cost lever.** Attach *cache_control* (*type: "ephemeral"*, optional *ttl: "1h"*) to the system prompt, tool definitions (custom, server, Anthropic-schema, *mcp_toolset*), and stable message content. Up to four explicit breakpoints per request. Placement order tools → system → messages.
-- **Pricing multipliers:** 1.25x for 5-minute write, 2.0x for 1-hour write, 0.1x for cache hits and refreshes (about a 90 percent discount on reads). Break-even is one hit at 5 minutes, roughly four hits at 1 hour.
-- **Minimum cacheable size and exact matching.** 4,096 tokens for Opus 4.7 / 4.6 / 4.5 and Haiku 4.5; 1,024 for Opus 4.8 / Sonnet 4.6 / Sonnet 4.5. Caching is exact-match: one character change invalidates the prefix.
-- **Read the cache in *usage*.** *cache_creation_input_tokens* (written this turn), *cache_read_input_tokens* (hit this turn), *input_tokens* (uncached after the last breakpoint). Total input = sum of the three. In production, watch the read-to-total ratio.
-- **Context window picture.** 1M tokens on current Opus and Sonnet 4.x; 200K on Sonnet 4.5 and older. Context rot makes curation matter as much as raw size. Overflow on 4.5+ models stops cleanly with *stop_reason: model_context_window_exceeded*.
-- **Compaction is the default long-session lever.** Beta header *compact-2026-01-12*; edit *compact*; default trigger 150K input tokens. Replaces older history with a summary block; same model is used for summarization (extra sampling step billed in *usage.iterations*). Cache the system prompt separately so it survives.
-- **Context editing is the surgical lever.** Beta header *context-management-2025-06-27*. Two strategies: *clear_tool_uses* (use *clear_at_least* to make cache invalidation pay back) and *clear_thinking* (the *keep* parameter; thinking-block clearing preserves more cache than tool-result clearing).
+- **Prompt caching is the cost lever.** Use *cache_control* once at the top level (automatic caching, the suggested start) or on the system prompt, tool definitions (custom, server, Anthropic-schema, *mcp_toolset*), and stable message content. A few explicit breakpoints per request. Placement order tools, then system, then messages.
+- **The pricing principle:** writes cost a little more than normal input, more again for the longer lifetime; reads cost much less. The short cache pays back after one hit, the one-hour cache after a couple.
+- **Minimum cacheable size and exact matching.** Every model has a floor, and the floors differ a lot between models; below it, the prompt is simply not cached. Caching is exact-match: one character change invalidates the prefix.
+- **Read the cache in *usage*.** Cache-creation tokens (written this turn), cache-read tokens (hit this turn), input tokens (uncached, after the last breakpoint). Total input is the sum of the three. In production, watch the read-to-total share.
+- **Context window picture.** Window sizes depend on the model. Context rot makes curation matter as much as raw size. On recent models, an output that runs into the window stops cleanly with its own stop reason.
+- **Compaction is the default long-session lever.** On demand (your application decides when) or at a token threshold (the API decides); either way a summary block replaces older history. In the threshold kind the same model writes the summary, in an extra sampling step billed in the usage iterations. Cache the system prompt separately so it survives.
+- **Context editing is the surgical lever.** Two strategies: tool result clearing (use *clear_at_least* to make cache invalidation pay back) and thinking block clearing (the *keep* parameter; thinking-block clearing preserves more cache than tool-result clearing).
 - **The unifying frame:** cache the stable parts (cost), compact the long parts (staleness), clear the heavy parts (surgical). Reach for each deliberately; do not turn them all on by default.
 
 A tool-heavy Claude application's costs and its focus both compound over a long conversation. Caching takes the cost down; compaction and context editing take the staleness down. The next lesson turns the result into an agent loop.
