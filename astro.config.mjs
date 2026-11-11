@@ -193,7 +193,7 @@ export default defineConfig({
 				{
 					icon: 'github',
 					label: 'GitHub',
-					href: 'https://github.com/clawless-io/clawdemy',
+					href: 'https://github.com/RBJGlobal/clawdemy',
 				},
 			],
 			// Sidebar grows as lessons land. Each lesson is a directory under
