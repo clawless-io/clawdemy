@@ -14,7 +14,7 @@ import SourceLecture from '../../../../../components/SourceLecture.astro';
 <ReadAlongDim
   src="https://audio.clawdemy.org/lessons/the-messages-api-in-production-lesson.mp3"
   slug="the-messages-api-in-production"
-  cacheVersion="20260605"
+  cacheVersion="20261111"
   approxMinutes={17}
 />
 
@@ -50,7 +50,7 @@ import anthropic
 client = anthropic.Anthropic()
 
 with client.messages.stream(
-    model="claude-opus-4-8",
+    model="claude-opus-5-5",
     max_tokens=1024,
     messages=[{"role": "user", "content": "Write a haiku about latency."}],
 ) as stream:
@@ -67,7 +67,7 @@ const client = new Anthropic();
 
 await client.messages
   .stream({
-    model: "claude-opus-4-8",
+    model: "claude-opus-5-5",
     max_tokens: 1024,
     messages: [{ role: "user", content: "Write a haiku about latency." }]
   })
@@ -82,7 +82,7 @@ If you want streaming under the hood but a complete *Message* object in your app
 
 ```python
 with client.messages.stream(
-    model="claude-opus-4-8",
+    model="claude-opus-5-5",
     max_tokens=128000,
     messages=[{"role": "user", "content": "Write a detailed analysis..."}],
 ) as stream:
@@ -100,9 +100,19 @@ Every Messages response carries a *stop_reason* that tells you why the model fin
 - ***max_tokens***: the model hit the *max_tokens* cap mid-generation. Either raise the cap and retry, summarize the partial output, or surface the truncation to the caller; do not silently treat truncated output as a finished answer.
 - ***stop_sequence***: a configured *stop_sequences* value triggered. Often treat as *end_turn* with a known reason.
 - ***tool_use***: the model returned one or more *tool_use* blocks asking your code to execute a tool. Lesson 4 walks the full *tool_use* to execute to *tool_result* round-trip; this lesson surfaces the value here so the dispatch table starts complete.
-- ***refusal***: the model declined the request on safety grounds. The *stop_details.category* field on the response carries the specific category. Surface the refusal to the caller; do not blind-retry the same prompt. This value can appear on a single non-tool-using call, so the dispatch belongs here, not in the agent-loop chapter.
+- ***refusal***: a safety classifier declined the request. This arrives as a normal, successful response, not an error, and the stop details on the response name the policy category. Do not blind-retry the same prompt on the same model; that usually earns another refusal. The docs recommend retrying the same request on a different model, which can usually still answer it, and they describe ways to set that fallback up on the server or in your own code (see the table below). This value can appear on a single non-tool-using call, so the dispatch belongs here, not in the agent-loop chapter.
 
-Two more values appear later in the track: *pause_turn* (lesson 5; server tools that need to yield mid-multi-iteration) and *model_context_window_exceeded* plus the *"compaction"* value (lesson 7; context-window handling). Lesson 8 unifies all of them into the full agent-loop dispatch.
+| As of November 2026 | Refusal handling |
+| --- | --- |
+| Where it shows up | *stop_reason* is *refusal*; *stop_details* carries *category* and *explanation*, either of which can be null. *stop_details* is null for every other stop reason |
+| Category values | *cyber*, *bio*, *frontier_llm*, *reasoning_extraction*, *general_harms*, or null |
+| Models with these classifiers | Claude Fable 5.2, 5.1 and 5; Claude Opus 5.5 and Opus 5; Claude Sonnet 5.5; Claude Haiku 5.5 |
+| Server-side fallback (beta) | Set *fallbacks* to *"default"* with the *server-side-fallback-2026-07-01* beta header, or name up to three fallback models of your own. Not available for Claude Haiku 5.5 |
+| Client-side fallback | SDK middleware, or write the retry yourself on another model. Use one approach per request, never both |
+| Billing | A refusal before any output is billed only for the *bio*, *frontier_llm* and *reasoning_extraction* categories |
+| Sources | [Stop reasons](https://platform.claude.com/docs/en/build-with-claude/handling-stop-reasons), [Refusals and fallback](https://platform.claude.com/docs/en/build-with-claude/refusals-and-fallback) |
+
+More values appear later in the track: *pause_turn* (lesson 5; server tools that need to yield mid-multi-iteration) and *model_context_window_exceeded* plus the *"compaction"* value (lesson 7; context-window handling). Lesson 8 unifies all of them into the full agent-loop dispatch.
 
 The discipline that travels with every value: dispatch explicitly. Silent fall-through (treating any unknown value as "done") is the failure mode that produces "the call stopped and I do not know why" debugging downstream.
 
@@ -110,17 +120,20 @@ The discipline that travels with every value: dispatch explicitly. Silent fall-t
 
 The API returns a small map of HTTP status codes. The full list is at [platform.claude.com/docs/en/api/errors](https://platform.claude.com/docs/en/api/errors); the ones you will see in production:
 
-| Code | Type | What it means | What to do |
+| As of November 2026: code | Type | What it means | What to do |
 | --- | --- | --- | --- |
-| 400 | *invalid_request_error* | Bad request shape (wrong field, missing required field, prefill on a model that does not support it) | Fix the request; do not retry the same call |
+| 400 | *invalid_request_error* | Bad request shape (wrong field, missing required field, prefill on a model that does not support it, a parameter the API version or model no longer accepts). Also returned when usage reaches a spend limit you set | Fix the request; do not retry the same call |
 | 401 | *authentication_error* | API key missing, wrong, or revoked | Check the key; do not retry |
 | 402 | *billing_error* | Billing or payment issue | Fix in the Console; do not retry |
 | 403 | *permission_error* | API key lacks the right permission | Check scope; do not retry |
-| 413 | *request_too_large* | Request body exceeds the per-endpoint limit (32 MB for the Messages API, 256 MB for Batches, 500 MB for Files) | Trim the request; do not retry the same call |
-| 429 | *rate_limit_error* | You hit a per-organization or per-key rate limit | Retry with backoff; the SDKs handle this for you |
-| 500 | *api_error* | Internal Anthropic error | Retry with backoff |
+| 404 | *not_found_error* | The endpoint path or a resource ID is wrong | Fix the path or ID; do not retry |
+| 409 | *conflict_error* | The request conflicts with the current state of a resource | Resolve the conflict, then retry (the SDKs retry 409 automatically) |
+| 413 | *request_too_large* | Request body exceeds the per-endpoint limit (128 MB for the Messages API and Token Counting API, 256 MB for Batches, 500 MB for Files) | Trim the request; do not retry the same call |
+| 429 | *rate_limit_error* | Your organization hit a rate limit, or a spend cap | Retry with backoff; the SDKs handle this for you, honoring the *retry-after* header. A spend-cap 429 has no *retry-after* header and keeps failing until access resumes |
+| 500 | *api_error* | Internal Anthropic error | Retry with backoff; if it persists, contact support with the request ID |
 | 504 | *timeout_error* | Request timed out | Switch to streaming or batches for long requests |
-| 529 | *overloaded_error* | Platform is overloaded across all users | Retry with backoff; bursts of usage can also trigger this |
+| 529 | *overloaded_error* | Platform is overloaded across all users | Retry with backoff. A sharp rise in your own usage can instead trigger 429s from acceleration limits, so ramp traffic gradually |
+| Source | [Errors](https://platform.claude.com/docs/en/api/errors) | | |
 
 The error body is JSON:
 
@@ -137,23 +150,32 @@ The error body is JSON:
 
 Three fields matter for handling. *error.type* tells you which class of failure (the codes above). *error.message* is the human-readable detail you log. *request_id* is the unique identifier for this specific call; quote it when you ask Anthropic Support about a failure.
 
-The simplest correct handler is: **4xx errors are your bug, 5xx errors are the platform's bug, 429 and 529 are temporary, everything else gets surfaced.** The official SDKs already implement the common-case retry policy (connection errors, 408, 409, 429, and any 5xx status code; about two retries with exponential backoff and jitter by default); you do not have to wire it. What you have to think about is what happens when the retries eventually exhaust (the SDK still raises), and whether the original request was idempotent enough to retry safely.
+The simplest correct handler is: **4xx errors are your bug, 5xx errors are the platform's bug, 429 and 529 are temporary, everything else gets surfaced.** The official SDKs already implement the common-case retry policy (connection errors, 408, 409, 429, and any 5xx status code; two retries with exponential backoff by default); you do not have to wire it. One exception to "temporary": a 429 caused by reaching your spending cap keeps failing until access resumes, so backoff will not rescue it. What you have to think about is what happens when the retries eventually exhaust (the SDK still raises), and whether the original request was idempotent enough to retry safely.
 
 A streaming response is a special case: an error can happen *after* the connection has already sent a 200 OK, mid-stream. Your handler needs to read errors off the event stream too, not only at request initiation. The Python and TypeScript SDKs surface mid-stream errors by raising on the iterator; you wrap the *for* loop or the *.on("error", ...)* handler the same way you would wrap an *await*.
 
 ## Retries
 
-The official SDKs handle the common-case retry policy: exponential backoff with jitter on the retryable failures (connection errors, 408, 409, 429, and any 5xx status code), about two retries by default, then they raise. You can configure attempt count and timeout per-call.
+The official SDKs handle the common-case retry policy: exponential backoff on the retryable failures (connection errors, 408, 409, 429, and any 5xx status code), two retries by default, then they raise. When the API sends a header saying how long to wait, the SDK honors it. You can configure attempt count and timeout per-call.
 
 What the SDK does not decide for you: **whether your specific request is safe to retry.** For an idempotent request like "summarize this document," a retry is safe; the worst case is the model bills for the same work twice. For a request whose downstream effect is a side effect ("send this email," "post this row to the database"), a retry can do the side effect twice. The fix is on your side: make the tool the model calls idempotent (a *send_email* tool with a deduplication key, a database write with a unique transaction id), not on the API call itself.
 
-Log the *request_id* from every response (the SDKs expose it as *response._request_id* in Python, *response._request_id* in TypeScript). When a customer complains that something went wrong at a specific time, the *request_id* is the handle Anthropic Support needs to find the exact call. Without it, you are debugging blind.
+Log the *request_id* from every response (the Python and TypeScript SDKs both expose it as a request ID property on the response object). When a customer complains that something went wrong at a specific time, the *request_id* is the handle Anthropic Support needs to find the exact call. Without it, you are debugging blind.
 
 ## Batches
 
 The Message Batches API is the cost-and-throughput dial when latency does not matter. You submit a batch of independent Messages requests (each is a full Messages request, with its own *model*, *max_tokens*, *messages*, *system*), the platform processes them asynchronously, you poll for completion, and you read the results.
 
-Two numbers worth remembering: **batches cost 50 percent less per token than the equivalent standard call**, and **most batches finish in less than one hour** (the public docs cite both directly). The per-batch size limit is 256 MB of request body; the per-request limits are the same as the standard Messages API (32 MB).
+Two numbers worth remembering: **batches cost 50 percent less per token than the equivalent standard call**, and **most batches finish in less than one hour** (the public docs cite both directly). A batch also has its own caps on how many requests and how many bytes it can hold, a processing window after which unfinished work expires, and a limited time during which you can download results; the table below lists the current values.
+
+| As of November 2026 | Message Batches API |
+| --- | --- |
+| Price | 50 percent of standard API prices, on input, output and special tokens |
+| Batch size | Up to 100,000 requests or 256 MB, whichever is reached first |
+| Processing | Most batches finish within 1 hour; a batch expires if processing does not finish within 24 hours |
+| Results | Available for 29 days after the batch is created |
+| Each request inside a batch | Same parameters as a standard Messages request |
+| Source | [Batch processing](https://platform.claude.com/docs/en/build-with-claude/batch-processing) |
 
 The shape of usage:
 
@@ -163,7 +185,7 @@ batch = client.messages.batches.create(
         {
             "custom_id": "doc_001",
             "params": {
-                "model": "claude-opus-4-8",
+                "model": "claude-opus-5-5",
                 "max_tokens": 1024,
                 "messages": [{"role": "user", "content": "Summarize: ..."}],
             },
@@ -184,13 +206,13 @@ The cost shape is the lever. A nightly evaluation of ten thousand prompts at sta
 
 ## The request_id
 
-One small habit pays back outsized when something goes wrong: **log the *request_id* from every response.** Every API response includes a *request-id* header (and the official SDKs expose it as *response._request_id*). When you contact Anthropic Support about a specific call, the *request_id* is the handle. Without it, the only thing you can give Support is "the call we made yesterday afternoon," which is not enough to find one call out of millions.
+One small habit pays back outsized when something goes wrong: **log the *request_id* from every response.** Every API response includes a request ID header (and the Python and TypeScript SDKs expose it as a request ID property on the response). When you contact Anthropic Support about a specific call, the *request_id* is the handle. Without it, the only thing you can give Support is "the call we made yesterday afternoon," which is not enough to find one call out of millions.
 
 A reasonable production logging shape includes: timestamp, *request_id*, *model*, *stop_reason*, *usage.input_tokens*, *usage.output_tokens*, latency. That gives you everything you need to investigate any single call later, and the *usage* fields are the data lesson 12 turns into cost-per-feature dashboards.
 
 ## What you do not need yet
 
-This lesson stops at the bare production patterns. Topics deferred to later T22 lessons:
+This lesson stops at the bare production patterns. Topics deferred to later Track 22 lessons:
 
 - **Prompt caching** for cost on repeated long prompts. Lesson 7.
 - **Tools.** Anything where the model calls a function you defined. Lessons 4 and 5.
@@ -215,12 +237,12 @@ Get streaming, errors, retries, batches, and *request_id* logging in place first
 ## What you should remember
 
 - **Streaming** is for interactive UIs and long generations. Python: *client.messages.stream(...)* as a context manager. TypeScript: *.stream(...).on("text", ...)*. Use *.get_final_message()* / *.finalMessage()* if you want streaming under the hood but the full message in your code.
-- ***stop_reason* dispatch.** Every response carries *stop_reason*. For a non-tool-using call, the values are *end_turn* (model finished naturally; return), *max_tokens* (output cap hit; raise / summarize / surface partial), *stop_sequence* (configured sequence triggered; often treat as *end_turn* with a known reason), *tool_use* (model returned *tool_use* blocks; lesson 4's loop), and *refusal* (model declined on safety grounds; *stop_details.category* on the response carries the category; surface, do not blind-retry). *pause_turn* arrives in lesson 5; *model_context_window_exceeded* and *"compaction"* arrive in lesson 7; lesson 8 unifies the full dispatch.
-- **Errors are a small map.** 4xx codes are your bug (do not retry); 429 and 529 are temporary (retry with backoff, the SDKs do this for you); 500 and 504 are platform-side (retry). The response body has *type*, *error.type*, *error.message*, *request_id*.
-- **Official SDKs retry by default** on connection errors, 408, 409, 429, and any 5xx status code, with about two retries via exponential backoff and jitter. You decide whether your specific request is *safe* to retry (think idempotency on the tool side, not the API call side).
-- **Batches cost 50 percent less per token** and most finish in under one hour. Per-batch size limit 256 MB. Use for evaluations, content moderation, data analysis, nightly summarization. Not a substitute for streaming on user-facing work.
+- ***stop_reason* dispatch.** Every response carries *stop_reason*. For a non-tool-using call, the values are *end_turn* (model finished naturally; return), *max_tokens* (output cap hit; raise the cap, summarize, or surface the partial answer), *stop_sequence* (configured sequence triggered; often treat as *end_turn* with a known reason), *tool_use* (model returned *tool_use* blocks; lesson 4's loop), and *refusal* (a safety classifier declined; a normal response whose stop details name the category; do not blind-retry on the same model; retry on a fallback model instead, or change the prompt when the category has no fallback). *pause_turn* arrives in lesson 5; *model_context_window_exceeded* and *"compaction"* arrive in lesson 7; lesson 8 unifies the full dispatch.
+- **Errors are a small map.** 4xx codes are your bug (do not retry); 429 and 529 are usually temporary (retry with backoff, the SDKs do this for you; a spend-cap 429 is the exception); a 500 is platform-side, so retry; a 504 means switch long requests to streaming or batches. The response body has *type*, *error.type*, *error.message*, *request_id*.
+- **Official SDKs retry by default** on connection errors, 408, 409, 429, and any 5xx status code, with two retries via exponential backoff. You decide whether your specific request is *safe* to retry (think idempotency on the tool side, not the API call side).
+- **Batches cost 50 percent less per token** and most finish in under one hour. A batch has its own size and time limits (see the table). Use for evaluations, content moderation, data analysis, nightly summarization. Not a substitute for streaming on user-facing work.
 - **Log the *request_id*** from every response. Without it, debugging at Anthropic Support's level is impossible.
 
 ## Where this fits
 
-Lesson 1 established the smallest primitive. Lesson 2 is the same primitive made production-ready. Lesson 3 will go up the model-selection layer (Opus, Sonnet, Haiku, the *effort* parameter, extended thinking) and finish Phase 1. Phase 2 (lessons 4 to 7) picks up the augmentation patterns: tools, server-side tools, Model Context Protocol, prompt caching. The production-side fundamentals here are the floor every later lesson runs on.
+Lesson 1 established the smallest primitive. Lesson 2 is the same primitive made production-ready. Lesson 3 will go up the model-selection layer (the model tiers, the *effort* parameter, thinking modes) and finish Phase 1. Phase 2 (lessons 4 to 7) picks up the augmentation patterns: tools, server-side tools, Model Context Protocol, prompt caching. The production-side fundamentals here are the floor every later lesson runs on.

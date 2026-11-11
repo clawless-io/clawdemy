@@ -14,13 +14,13 @@ import SourceLecture from '../../../../../components/SourceLecture.astro';
 <ReadAlongDim
   src="https://audio.clawdemy.org/lessons/server-side-tools-and-built-ins-lesson.mp3"
   slug="server-side-tools-and-built-ins"
-  cacheVersion="20260605b"
+  cacheVersion="20261111"
   approxMinutes={20}
 />
 
 <LessonFreshness lastReviewed={frontmatter.last_reviewed} />
 
-<SourceLecture url="https://platform.claude.com/docs/en/agents-and-tools/tool-use/server-tools" title="Anthropic Academy 'Building with the Claude API' (server-tools sections) + Anthropic public Web search, Code execution, Web fetch, Computer use, Tool search docs" instructor="Anthropic" />
+<SourceLecture url="https://platform.claude.com/docs/en/agents-and-tools/tool-use/server-tools" title="Anthropic Academy 'Building with the Claude API' (server-tools sections) + Anthropic public Web search, Code execution, Web fetch, Computer use, Tool search, Tool reference docs" instructor="Anthropic" />
 
 ## Why this lesson
 
@@ -37,10 +37,12 @@ The taxonomy that matters in practice:
 | Category | Who executes | Schema you author | Examples |
 | --- | --- | --- | --- |
 | **Server tools** | Anthropic | Just the type identifier | web_search, web_fetch, code_execution |
-| **Anthropic-schema client tools** | You | Anthropic publishes the schema | bash, computer use, memory, text_editor |
+| **Anthropic-schema client tools** | You | Anthropic publishes the schema | bash, text_editor, memory, computer use, browser use |
 | **Tool infrastructure** | Anthropic | Mixed (declare + use) | tool_search, MCP connector (lesson 6) |
 
 The pattern from lesson 4 (you author the *name* + *description* + *input_schema*, execute the tool in your code) is the **custom client tool** path. Most production applications will mix custom client tools (lesson 4) with one or two server tools and possibly one Anthropic-schema client tool. The decision per tool is "who owns this capability." Web search is Anthropic's; your domain logic is yours.
+
+Each Anthropic-provided tool is declared with a dated type string; a new date ships when the tool changes, and older dates keep working. Pin the version you tested, as you pin a model ID. The tables list the current strings; the docs' tool reference is canonical.
 
 ## Server tools
 
@@ -52,31 +54,34 @@ Real-time web search from inside a Claude call. Declare it in *tools* and the mo
 
 ```python
 response = client.messages.create(
-    model="claude-opus-4-8",
+    model="claude-opus-5-5",
     max_tokens=4096,
     messages=[{"role": "user", "content": "What's the latest on the Mars rover?"}],
-    tools=[{"type": "web_search_20260209", "name": "web_search"}],
+    tools=[{"type": "web_search_20260318", "name": "web_search"}],
 )
 ```
 
-Two versions of *web_search* matter. The current one adds **dynamic filtering** (the model writes code to post-process results before they hit the context window, cutting token spend by often more than half); the previous one does not. Dynamic filtering uses code execution as the internal substrate, so you do not need to declare *code_execution* separately to get it. The exact version identifiers:
+The web search tool comes in several dated versions, and the split that matters is **dynamic filtering**. On the newer versions, the model writes code to post-process results before they hit the context window, so less irrelevant text lands in context and token use drops on search-heavy requests. The basic version loads every result as is. Dynamic filtering uses code execution as the internal substrate, so you do not need to declare *code_execution* separately to get it.
 
-```
-web_search_20260209   current   (dynamic filtering)
-web_search_20250305   previous   (no dynamic filtering)
-```
+| As of November 2026: web search versions | Dynamic filtering | Notes |
+| --- | --- | --- |
+| `web_search_20260318` | Yes | Adds `response_inclusion` control for agent workflows |
+| `web_search_20260209` | Yes | First version with dynamic filtering |
+| `web_search_20250305` | No | Basic search; the only version on some cloud platforms |
+| Fee | $10 per 1,000 searches ($0.01 each), plus standard token costs | Failed searches are not billed |
+| Sources | [Web search tool](https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool), [Tool reference](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-reference) | |
 
-**Pricing: $10 per 1,000 searches** ($0.01 each), plus standard token costs for the search-generated content. Each web search counts as one use regardless of how many results come back. Errors do not bill.
+**Pricing: a flat fee per search** (the table has the current rate), plus standard token costs for the search-generated content. Each web search counts as one use regardless of how many results come back. Errors do not bill.
 
-**Optional parameters worth knowing.** *max_uses* caps the number of searches per request (limits cost when the model gets enthusiastic). *allowed_domains* and *blocked_domains* filter the result set. *user_location* localizes results.
+**Optional parameters worth knowing.** *max_uses* caps the number of searches in a turn (limits cost when the model gets enthusiastic). *allowed_domains* and *blocked_domains* filter the result set; use one or the other, not both. *user_location* localizes results.
 
-**Citations are always on.** Each cited claim in the response includes a *web_search_result_location* block with *url*, *title*, *encrypted_index*, and up to 150 characters of *cited_text*. The docs are explicit: when you display API outputs directly to end users, include the citations.
+**Citations are always on.** Each cited claim in the response includes a *web_search_result_location* block with the source's address, its title, an encrypted index, and a short excerpt of the cited text. The docs are explicit: when you display API outputs directly to end users, include the citations.
 
 ### code_execution
 
 Run Python and bash in a sandboxed container. The model decides when to execute, writes the code, the platform runs it, results come back in the response. Use for data analysis, calculations, file generation, anything the model needs to actually run rather than reason about.
 
-**Pricing is the key fact.** **Code execution is free when used with *web_search* or *web_fetch* in the same request.** When either of those is declared, code-execution tool calls do not carry the per-execution charge beyond standard input and output tokens. Standalone *code_execution* (without web_search or web_fetch in the request) carries the standard per-execution pricing layer.
+**Pricing is the key fact.** **Code execution is free when used with a dynamic-filtering version of *web_search* or *web_fetch* in the same request.** When either of those is declared, code-execution tool calls carry no charge beyond standard input and output tokens. Standalone *code_execution* (without either of them in the request) is billed by execution time, with a monthly free allowance; the table below has the current figures.
 
 There are three shapes to recognize:
 
@@ -84,47 +89,62 @@ There are three shapes to recognize:
 
 ```python
 response = client.messages.create(
-    model="claude-opus-4-8",
+    model="claude-opus-5-5",
     max_tokens=4096,
     messages=[{"role": "user", "content": "Search for the current prices of AAPL and GOOGL, then calculate which has a better P/E ratio."}],
-    tools=[{"type": "web_search_20260209", "name": "web_search"}],
+    tools=[{"type": "web_search_20260318", "name": "web_search"}],
 )
 ```
 
-**Search plus top-level code execution.** If you also want the model to call *code_execution* as a top-level tool for tasks unrelated to filtering search results (plotting, file generation, a calculation that does not flow from search), declare both. The per-execution charge stays waived because *web_search* is in the request:
+**Search plus top-level code execution.** If you also want the model to call *code_execution* as a top-level tool for tasks unrelated to filtering search results (plotting, file generation, a calculation that does not flow from search), declare both. The execution charge stays waived because *web_search* is in the request:
 
 ```python
 tools=[
-    {"type": "web_search_20260209", "name": "web_search"},
-    {"type": "code_execution_20260120", "name": "code_execution"},
+    {"type": "web_search_20260318", "name": "web_search"},
+    {"type": "code_execution_20260521", "name": "code_execution"},
 ]
 ```
 
-**Computation only, no search.** Declare *code_execution* alone; standard per-execution pricing applies.
+**Computation only, no search.** Declare *code_execution* alone; standard execution-time pricing applies.
 
-**Not ZDR eligible** (data is retained per the feature's standard retention policy). If your organization has Zero Data Retention requirements, code_execution is the wrong tool. Most applications can use it freely.
+| As of November 2026: code execution | Value |
+| --- | --- |
+| Versions | `code_execution_20260521` (states the per-cell time limit to the model), `code_execution_20260120` (adds programmatic tool calling and persistent Python state), `code_execution_20250825` (bash and file operations) |
+| Version to pair with dynamic-filtering web tools | `code_execution_20260120` or later |
+| Free with | `web_search_20260209` or `web_fetch_20260209`, or any later version, in the same request |
+| Standalone pricing | 1,550 free hours per organization per month, then $0.05 per hour per container; 5-minute minimum |
+| Zero Data Retention | Not eligible; container data retained up to 30 days |
+| Source | [Code execution tool](https://platform.claude.com/docs/en/agents-and-tools/tool-use/code-execution-tool) |
+
+**Not ZDR eligible** (the docs state how long container data is kept). If your organization has Zero Data Retention requirements, code_execution is the wrong tool. Most applications can use it freely.
 
 ### web_fetch
 
-Retrieve the full content of a specific URL (web page or PDF). Different from *web_search* (which finds pages) in that you give it a URL and it pulls the content. Useful when the model already knows the source (a documentation URL the user shared, a PDF you uploaded).
+Retrieve the full content of a specific URL (web page or PDF). Different from *web_search* (which finds pages) in that you give it a URL and it pulls the content. Useful when the model already knows the source (a documentation URL the user shared, a PDF at a known link).
 
-Two versions of *web_fetch* exist: the current one adds dynamic filtering, the previous one does not. The same pricing rule as web_search applies: code execution is free when the current *web_fetch* is in the request (dynamic filtering uses code execution internally; declare *code_execution* alongside only if your task also needs top-level code execution). The exact version identifiers:
+Like web search, *web_fetch* comes in several dated versions: the newer ones add dynamic filtering, the basic one does not. Web fetch itself carries no extra fee; you pay standard token costs for the fetched content. The same rule for code execution applies: it is free when a dynamic-filtering *web_fetch* is in the request (dynamic filtering uses code execution internally; declare *code_execution* alongside only if your task also needs top-level code execution).
 
-```
-web_fetch_20260209   current   (dynamic filtering)
-web_fetch_20250910   previous   (no dynamic filtering)
-```
+| As of November 2026: web fetch versions | Dynamic filtering | Notes |
+| --- | --- | --- |
+| `web_fetch_20260318` | Yes | Adds `response_inclusion` control |
+| `web_fetch_20260309` | Yes | Adds cache bypass (`use_cache`) |
+| `web_fetch_20260209` | Yes | First version with dynamic filtering |
+| `web_fetch_20250910` | No | Basic fetch |
+| Fee | None beyond standard token costs | Fetches only URLs that already appeared in the conversation |
+| Source | [Web fetch tool](https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-fetch-tool) | |
 
 ## Anthropic-schema client tools
 
 The second family. You execute the tool in your code (the L4 loop applies), but Anthropic publishes the canonical schema so you do not have to author it.
 
-| Tool | What it does |
-| --- | --- |
-| **bash** | Execute shell commands and scripts |
-| **text_editor** | Create and edit text files |
-| **memory** | Persist knowledge across conversations |
-| **computer use** (beta) | Screenshots, mouse, keyboard |
+| As of November 2026: tool | Type string | What it does |
+| --- | --- | --- |
+| **bash** | `bash_20250124` | Execute shell commands and scripts |
+| **text_editor** | `text_editor_20250728` (Claude 4 and later models) | Create and edit text files |
+| **memory** | `memory_20250818` | Persist knowledge across conversations |
+| **computer use** | `computer_toolset_20260801` | Screenshots, mouse, keyboard |
+| **browser use** | `browser_toolset_20260801` | Navigate and act on web pages in your own browser environment |
+| Source | [Tool reference](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-reference) | |
 
 You declare them in *tools* with their canonical type identifier, the model calls them as if they were client tools (with *tool_use* / *tool_result* round-trip), and your code is responsible for the actual execution. The advantage over a fully-custom client tool is that the model already knows what these tools do (the schema is standard across all Anthropic users), so your descriptions can be brief.
 
@@ -132,21 +152,28 @@ The standard ones (*bash*, *text_editor*, *memory*) are straightforward: you wir
 
 ### Computer use (the careful section)
 
-Computer use is the highest-stakes tool. It gives the model the ability to see a screen (screenshots), move a cursor (mouse), and type (keyboard). On benchmarks like WebArena, Claude achieves state-of-the-art results among single-agent systems. In production, computer use lets an agent operate any desktop application or website that a person could.
+Computer use is the highest-stakes tool. It gives the model the ability to see a screen (screenshots), move a cursor (mouse), and type (keyboard). In production, computer use lets an agent operate any desktop application or website that a person could.
 
-**Beta status.** Computer use requires a beta header (*computer-use-2025-11-24* for Opus 4.8, Opus 4.7, Opus 4.6, Sonnet 4.6, Opus 4.5; earlier header for older models). It is ZDR eligible.
+**Versions and headers.** On current models, computer use is a stable toolset: one entry in *tools* declares a fixed set of actions, and the request needs no beta header. Older models use earlier beta versions, which do need a beta header on every request. Check which version your model accepts; sending a version a model does not accept returns an error. It is ZDR eligible, because the screenshots and files stay in your environment.
+
+| As of November 2026: computer use | Beta header | Use with |
+| --- | --- | --- |
+| `computer_toolset_20260801` | None | Current models on the Claude API (Fable 5.2, Opus 5.5, Sonnet 5.5, Haiku 5.5, and others listed in the docs) |
+| `computer_20251124` (beta) | `computer-use-2025-11-24` | Earlier models such as Opus 4.7, Opus 4.6, Sonnet 4.6, Opus 4.5 |
+| `computer_20250124` (beta) | `computer-use-2025-01-24` | Older models such as Haiku 4.5 |
+| Source | [Computer use tool](https://platform.claude.com/docs/en/agents-and-tools/tool-use/computer-use-tool) (Earlier tool versions, Migrate) | |
 
 **Where it runs.** This is a client tool: your code runs the screenshots, executes the cursor moves, types into the application. The model decides what to do; your environment is what acts. That distinction is what makes computer use both powerful and high-stakes: anything your environment can reach, the agent can affect.
 
-**The discipline this lesson recommends.** Run computer use in a sandboxed environment, not against your real desktop or any environment that can reach production systems, user data, or services that cost money. A VM, a container, an isolated profile with limited credentials. Treat the agent the way you would treat a contractor who is given access only to what they need to complete the task and nothing more. This is general agent-security discipline, not Anthropic-specific guidance.
+**The discipline this lesson recommends.** Run computer use in a sandboxed environment, not against your real desktop or any environment that can reach production systems, user data, or services that cost money. A VM, a container, an isolated profile with limited credentials. Treat the agent the way you would treat a contractor who is given access only to what they need to complete the task and nothing more. The computer use docs recommend the same: a dedicated machine or container with minimal privileges, no login details, internet limited to allowed domains, and a person confirming any action with real-world consequences. Instructions hidden in a web page can steer the model.
 
-Track 20 ("AI Agents and Tool Use") goes deeper on tool-using agent design at a track-level depth. For the building-with-Claude scope: know the tool exists, know the beta posture, know to isolate the environment.
+Track 20 ("AI Agents and Tool Use") goes deeper on tool-using agent design at a track-level depth. For the building-with-Claude scope: know the tool exists, know which version your model takes, know to isolate the environment.
 
 ## Tool search
 
-The third family, distinct from the first two. *tool_search* solves a problem that compounds when you have many tools: a multi-server setup with GitHub, Slack, Sentry, Grafana, and Splunk integrations can consume around 55,000 tokens in tool definitions alone before the model has done any work, and the model's selection accuracy degrades meaningfully past 30 to 50 available tools.
+The third family, distinct from the first two. *tool_search* solves a problem that compounds when you have many tools: the docs' example of a multi-server setup with GitHub, Slack, Sentry, Grafana, and Splunk integrations can consume tens of thousands of tokens in tool definitions alone before the model has done any work, and the model's selection accuracy degrades meaningfully past 30 to 50 available tools.
 
-The mechanic: you mark tools with *defer_loading: true* in their definition. The model sees only the *tool_search* tool and any non-deferred tools at the start. When it needs more, it calls *tool_search* with a query (regex or BM25 variant), gets back 3-5 most relevant *tool_reference* blocks, the API expands those to full definitions inline, and the model calls the right one.
+The mechanic: you mark tools with *defer_loading: true* in their definition. You still send every definition with each request, but the model sees only the *tool_search* tool and any non-deferred tools at the start. When it needs more, it calls *tool_search* with a query (regex or BM25 variant), gets back a few of the most relevant *tool_reference* blocks, the API expands those to full definitions inline, and the model calls the right one.
 
 ```python
 tools = [
@@ -157,17 +184,27 @@ tools = [
 ]
 ```
 
-**Two variants:** *tool_search_tool_regex* (Python *re.search* patterns, max 200 characters) and *tool_search_tool_bm25* (natural-language queries). The regex form is precise; the BM25 form is forgiving.
+**Two variants:** *tool_search_tool_regex* (short Python regular-expression patterns) and *tool_search_tool_bm25* (natural-language queries). The regex form is precise; the BM25 form is forgiving.
 
-**When to reach for it.** The docs are explicit: good use cases are 10+ tools, tool definitions over 10k tokens, selection accuracy issues with large sets, or MCP-powered systems with 200+ tools. Bad use cases are fewer than 10 tools, all of them used frequently, or very small total definitions. The crossover is around 10 tools; below that, standard tool calling is cleaner.
+**When to reach for it.** The docs are explicit: good use cases are 10 or more tools, tool definitions that take up a large share of tokens, selection accuracy issues with large sets, or systems that pull hundreds of tools from several MCP servers. Bad use cases are fewer than 10 tools, all of them used in every request, or very small total definitions. The crossover is around 10 tools; below that, standard tool calling is cleaner.
 
-**Limits.** Maximum 10,000 tools in the catalog. The tool_search tool itself can never have *defer_loading: true*. Keep 3-5 most-used tools non-deferred.
+**Limits.** The catalog can hold thousands of deferred tools (the table has the exact cap). The tool_search tool itself can never have *defer_loading: true*. Keep your three to five most-used tools non-deferred.
+
+| As of November 2026: tool search | Value |
+| --- | --- |
+| Variants | `tool_search_tool_regex_20251119` (regex, max 200 characters), `tool_search_tool_bm25_20251119` (natural language, max 500 characters) |
+| Results per search | Up to 5 by default; the model can set a `limit` |
+| Maximum deferred tools | 10,000 per request |
+| Use it when | 10+ tools, definitions over 10k tokens, accuracy drops, multiple MCP servers (200+ tools) |
+| Skip it when | Fewer than 10 tools, every tool used in every request, definitions under 100 tokens total |
+| Fee | Not metered separately; loaded definitions count as input tokens |
+| Source | [Tool search tool](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-search-tool) |
 
 **It also preserves prompt caching.** Deferred tools are not in the system-prompt prefix, so caching the prefix still works. Lesson 7 covers prompt caching directly; the interaction matters in production.
 
 ## The server-tool response shape
 
-Server tools return a different content-block type than client tools. Where a client tool produces *tool_use*, a server tool produces *server_tool_use* (the model's call) followed by *web_search_tool_result* (or *code_execution_tool_result* or *tool_search_tool_result*) with the inline result. You do not handle a round-trip; everything is already in the response.
+Server tools return a different content-block type than client tools. Where a client tool produces *tool_use*, a server tool produces *server_tool_use* (the model's call) followed by a result block named for that tool (the web search result, the web fetch result, the tool search result, and so on) with the inline result. You do not handle a round-trip; everything is already in the response. One exception: if the model calls a server tool and one of your client tools together, the server tool waits until you send back your client results.
 
 ```json
 {
@@ -188,27 +225,36 @@ Same iterate-the-content-array discipline from lesson 1 applies: your code walks
 
 ## pause_turn: the server-side loop
 
-Server tools sometimes loop: the model searches, reads results, decides to search again, then formulates an answer. When the API needs to yield control mid-loop (for example, because results are still streaming or the loop has run long), you may see *stop_reason: pause_turn* instead of *end_turn*. The pattern is documented in the server-tools docs; the practical move is to send the response message back in *messages* (as an assistant turn) and re-call the API to let the loop continue.
+Server tools sometimes loop: the model searches, reads results, decides to search again, then formulates an answer. When that server-side loop runs long, the API may pause it, and you see *stop_reason: pause_turn* instead of *end_turn*. The pattern is documented in the server-tools docs; the practical move is to send the paused response back in *messages* unchanged (as an assistant turn), with the same tools, and re-call the API to let the loop continue. It can pause again, so cap the continuations.
 
 ## Pricing implications
 
 Server tools sit on top of standard token costs. The pieces:
 
 - **Standard tokens**: input + output, billed per model (lesson 3).
-- **Per-tool fee**: web_search at $0.01 per search; code_execution free when used with web_search or web_fetch, standard per-execution pricing otherwise.
+- **Per-tool fee**: web search charges per search; code execution is free when used with a dynamic-filtering web search or web fetch, and billed by execution time otherwise; web fetch and tool search add no fee of their own.
 - **Server tool results in context**: search results, code outputs, and fetched pages all count as input tokens on subsequent turns.
 
-The dial: declare *web_search* and code execution is free (dynamic filtering uses it internally); declare *code_execution* alongside only when your task also needs top-level code execution; use *max_uses* to cap web_search runaway cost; cache stable tool definitions per lesson 7. The same eval-set discipline from lesson 3 applies: measure whether the server tool actually improves your application's output enough to justify its cost.
+| As of November 2026: per-tool fees | Fee on top of standard tokens |
+| --- | --- |
+| web_search | $10 per 1,000 searches |
+| web_fetch | None |
+| code_execution | None with `web_search_20260209` / `web_fetch_20260209` or later in the request; otherwise 1,550 free hours per month, then $0.05 per container-hour |
+| tool_search | None (not metered separately) |
+| computer use toolset | None; about 4,500 input tokens of definitions per request, plus screenshots billed as image input |
+| Sources | [Web search](https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool), [Web fetch](https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-fetch-tool), [Code execution](https://platform.claude.com/docs/en/agents-and-tools/tool-use/code-execution-tool), [Tool search](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-search-tool), [Computer use](https://platform.claude.com/docs/en/agents-and-tools/tool-use/computer-use-tool) |
+
+The dial: declare a dynamic-filtering *web_search* and code execution is free (dynamic filtering uses it internally); declare *code_execution* alongside only when your task also needs top-level code execution; use *max_uses* to cap web_search runaway cost; cache stable tool definitions per lesson 7. The same eval-set discipline from lesson 3 applies: measure whether the server tool actually improves your application's output enough to justify its cost.
 
 ## Common pitfalls
 
 **Reaching for a custom client tool when a server tool exists.** Building a web-search wrapper around your own search backend when *web_search* is one declaration away is wasted work for most applications. Use server tools for general capabilities, custom client tools for your domain.
 
-**Reaching for standalone code_execution when web_search or web_fetch would also be in the request.** The per-execution code-execution charge is waived whenever either is declared. If your task already needs current-information search or page fetch, you get computation for free under the dynamic-filtering substrate; declare *code_execution* alongside only when the task needs top-level code execution beyond filtering. Pure-computation tasks with no search or fetch declare *code_execution* alone and pay standard pricing.
+**Reaching for standalone code_execution when web_search or web_fetch would also be in the request.** The code-execution charge is waived whenever a dynamic-filtering version of either is declared. If your task already needs current-information search or page fetch, you get computation for free under the dynamic-filtering substrate; declare *code_execution* alongside only when the task needs top-level code execution beyond filtering. Pure-computation tasks with no search or fetch declare *code_execution* alone and pay standard pricing.
 
-**Running computer use against a real environment.** Computer use is powerful and unsupervised; in beta, isolated environments are the default discipline. A VM or sandbox, not your desktop or any system with production reach.
+**Running computer use against a real environment.** Computer use is powerful and acts on whatever it can reach; isolated environments are the default discipline, and the docs recommend them. A VM or sandbox, not your desktop or any system with production reach.
 
-**Using tool_search below the threshold.** Below 10 tools, tool_search adds complexity for no benefit. The crossover is around 10 tools or 10k tokens in definitions; below it, standard tool calling is cleaner.
+**Using tool_search below the threshold.** Below 10 tools, tool_search adds complexity for no benefit. The crossover is around 10 tools; below it, standard tool calling is cleaner.
 
 **Treating server tools as ZDR-equivalent to client tools.** ZDR eligibility varies. *web_search* and *web_fetch* are ZDR-eligible (except with dynamic filtering enabled); *code_execution* is **not** ZDR-eligible. If your organization has data-retention requirements, check per-tool before declaring.
 
@@ -220,18 +266,18 @@ The dial: declare *web_search* and code execution is free (dynamic filtering use
 - **Prompt caching on tool definitions** (cut the repeated tools-overhead cost; combine with tool_search). Lesson 7.
 - **Advanced agent loops** (the model + tools converging on a task across many turns; *pause_turn* in production). Lesson 8 onward.
 - **Subagents and Claude Managed Agents** (one orchestrator + many specialist subagents). Lesson 11.
-- **The Anthropic Advisor server tool** (research preview; pair faster executor with higher-intelligence advisor for long-horizon work). Mentioned only; lesson 11 territory.
+- **The Anthropic Advisor server tool** (in beta; pairs a faster executor model with a higher-intelligence advisor model). Mentioned only; the docs cover it.
 
 ## What you should remember
 
 - **Three categories of Anthropic-provided tools.** Server tools (Anthropic executes: web_search, web_fetch, code_execution); Anthropic-schema client tools (you execute, schema is standard: bash, computer use, memory, text_editor); tool_search (the scale tool for large catalogs).
-- **web_search:** $0.01 per search, real-time results with always-on citations, two versions (the current one with dynamic filtering, the previous one without). Optional *max_uses*, *allowed_domains*, *blocked_domains*, *user_location*.
-- **code_execution is free when used with *web_search* or *web_fetch*.** Standalone *code_execution* otherwise. Not ZDR-eligible.
-- **web_fetch** retrieves full content of a specific URL; two versions (a current one with dynamic filtering, a basic one without); same pricing rule for code_execution applies.
+- **web_search:** a flat fee per search, real-time results with always-on citations, dated versions (the newer ones with dynamic filtering, the basic one without). Optional *max_uses*, *allowed_domains*, *blocked_domains*, *user_location*.
+- **code_execution is free when used with a dynamic-filtering *web_search* or *web_fetch*.** Billed by execution time otherwise. Not ZDR-eligible.
+- **web_fetch** retrieves full content of a specific URL; dated versions (the newer ones with dynamic filtering, a basic one without); no fee of its own; same pricing rule for code_execution applies.
 - **Anthropic-schema client tools** (bash, computer use, memory, text_editor) follow the L4 client-tool loop; the schema is standard. Treat them like contractors: minimum access, isolated environment.
-- **Computer use is beta + powerful + high-stakes.** Beta header required. Run in a sandboxed environment, not against real desktop or production.
-- **tool_search** keeps up to 10,000 tools in a catalog; mark each with *defer_loading: true*; the model finds and loads 3-5 per call. Two variants (regex, BM25). Right above ~10 tools; wrong below.
-- **Server response shape:** *server_tool_use* + the matching tool-specific result block (*web_search_tool_result*, *code_execution_tool_result*, *web_fetch_tool_result*, *tool_search_tool_result*) inline, no round-trip in your code. *pause_turn* stop reason for mid-loop yields.
+- **Computer use is powerful and high-stakes.** Current models take the stable toolset with no beta header; older models need a beta version and its header. Run in a sandboxed environment, not against real desktop or production.
+- **tool_search** keeps thousands of tools in a catalog; mark each with *defer_loading: true*; the model finds and loads a few per call. Two variants (regex, BM25). Right above about 10 tools; wrong below.
+- **Server response shape:** *server_tool_use* + the matching tool-specific result block inline, no round-trip in your code. *pause_turn* stop reason for mid-loop yields.
 - **Pricing:** per-tool fees stack on top of standard tokens; cache definitions per lesson 7; eval whether the tool earns its cost.
 
 ## Where this fits

@@ -12,13 +12,13 @@ import ReadAlongDim from '../../../../../components/ReadAlongDim.astro';
 <ReadAlongDim
   src="https://audio.clawdemy.org/lessons/remotes-and-forks-lesson.mp3"
   slug="remotes-and-forks"
-  cacheVersion="20260612"
+  cacheVersion="20261111"
   approxMinutes={33}
 />
 
 ### The lesson that lets your work leave your laptop
 
-So far in T7, every command has been local. You initialized a repo (L2), made commits (L2 + L3), undid things (L4), branched (L5), opened PRs (L6), resolved conflicts (L7). Everything has happened on your machine.
+So far in this track, every command has been local. You initialized a repo (L2), made commits (L2 + L3), undid things (L4), branched (L5), opened PRs (L6), resolved conflicts (L7). Everything has happened on your machine.
 
 But the team's main repository doesn't live on your machine. It lives on GitHub (or GitLab, or Bitbucket, or a private server). Your commits aren't useful to the team until they reach that shared repository. Your teammate's commits aren't visible to you until you pull them from there.
 
@@ -143,11 +143,11 @@ hint: (e.g., 'git pull ...') before pushing again.
 
 This means: while you were working, someone else pushed to the same branch. The remote has commits you don't have yet. Git refuses to overwrite their commits silently.
 
-The fix: pull first, then push.
+The fix: pull first (here with the rebase option, explained below), then push.
 
 ```bash
-git pull        # fetches their commits and merges into yours
-git push        # now your local has everything; push succeeds
+git pull --rebase   # fetches their commits and replays yours on top
+git push            # now your local has everything; push succeeds
 ```
 
 We'll cover what *pull* actually does in a moment.
@@ -182,11 +182,11 @@ Then you can decide what to do: merge, rebase, ignore, examine specific commits,
 - You're about to merge but want to verify the conflict surface first
 - You're investigating "what did my teammate push?" without committing to integrate
 
-Most senior engineers prefer *fetch* over *pull* for daily work because the "look first, decide what to do" workflow is safer than the "automatically merge" workflow that *pull* provides.
+Many experienced engineers prefer *fetch* over *pull* for daily work because the "look first, decide what to do" workflow is safer than the "automatically merge" workflow that *pull* provides.
 
-### *git pull*: fetch plus merge
+### *git pull*: fetch plus integrate
 
-*git pull* is a shortcut. It runs *git fetch* followed by *git merge* against origin's branch. So *pull* equals fetch plus merge.
+*git pull* is a shortcut. It runs *git fetch*, then integrates origin's branch into your current branch.
 
 ```bash
 git pull
@@ -194,9 +194,9 @@ git pull
 
 What happens:
 1. Fetch: download new commits from remote
-2. Merge: combine the fetched commits into your current branch
+2. Integrate: bring the fetched commits into your current branch
 
-Step 2 might produce a merge conflict (L7). If it does, you're now in a merge state and need to resolve. If it doesn't, you just got the latest changes.
+How step 2 integrates depends on your settings. In current git, the default is fast-forward only. If your branch has no new commits of its own, git simply moves it forward to match the remote. If both sides have new commits (the branches have diverged), plain *git pull* stops with an error and asks you to choose: rebase or merge. Either choice can produce a merge conflict (L7), which you resolve the usual way.
 
 **The variant: *git pull* with the rebase flag.**
 
@@ -206,13 +206,13 @@ git pull --rebase
 
 Instead of merging, this rebases your local commits on top of the fetched commits. The result: a linear history without an extra merge commit.
 
-Many teams enable this as the default for pull:
+Many teams make this the default for pull:
 
 ```bash
 git config --global pull.rebase true
 ```
 
-After this setting, every *git pull* automatically uses the rebase flag. Most modern teams prefer this; pull-rebase keeps history clean and avoids the cluttered "Merge branch 'main' into 'main'" commits that simple pull produces.
+After this setting, every *git pull* automatically uses the rebase flag. Many teams prefer this; pull-rebase keeps history clean and avoids the cluttered "Merge branch 'main' into 'main'" commits that pulling with merge produces.
 
 We'll dive deeper into rebase in L12. For now, know that the rebase flag is usually the better default for *pull*.
 
@@ -476,7 +476,7 @@ The rule: force-push is for branches whose history is YOUR personal responsibili
 
 ### The *git pull* with rebase setting: make this your default
 
-The default behavior of *git pull* is fetch plus merge. This creates merge commits when you pull updates. Over a year of pulls, your history accumulates dozens of "Merge branch 'main' of github.com:..." commits, visual noise that nobody benefits from.
+Older versions of git merged by default when you pulled, and many setups still pull with merge. That creates a merge commit whenever your branch and the remote have both moved. Over a year of pulls, your history accumulates dozens of "Merge branch 'main' of github.com:..." commits, visual noise that nobody benefits from. Current git refuses to guess: when the branches have diverged and you have not chosen a method, plain *git pull* stops and asks.
 
 The alternative: *git pull* with the rebase flag runs fetch plus rebase. Your local commits get replayed on top of the fetched commits. No merge commit. Linear history.
 
@@ -486,7 +486,7 @@ To make this the default for all future pulls:
 git config --global pull.rebase true
 ```
 
-Now *git pull* automatically uses the rebase flag. Most modern teams set this; many recommend it as the first config a new developer adds.
+Now *git pull* automatically uses the rebase flag, and the question never comes up again. Many teams set this; some recommend it as the first config a new developer adds.
 
 **One caveat:** if you have UNCOMMITTED changes, *git pull* with the rebase flag refuses (because rebase can't replay changes that aren't commits). The fix: stash your changes with *git stash*, pull, then unstash with *git stash pop*. Or just commit your work first.
 
@@ -544,7 +544,7 @@ The discipline: rebase on upstream frequently so your PR stays mergeable. Force-
 
 **Scenario D: Multi-agent AI workflow.**
 
-Each AI agent runs in its own git worktree (L15) on the same local clone, OR each agent runs on a separate machine with its own clone. Either way, agents push to a shared *origin*.
+Each AI agent runs in its own git worktree (L13, Worktrees and parallel agents) on the same local clone, OR each agent runs on a separate machine with its own clone. Either way, agents push to a shared *origin*.
 
 What changes from human workflows:
 - Agents push more frequently (sometimes every commit). The remote sees more rapid activity.
@@ -552,17 +552,17 @@ What changes from human workflows:
 - Force-pushes are often produced by agents (during rebases). The orchestrator needs to verify they're safe (always force-with-lease, never on shared branches).
 - Each agent might have its own clone or worktree, all pointing to the same *origin*. The conflict surface concentrates at integration time.
 
-The [Clawless](https://clawless.ai) 2026-06-04 multi-track sprint: six dev terminals all worked on the Clawdemy repo. Each pushed to the same *origin*. The Lead orchestrated integration. The model works at fleet scale because the underlying primitive (every clone is a full repo, push and pull are explicit) gives each agent isolation and the orchestrator visibility.
+Picture a team running six AI coding agents in parallel, each on its own branch, with one human reviewer merging their work. Every agent pushes to the same *origin*, and the reviewer integrates from there. The model holds up at that scale because the underlying primitive (every clone is a full repo, push and pull are explicit) gives each agent isolation and the reviewer visibility.
 
 ### A foreshadowing note for Phase 4
 
 In Phase 4, remotes become the integration backbone between AI agents and humans. Three patterns to anticipate:
 
-**Pattern 1: Shared *origin*, parallel agents.** All agents push to the same remote *origin*. The orchestrator pulls each agent's branch and merges in sequence. This is the Clawless 2026-06-04 pattern. Works for small fleets (under 10 agents) sharing a single remote.
+**Pattern 1: Shared *origin*, parallel agents.** All agents push to the same remote *origin*. The orchestrator pulls each agent's branch and merges in sequence. This is the setup in the six-agent picture above. Works for small fleets (under 10 agents) sharing a single remote.
 
 **Pattern 2: Agent-per-fork.** Each agent has its own fork of the project. The orchestrator pulls from each agent's fork, merges into a central repo, pushes to the canonical *origin*. Provides better isolation but adds setup overhead.
 
-**Pattern 3: Shared worktrees, single origin.** All agents work in worktrees off the same clone. They share *origin*. Worktrees give them filesystem isolation; the shared clone gives the orchestrator one place to integrate from. Lighter weight than per-agent forks. Covered in L15.
+**Pattern 3: Shared worktrees, single origin.** All agents work in worktrees off the same clone. They share *origin*. Worktrees give them filesystem isolation; the shared clone gives the orchestrator one place to integrate from. Lighter weight than per-agent forks. Covered in L13.
 
 The pattern that wins depends on agent count, network constraints, and orchestration discipline. The primitive (a remote with explicit push/pull) is the same.
 
@@ -602,7 +602,7 @@ Phase 3 covers production team workflows, the patterns that emerge when you scal
 - **L11 Cherry-pick and stash**: moving commits between branches; saving in-progress work
 - **L12 Rebase, deeper**: interactive rebase, history cleanup, when rebase is the right answer
 
-After Phase 3, you can join any production engineering team and operate confidently. Phase 4 then covers the unique angle of T7, multi-agent teams.
+After Phase 3, you can join any production engineering team and operate confidently. Phase 4 then covers the unique angle of this track, multi-agent teams.
 
 ### Voice anchor (carried from L1-L7)
 

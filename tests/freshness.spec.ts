@@ -17,13 +17,14 @@ import { expect, test } from '@playwright/test';
 
 // An overdue lesson, so the stale callout and its wording are actually
 // exercised. This was ai-wont-replace-you until its 2026-11-11 review made it
-// silent, and the wording assertion then skipped without failing. When this
+// silent, and the wording assertion then skipped without failing; then llmops
+// until the 2026-11 narration batch reviewed it. When this
 // lesson is reviewed too, move the fixture to another overdue one (the weekly
 // "Lessons due for review" issue lists them) or this test skips again.
-const BRIEF_PATH = '/lessons/llm-ops-and-production/llmops/brief/';
+const BRIEF_PATH = '/lessons/getting-started/memory-system-overview/brief/';
 
 /** This lesson's `last_reviewed`, as LessonFreshness formats it (UTC, en-US). */
-const REVIEW_DATE = 'May 25, 2026';
+const REVIEW_DATE = 'June 5, 2026';
 
 const FRESH = 'aside.starlight-aside--tip[aria-label="Recently updated"]';
 const STALE = 'aside.starlight-aside--note[aria-label="Due for a fresh look"]';

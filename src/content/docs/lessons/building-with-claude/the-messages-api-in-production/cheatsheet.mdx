@@ -48,13 +48,15 @@ Decision driver: **who is waiting**. User → streaming. Nobody → batches.
 | 401 | *authentication_error* | No (API key missing/wrong/revoked) |
 | 402 | *billing_error* | No (fix in Console) |
 | 403 | *permission_error* | No (key lacks permission) |
+| 404 | *not_found_error* | No (fix the path or resource ID) |
+| 409 | *conflict_error* | Yes, after resolving the conflict (SDKs retry 409) |
 | 413 | *request_too_large* | No (trim the request; see size limits below) |
-| 429 | *rate_limit_error* | Yes, backoff (SDKs do this) |
+| 429 | *rate_limit_error* | Yes, backoff (SDKs do this). Not for a spend-cap 429, which keeps failing until access resumes |
 | 500 | *api_error* | Yes, backoff (SDKs do this) |
 | 504 | *timeout_error* | Switch to streaming or batches for long requests |
 | 529 | *overloaded_error* | Yes, backoff (SDKs do this) |
 
-**Rule of thumb:** 4xx is your bug, 5xx is the platform's bug, 429 and 529 are temporary.
+**Rule of thumb:** 4xx is your bug, 5xx is the platform's bug, 429 and 529 are usually temporary.
 
 ## Error response shape
 
@@ -73,16 +75,18 @@ Log all three: *error.type*, *error.message*, *request_id*.
 
 ## Request size limits (the 413 boundary)
 
-| Endpoint | Max request size |
+| Endpoint (as of November 2026) | Max request size |
 | --- | --- |
-| Messages API | 32 MB |
-| Token Counting API | 32 MB |
+| Messages API | 128 MB |
+| Token Counting API | 128 MB |
 | Batch API | 256 MB |
 | Files API | 500 MB |
 
+Source: [Errors, Request size limits](https://platform.claude.com/docs/en/api/errors#request-size-limits).
+
 ## Retry policy
 
-- Official SDKs retry **connection errors, 408, 409, 429, and any 5xx status code** with **exponential backoff + jitter** by default (about two retries).
+- Official SDKs retry **connection errors, 408, 409, 429, and any 5xx status code** with **exponential backoff** by default (two retries), honoring the *retry-after* header when present.
 - You configure max attempts and per-call timeout.
 - What the SDK CANNOT decide: whether your request is **safe** to retry. Fix idempotency on the tool side (deduplication key, unique transaction id), not the API call.
 
@@ -112,12 +116,13 @@ Missing this: mid-stream failures get logged as "succeeded" because the HTTP sta
 
 ## Batches: the cost / latency dial
 
-| Property | Value |
+| Property (as of November 2026) | Value |
 | --- | --- |
 | Cost vs standard | **50 percent less per token** |
 | Typical completion | **Most batches finish in under 1 hour** |
-| Per-batch size limit | 256 MB |
-| Per-request size limit | 32 MB (same as Messages API) |
+| Per-batch limit | 100,000 requests or 256 MB, whichever comes first |
+| Expiry | Unfinished batches expire after 24 hours |
+| Results retention | 29 days after creation |
 
 Right for: large-scale evaluations, content moderation, dataset summarization, nightly jobs.
 Wrong for: anything a user is waiting on (use streaming).
@@ -130,7 +135,7 @@ batch = client.messages.batches.create(
         {
             "custom_id": "doc_001",
             "params": {
-                "model": "claude-opus-4-8",
+                "model": "claude-opus-5-5",
                 "max_tokens": 1024,
                 "messages": [{"role": "user", "content": "Summarize: ..."}],
             },
@@ -141,6 +146,18 @@ batch = client.messages.batches.create(
 # Later: poll until status is "ended", then stream results
 results = client.messages.batches.results(batch.id)
 ```
+
+## Refusals (as of November 2026)
+
+| Field or option | What it does |
+| --- | --- |
+| *stop_reason: "refusal"* | A safety classifier declined; this is a normal 200 response, not an error |
+| *stop_details.category* | Policy area: *cyber*, *bio*, *frontier_llm*, *reasoning_extraction*, *general_harms*, or null |
+| Retry on the same model | Usually earns another refusal; do not |
+| Server-side fallback (beta) | *fallbacks: "default"* plus the *server-side-fallback-2026-07-01* beta header; not on Claude Haiku 5.5 |
+| Client-side fallback | SDK middleware, or your own retry on another model |
+
+Source: [Refusals and fallback](https://platform.claude.com/docs/en/build-with-claude/refusals-and-fallback).
 
 ## request_id: the one habit
 
@@ -172,7 +189,7 @@ A reasonable production log line: timestamp, request_id, model, stop_reason, inp
 
 | Topic | Lands at |
 | --- | --- |
-| Choosing the model + extended thinking + effort | Lesson 3 |
+| Choosing the model + thinking modes + effort | Lesson 3 |
 | Tool use (define + handle) | Lesson 4 |
 | Server-side tools (web search, code execution) | Lesson 5 |
 | Model Context Protocol | Lesson 6 |
@@ -181,4 +198,4 @@ A reasonable production log line: timestamp, request_id, model, stop_reason, inp
 
 ## Source
 
-- Anthropic public Claude docs, **Streaming Messages**, **Batch processing**, **Errors**, and **Working with the Messages API** at `https://platform.claude.com/docs/`. Structural-mirror citation; see references.
+- Anthropic public Claude docs, **Streaming Messages**, **Batch processing**, **Errors**, **Refusals and fallback**, and **Working with the Messages API** at `https://platform.claude.com/docs/`. Structural-mirror citation; see references.

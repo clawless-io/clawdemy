@@ -12,7 +12,7 @@ tableOfContents: false
 
 | # | Discipline | Pulls from |
 | --- | --- | --- |
-| 1 | **Cost monitoring** | L2 + L7 *usage* fields; Usage and Cost Admin API |
+| 1 | **Cost monitoring** | L2 + L7 *usage* fields; organization usage and cost reports (Admin API) |
 | 2 | **Latency budgets** | L2 streaming; L3 effort; L7 caching; L9.2 routing; L11 Subagent parallelization; L2 batches |
 | 3 | **Eval-set discipline** | L9 pattern 5; T21 L7 LLMOps |
 | 4 | **Rollout** | L2 *request_id*; feature flags + canary + A/B + rollback |
@@ -38,32 +38,40 @@ Pair with *user_id*, *session_id*, *feature_flag_state*.
 
 **Identity:** *total_input_tokens = cache_read_input_tokens + cache_creation_input_tokens + input_tokens*.
 
-**Headline:** *cache_read_input_tokens / total_input_tokens*. On a well-cached production stack with stable prefixes, often above 90 percent. If below 70 percent, fix cache placement BEFORE any further optimization.
+**Headline:** *cache_read_input_tokens / total_input_tokens*. On a well-cached production stack with stable prefixes, most input tokens should be cache reads. If below 70 percent, fix cache placement BEFORE any further optimization.
 
-## Usage and Cost Admin API
+## Organization usage and cost reports (Admin API)
 
-**Verbatim:** *The Usage & Cost Admin API provides programmatic and granular access to historical API usage and cost data for your organization*.
+The docs recommend the **Usage and Cost Analytics API** for new integrations. The older **Usage and Cost API** is legacy and remains supported. Values as of November 2026.
 
-| Endpoint | Returns | Granularity |
+| | Usage and Cost Analytics API (recommended) | Usage and Cost API (legacy) |
 | --- | --- | --- |
-| *GET /v1/organizations/usage_report/messages* | Token counts | *1m* / *1h* / *1d* |
-| *GET /v1/organizations/cost_report* | USD (cents, decimal strings) | *1d* only |
+| Status | Beta; header *anthropic-beta: analytics-usage-cost-2026-08-24* | No beta header |
+| Usage endpoint | *GET /v1/organizations/analytics/usage* | *GET /v1/organizations/usage_report/messages* |
+| Cost endpoint | *GET /v1/organizations/analytics/cost* | *GET /v1/organizations/cost_report* (*1d* only) |
+| Buckets | *time_bucket_width* *1m* / *1h* / *1d*, optional | *bucket_width* *1m* / *1h* / *1d*, default *1d* |
+| Range | From January 1, 2026, last 365 days, 31 days per request (24 hours with *1m*) | Any range, paged by bucket |
+| Data freshness | Typically within 4 hours, up to 24; *data_refreshed_at* on every response; revisable until about 7 days after month end | Typically within 5 minutes; polling once per minute supported |
+| Priority Tier | On the usage endpoint as *service_tier* *priority* with zero token cost | Not in the cost endpoint; use the usage endpoint |
+| Claude Platform on AWS | Available (per region, AWS auth) | Not available |
 
-**Admin API key required** (*sk-ant-admin...*). Distinct from regular API keys. Only org admins can provision via Console.
+**Admin API key required** (*sk-ant-admin01-...*, or another Admin API credential). Distinct from regular API keys. Not available to individual Console accounts or claude.ai Team plan organizations; an individual account sets up an organization first.
 
-### Minimal Usage call
+### Minimal daily-usage call (Usage and Cost Analytics API)
 
 ```bash
-curl "https://api.anthropic.com/v1/organizations/usage_report/messages?\
-starting_at=2025-01-08T00:00:00Z&\
-ending_at=2025-01-15T00:00:00Z&\
+curl --globoff "https://api.anthropic.com/v1/organizations/analytics/usage?\
+starting_at=2026-10-01T00:00:00Z&\
+ending_at=2026-10-08T00:00:00Z&\
+time_bucket_width=1d&\
 group_by[]=model&\
-bucket_width=1d" \
-  --header "anthropic-version: 2023-06-01" \
+limit=100" \
+  --header "anthropic-version: 2026-10-21" \
+  --header "anthropic-beta: analytics-usage-cost-2026-08-24" \
   --header "x-api-key: $ANTHROPIC_ADMIN_KEY"
 ```
 
-### Time-granularity limits
+### Legacy time-granularity limits (Usage and Cost API)
 
 | *bucket_width* | Default | Max | Use case |
 | --- | --- | --- | --- |
@@ -73,32 +81,35 @@ bucket_width=1d" \
 
 ### Group-by + filter dimensions
 
-| Dimension | Usage | Cost |
-| --- | --- | --- |
-| *model* | Yes | Via *description* |
-| *workspace_id* | Yes | Yes |
-| *api_key_id* | Yes | No |
-| *service_tier* | Yes (filter) | No (Priority Tier excluded) |
-| *context_window* | Yes | Via *description* |
-| *inference_geo* | Yes | Via *description* |
-| *speed* (beta) | Yes (with *fast-mode-2026-02-01* header) | No |
+| Dimension | Usage and Cost Analytics API | Legacy usage | Legacy cost |
+| --- | --- | --- | --- |
+| *actor* (user or service account) | Yes | No | No |
+| *model* | Yes | Yes | Via *description* |
+| *workspace_id* | Yes | Yes | Yes |
+| *api_key_id* | Yes | Yes | No |
+| *service_tier* | Yes | Yes | No |
+| *context_window* | Yes | Yes | Via *description* |
+| *inference_geo* | Yes | Yes | Via *description* |
+| *speed* | Yes | Yes | No |
+| *cost_type*, *token_type* | Cost endpoint only | No | No |
 
-### Operational caveats (verbatim)
+### Operational caveats (verbatim from the legacy page, unless noted)
 
-- **Data freshness:** *typically appears within 5 minutes of API request completion*.
-- **Polling cadence:** once per minute sustained. Cache results for dashboards.
-- **Priority Tier costs use a different billing model and never appear in the Cost endpoint.** Track Priority Tier usage via Usage endpoint (*service_tier* = *priority*).
-- **NOT available on Claude Platform on AWS** (use Console). **NOT available on individual accounts** (set up an organization first).
-- **Pagination via *has_more* + *next_page***.
+- **Legacy data freshness:** "Usage and cost data typically appears within 5 minutes of API request completion, though delays might occasionally be longer."
+- **Analytics data freshness:** "Data typically refreshes within 4 hours of the underlying usage and can take up to 24 hours." (Usage and Cost Analytics API page)
+- **Polling (legacy):** "The API supports polling once per minute for sustained use."
+- **Priority Tier (legacy):** "Priority Tier costs use a different billing model and are not included in the cost endpoint. Track Priority Tier usage through the usage endpoint instead."
+- **Claude Platform on AWS (legacy):** "The Usage and Cost API endpoints are not available. Use the Usage and Cost Analytics API."
+- **Rule of thumb:** per-call telemetry for real-time alerts; organization reports for dashboards, chargebacks, and reconciliation.
 
 ## Four cost levers from earlier lessons
 
 | Lever | Lesson | Savings |
 | --- | --- | --- |
-| Model selection (Sonnet default; Haiku for volume) | L3 | Up to 5x cheaper per token |
-| Effort dial (*medium* on Sonnet) | L3 | Per-call token spend |
-| Prompt caching (cache_control on stable prefixes) | L7 | ~90 percent off hits (0.1x multiplier) |
-| Batches API (bulk non-interactive) | L2 | 50 percent off, async, under 1 hour |
+| Model selection (start where the docs point; let evaluation move you down a tier; fastest tier for volume) | L3 | Per-token price gap between tiers (see L3 table) |
+| Effort dial (set explicitly per workload; defaults differ by model) | L3 | Per-call token spend |
+| Prompt caching (cache_control on stable prefixes) | L7 | Cache reads 0.1x base input on most models; 0.05x on Opus 5.5 and Sonnet 5.5; 0.025x on Fable 5.2, Mythos 5.2, Fable 5.1 and Mythos 5.1. Writes 1.25x (5-minute) or 2x (1-hour) |
+| Batches API (bulk non-interactive) | L2 | 50 percent off, async, most finish in under 1 hour |
 | Per-subagent model | L11 | Per-step instance of the mix-and-match |
 
 ## Latency budgets per surface
@@ -129,7 +140,7 @@ Cross-ref: T21 L7 LLMOps (provider-agnostic playbook). L9 pattern 5 (evaluator-o
 | Move | What |
 | --- | --- |
 | **Feature flags** | Model + system prompt + tool list + *cache_control* placement + MCP servers + Subagent configs behind flags. A swap is a config change, not a deploy. |
-| **Canary** | 1 percent → 10 percent → 100 percent. Each stage gated by eval-set + dashboards + alerts staying green for 24-72h. |
+| **Canary** | 1 percent, then 10 percent, then 100 percent. Each stage gated by eval-set + dashboards + alerts staying green for 24-72h. |
 | **A/B vs current production** | Run both for a fixed window; score live responses; pick cheapest that passes. |
 | **Rollback (rehearsed)** | Flag toggles back in one motion. Drill it. |
 
@@ -140,11 +151,11 @@ Cross-ref: T21 L7 LLMOps (provider-agnostic playbook). L9 pattern 5 (evaluator-o
 | State | Meaning (verbatim) |
 | --- | --- |
 | **Active** | *Fully supported and recommended for use* |
-| **Legacy** | *Will no longer receive updates and may be deprecated in the future* |
-| **Deprecated** | *Still functional but no longer recommended; replacement and retirement date assigned* |
-| **Retired** | *No longer available; requests fail* |
+| **Legacy** | *Will no longer receive updates and might be deprecated in the future* |
+| **Deprecated** | *Still functional but no longer recommended. Anthropic provides a recommended replacement and assigns a retirement date* |
+| **Retired** | *No longer available for use. Requests to retired models fail* |
 
-**Notice window (verbatim):** *Anthropic notifies customers with active deployments for models with upcoming retirements, providing at least 60 days notice before model retirement for publicly released models*.
+**Notice window (verbatim):** "Anthropic notifies customers with active deployments for models with upcoming retirements, providing at least 60 days’ notice before model retirement for publicly released models."
 
 **Audit path:** Console Usage page → Export → CSV by API key and model → migrate before retirement date.
 
@@ -152,19 +163,19 @@ Cross-ref: T21 L7 LLMOps (provider-agnostic playbook). L9 pattern 5 (evaluator-o
 
 | Generation | Form | Use in production? |
 | --- | --- | --- |
-| 4.6 and later (4.8 / 4.7 / 4.6 / Sonnet 4.6) | Dateless | YES (already pinned) |
-| Pre-4.6 (Haiku 4.5 / Sonnet 4.5 / Opus 4.5 / etc.) | Date-suffixed | YES |
+| 4.6 and later (Fable 5.2, Opus 5.5, Sonnet 5.5, Haiku 5.5, Opus 4.8 / 4.7 / 4.6, Sonnet 4.6) | Dateless | YES (already pinned) |
+| Pre-4.6 (Haiku 4.5 / Sonnet 4.5 / Opus 4.5) | Date-suffixed | YES |
 | Pre-4.6 dateless alias | Convenience pointer | NO in production (use date-suffixed) |
 
-### Smaller deprecation worth knowing
+### Parameter and API-version lifecycle
 
-***temperature* / *top_p* / *top_k*** deprecated on Opus 4.7+ (including Opus 4.8). **Return 400** on non-default values. Omit; use prompting to guide behavior.
+***temperature* / *top_p* / *top_k*** are **removed in API version 2026-10-21**: sending any of them **returns 400**, even at the default value. On the earlier *2023-06-01* version they return 400 at non-default values on Claude 4.7 and later models. Omit; use prompting to guide behavior. Pin the *anthropic-version* header like the model ID; read the migration guide before moving it.
 
 ## The rollout checklist (deploy gate)
 
 - [ ] **L1** smallest primitive solid (iterate *content* array; never index)
 - [ ] **L2** production patterns (streaming + batches + *stop_reason* + *request_id*)
-- [ ] **L3** model + effort chosen by eval (Sonnet default; effort per workload)
+- [ ] **L3** model + effort chosen by eval (start where the docs point, let evaluation move you down a tier; effort set explicitly per workload)
 - [ ] **L4-L6** tools deliberate (custom + server + MCP; denylist destructive; sandbox computer-use)
 - [ ] **L7** caching live (*cache_control* on system + tool stack); cache-hit ratio dashboard
 - [ ] **L7** context-management posture chosen (compaction for long sessions; tool result clearing for heavy loops)
@@ -172,11 +183,11 @@ Cross-ref: T21 L7 LLMOps (provider-agnostic playbook). L9 pattern 5 (evaluator-o
 - [ ] **L9** pattern by decision tree (simplest pattern that fits)
 - [ ] **L10** Skills + harness chosen (*.claude/skills/* + *CLAUDE.md*; security audit on third-party Skills)
 - [ ] **L11** right primitive per workload (self-built loop / Subagents / Managed Agents)
-- [ ] **L12** cost dashboards live (Usage + Cost Admin API; cache-hit ratio; per-model + per-workspace)
+- [ ] **L12** cost dashboards live (usage and cost reports; cache-hit ratio; per-model + per-workspace)
 - [ ] **L12** latency budget defined + tracked
 - [ ] **L12** eval set as deploy gate
 - [ ] **L12** feature flags + canary + rollback (rehearsed)
-- [ ] **L12** deprecation watch (Console Export reviewed quarterly)
+- [ ] **L12** deprecation watch (Console Export reviewed quarterly; API version pinned)
 
 ## Common pitfalls
 
@@ -189,10 +200,10 @@ Cross-ref: T21 L7 LLMOps (provider-agnostic playbook). L9 pattern 5 (evaluator-o
 | No feature flag | Model swap requires a deploy | Put model + prompt + tool list behind flags; a swap is a config change |
 | Rollback never rehearsed | Incident response includes "how do we rollback?" | Drill rollback at low-traffic time; flag toggles back in one motion |
 | Missing deprecation notice | Production fails when retirement lands | Subscribe to Anthropic notifications; Console Usage Export quarterly; date-pin pre-4.6 models |
-| *temperature* on Opus 4.7+ | 400 errors | Omit; use prompting to guide behavior |
+| *temperature* / *top_p* / *top_k* sent on API version 2026-10-21 (or non-default on Claude 4.7+) | 400 errors | Omit; use prompting to guide behavior |
 | Admin key in regular code path | Security gap (Admin keys can read org-wide usage) | Admin keys live in a separate vault, used only by the dashboard/finance service |
 
 ## Source
 
-- Anthropic public Claude docs: **Usage and Cost API**, **Admin API**, **Model deprecations**, **Pricing**, **Rate limits**, at `https://platform.claude.com/docs/`. See references for the full anchor list.
+- Anthropic public Claude docs: **Usage and Cost Analytics API**, **Usage and Cost API** (legacy), **Admin API**, **Model deprecations**, **Pricing**, **Rate limits**, at `https://platform.claude.com/docs/`. See references for the full anchor list.
 - **Migration guide** at `https://platform.claude.com/docs/en/about-claude/models/migration-guide`.
