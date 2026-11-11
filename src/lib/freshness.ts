@@ -23,6 +23,11 @@ export type FreshnessState = 'fresh' | 'silent' | 'stale';
 
 export interface FreshnessInput {
 	lastReviewed?: Date | string;
+	/**
+	 * Last date the body changed, if it differs from the last review. Drives
+	 * the "fresh" callout only; staleness always runs off lastReviewed.
+	 */
+	lastRevised?: Date | string;
 	publishedAt?: Date | string;
 	/** Track slug, for the per-track review window. Null falls back to the default tier. */
 	trackSlug?: string | null;
@@ -83,7 +88,7 @@ export function formatReviewDate(d: Date): string {
  * freshly reviewed rather than breaking the build.
  */
 export function freshnessState(input: FreshnessInput): FreshnessResult {
-	const { lastReviewed, publishedAt, trackSlug = null, cadenceMonths, now } = input;
+	const { lastReviewed, lastRevised, publishedAt, trackSlug = null, cadenceMonths, now } = input;
 
 	const staleDays = cadenceDays(resolveCadenceMonths(trackSlug, cadenceMonths));
 	const reviewed = toDate(lastReviewed);
@@ -95,11 +100,15 @@ export function freshnessState(input: FreshnessInput): FreshnessResult {
 
 	const ageDays = Math.max(0, dayDiff(now, reviewed));
 	const formatted = formatReviewDate(reviewed);
-	const updatedAfterPublish = published !== null && dayDiff(reviewed, published) > 0;
+	// A review is not a revision: when lastRevised is set, only it can make the
+	// lesson "fresh". Without it, lastReviewed stands in (original behaviour).
+	const revised = toDate(lastRevised) ?? reviewed;
+	const revisedAgeDays = Math.max(0, dayDiff(now, revised));
+	const updatedAfterPublish = published !== null && dayDiff(revised, published) > 0;
 
 	if (ageDays > staleDays) return { state: 'stale', ageDays, staleDays, formatted };
-	if (ageDays <= FRESH_DAYS && updatedAfterPublish) {
-		return { state: 'fresh', ageDays, staleDays, formatted };
+	if (revisedAgeDays <= FRESH_DAYS && updatedAfterPublish) {
+		return { state: 'fresh', ageDays, staleDays, formatted: formatReviewDate(revised) };
 	}
 	return { state: 'silent', ageDays, staleDays, formatted };
 }

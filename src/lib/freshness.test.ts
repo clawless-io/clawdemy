@@ -145,3 +145,27 @@ describe('date formatting', () => {
 		expect(at(REVISED).formatted).toBe('February 1, 2026');
 	});
 });
+
+describe('a review is not a revision (last_revised)', () => {
+	test('a clean review bumps last_reviewed without claiming the body changed', () => {
+		// Reviewed today, body last changed months ago: silent, not "fresh".
+		const r = at('2026-05-01', { lastReviewed: '2026-05-01', lastRevised: PUBLISHED });
+		expect(r.state).toBe('silent');
+	});
+	test('the clean review still clears the stale notice', () => {
+		const r = at('2026-05-01', { lastReviewed: '2026-05-01', lastRevised: PUBLISHED });
+		expect(r.state).not.toBe('stale');
+	});
+	test('a real revision inside the window is fresh, dated by the revision', () => {
+		const r = at('2026-05-05', { lastReviewed: '2026-05-05', lastRevised: '2026-05-01' });
+		expect(r.state).toBe('fresh');
+		expect(r.formatted).toBe(formatReviewDate(new Date('2026-05-01T00:00:00Z')));
+	});
+	test('staleness still runs off last_reviewed, not last_revised', () => {
+		const r = at(plusDays('2026-02-01', QUARTERLY_DAYS + 1), {
+			lastReviewed: '2026-02-01',
+			lastRevised: '2026-02-01',
+		});
+		expect(r.state).toBe('stale');
+	});
+});
