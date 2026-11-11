@@ -1,0 +1,65 @@
+name: Lesson freshness
+
+# Founder, 2026-11-10: keep lessons reviewed AHEAD of their dates, so the
+# "Due for a fresh look" notice rarely shows. This is the early warning: every
+# Monday it lists lessons that are overdue, due within 30 days, or published
+# with no review date at all, and keeps ONE issue up to date with that list.
+# It costs no agent time; the review itself is done by an agent session that
+# works from this issue. Cadence rules: src/data/review-cadence.ts.
+
+on:
+  schedule:
+    - cron: '0 14 * * 1' # Mondays 14:00 UTC (08:00 US Central)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  report:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - name: Build the review list
+        run: |
+          bun run scripts/check-lesson-freshness.ts --json > freshness.json
+          python3 - <<'PY'
+          import json
+          d = json.load(open('freshness.json'))
+          c = d['counts']
+          out = [
+              f"Generated {d['generated']} by the weekly freshness workflow.",
+              '',
+              f"**{c['overdue']} overdue** (readers see the notice), **{c['dueSoon']} due within 30 days**, "
+              f"**{c['untracked']} published with no review date** (no notice can ever show).",
+              '',
+              'Review the overdue ones first, then the due-soon ones, so the notice never appears. '
+              'A clean review bumps `last_reviewed` only; set `last_revised` only when the lesson body changed. '
+              'Never bump a date without a real review.',
+          ]
+          def section(title, rows, fmt):
+              if not rows:
+                  return
+              out.extend(['', f'### {title}', ''])
+              out.extend(fmt(r) for r in rows)
+          section('Overdue', d['overdue'], lambda r: f"- [ ] `{r['track']}/{r['slug']}`: due {r['due']}, {r['daysOverdue']} days ago")
+          section('Due within 30 days', d['dueSoon'], lambda r: f"- [ ] `{r['track']}/{r['slug']}`: due {r['due']}, in {r['daysUntilDue']} days")
+          section('Published with no review date', [{'s': s} for s in d['untracked']], lambda r: f"- [ ] `{r['s']}`")
+          open('body.md', 'w').write('\n'.join(out) + '\n')
+          PY
+      - name: Create or update the issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TITLE="Lessons due for review"
+          NUM=$(gh issue list --state open --search "\"$TITLE\" in:title" --json number,title --jq ".[] | select(.title == \"$TITLE\") | .number" | head -1)
+          if [ -n "$NUM" ]; then
+            gh issue edit "$NUM" --body-file body.md
+          else
+            gh issue create --title "$TITLE" --body-file body.md
+          fi
