@@ -156,8 +156,11 @@ export default defineConfig({
 				// project (commercial inquirers searching "Clawdemy commercial
 				// licensing" should land here). All other /legal/ pages stay
 				// excluded from sitemap + carry noindex meta in their frontmatter.
+				// The Track 5 "Coming soon" placeholder is noindex too (SEO
+				// Specialist 2026-11-11), so it is omitted here.
 				filter: (page) =>
 					!/\/(summary|practice|references)\/?$/.test(page) &&
+					!page.includes('/lessons/ai-foundations/coming-soon/') &&
 					(page.includes('/legal/licensing/') ||
 						(!page.includes('/legal/') && !page.includes('/trust/'))),
 			// lastmod per lesson artifact, from its source file's last commit.
