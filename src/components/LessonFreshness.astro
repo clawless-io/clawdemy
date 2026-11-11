@@ -49,7 +49,18 @@ interface Props {
 	cadenceMonths?: number;
 }
 
-const { lastReviewed, publishedAt, cadenceMonths } = Astro.props;
+const { lastReviewed, publishedAt } = Astro.props;
+// A per-lesson `review_cadence_months` in frontmatter wins over the track tier.
+// Read it from the page's own entry when the prop is not passed: no call site
+// passes it (six lessons set the field, zero pages forwarded it), so until
+// 2026-11-11 the notice ignored every override while scripts/check-lesson-
+// freshness.ts honoured them, and the two could disagree about the same lesson.
+const entryData = Astro.locals.starlightRoute?.entry?.data as
+	| { review_cadence_months?: number; last_revised?: Date }
+	| undefined;
+const cadenceMonths = Astro.props.cadenceMonths ?? entryData?.review_cadence_months;
+// Read straight from the entry too, so no call site has to change.
+const lastRevised = entryData?.last_revised;
 
 // Track slug is the second path segment of a lesson URL:
 // /lessons/<track>/<lesson>/<artifact>/ . Deriving it here rather than taking a
@@ -64,6 +75,7 @@ const trackSlug = pathSegments[0] === 'lessons' ? (pathSegments[1] ?? null) : nu
 // at the head of that file.
 const { state, formatted } = freshnessState({
 	lastReviewed,
+	lastRevised,
 	publishedAt,
 	trackSlug,
 	cadenceMonths,
@@ -85,9 +97,16 @@ const showStale = state === 'stale';
 
 {
 	showStale && (
-		<Aside type="caution" title="Last reviewed a while ago">
-			This lesson was last reviewed on {formatted}. AI moves quickly. Verify
-			anything load-bearing before you rely on it.
+		<Aside type="note" title="Due for a fresh look">
+			{/*
+			 * Founder, 2026-11-10: the old wording ("Verify anything load-bearing
+			 * before you rely on it", in an orange caution box) read as a warning
+			 * and could put a new reader off the lesson. The date stays, because
+			 * it is the honest part; the alarm goes. The fix for a notice that
+			 * shows too often is reviewing on time, not hiding it.
+			 */}
+			This lesson was last reviewed on {formatted}. AI moves fast, so we re-check
+			our lessons on a regular schedule, and this one is due for its next look.
 		</Aside>
 	)
 }

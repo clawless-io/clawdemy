@@ -28,7 +28,7 @@ Git is called "distributed" because every clone is a full repository; it contain
 <details>
 <summary>Show answer</summary>
 
-`git fetch` downloads new commits from the remote and updates the remote-tracking branch labels (`origin/main`, etc.) but does NOT change your working files or merge anything into your current branch. It's "look but don't touch." `git pull` is a shortcut for `git fetch + git merge` (or `git fetch + git rebase` with `--rebase`). The difference: fetch lets you inspect the remote state and decide what to do, while pull automatically integrates. A senior engineer might prefer fetch in two situations: (1) when investigating "what did my teammate push?" without committing to integrate it, and (2) when about to merge and wanting to verify the conflict surface before triggering the merge. The "look first, then decide" workflow is safer than the "integrate automatically" workflow, especially on shared branches.
+`git fetch` downloads new commits from the remote and updates the remote-tracking branch labels (`origin/main`, etc.) but does NOT change your working files or merge anything into your current branch. It's "look but don't touch." `git pull` is a shortcut for `git fetch` followed by an integration step: fast-forward only by default in current git, or rebase (`--rebase`) or merge (`--no-rebase`) if you choose. The difference: fetch lets you inspect the remote state and decide what to do, while pull automatically integrates. A senior engineer might prefer fetch in two situations: (1) when investigating "what did my teammate push?" without committing to integrate it, and (2) when about to merge and wanting to verify the conflict surface before triggering the merge. The "look first, then decide" workflow is safer than the "integrate automatically" workflow, especially on shared branches.
 
 </details>
 
@@ -39,7 +39,7 @@ Git is called "distributed" because every clone is a full repository; it contain
 
 Resolution in order:
 1. Read the push-rejected error message; observe it tells you to "fetch first" and pull before pushing
-2. Run `git pull --rebase` (or `git pull` if rebase isn't your default). This fetches teammate's commits and integrates them with yours.
+2. Run `git pull --rebase`. This fetches your teammate's commits and replays yours on top. (Plain `git pull` with no settings stops here in current git, because your branch and the remote have diverged; it asks you to choose rebase or merge.)
 3. If there's a merge conflict, resolve it (L7 mechanics): edit the file, remove markers, `git add`, then `git rebase --continue`.
 4. Run `git push` again. This time it succeeds because your local now has all the commits the remote did, plus yours on top.
 
@@ -86,7 +86,7 @@ This drill simulates two-developer collaboration on a single laptop. Use two fol
 **Setup:**
 
 1. Create a sandbox folder. `mkdir l8-drill && cd l8-drill`
-2. Initialize a "bare" repo (this simulates GitHub): `git init --bare central.git`
+2. Initialize a "bare" repo (this simulates GitHub): `git init --bare --initial-branch=main central.git`. The branch option makes the default branch `main`; without it, git may still name it `master`, and the `main` commands below would fail.
 3. Clone it as "developer 1": `git clone central.git dev1`
 4. Clone it again as "developer 2": `git clone central.git dev2`
 
@@ -96,7 +96,7 @@ You now have three folders: `central.git` (the "remote"), `dev1` (clone 1), `dev
 
 1. `cd dev1`. Create a file: `echo "Hello from dev1" > README.md`
 2. `git add README.md && git commit -m "Initial commit"`
-3. `git push origin main`. (Note: this works even without -u because main already exists locally.)
+3. `git push origin main`. (Note: no `-u` needed; cloning set your local `main` to track origin's `main`.)
 4. `cd ../dev2 && git pull`. Observe dev2 now has the README.
 
 **Drill 2: Diverging commits + conflict:**
@@ -185,13 +185,13 @@ The general principle: pull is a commitment; fetch is reconnaissance. Senior eng
 <details>
 <summary>Show answer</summary>
 
-Upstream cause: every time someone runs `git pull` with the default behavior (merge), git creates a "Merge branch 'main' of ..." commit. Over months of pulls, these accumulate. The clutter is visual noise; nobody benefits from those merge commits; they just record "I pulled at 3:47pm." The single config change that prevents this going forward:
+Upstream cause: every time someone pulls with merge (the old default, still common when `pull.rebase` is set to false or `--no-rebase` is used) after both sides have moved, git creates a "Merge branch 'main' of ..." commit. Over months of pulls, these accumulate. The clutter is visual noise; nobody benefits from those merge commits; they just record "I pulled at 3:47pm." The single config change that prevents this going forward:
 
 ```bash
 git config --global pull.rebase true
 ```
 
-After this, every `git pull` uses rebase instead of merge. Pulled commits go on the bottom of local commits; no merge commit is created. History stays linear.
+After this, every `git pull` uses rebase instead of merge. Your local commits are replayed on top of the pulled ones; no merge commit is created. History stays linear.
 
 For the existing merge commits in history: leave them. They're harmless. The fix prevents future ones; trying to rewrite history to remove the old ones would create a much bigger problem than the visual clutter.
 
@@ -233,7 +233,7 @@ Pushes the branch to origin AND sets the upstream tracking relationship so futur
 </Flashcard>
 
 <Flashcard question="What's the difference between git fetch and git pull?">
-Fetch downloads remote changes but doesn't merge. Pull = fetch + merge (or fetch + rebase, with `--rebase`). Fetch lets you inspect before committing to integrate.
+Fetch downloads remote changes but doesn't integrate them. Pull = fetch + integrate: fast-forward only by default in current git, or rebase / merge if you choose. Fetch lets you inspect before committing to integrate.
 </Flashcard>
 
 <Flashcard question="What is a remote-tracking branch like origin/main?">
@@ -253,7 +253,7 @@ Almost never. Prefer `--force-with-lease`, which refuses to overwrite if the rem
 </Flashcard>
 
 <Flashcard question="What does git config --global pull.rebase true do?">
-Sets all future `git pull` calls to use `--rebase` by default instead of merge. Keeps history linear; eliminates the "Merge branch 'main' of ..." commit clutter.
+Sets all future `git pull` calls to use `--rebase` by default. Diverged branches get rebased instead of stopping with an error or creating a "Merge branch 'main' of ..." commit. Keeps history linear.
 </Flashcard>
 
 <Flashcard question="How does git survive a GitHub outage?">

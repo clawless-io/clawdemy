@@ -28,7 +28,7 @@ Seven short questions. Answer each before opening the collapsible.
 <details>
 <summary>Show answer</summary>
 
-**The MCP connector is a Messages API feature that lets Claude talk directly to remote MCP servers without a separate MCP client in your application.** The Anthropic docs put it this way verbatim: *Claude's Model Context Protocol (MCP) connector feature enables you to connect to remote MCP servers directly from the Messages API without a separate MCP client*. What you stop doing: you no longer write or run an MCP client in your code, you no longer manage the MCP connection lifecycle, and you no longer parse MCP responses. What Claude does: lists tools from the server, decides when to call them, runs the call through the connector, and returns the result inline in the same response.
+**The MCP connector is a Messages API feature that lets Claude talk directly to remote MCP servers without a separate MCP client in your application.** The Anthropic docs put it this way verbatim: *Claude's Model Context Protocol (MCP) connector feature allows you to connect to remote MCP servers directly from the Messages API without a separate MCP client.* What you stop doing: you no longer write or run an MCP client in your code, you no longer manage the MCP connection lifecycle, and you no longer parse MCP responses. What Claude does: lists tools from the server, decides when to call them, runs the call through the connector, and returns the result inline in the same response.
 
 </details>
 
@@ -42,7 +42,7 @@ Two components paired one-to-one:
 - ***mcp_servers* array on the request:** each entry names a remote MCP server with *type: "url"*, *url* (HTTPS), *name* (unique inside the request), and an optional *authorization_token* for OAuth.
 - ***mcp_toolset* entries inside the *tools* array:** each entry picks a server by *mcp_server_name* and configures which tools to enable via *default_config* + *configs*. The pairing is mandatory: every server must be referenced by exactly one *mcp_toolset*, and every *mcp_toolset* must name a server that exists.
 
-Beta header: *mcp-client-2025-11-20* (current). The earlier *mcp-client-2025-04-04* is deprecated; in the deprecated version, tool configuration lived inside the server definition as a *tool_configuration* object, which has since moved out into the *tools* array as *mcp_toolset*.
+Beta header: *mcp-client-2026-09-15* (Claude API only; adds tool-list pinning and replaces the older header there) or *mcp-client-2025-11-20* (Claude API and the cloud platforms). With the newer header, a response can start with one *mcp_tool_listing* block per server, which you send back unchanged. The earlier *mcp-client-2025-04-04* is deprecated; in the deprecated version, tool configuration lived inside the server definition as a *tool_configuration* object, which has since moved out into the *tools* array as *mcp_toolset*.
 
 </details>
 
@@ -97,16 +97,16 @@ Most production applications mix all three. The cross-lesson bonus: if your tool
 
 </details>
 
-**7. The connector's active limits as of *mcp-client-2025-11-20*: list five and name which one decides not-for-us in a regulated environment.**
+**7. The connector's active limits: list five and name which one decides not-for-us in a regulated environment.**
 
 <details>
 <summary>Show answer</summary>
 
 **Five active limits:**
 
-- **Tools only.** The MCP spec defines tools, resources, and prompts; the connector currently supports only tool calls. Resources and prompts require the client-side path (the TypeScript helpers).
+- **Tools only.** The MCP spec defines tools, resources, and prompts; the connector supports only tool calls. Resources and prompts require the client-side path (the SDK client-side helpers).
 - **HTTPS transports only.** Streamable HTTP and SSE are supported; local STDIO servers are not reachable through the connector.
-- **Not on every deployment.** Available on the Claude API directly, Claude Platform on AWS, and Microsoft Foundry. Not on Amazon Bedrock or Vertex AI.
+- **Not on every deployment.** Available on the Claude API, Claude Platform on AWS, Claude Models on Google Cloud (Anthropic managed), and Microsoft Foundry (Amazon Bedrock and Claude Models on Google Cloud (Google managed) are not listed on the connector page).
 - **Not ZDR eligible.** The connector is not covered by Zero Data Retention; tool definitions and execution results are retained per Anthropic's standard data-retention policy.
 - **OAuth is your responsibility.** The connector accepts an *authorization_token* per server; obtaining and refreshing the token is application-side.
 
@@ -120,7 +120,7 @@ About 15 minutes. Two parts: a basic single-server call and the migration-aware 
 
 **Setup:** confirm your SDK version supports the beta channel (`client.beta.messages.create(...)`) and have an HTTPS MCP server URL + (if required) an OAuth access token ready.
 
-**Part A: a single-server connector call with default tools.** Make a request that names one MCP server in *mcp_servers* and adds one matching *mcp_toolset* in *tools*. Include the *betas=["mcp-client-2025-11-20"]* parameter. Send a user message that asks "what tools do you have available?" Print the full response. Find the assistant *text* blocks describing the tools, any *mcp_tool_use* blocks, and the *mcp_tool_result* blocks.
+**Part A: a single-server connector call with default tools.** Make a request that names one MCP server in *mcp_servers* and adds one matching *mcp_toolset* in *tools*. Include the *betas=["mcp-client-2025-11-20"]* parameter (on the Claude API you can send *mcp-client-2026-09-15* instead; then skip any *mcp_tool_listing* blocks at the start of the response when you print it, and send them back unchanged on the next turn). Send a user message that asks "what tools do you have available?" Print the full response. Find the assistant *text* blocks describing the tools, any *mcp_tool_use* blocks, and the *mcp_tool_result* blocks.
 
 **Part B: an allowlist pattern.** Modify the *mcp_toolset* entry to use *default_config.enabled: false* and explicitly enable two specific tool names in *configs*. Re-run with a prompt that names a third (excluded) tool to confirm the model does not call it. Note that the docs explicitly recommend denylisting destructive or write tools as a baseline discipline; you have just done the inverse (allowlist), which is the stricter posture.
 
@@ -149,13 +149,13 @@ Nine cards. Click any card to reveal the answer. Use the **Print flashcards** bu
 
 <Flashcard question="The MCP connector pattern in one sentence?">
 
-The connector lets Claude talk to remote MCP servers directly from the Messages API without a separate MCP client in your application. Verbatim from the docs: *Claude's Model Context Protocol (MCP) connector feature enables you to connect to remote MCP servers directly from the Messages API without a separate MCP client*. You stop writing client-side MCP code; Claude handles list-tools, call-tool, parse-result.
+The connector lets Claude talk to remote MCP servers directly from the Messages API without a separate MCP client in your application. Verbatim from the docs: *Claude's Model Context Protocol (MCP) connector feature allows you to connect to remote MCP servers directly from the Messages API without a separate MCP client.* You stop writing client-side MCP code; Claude handles list-tools, call-tool, parse-result.
 
 </Flashcard>
 
 <Flashcard question="The request shape: which two components and which beta header?">
 
-Two components paired one-to-one. *mcp_servers* array on the request (each entry: *type: "url"*, *url* HTTPS, *name*, optional *authorization_token*). *mcp_toolset* entries inside the *tools* array (each: *type: "mcp_toolset"*, *mcp_server_name*, optional *default_config* + *configs*). Beta header: *mcp-client-2025-11-20* (current; *mcp-client-2025-04-04* is deprecated). Every server must be referenced by exactly one toolset.
+Two components paired one-to-one. *mcp_servers* array on the request (each entry: *type: "url"*, *url* HTTPS, *name*, optional *authorization_token*). *mcp_toolset* entries inside the *tools* array (each: *type: "mcp_toolset"*, *mcp_server_name*, optional *default_config* + *configs*). Beta header: *mcp-client-2026-09-15* (Claude API only; adds tool-list pinning and replaces the older header there) or *mcp-client-2025-11-20* (Claude API and the cloud platforms); *mcp-client-2025-04-04* is deprecated. Every server must be referenced by exactly one toolset.
 
 </Flashcard>
 
@@ -177,9 +177,9 @@ Two components paired one-to-one. *mcp_servers* array on the request (each entry
 
 </Flashcard>
 
-<Flashcard question="The connector's active limits (as of mcp-client-2025-11-20)?">
+<Flashcard question="The connector's active limits?">
 
-Tools only (not resources or prompts via connector). HTTPS transports only (Streamable HTTP, SSE; no local STDIO). Available on Claude API + Claude Platform on AWS + Microsoft Foundry; NOT on Amazon Bedrock or Vertex AI. NOT ZDR eligible (data retained per Anthropic's standard policy). OAuth is your responsibility (obtain + refresh the *authorization_token*). For the limits you cannot work around, use the TypeScript client-side helpers (mcpTools, mcpMessages, mcpResourceToContent, mcpResourceToFile) with your own MCP client.
+Tools only (not resources or prompts via connector). HTTPS transports only (Streamable HTTP, SSE; no local STDIO). Available on Claude API + Claude Platform on AWS + Claude Models on Google Cloud (Anthropic managed) + Microsoft Foundry; Amazon Bedrock and Claude Models on Google Cloud (Google managed) are not listed. NOT ZDR eligible (data retained per Anthropic's standard policy). OAuth is your responsibility (obtain + refresh the *authorization_token*). For the limits you cannot work around, use the SDK client-side helpers (in TypeScript: mcpTools, mcpMessages, mcpResourceToContent, mcpResourceToFile) with your own MCP client.
 
 </Flashcard>
 

@@ -13,64 +13,66 @@ tableOfContents: false
 | Category | Who executes | Schema you author | Examples |
 | --- | --- | --- | --- |
 | **Server tools** | Anthropic | Just type identifier | web_search, web_fetch, code_execution |
-| **Anthropic-schema client tools** | You | Anthropic publishes schema | bash, computer use, memory, text_editor |
+| **Anthropic-schema client tools** | You | Anthropic publishes schema | bash, text_editor, memory, computer use, browser use |
 | **Tool infrastructure** | Anthropic | Mixed | tool_search, MCP connector (L6) |
 
 Decision: **who owns the capability + who runs the code?**
 
 ## Server tools at a glance
 
-| Tool | Type identifier | Pricing | ZDR |
+| As of November 2026: tool | Type identifier | Pricing | ZDR |
 | --- | --- | --- | --- |
-| web_search | `web_search_20260209` (dynamic filtering) / `web_search_20250305` (basic) | **$10 / 1,000 searches** ($0.01 each) | Basic: eligible. Dynamic filtering: NOT eligible |
-| web_fetch | `web_fetch_20260209` (dynamic filtering) / `web_fetch_20250910` (basic) | Standard tokens (no per-fetch charge) | Basic: eligible. Dynamic filtering: NOT eligible |
-| code_execution | `code_execution_20260120` / `code_execution_20250825` | **FREE when used with `web_search_20260209` or `web_fetch_20260209`**; otherwise standard per-execution pricing | NOT eligible |
+| web_search | `web_search_20260318` / `web_search_20260209` (dynamic filtering) / `web_search_20250305` (basic) | **$10 / 1,000 searches** ($0.01 each) | Basic: eligible. Dynamic filtering: NOT eligible |
+| web_fetch | `web_fetch_20260318` / `web_fetch_20260309` / `web_fetch_20260209` (dynamic filtering) / `web_fetch_20250910` (basic) | Standard tokens (no per-fetch charge) | Basic: eligible. Dynamic filtering: NOT eligible |
+| code_execution | `code_execution_20260521` / `code_execution_20260120` / `code_execution_20250825` | **FREE when used with `web_search_20260209` or `web_fetch_20260209`, or later**; otherwise 1,550 free hours per org per month, then $0.05 per container-hour (5-minute minimum) | NOT eligible (container data kept up to 30 days) |
 
 ## The free-when-used-with pricing rule
 
 The canonical case: search plus computation with one tool declared. Dynamic filtering runs code internally:
 
 ```python
-tools=[{"type": "web_search_20260209", "name": "web_search"}]
+tools=[{"type": "web_search_20260318", "name": "web_search"}]
 ```
 
-If the task also needs top-level code execution beyond filtering search results (plotting, file writes, a calculation independent of search), declare both. The per-execution charge stays waived because `web_search_20260209` is in the request:
+If the task also needs top-level code execution beyond filtering search results (plotting, file writes, a calculation independent of search), declare both. The execution charge stays waived because a dynamic-filtering web search is in the request:
 
 ```python
 tools=[
-    {"type": "web_search_20260209", "name": "web_search"},
-    {"type": "code_execution_20260120", "name": "code_execution"},
+    {"type": "web_search_20260318", "name": "web_search"},
+    {"type": "code_execution_20260521", "name": "code_execution"},
 ]
 ```
 
-Computation only with no search or fetch: declare `code_execution_20260120` alone and pay standard per-execution pricing.
+Computation only with no search or fetch: declare `code_execution_20260521` alone and pay standard execution-time pricing.
 
 ## web_search optional params
 
 | Param | Use for |
 | --- | --- |
-| `max_uses` | Cap searches per request (cost guardrail) |
+| `max_uses` | Cap searches per turn (cost guardrail) |
 | `allowed_domains` | Whitelist sources |
-| `blocked_domains` | Blacklist sources |
+| `blocked_domains` | Blacklist sources (use this or `allowed_domains`, not both) |
 | `user_location` | Localize results (approximate; city/region/country/timezone) |
 
 Citations: **always on**; *web_search_result_location* blocks with *url* / *title* / *encrypted_index* / up to 150 chars of *cited_text*. Display to end users per docs.
 
 ## Anthropic-schema client tools
 
-| Tool | What it does |
-| --- | --- |
-| `bash` | Execute shell commands |
-| `text_editor` | Create + edit files |
-| `memory` | Persist knowledge across conversations |
-| `computer use` (beta) | Screenshots + mouse + keyboard |
+| As of November 2026: tool | Type string | What it does |
+| --- | --- | --- |
+| bash | `bash_20250124` | Execute shell commands |
+| text_editor | `text_editor_20250728` (Claude 4 and later) | Create + edit files |
+| memory | `memory_20250818` | Persist knowledge across conversations |
+| computer use | `computer_toolset_20260801` | Screenshots + mouse + keyboard |
+| browser use | `browser_toolset_20260801` | Navigate and act on web pages in your browser environment |
 
 Same L4 client loop (*tool_use* → execute → *tool_result*). Brief tool descriptions OK because the model already knows the canonical tool.
 
 ## Computer use discipline (the careful section)
 
-- **Beta header required:** `computer-use-2025-11-24` for Opus 4.8 / Opus 4.7 / Opus 4.6 / Sonnet 4.6 / Opus 4.5; earlier header for older models.
-- **ZDR eligible.** State-of-the-art on WebArena.
+- **Versions (as of November 2026):** `computer_toolset_20260801` is the stable toolset on current models (Fable 5.2, Opus 5.5, Sonnet 5.5, Haiku 5.5, and others in the docs), **no beta header**. Earlier models use the beta `computer_20251124` with header `computer-use-2025-11-24` (Opus 4.7 / Opus 4.6 / Sonnet 4.6 / Opus 4.5) or `computer_20250124` with `computer-use-2025-01-24` (Haiku 4.5). A model returns 400 for a version it does not accept.
+- **ZDR eligible** (screenshots and files stay in your environment).
+- **Docs' precautions:** dedicated VM or container with minimal privileges; no sensitive data such as logins; internet limited to an allowlist of domains; a human confirms consequential actions. Watch for prompt injection from page or image content.
 - **Sandbox the environment:** VM, container, or isolated profile with minimum credentials. Never against real desktop or production-reachable systems. Treat the agent like a contractor with access only to what they need.
 - **Track 20** ("AI Agents and Tool Use") goes deeper on agent-design at track-level depth.
 
@@ -88,13 +90,14 @@ tools = [
 | Variant | Query type |
 | --- | --- |
 | `tool_search_tool_regex_20251119` | Python `re.search` patterns (max 200 chars) |
-| `tool_search_tool_bm25_20251119` | Natural-language queries |
+| `tool_search_tool_bm25_20251119` | Natural-language queries (max 500 chars) |
 
 | | Use when | Skip when |
 | --- | --- | --- |
 | tool_search | 10+ tools / >10k definition tokens / selection accuracy issues / MCP with 200+ tools | \<10 tools / all-used-frequently / \<100-token total |
 
-- **Max 10,000 tools** in catalog. Returns 3-5 per search.
+- **Max 10,000 deferred tools** per request. Returns up to 5 per search by default (the model can set a `limit`).
+- Not metered separately; loaded definitions count as input tokens.
 - *tool_search* tool itself NEVER has *defer_loading: true*.
 - Keep 3-5 most-used tools non-deferred.
 - Preserves prompt caching (deferred tools not in system-prompt prefix).
@@ -116,10 +119,10 @@ tools = [
 }
 ```
 
-- *server_tool_use* + the matching tool-specific result block (*web_search_tool_result*, *code_execution_tool_result*, *web_fetch_tool_result*, *tool_search_tool_result*) INLINE.
-- **No round-trip in your code.**
+- *server_tool_use* + the matching tool-specific result block (*web_search_tool_result*, *web_fetch_tool_result*, *bash_code_execution_tool_result*, *tool_search_tool_result*) INLINE.
+- **No round-trip in your code**, except when a client tool is called in the same turn: *stop_reason* is *tool_use*, the server tool waits, and it runs after you return only your *tool_result* blocks (same tools array).
 - Iterate `response.content`, surface text + citations.
-- *stop_reason* typically *end_turn*. Mid-loop: *pause_turn* (send back as assistant turn, re-call to continue).
+- *stop_reason* typically *end_turn*. Mid-loop: *pause_turn* (send the paused response back unchanged as an assistant turn, with the same tools; it can pause again, so cap the continuations).
 
 ## Pricing implications
 
@@ -129,7 +132,7 @@ Total cost per call = standard tokens
                     + server-tool results in context (as input tokens on next turns)
 
 Dials to manage:
-  • Declare web_search_20260209 (or web_fetch_20260209) → code-execution per-execution charge is waived
+  • Declare web_search_20260209 or web_fetch_20260209 (or later) → code-execution charge is waived
   • max_uses on web_search → cap runaway
   • Cache stable tool definitions (L7) → drop repeated tool overhead
   • tool_search for large catalogs → keep most defs out of context
@@ -138,12 +141,12 @@ Dials to manage:
 
 ## ZDR eligibility (check per-tool)
 
-| Tool | ZDR |
+| As of November 2026: tool | ZDR |
 | --- | --- |
 | web_search (basic: `web_search_20250305`) | Eligible |
-| web_search (dynamic filtering: `web_search_20260209`) | NOT eligible |
+| web_search (dynamic filtering: `web_search_20260209` and later) | NOT eligible (set `allowed_callers: ["direct"]` to turn filtering off) |
 | web_fetch (basic: `web_fetch_20250910`) | Eligible |
-| web_fetch (dynamic filtering: `web_fetch_20260209`) | NOT eligible |
+| web_fetch (dynamic filtering: `web_fetch_20260209` and later) | NOT eligible (same `allowed_callers` workaround) |
 | code_execution | **NOT** eligible |
 | computer use | Eligible |
 | bash / text_editor / memory | Standard messages-API ZDR |
@@ -154,7 +157,7 @@ Dials to manage:
 | Failure | Recognize by | Fix |
 | --- | --- | --- |
 | Building your own web search | Wasted effort on solved problem | Drop in *web_search* server tool |
-| Paying standalone code_execution when search or fetch is also in flight | Surprise per-execution charges | Declare *web_search_20260209* or *web_fetch_20260209* in the same request (per-execution charge is waived) |
+| Paying standalone code_execution when search or fetch is also in flight | Surprise execution-time charges | Declare *web_search_20260209* or *web_fetch_20260209*, or later, in the same request (charge is waived) |
 | Computer use against real env | Real-world side effects | Sandbox: VM / container / isolated profile |
 | tool_search below threshold | Complexity without benefit | Standard tool calling for \<10 tools |
 | Skipping citations | UX miss + docs-recommended discipline | Always display web_search citations to end users |
@@ -168,8 +171,8 @@ Dials to manage:
 | Prompt caching on tool definitions | Lesson 7 |
 | The agent loop (model + tools across many turns; pause_turn in prod) | Lesson 8 onward |
 | Subagents and Claude Managed Agents | Lesson 11 |
-| Advisor server tool (research preview) | Beyond T22; see docs |
+| Advisor server tool (beta, `advisor_20260301`) | Beyond T22; see docs |
 
 ## Source
 
-- Anthropic public Claude docs: **Web search**, **Code execution**, **Web fetch**, **Computer use**, **Tool search**, **Server tools** at `https://platform.claude.com/docs/en/agents-and-tools/tool-use/`. Structural-mirror citation; see references.
+- Anthropic public Claude docs: **Web search**, **Code execution**, **Web fetch**, **Computer use**, **Tool search**, **Server tools**, **Tool reference** at `https://platform.claude.com/docs/en/agents-and-tools/tool-use/`. Structural-mirror citation; see references.

@@ -15,17 +15,20 @@ POST https://api.anthropic.com/v1/messages
 
 Headers
   x-api-key: $ANTHROPIC_API_KEY
-  anthropic-version: 2023-06-01
+  anthropic-version: 2026-10-21     (as of November 2026; the SDKs set it)
   Content-Type: application/json
 
 Body (required)
-  model        precise identifier, e.g. claude-opus-4-8
+  model        precise identifier, e.g. claude-opus-5-5
   max_tokens   output ceiling, integer
   messages     [{role: user | assistant, content: "..."}, ...]
                 ends with role: user (model generates next assistant)
 
 Body (optional)
   system       standing instructions (persona, format, constraint)
+
+Removed in API version 2026-10-21 (sending them returns 400)
+  temperature, top_p, top_k
 ```
 
 ## SDKs
@@ -39,32 +42,37 @@ Body (optional)
 | C-sharp, PHP, Ruby | official SDKs published |
 | CLI | `brew install anthropics/tap/ant` |
 
-All SDKs auto-read *ANTHROPIC_API_KEY* from the environment.
+All SDKs auto-read *ANTHROPIC_API_KEY* from the environment. They also pick up a sign-in from the CLI (`ant auth login`), which the quickstart recommends for local development.
 
-## Current canonical model names
+## Model IDs
 
-| Family | Identifier | When to reach for it |
+| As of November 2026 | Identifier | Tier and description (Models overview) |
 | --- | --- | --- |
-| Opus | *claude-opus-4-8* | Flagship Opus; complex reasoning, agentic coding |
-| Sonnet | *claude-sonnet-4-6* | Frontier intelligence at scale |
-| Haiku | *claude-haiku-4-5* | Fastest; near-frontier intelligence |
+| Claude Fable 5.2 | *claude-fable-5-2* | Above the flagship; "For demanding reasoning and long-horizon agentic work" |
+| Claude Opus 5.5 | *claude-opus-5-5* | Flagship; the docs' suggested start for most workloads; "For long-running agentic coding and knowledge work" |
+| Claude Sonnet 5.5 | *claude-sonnet-5-5* | Balanced; "The best combination of speed and intelligence" |
+| Claude Haiku 5.5 | *claude-haiku-5-5* | Fastest and cheapest; "For high-volume, latency-sensitive tasks such as classification, extraction, and routing" |
+| Source | [Models overview](https://platform.claude.com/docs/en/models/overview) | |
 
-Lesson 3 of this track is the proper selection lesson.
+Start where the docs point, then let evaluation move you down a tier. Lesson 3 of this track is the proper selection lesson.
 
 ## Response shape
 
 ```
 {
-  "id": "msg_01HCDu5LRGeP2o7s2xGmxyx8",
+  "model": "claude-opus-5-5",
+  "id": "msg_013mHbppMPd2PrVJzGMZPt2D",
   "type": "message",
   "role": "assistant",
   "content": [{ "type": "text", "text": "..." }],
-  "model": "claude-opus-4-8",
   "stop_reason": "end_turn",
   "stop_sequence": null,
+  "stop_details": null,
   "usage": { "input_tokens": 21, "output_tokens": 305 }
 }
 ```
+
+A thinking block can come before the text block on models that think; iterate *content* and handle each block by *type*.
 
 ## Stop reasons (check on every response)
 
@@ -74,6 +82,7 @@ Lesson 3 of this track is the proper selection lesson.
 | *max_tokens* | Truncated; raise the cap or split the request |
 | *stop_sequence* | Your custom stop string was generated |
 | *tool_use* | Model is requesting a tool call (lesson 4) |
+| *refusal* | Model declined the request; *stop_details* says why (lesson 2) |
 
 ## Multi-turn pattern (the API is stateless)
 
@@ -85,7 +94,7 @@ messages = [
 ]
 ```
 
-- API holds NOTHING between calls.
+- API holds NOTHING between calls (by default).
 - Your application owns conversation state.
 - Roles alternate *user* / *assistant*, ending with *user*.
 - Synthesized prior turns are OK (the API does not check).
@@ -95,7 +104,7 @@ messages = [
 
 ```
 client.messages.create(
-    model="claude-opus-4-8",
+    model="claude-opus-5-5",
     max_tokens=1024,
     system="You are a terse code reviewer. Return only the changes...",
     messages=[{ "role": "user", "content": "<diff>" }],
@@ -109,9 +118,9 @@ System text is NOT a message. No role. No alternation. Standing instruction for 
 | Failure | Recognize by | Fix |
 | --- | --- | --- |
 | API key not set | Auth error on first call | `export ANTHROPIC_API_KEY='...'`; persist in shell profile |
-| Wrong model name | Unknown-model error | Use precise identifier (*claude-opus-4-8*), not "Claude" or "Opus" |
-| max-tokens too small | Successful response, *stop_reason: max_tokens* | Raise the cap or split into smaller turns |
-| Content read as a string | Works once, breaks on tool use / vision | Iterate *response.content* and dispatch on each block's *type* |
+| Wrong model name | Unknown-model error | Use the precise ID from the Models overview (*claude-opus-5-5*), not "Claude" or "Opus" |
+| max-tokens too small | Successful response, *stop_reason: max_tokens* | Raise the cap (thinking counts against it) or split into smaller turns |
+| Content read as a string | Works once, breaks when a thinking or tool block comes first | Iterate *response.content* and dispatch on each block's *type* |
 | Treating API as stateful | Model "forgets" earlier turns | Send the entire conversation history every call |
 
 ## What this lesson does NOT cover (and where to find it)
@@ -119,7 +128,7 @@ System text is NOT a message. No role. No alternation. Standing instruction for 
 | Topic | Lands at |
 | --- | --- |
 | Streaming, batches, error handling | Lesson 2 |
-| Model selection + extended thinking | Lesson 3 |
+| Model tiers, effort, adaptive thinking | Lesson 3 |
 | Tool use (define + handle) | Lesson 4 |
 | Server-side tools (web search, web fetch, code execution) | Lesson 5 |
 | Model Context Protocol | Lesson 6 |
@@ -130,10 +139,10 @@ System text is NOT a message. No role. No alternation. Standing instruction for 
 ## Words to use precisely
 
 - **Endpoint:** the URL the request goes to (`https://api.anthropic.com/v1/messages`).
-- **Stateless:** the API holds no state between calls; conversation state lives in your application.
+- **Stateless:** by default the API holds no state between calls; conversation state lives in your application.
 - **System parameter:** standing instructions, separate from the *messages* list.
 - **Stop reason:** the field telling you why generation ended; check on every response.
 
 ## Source
 
-- Anthropic public Claude docs, Get Started + Working with the Messages API, at `https://platform.claude.com/docs/en/get-started` and `https://platform.claude.com/docs/en/build-with-claude/working-with-messages`. Structural-mirror citation; see references.
+- Anthropic public Claude docs, Get Started + Working with the Messages API, at `https://platform.claude.com/docs/en/get-started` and `https://platform.claude.com/docs/en/build-with-claude/working-with-messages`; model IDs from `https://platform.claude.com/docs/en/models/overview`; header value from `https://platform.claude.com/docs/en/api/versioning`. Structural-mirror citation; see references.

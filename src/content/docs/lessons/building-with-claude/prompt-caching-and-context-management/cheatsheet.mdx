@@ -10,7 +10,7 @@ tableOfContents: false
 
 ## Prompt caching at a glance
 
-**Verbatim from docs:** *Prompt caching optimizes your API usage by allowing resuming from specific prefixes in your prompts.*
+**Verbatim from docs:** *Prompt caching optimizes your API usage by letting the API resume from specific prefixes in your prompts.*
 
 ```json
 "cache_control": { "type": "ephemeral" }
@@ -18,31 +18,49 @@ tableOfContents: false
 "cache_control": { "type": "ephemeral", "ttl": "1h" }
 ```
 
+**Two ways to use it:** once at the **top level** of the request (automatic caching: the API places the breakpoint on the last cacheable block and moves it forward as the conversation grows; the docs suggest starting here), or on individual blocks (explicit breakpoints, for exact control).
+
 **Placement layers** (and the order they are honored): *tools* → *system* → *messages*. Attaches to: *system* text blocks; *tools* entries (custom client from L4, server + Anthropic-schema client from L5, *mcp_toolset* from L6); *messages* content blocks (user content and assistant *tool_use* / *tool_result*).
 
 **Limits:**
-- Maximum **4 explicit cache breakpoints per request** (5th returns 400).
-- 20-block lookback from each breakpoint.
+- Maximum **4 explicit cache breakpoints per request**. Automatic caching uses one of the four slots; with four explicit breakpoints already set, a top-level *cache_control* returns 400.
+- 20-position lookback from each breakpoint (counting the breakpoint itself). The lookback only finds entries earlier requests wrote, so put the breakpoint on the last block that stays identical across requests.
+- Default lifetime 5 minutes, refreshed at no extra cost on each use.
 - Exact-match: one character change invalidates the prefix.
 
 ## Pricing multipliers
 
-| Token kind | Multiplier | Example (Opus 4.7 base $5/MTok) |
-| --- | --- | --- |
-| Standard (uncached) input | 1.0x | $5 / MTok |
-| 5-minute cache write | 1.25x | $6.25 / MTok |
-| 1-hour cache write | 2.0x | $10 / MTok |
-| Cache hit or refresh | 0.1x | $0.50 / MTok |
+The principle: writes cost a little more than base input, and reads cost much less.
 
-**Break-even:** 5-minute pays back at one hit; 1-hour pays back at roughly two to four hits depending on prefix size.
+| Token kind (as of November 2026) | Multiplier off base input |
+| --- | --- |
+| Standard (uncached) input | 1x |
+| 5-minute cache write | 1.25x |
+| 1-hour cache write | 2x |
+| Cache hit or refresh, most models | 0.1x |
+| Cache hit or refresh, Opus 5.5 and Sonnet 5.5 | 0.05x |
+| Cache hit or refresh, Fable 5.2 (and Fable 5.1, Mythos 5.2, Mythos 5.1) | 0.025x |
+
+| Per model, per million tokens (as of November 2026) | Base input | 5-minute write | 1-hour write | Cache hit |
+| --- | --- | --- | --- | --- |
+| Fable 5.2 | $8 | $10 | $16 | $0.20 |
+| Opus 5.5 | $4 | $5 | $8 | $0.20 |
+| Sonnet 5.5 | $2 | $2.50 | $4 | $0.10 |
+| Haiku 5.5 (prompts up to 100,000 tokens) | $0.10 | $0.125 | $0.20 | $0.01 |
+| Opus 4.8 / 4.7 (legacy) | $5 | $6.25 | $10 | $0.50 |
+| Sonnet 4.6 (legacy) | $3 | $3.75 | $6 | $0.30 |
+
+**Break-even (per the Pricing page):** 5-minute write pays back after one cache read; 1-hour write after two cache reads.
 
 ## Minimum cacheable size (token floor)
 
-| Model | Minimum tokens |
+| Model (as of November 2026; Claude API, Claude Platform on AWS, Claude Models on Google Cloud (Google managed), Microsoft Foundry) | Minimum tokens |
 | --- | --- |
-| Opus 4.7 / Opus 4.6 / Opus 4.5 / Haiku 4.5 / Mythos Preview | 4,096 |
-| Opus 4.8 / Opus 4.1 / Sonnet 4.6 / Sonnet 4.5 | 1,024 |
-| Haiku 3.5 (Vertex AI only) | 2,048 |
+| Fable 5.2 / Opus 5.5 / Sonnet 5.5 / Haiku 5.5 (and Fable 5.1, Fable 5, Opus 5, the Mythos 5.x models) | 512 |
+| Opus 4.8 / Sonnet 5 / Sonnet 4.6 / Sonnet 4.5 | 1,024 |
+| Opus 4.7 / Mythos Preview | 2,048 |
+| Opus 4.6 / Opus 4.5 / Haiku 4.5 | 4,096 |
+| Amazon Bedrock | See the Bedrock prompt caching documentation |
 
 Shorter prompts marked with *cache_control* process without caching (no error).
 
@@ -59,7 +77,7 @@ Shorter prompts marked with *cache_control* process without caching (no error).
 }
 ```
 
-**Identity:** *total_input_tokens = cache_read_input_tokens + cache_creation_input_tokens + input_tokens*. *input_tokens* here means "tokens after the last breakpoint." Production telemetry: watch *cache_read_input_tokens* / total (often 90 percent+ on stable-prefix workloads).
+**Identity:** *total_input_tokens = cache_read_input_tokens + cache_creation_input_tokens + input_tokens*. *input_tokens* here means "tokens after the last breakpoint." If both cache fields are 0, nothing was cached (most often the prompt was under the minimum). Production telemetry: watch *cache_read_input_tokens* / total (a stable-prefix workload can push it very high).
 
 ## Cache isolation
 
@@ -68,29 +86,40 @@ Shorter prompts marked with *cache_control* process without caching (no error).
 | Claude API | Workspace-level |
 | Claude Platform on AWS | Workspace-level |
 | Microsoft Foundry (beta) | Workspace-level |
+| Claude Models on Google Cloud (Google managed) | Organization-level |
 | Amazon Bedrock | Organization-level |
-| Vertex AI | Organization-level |
 
 ## Context window sizes
 
-| Window | Models |
+| Window (as of November 2026) | Models |
 | --- | --- |
-| 1M tokens | Opus 4.8 / Mythos Preview / Opus 4.7 / Opus 4.6 / Sonnet 4.6 (on Claude API + Bedrock + Vertex AI) |
-| 200K tokens | Sonnet 4.5 (and deprecated older models); Opus 4.8 on Microsoft Foundry |
+| 1M tokens (up to 128K output) | Fable 5.2 / Opus 5.5 / Sonnet 5.5 / Haiku 5.5; legacy Opus 4.8 / 4.7 / 4.6 and Sonnet 4.6 (plus Fable 5.1, Fable 5, Opus 5, Sonnet 5, Mythos models) |
+| 200K tokens | Other models, including Sonnet 4.5 (deprecated) and Haiku 4.5 |
 
-**Image / PDF caps:** up to 600 pages on 1M-window models; 100 on 200K-window models.
+**Image / PDF caps:** up to 600 images or PDF pages per request on 1M-window models; 100 on 200K-window models.
 
-**Context awareness** (Sonnet 4.6 / Sonnet 4.5 / Haiku 4.5): explicit token budget at session start (`<budget:token_budget>1000000</budget:token_budget>`) and a remaining-tokens warning after each tool call.
+**Context awareness** (Sonnet 5 / Sonnet 4.6 / Sonnet 4.5 / Haiku 4.5): the API injects the token budget into the system prompt (for example `<budget:token_budget>200000</budget:token_budget>`) and a remaining-tokens warning after each tool call; you never send these tags yourself. Opus 4.7 and later Opus, Sonnet 5.5, Fable models and Haiku 5.5 do not receive them; use task budgets (beta) instead.
 
-**Overflow stop reason** (Claude 4.5+ models): *stop_reason: model_context_window_exceeded*. On older models, opt in via *model-context-window-exceeded-2025-08-26* beta header.
+**Overflow:** if the input alone exceeds the window, every model returns a 400 (*prompt is too long*). If input plus *max_tokens* exceeds it, Claude 4.5+ models accept the request and stop with *stop_reason: model_context_window_exceeded*; on older models, opt in via the *model-context-window-exceeded-2025-08-26* beta header.
 
 ## Context rot
 
-The docs name it directly: *as token count grows, accuracy and recall degrade, a phenomenon known as context rot. This makes curating what's in context just as important as how much space is available.*
+The docs name it directly: *As token count grows, accuracy and recall degrade, a phenomenon known as context rot. This makes curating what's in context just as important as how much space is available.*
 
 ## Compaction (the recommended long-session lever)
 
-**Verbatim purpose:** *server-side context compaction for managing long conversations that approach context window limits*.
+**Verbatim purpose (Compaction overview):** *Compaction replaces the older turns of a conversation with a summary that Claude writes on the server, so you need no summarization code of your own.*
+
+**Two kinds (as of November 2026):**
+
+| | On demand | At a token threshold |
+| --- | --- | --- |
+| Who decides when | Your application | The API, when input reaches the trigger |
+| Beta header | *compact-2026-09-04* | *compact-2026-01-12* |
+| Request shape | Top-level *compaction* parameter with *type: summarize* (not combinable with *context_management* on one request) | *compact_20260112* entry in *context_management.edits* |
+| Docs advice | "Use on-demand compaction wherever it is available." | Supported alongside on-demand |
+
+Threshold compaction:
 
 ```python
 context_management={
@@ -104,8 +133,8 @@ context_management={
 ```
 
 - **Default trigger:** 150,000 input tokens (min 50,000).
-- **Models** (beta): Opus 4.8 / Mythos Preview / Opus 4.7 / Opus 4.6 / Sonnet 4.6.
-- **ZDR eligible.**
+- **Models on the Claude API** (beta, both kinds, as of November 2026): Fable 5.2 / Opus 5.5 / Sonnet 5.5 / Haiku 5.5; legacy Opus 4.8 / 4.7 / 4.6 and Sonnet 4.6 (plus Fable 5.1, Fable 5, Opus 5, Sonnet 5, Mythos models). Threshold compaction also supports legacy Haiku 4.5; on-demand compaction does not.
+- **ZDR eligible** (threshold compaction; excludes Covered Models).
 - Replaces older history with a *compaction* block; on subsequent requests, prior messages are auto-dropped.
 - *pause_after_compaction*: stops with *stop_reason: "compaction"* after writing the summary; lets you manually preserve recent N turns verbatim.
 - **Costs an extra sampling step.** Billed under *usage.iterations* (top-level *input_tokens* / *output_tokens* exclude it).
@@ -116,7 +145,7 @@ context_management={
 
 ## Context editing (the surgical lever)
 
-**Verbatim purpose:** *context editing allows you to selectively clear specific content from conversation history as it grows.*
+**Verbatim purpose:** *Context editing allows you to selectively clear specific content from conversation history as it grows.*
 
 Beta header: *context-management-2025-06-27*. Two strategies:
 
@@ -126,7 +155,7 @@ Beta header: *context-management-2025-06-27*. Two strategies:
 context_management={"edits": [{"type": "clear_tool_uses_20250919"}]}
 ```
 
-Clears oldest *tool_result* + *mcp_tool_result* blocks chronologically; placeholder text substituted. Optional *clear_tool_inputs* also clears the *tool_use* parameters. *clear_at_least* sets a minimum tokens-cleared floor.
+Clears the oldest tool results (including *mcp_tool_result* blocks) chronologically; placeholder text substituted. Optional *clear_tool_inputs* also clears the *tool_use* parameters. *clear_at_least* sets a minimum tokens-cleared floor.
 
 **Use for:** agentic workflows with heavy tool use (web search results, file dumps, MCP retrievals).
 
@@ -136,19 +165,21 @@ Clears oldest *tool_result* + *mcp_tool_result* blocks chronologically; placehol
 context_management={"edits": [{"type": "clear_thinking_20251015"}]}
 ```
 
-Clears *thinking* blocks from extended-thinking sessions. *keep* parameter controls how many recent thinking blocks survive.
+Clears *thinking* blocks from earlier assistant turns. *keep* parameter controls how many recent thinking blocks survive.
 
-**Default *keep* by model class:**
+**Default when the strategy is left out, by model class (as of November 2026):**
 
 | Model class | Default behavior |
 | --- | --- |
 | Opus 4.5 and later | Keep all prior thinking |
-| Opus 4.1 and earlier | Keep only the last turn's thinking |
+| Opus 4.1 and earlier | Keep thinking only for the turn in progress |
 | Sonnet 4.6 and later | Keep all prior thinking |
-| Sonnet 4.5 and earlier | Keep only the last turn's thinking |
-| All Haiku (through 4.5) | Keep only the last turn's thinking |
+| Sonnet 4.5 and earlier | Keep thinking only for the turn in progress |
+| Haiku 5.5 and later | Keep all prior thinking |
+| Haiku 4.5 and earlier | Keep thinking only for the turn in progress |
+| Fable and Mythos (all) | Keep all prior thinking |
 
-**Use for:** long extended-thinking sessions where you want to override the per-model default.
+**Use for:** long thinking-heavy sessions where you want to override the per-model default. If your code runs across model classes, set *keep* explicitly.
 
 ## Cache-interaction asymmetry (editing vs caching)
 
@@ -163,8 +194,8 @@ Clears *thinking* blocks from extended-thinking sessions. *keep* parameter contr
 
 | Lever | What it costs | When to use |
 | --- | --- | --- |
-| **Cache the stable parts** | 1.25x or 2.0x on the write turn; 0.1x on hits | Anything whose text does not change for the session (system prompt, tool stack across L4/L5/L6, stable reference passages) |
-| **Compact the long parts** | Extra sampling step per crossing (under *usage.iterations*) | Sessions that will exceed 100K input tokens or where context rot is hurting focus |
+| **Cache the stable parts** | 1.25x or 2x on the write turn; 0.1x on hits on most models (0.05x or 0.025x on the newest) | Anything whose text does not change for the session (system prompt, tool stack across L4/L5/L6, stable reference passages) |
+| **Compact the long parts** | Extra sampling step per compaction (under *usage.iterations* in the threshold kind) | Sessions that will run long or where context rot is hurting focus |
 | **Clear the heavy parts** | Cache invalidation on each clear (tool result clearing); preserved on kept thinking blocks | Agentic workflows with old tool results; extended-thinking sessions with tunable depth |
 
 **Default posture:** cache the system + tool stack; opt in to compaction once sessions go long; add tool result clearing only for agentic loops with heavy retrieval. Do not turn all three on by default.
@@ -173,8 +204,8 @@ Clears *thinking* blocks from extended-thinking sessions. *keep* parameter contr
 
 | Failure | Recognize by | Fix |
 | --- | --- | --- |
-| Cache marked but not hitting | *cache_creation_input_tokens* every turn, *cache_read_input_tokens* always 0 | Confirm prefix is byte-identical; check minimum-token floor; check workspace isolation |
-| Prefix too short to cache | *cache_control* set but no usage change | Push prefix past the floor (4,096 or 1,024 depending on model); merge breakpoints |
+| Cache marked but not hitting | *cache_creation_input_tokens* every turn, *cache_read_input_tokens* always 0 | Confirm prefix is byte-identical; move the breakpoint off any block that changes per request (timestamps, the incoming message); check workspace isolation |
+| Prefix too short to cache | *cache_control* set but both cache fields stay 0 | Push prefix past the model's floor (512 to 4,096 depending on model, as of November 2026); merge breakpoints |
 | Compaction loses cached system | First post-compaction request shows full cache write again | Put a *cache_control* breakpoint at the **end** of the system prompt |
 | Compaction summary returns *content: null* | Tools defined, model called a tool inside the summary | Add explicit *instructions* on the compaction edit forbidding tool calls during the summary |
 | Tool result clearing eating cache cost | Cache write costs spike around every clear | Set *clear_at_least* high enough that the saved tokens exceed the write premium |
@@ -192,4 +223,4 @@ Clears *thinking* blocks from extended-thinking sessions. *keep* parameter contr
 
 ## Source
 
-- Anthropic public Claude docs: **Prompt caching**, **Context windows**, **Compaction**, **Context editing** under `https://platform.claude.com/docs/en/build-with-claude/`. See references for the full anchor list.
+- Anthropic public Claude docs: **Prompt caching**, **Context windows**, **Compaction**, **Context editing** under `https://platform.claude.com/docs/en/build-with-claude/`, plus **Pricing** at `https://platform.claude.com/docs/en/about-claude/pricing`. See references for the full anchor list.

@@ -193,6 +193,13 @@ export const collections = {
 				authors: z.array(z.string()).optional(),
 				published_at: z.coerce.date().optional(),
 				last_reviewed: z.coerce.date().optional(),
+				// The last date the BODY changed, when that differs from the last
+				// review. A clean freshness review bumps last_reviewed only, and the
+				// "Recently updated: the body has changed" callout keys on this
+				// instead, so a review that changed nothing never claims a change.
+				// Omitted: last_reviewed doubles as the revision date (the original
+				// behaviour, so every existing lesson renders exactly as before).
+				last_revised: z.coerce.date().optional(),
 				status: z.enum(['draft', 'published', 'needs-review']).optional(),
 
 				// License
