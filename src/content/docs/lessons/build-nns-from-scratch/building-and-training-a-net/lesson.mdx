@@ -7,25 +7,34 @@ sidebar:
   label: Lesson
 ---
 
-Last lesson you built an autograd engine: give it any expression built from `+`, `*`, and `tanh`, and it hands back the gradient of the output with respect to every input. That is the hard part of learning, done. What is left is almost anticlimactic: wire some `Value` objects into the shape of a network, measure how wrong it is with a single number, and use the gradients to nudge the network less wrong, over and over. This lesson does exactly that, and by the end "training a neural network" will be a loop you could write yourself.
+import ReadAlongDim from '../../../../../components/ReadAlongDim.astro';
+
+<ReadAlongDim
+  src="https://audio.clawdemy.org/lessons/building-and-training-a-net-lesson.mp3"
+  slug="building-and-training-a-net"
+  cacheVersion="20261112"
+  approxMinutes={13}
+/>
+
+Last lesson you built an autograd engine: give it any expression built from addition, multiplication, and *tanh*, and it hands back the gradient of the output with respect to every input. That is the hard part of learning, done. What is left is almost anticlimactic: wire some *Value* objects into the shape of a network, measure how wrong it is with a single number, and use the gradients to nudge the network less wrong, over and over. This lesson does exactly that, and by the end "training a neural network" will be a loop you could write yourself.
 
 The contract holds: nothing inside is a mystery. A trained network is just numbers that were nudged downhill a few thousand times.
 
 ## A neuron is a small expression
 
-A single neuron takes some inputs, weights each one, adds them up with a bias, and squashes the result. In the engine's terms, that is just an expression built from the operations you already have:
+A single neuron takes some inputs, weights each one, adds them up with a bias, and squashes the result. In the engine's terms, that is just an expression built from the operations you already have: multiply each input by its weight, add them all up with the bias, and pass the total through *tanh*:
 
 ```
 neuron(x) = tanh(w1*x1 + w2*x2 + ... + wn*xn + b)
 ```
 
-The `w`s (one weight per input) and the `b` (bias) are the neuron's **parameters**: they are leaf `Value` objects, the dials we are allowed to turn. The inputs `x` are fixed by the data. When you evaluate the neuron, the multiplies, adds, and `tanh` all record themselves in the graph exactly as before, so the neuron's output is a `Value` that remembers how it was computed, all the way back to its weights.
+The weights (one per input) and the bias are the neuron's **parameters**: they are leaf *Value* objects, the dials we are allowed to turn. The inputs are fixed by the data. When you evaluate the neuron, the multiplies, adds, and *tanh* all record themselves in the graph exactly as before, so the neuron's output is a *Value* that remembers how it was computed, all the way back to its weights.
 
 That last fact is the whole game. Because the output remembers its graph, backprop can later tell us how the loss responds to each weight.
 
 ## Layers and the multilayer perceptron
 
-One neuron is not much. A **layer** is just several neurons run on the same inputs, each producing one output number. Feed the outputs of one layer as the inputs to the next, stack a few of these, and you have a **multilayer perceptron** (MLP): the simplest "deep" network. A common small one has three inputs, two hidden layers of four neurons each, and a single output neuron, written `[3, 4, 4, 1]`.
+One neuron is not much. A **layer** is just several neurons run on the same inputs, each producing one output number. Feed the outputs of one layer as the inputs to the next, stack a few of these, and you have a **multilayer perceptron** (MLP): the simplest "deep" network. A common small one has three inputs, two hidden layers of four neurons each, and a single output neuron, written as the list 3, 4, 4, 1.
 
 When you run an input through the whole MLP, every neuron's expression gets recorded into one large graph, from the input values at the bottom up to the final output at the top. A "deep network" is not a mysterious object; it is a big expression made of the same three operations, and the forward pass is just evaluating it. Stack your own layers and the diagram becomes a data structure you built.
 
@@ -33,13 +42,13 @@ When you run an input through the whole MLP, every neuron's expression gets reco
 
 ## Measuring wrongness with a single number
 
-To train the network you need one number that says how wrong it currently is, so that "less wrong" has a direction. That number is the **loss**. The standard starter loss is the **mean squared error**: for each training example, take the network's prediction, subtract the target, square the difference (so being wrong in either direction counts as positive, and big misses count much more than small ones), and add these up across all examples.
+To train the network you need one number that says how wrong it currently is, so that "less wrong" has a direction. That number is the **loss**. The standard starter loss is the **mean squared error**: for each training example, take the network's prediction, subtract the target, square the difference (so being wrong in either direction counts as positive, and big misses count much more than small ones), and add these up across all examples (strictly that makes it a sum of squared errors; dividing by the number of examples gives the mean).
 
 ```
 loss = (pred1 - target1)^2 + (pred2 - target2)^2 + ...
 ```
 
-Crucially, `loss` is itself a `Value` sitting at the top of the graph, because it was computed from the predictions, which were computed from the weights. So `loss.backward()` floods gradients back through the entire network and every single weight and bias ends up holding `dLoss/d(itself)`: the rate at which the loss changes if you nudge that one parameter. That is the signal we train on.
+Crucially, the loss is itself a *Value* sitting at the top of the graph, because it was computed from the predictions, which were computed from the weights. So calling backward on the loss floods gradients back through the entire network and every single weight and bias ends up holding the derivative of the loss with respect to itself: the rate at which the loss changes if you nudge that one parameter. That is the signal we train on.
 
 ## Gradient descent: nudge every parameter downhill
 
@@ -49,43 +58,43 @@ Here is the rule that turns gradients into learning. Each parameter's gradient t
 parameter = parameter - learning_rate * gradient
 ```
 
-The `learning_rate` is a small number (say `0.1` or `0.01`) that controls step size. Do this for every parameter at once and the whole network takes one small step downhill on the loss. This is **gradient descent**, and it is the entire learning algorithm.
+In words: the new parameter is the old parameter minus the learning rate times the gradient. The learning rate is a small number (say 0.1 or 0.01) that controls step size. Do this for every parameter at once and the whole network takes one small step downhill on the loss. This is **gradient descent**, and it is the entire learning algorithm.
 
-Watch it work on the smallest possible network: a single weight `w`, one input `x`, prediction `pred = w * x`, with `x = 2` and target `y = 6`. Start at `w = 1`.
+Watch it work on the smallest possible network: a single weight *w*, one input *x*, and a prediction equal to the weight times the input, with the input equal to 2 and a target of 6. Start with the weight at 1, so the prediction is 2 and the squared-error loss is 2 minus 6, squared, which is 16.
 
 ```
 pred = w * x = 1 * 2 = 2
 loss = (pred - y)^2 = (2 - 6)^2 = 16
 ```
 
-Backprop the loss. The local derivative of the square is `2*(pred - y) = 2*(2 - 6) = -8`, and the local derivative of `pred = w*x` with respect to `w` is `x = 2`, so by the chain rule:
+Backprop the loss. The local derivative of the square is twice the gap between the prediction and the target, which is 2 times minus 4, or minus 8, and the local derivative of the prediction with respect to the weight is the input, which is 2, so by the chain rule the gradient of the weight is minus 8 times 2, or minus 16:
 
 ```
 gradient of w = -8 * 2 = -16
 ```
 
-The gradient is `-16`: increasing `w` would *decrease* the loss (negative slope). So we step `w` in the opposite direction of the gradient, which here means increasing it. With `learning_rate = 0.1`:
+The gradient is minus 16: increasing the weight would *decrease* the loss (negative slope). So we step the weight in the opposite direction of the gradient, which here means increasing it. With a learning rate of 0.1, the weight becomes 1 minus 0.1 times minus 16, which is 1 plus 1.6, or 2.6:
 
 ```
 w = w - 0.1 * (-16) = 1 + 1.6 = 2.6
 ```
 
-Check that it worked. The new prediction is `2.6 * 2 = 5.2`, and the new loss is `(5.2 - 6)^2 = 0.64`. The loss fell from `16` to `0.64` in a single step. The network just learned.
+Check that it worked. The new prediction is 2.6 times 2, or 5.2, and the new loss is 5.2 minus 6, squared, which is 0.64. The loss fell from 16 to 0.64 in a single step. The network just learned.
 
-Take one more step from `w = 2.6` to see it converge. Now `pred = 5.2`, the square's local derivative is `2*(5.2 - 6) = -1.6`, and `gradient of w = -1.6 * 2 = -3.2`, so `w = 2.6 - 0.1*(-3.2) = 2.92`. The new loss is `(2.92*2 - 6)^2 = (-0.16)^2 = 0.0256`. The loss is marching toward zero (`16`, then `0.64`, then `0.0256`) and `w` is closing in on `3`, the value where `pred = w*2` exactly hits the target `6`. Repeat the step enough times and the network nails it. A real MLP does this same step to thousands of parameters simultaneously; the arithmetic per parameter is identical to what you just did.
+Take one more step from a weight of 2.6 to see it converge. Now the prediction is 5.2, the gap is now minus 0.8, so the square's local derivative is 2 times minus 0.8, or minus 1.6, and the gradient of the weight is minus 1.6 times 2, or minus 3.2, so the weight becomes 2.6 plus 0.32, which is 2.92. The new prediction is 5.84, which falls short of the target by 0.16, and squaring that gap gives a new loss of 0.0256. The loss is marching toward zero (16, then 0.64, then 0.0256) and the weight is closing in on 3, the value where the weight times 2 exactly hits the target of 6. Repeat the step enough times and the network nails it. A real MLP does this same step to thousands of parameters simultaneously; the arithmetic per parameter is identical to what you just did.
 
 ## The training loop
 
 Training is that step, repeated. The loop has four parts, in this exact order:
 
 1. **Forward pass.** Run the inputs through the network to get predictions, and compute the loss. (This builds the graph.)
-2. **Zero the gradients.** Reset every parameter's `grad` to `0`.
-3. **Backward pass.** Call `loss.backward()` so every parameter gets its gradient.
-4. **Update.** Nudge every parameter: `p.data -= learning_rate * p.grad`.
+2. **Zero the gradients.** Reset every parameter's gradient to zero.
+3. **Backward pass.** Call backward on the loss so every parameter gets its gradient.
+4. **Update.** Nudge every parameter: subtract the learning rate times its gradient from its value.
 
 Repeat for as many iterations as it takes to drive the loss down. Watch the loss number shrink each pass and you are watching the network learn, in real time.
 
-Step 2 is the one beginners forget, and it is worth dwelling on because Karpathy flags it as the most common bug in the whole exercise. In the engine, backprop *accumulates* into `grad` (it adds, using `+=`, so that a parameter feeding two places correctly sums its gradients). That is correct within one backward pass, but it means that if you do not reset the gradients to zero before the next pass, the new gradients pile on top of the old ones. The network then takes a step based on stale, inflated gradients and training destabilizes. Zero the gradients every iteration; forgetting is a silent, confusing bug.
+Step 2 is the one beginners forget, and it is worth dwelling on because Karpathy flags it as the most common bug in the whole exercise. In the engine, backprop *accumulates* into each gradient (it adds to the running total instead of overwriting it, so that a parameter feeding two places correctly sums its gradients). That is correct within one backward pass, but it means that if you do not reset the gradients to zero before the next pass, the new gradients pile on top of the old ones. The network then takes a step based on stale, inflated gradients and training destabilizes. Zero the gradients every iteration; forgetting is a silent, confusing bug.
 
 ## Why this matters when you use AI
 
@@ -95,9 +104,9 @@ What changes at scale is around the edges, not at the center. The loss is fancie
 
 ## Common pitfalls
 
-**Forgetting to zero the gradients.** The single most common bug. Gradients accumulate across backward passes by design; you must reset them to `0` before each new backward pass, or you step on inflated, stale gradients and training breaks.
+**Forgetting to zero the gradients.** The single most common bug. Gradients accumulate across backward passes by design; you must reset them to zero before each new backward pass, or you step on inflated, stale gradients and training breaks.
 
-**Stepping in the wrong direction.** Gradient descent *subtracts* the gradient (steps downhill). Adding it would climb the loss and make the network worse every iteration. The minus sign in `p.data -= learning_rate * p.grad` is load-bearing.
+**Stepping in the wrong direction.** Gradient descent *subtracts* the gradient (steps downhill). Adding it would climb the loss and make the network worse every iteration. The minus sign in the update rule is load-bearing.
 
 **Mis-setting the learning rate.** Too large and the steps overshoot the minimum and the loss bounces or explodes; too small and training crawls. It is the one knob you most often have to tune by watching the loss.
 
@@ -105,8 +114,8 @@ What changes at scale is around the edges, not at the center. The loss is fancie
 
 ## What you should remember
 
-- **A network is one big expression, and a neuron is a small one.** A neuron is `tanh(weighted sum of inputs + bias)`; a layer is several neurons; an MLP is stacked layers. Running an input through records the whole thing as one computational graph whose leaves are the trainable parameters.
-- **The loss is a single number at the top of that graph, and `backward()` gives every parameter its gradient.** Gradient descent then nudges each parameter opposite its gradient by a small learning rate: `parameter -= learning_rate * gradient`. One worked step took a loss from `16` to `0.64`.
+- **A network is one big expression, and a neuron is a small one.** A neuron is *tanh* of the weighted sum of its inputs plus a bias; a layer is several neurons; an MLP is stacked layers. Running an input through records the whole thing as one computational graph whose leaves are the trainable parameters.
+- **The loss is a single number at the top of that graph, and the backward pass gives every parameter its gradient.** Gradient descent then nudges each parameter opposite its gradient by a small learning rate: subtract the learning rate times the gradient. One worked step took a loss from 16 to 0.64.
 - **Training is a four-step loop: forward, zero gradients, backward, update, repeated.** Forgetting to zero the gradients is the classic bug. This exact loop is how every network learns, including the largest models; only the loss, the optimizer, and the scale change.
 
-You can now build a network from nothing and train it: the full arc of the autograd engine, neurons, a loss, and gradient descent. That is the machinery underneath everything that follows. The next lesson points it at something real, a character-level language model called `makemore` that learns the statistics of names and generates new ones, your first step from a toy network toward a model that produces language.
+You can now build a network from nothing and train it: the full arc of the autograd engine, neurons, a loss, and gradient descent. That is the machinery underneath everything that follows. The next lesson points it at something real, a character-level language model called *makemore* that learns the statistics of names and generates new ones, your first step from a toy network toward a model that produces language.

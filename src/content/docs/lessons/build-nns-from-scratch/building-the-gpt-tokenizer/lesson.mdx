@@ -7,6 +7,15 @@ sidebar:
   label: Lesson
 ---
 
+import ReadAlongDim from '../../../../../components/ReadAlongDim.astro';
+
+<ReadAlongDim
+  src="https://audio.clawdemy.org/lessons/building-the-gpt-tokenizer-lesson.mp3"
+  slug="building-the-gpt-tokenizer"
+  cacheVersion="20261112"
+  approxMinutes={13}
+/>
+
 You have built the entire GPT, from the autograd engine to the trained transformer. But every step quietly assumed something we never explained: that text arrives already chopped into **tokens**, the integer IDs the embedding table looks up. This final lesson builds the piece that does the chopping, the **tokenizer**, the translator sitting between raw human text and the numbers the model consumes. It is a separate stage with its own training, and once you understand it, a whole category of strange language-model behavior stops being mysterious.
 
 This is the last build of the track. When it is done, the contract is fully paid: nothing inside is a mystery, end to end.
@@ -17,7 +26,7 @@ We used characters in the makemore lessons, and it worked, so why not keep them?
 
 The opposite extreme, one token per word, fails differently. The vocabulary explodes into the millions, and any word the tokenizer never saw (a name, a typo, a new term) has no token at all and cannot be represented.
 
-The fix is a middle ground: a vocabulary of **subword** units, where common chunks like `the` or `ing` get a single token, while rarer strings are spelled out from smaller pieces. Common text becomes short token sequences; anything at all can still be represented by falling back to smaller units. The algorithm that builds such a vocabulary is **byte-pair encoding**.
+The fix is a middle ground: a vocabulary of **subword** units, where common chunks like the word *the* or the ending *ing* get a single token, while rarer strings are spelled out from smaller pieces. Common text becomes short token sequences; anything at all can still be represented by falling back to smaller units. The algorithm that builds such a vocabulary is **byte-pair encoding**.
 
 ## Byte-pair encoding: merge the most common pair, repeatedly
 
@@ -28,11 +37,11 @@ Byte-pair encoding (BPE) builds its vocabulary with one simple loop:
 3. **Merge** that pair into a single new token, add it to the vocabulary, and record the merge.
 4. Repeat until the vocabulary reaches a target size.
 
-Each merge turns a common two-token sequence into one token, so the most frequent patterns in the language gradually become single units. Run it long enough and `t`+`h`+`e` collapses into one `the` token, while a rare string stays as several.
+Each merge turns a common two-token sequence into one token, so the most frequent patterns in the language gradually become single units. Run it long enough and the three letters t, h, and e collapse into one token for the word *the*, while a rare string stays as several.
 
 ## A BPE run, by hand
 
-Watch it on the classic small example. Take the string `aaabdaaabac` (11 symbols) and run BPE.
+Watch it on the classic small example. Take an eleven-letter string: the letter a three times, then b, then d, then the letter a three times again, then b, the letter a, and c. Run BPE on it. The most common pair is two a's in a row, so call it Z. After that merge, the most common pair is the letter a followed by b, so call it Y. After that, the pair Z followed by Y is most common, so call it X.
 
 ```
 start:           a a a b d a a a b a c       (11 symbols)
@@ -44,13 +53,13 @@ most common pair: "ZY"  ->  call it X
 after merge:     X d X a c                   (X = ZY = aaab)
 ```
 
-Three merges shrank the sequence from 11 symbols to 5 (`XdXac`), and grew the vocabulary by three tokens (`Z`, `Y`, `X`). The common pattern `aaab` became a single token `X`, exactly what you want: frequent chunks get short. Notice the merges are **layered**, `X` is built from `Z` and `Y`, which are themselves built from base symbols, so a token can stand for a long string.
+Three merges shrank the sequence from 11 symbols to 5 (X, d, X, the letter a, and c), and grew the vocabulary by three tokens (Z, Y, and X). The common pattern of three a's followed by b became the single token X, exactly what you want: frequent chunks get short. Notice the merges are **layered**, X is built from Z and Y, which are themselves built from base symbols, so a token can stand for a long string.
 
 ## Encoding, decoding, and bytes
 
 The merges are the tokenizer. To **encode** new text, apply the learned merges (in the order they were learned) until no more apply, and read off the resulting token IDs. To **decode**, reverse the process: expand each token back through its merges into the original characters. The tokenizer is **trained once** on a corpus, completely separately from the neural network, and then used unchanged.
 
-Use the three merges just learned (`aa`->Z, `ab`->Y, `ZY`->X) to encode a fresh string, `aaab`:
+Use the three merges just learned (two a's in a row become Z, the letter a followed by b becomes Y, Z followed by Y becomes X) to encode a fresh string: three a's followed by b. The first merge turns it into Z, then the letter a, then b; the second merge turns that into Z, Y; the third turns it into X:
 
 ```
 aaab  -- apply aa->Z -->  Zab
@@ -58,13 +67,13 @@ Zab   -- apply ab->Y -->  ZY
 ZY    -- apply ZY->X -->  X
 ```
 
-So `aaab` encodes to a single token, `X`. To decode `X`, unwind the merges: `X` is `ZY`, `Z` is `aa`, `Y` is `ab`, giving back `aaab`. A string the tokenizer has seen often becomes one efficient token; a string with no learned merges, like `dac`, stays as three separate tokens (`d`, `a`, `c`). That is the whole behavior: common gets short, rare stays spelled out. For a sense of scale, a real tokenizer turns a common word like "tokenization" into only a handful of tokens rather than its dozen-plus characters, which is exactly the context-saving the character approach lacked.
+So that string encodes to a single token, X. To decode X, unwind the merges: X is Z then Y, Z is two a's, and Y is the letter a followed by b, giving back three a's and a b. A string the tokenizer has seen often becomes one efficient token; a string with no learned merges, like d, the letter a, and c, stays as three separate tokens. That is the whole behavior: common gets short, rare stays spelled out. For a sense of scale, a real tokenizer turns a common word like "tokenization" into only a handful of tokens rather than its twelve characters, which is exactly the context-saving the character approach lacked.
 
-Real GPT tokenizers run BPE over the raw **bytes** of UTF-8 text rather than characters. Because every possible character (any language, any emoji) is some sequence of bytes, a byte-level tokenizer can represent absolutely any text, with no "unknown token" gaps, while still merging common byte sequences into efficient single tokens. They typically target a vocabulary of tens of thousands of tokens: large enough that common words and subwords each get their own slot, small enough that the embedding table and output layer stay manageable. The effect is real compression, a page of text that is several thousand characters becomes only several hundred tokens, which is precisely the context the character approach was wasting.
+Real GPT tokenizers run BPE over the raw **bytes** of UTF-8 text rather than characters. Because every possible character (any language, any emoji) is some sequence of bytes, a byte-level tokenizer can represent absolutely any text, with no "unknown token" gaps, while still merging common byte sequences into efficient single tokens. They typically target a vocabulary of tens of thousands to a few hundred thousand tokens: large enough that common words and subwords each get their own slot, small enough that the embedding table and output layer stay manageable. The effect is real compression, a page of text that is several thousand characters becomes only several hundred tokens, which is precisely the context the character approach was wasting.
 
 ## Why this matters when you use AI
 
-Here is the payoff that makes the tokenizer worth a whole lesson: a startling number of language-model quirks come from *this stage, not the model*. Models struggle to spell words or count the letters in them, because the model never sees letters, it sees tokens, and a word may be one opaque token whose spelling it has to have memorized separately. The notorious "how many r's are in strawberry?" failure is exactly this: if `strawberry` arrives as a couple of subword tokens rather than ten letters, the model has no direct view of the individual `r`s to count, it would have to have learned the spelling of each token from training, indirectly. Arithmetic is shaky partly because numbers get chopped into tokens inconsistently (`127` might be one token, `128` two). Models are weirdly sensitive to whitespace and to a leading space before a word, because those produce different tokens. And they often perform worse in languages whose text BPE splits into many more tokens per word, leaving less effective context. None of these are flaws in the transformer you built; they are artifacts of how text was turned into tokens before the model ever saw it. Knowing the tokenizer is a separate, trained stage is what lets you predict and explain them.
+Here is the payoff that makes the tokenizer worth a whole lesson: a startling number of language-model quirks come from *this stage, not the model*. Models struggle to spell words or count the letters in them, because the model never sees letters, it sees tokens, and a word may be one opaque token whose spelling it has to have memorized separately. The notorious "how many r's are in strawberry?" failure is exactly this: if *strawberry* arrives as a couple of subword tokens rather than ten letters, the model has no direct view of the individual r's to count, it would have to have learned the spelling of each token from training, indirectly. Arithmetic is shaky partly because numbers get chopped into tokens inconsistently (127 might be one token, 128 two). Models are weirdly sensitive to whitespace and to a leading space before a word, because those produce different tokens. And they often perform worse in languages whose text BPE splits into many more tokens per word, leaving less effective context. None of these are flaws in the transformer you built; they are artifacts of how text was turned into tokens before the model ever saw it. Knowing the tokenizer is a separate, trained stage is what lets you predict and explain them.
 
 And with this piece, the whole pipeline is complete. Raw text goes into the tokenizer and comes out as token IDs; the IDs become token-and-position embeddings; those flow through a stack of transformer blocks, attention routing information, feed-forward layers processing it, residuals and normalization keeping the deep stack trainable; a softmax turns the top into a probability for the next token; you sample one, and the tokenizer turns it back into text. Every single piece of that, you have now built from nothing.
 
@@ -81,9 +90,9 @@ And with this piece, the whole pipeline is complete. Raw text goes into the toke
 ## What you should remember
 
 - **The tokenizer turns raw text into the token IDs a GPT consumes, and back.** Characters make sequences too long; words make the vocabulary explode and break on unseen words. Subword tokens are the middle ground.
-- **Byte-pair encoding builds the vocabulary by repeatedly merging the most frequent adjacent pair into a new token.** Worked once: `aaabdaaabac` becomes `XdXac` in three merges (`aa`->Z, `ab`->Y, `ZY`->X), so common chunks become single tokens. It is trained once, separately from the model, and real tokenizers run it over UTF-8 bytes so any text is representable.
+- **Byte-pair encoding builds the vocabulary by repeatedly merging the most frequent adjacent pair into a new token.** Worked once: the eleven-letter string of three a's, b, d, three a's, b, the letter a, and c becomes the five tokens X, d, X, the letter a, and c in three merges (two a's in a row become Z, the letter a followed by b becomes Y, Z followed by Y becomes X), so common chunks become single tokens. It is trained once, separately from the model, and real tokenizers run it over UTF-8 bytes so any text is representable.
 - **A large share of language-model quirks come from tokenization, not the model:** trouble spelling and counting letters, shaky arithmetic, whitespace sensitivity, and weaker performance in heavily-split languages. The tokenizer is a separate stage, and knowing that explains the quirks.
 
 That completes the track. Look back at the climb. You built an **autograd engine** that computes a gradient through any expression, then a **training loop** that uses it to make a network learn. You turned that into a **language model** by counting character pairs, gave it real memory with **learned embeddings**, and made the deeper network actually train with careful **initialization and normalization**. You backpropagated through it **by hand** to prove the engine holds no secrets, restructured it into a **deep hierarchy**, and then built the **self-attention** that lets each token choose what to listen to. You assembled that into the **full GPT** and trained it, and now you have built the **tokenizer** that feeds it. Ten lessons, and every piece is yours.
 
-You started with a single number wrapped in a `Value` and an autograd engine that computes one gradient; you finish holding the entire blueprint of a large language model, the tokenizer, the embeddings, attention, the transformer block, the training loop, every piece built by hand. The next time someone calls a language model a black box, you will know better: it is a tokenizer, a stack of differentiable operations, and a number that gets nudged downhill a few trillion times. Nothing inside is a mystery, because you built all of it.
+You started with a single number wrapped in a *Value* and an autograd engine that computes one gradient; you finish holding the entire blueprint of a large language model, the tokenizer, the embeddings, attention, the transformer block, the training loop, every piece built by hand. The next time someone calls a language model a black box, you will know better: it is a tokenizer, a stack of differentiable operations, and billions of numbers nudged downhill, step after step, across trillions of tokens of text. Nothing inside is a mystery, because you built all of it.
