@@ -240,7 +240,7 @@ export default defineConfig({
 					],
 				},
 				{
-					label: '1.3  API keys and the OAuth path',
+					label: '1.3  Connecting your AI provider',
 					collapsed: true,
 					items: [
 						{ label: 'Brief', slug: 'lessons/getting-started/api-keys-and-provider-oauth/brief' },
