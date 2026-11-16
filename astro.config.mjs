@@ -181,8 +181,8 @@ export default defineConfig({
 			// Brand wordmark replaces the plain-text title (brand-integration spec
 			// 2026-06-07). Light/dark variants; sizing in src/styles/global.css.
 			logo: {
-				light: './src/assets/brand/Clawdemy-wordmark.png',
-				dark: './src/assets/brand/Clawdemy-wordmark-white.png',
+				light: './src/assets/brand/Clawdemy-wordmark-color.png',
+				dark: './src/assets/brand/Clawdemy-wordmark-color-white.png',
 				replacesTitle: true,
 			},
 			customCss: ['./src/styles/global.css'],
