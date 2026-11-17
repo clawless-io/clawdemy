@@ -12,7 +12,8 @@ tableOfContents: false
 
 ```
 A transformer block = multi-head attention
-                    + position encoding (added once before block 1)
+                    + position encoding (absolute schemes: added once before block 1;
+                      RoPE and ALiBi: applied inside each attention layer)
                     + feed-forward network
                     + residual connections (×2)
                     + layer normalization (×2)
@@ -25,7 +26,7 @@ Stacked attention alone does not work. Each wrapping piece fixes a specific stru
 | Piece | What it adds | Gap it fixes |
 | --- | --- | --- |
 | **Position encoding** | Position-dependent vector added to each embedding | Attention is permutation-invariant by default |
-| **Feed-forward network** | Per-token MLP with nonlinearity | Attention is linear in values; without nonlinearity, depth gives no gain |
+| **Feed-forward network** | Per-token MLP with nonlinearity | Attention only blends values; without a per-token nonlinearity, stacked attention loses rank with depth |
 | **Residual connections** | `output = input + sub-layer(input)` around each sub-layer | Vanishing gradients in deep stacks; information replacement |
 | **Layer normalization** | Rescale activations across features per token | Activation scale drift across deep stacks |
 
@@ -37,6 +38,8 @@ Stacked attention alone does not work. Each wrapping piece fixes a specific stru
 | After attention sub-layer (Add+Norm) | `x_1 = LayerNorm(x_0 + Attention(x_0))` |
 | After FFN sub-layer (Add+Norm) | `x_2 = LayerNorm(x_1 + FFN(x_1))` |
 
+This is the original 2017 Post-LN ordering. Modern models usually use Pre-LN: `x_1 = x_0 + Attention(LayerNorm(x_0))`, then `x_2 = x_1 + FFN(LayerNorm(x_1))`.
+
 Shape in equals shape out. That is what lets the next block stack on top.
 
 ## Architecture knobs
@@ -44,7 +47,7 @@ Shape in equals shape out. That is what lets the next block stack on top.
 | Knob | What it controls | Typical range |
 | --- | --- | --- |
 | Layer count (`N`) | Depth of the model | 6 to 100+ |
-| Head count per layer (`h`) | Parallel attention computations per block | 8 to 32 |
+| Head count per layer (`h`) | Parallel attention computations per block | About 8 to 32 in small and mid-size models, 64 or more in the largest |
 | `d_model` | Main embedding dimension | A few hundred to several thousand |
 | `d_ff` | FFN hidden dimension | Typically 4 × `d_model` |
 
@@ -74,7 +77,7 @@ Shape in equals shape out. That is what lets the next block stack on top.
 | Pitfall | Reality |
 | --- | --- |
 | Block versus layer | "Layer" is overloaded; usually means block, sometimes means sub-layer. Read carefully. |
-| Position encoding added per block | Added once, before block 1. Carried through every block via residuals. |
+| Position encoding added per block | Absolute schemes (sinusoidal, learned): added once, before block 1, and carried through every block via residuals. RoPE and ALiBi apply position inside each attention layer. |
 | FFN does cross-token mixing | No. FFN is per-token; attention is the only cross-token operation. |
 | Residuals are decorative | Load-bearing. A transformer without residuals would not train past a few layers. |
 | LayerNorm equals BatchNorm | Different ops. LayerNorm is per-token (works for variable-length sequences); BatchNorm is per-batch (does not). |
