@@ -116,6 +116,16 @@ const STYLE_TOGGLE_ENABLED = true;
  */
 const FLOATING_PLAYER_ENABLED = true;
 
+/**
+ * Single global flag for "play from here" (issue #73, Carsten Krueger). When
+ * true, each narrated paragraph and list item gets a small play button in the
+ * left margin that starts the audio at that block's first spoken word. The
+ * button is added AFTER the word walker runs and carries no text, so it never
+ * shifts the DOM-word to timing-word alignment. Wide screens only (the margin
+ * is too narrow on phones). Flip to false to remove it site-wide. No MDX edits.
+ */
+const PLAY_FROM_HERE_ENABLED = true;
+
 const cacheQuery = cacheVersion ? `?v=${cacheVersion}` : '';
 const audioSrc = `${src}${cacheQuery}`;
 const timingSrc = `/read-along/${slug}.timing.json${cacheQuery}`;
@@ -168,7 +178,7 @@ const playerId = `rad-${slug}-${Math.random().toString(36).slice(2, 8)}`;
 	)}
 </aside>
 
-<script define:vars={{ playerId, timingSrc, styleToggleEnabled: STYLE_TOGGLE_ENABLED, floatingPlayerEnabled: FLOATING_PLAYER_ENABLED }}>
+<script define:vars={{ playerId, timingSrc, styleToggleEnabled: STYLE_TOGGLE_ENABLED, floatingPlayerEnabled: FLOATING_PLAYER_ENABLED, playFromHereEnabled: PLAY_FROM_HERE_ENABLED }}>
 	(async function initReadAlongDim() {
 		const root = document.querySelector(`[data-player-id="${playerId}"]`);
 		if (!root) return;
@@ -461,6 +471,55 @@ const playerId = `rad-${slug}-${Math.random().toString(36).slice(2, 8)}`;
 					prev = b;
 				}
 				wordBlockIdx[i] = blockEls.length - 1;
+			}
+		}
+
+		// "Play from here" (issue #73). One button per narrated paragraph or
+		// list item, placed in the left margin by CSS. Inserted after the walk
+		// above, holds only an SVG, and is aria-hidden and out of the tab order:
+		// it is a mouse and touch shortcut for a seek the native audio controls
+		// already offer to keyboard and screen-reader users, and 60 extra tab
+		// stops per lesson would bury the page's links.
+		if (playFromHereEnabled) {
+			const HERE_TAGS = new Set(['P', 'LI', 'BLOCKQUOTE']);
+			const firstWordOfBlock = new Array(blockEls.length).fill(-1);
+			for (let i = 0; i < N; i++) {
+				const b = wordBlockIdx[i];
+				if (firstWordOfBlock[b] === -1) firstWordOfBlock[b] = i;
+			}
+			const ICON = '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4.5v15l13-7.5z"></path></svg>';
+			for (let b = 0; b < blockEls.length; b++) {
+				const wi = firstWordOfBlock[b];
+				if (wi < 0) continue;
+				const t = words[wi];
+				if (!t || typeof t.start !== 'number' || !Number.isFinite(t.start)) continue;
+				const el = blockEls[b];
+				if (!HERE_TAGS.has(el.tagName)) continue;
+				const btn = document.createElement('button');
+				btn.type = 'button';
+				btn.className = 'cw-ra-here';
+				btn.tabIndex = -1;
+				btn.setAttribute('aria-hidden', 'true');
+				btn.title = 'Play from here';
+				btn.innerHTML = ICON;
+				btn.dataset.raStart = String(t.start);
+				btn.addEventListener('click', (e) => {
+					e.preventDefault();
+					e.stopPropagation();
+					const at = Math.max(0, t.start - 0.15);
+					const go = () => {
+						audio.currentTime = at;
+						audio.play().catch(() => {});
+					};
+					if (audio.readyState >= 1) {
+						go();
+					} else {
+						audio.addEventListener('loadedmetadata', go, { once: true });
+						audio.load();
+					}
+				});
+				el.classList.add('cw-ra-here-host');
+				el.insertBefore(btn, el.firstChild);
 			}
 		}
 
@@ -793,6 +852,7 @@ const playerId = `rad-${slug}-${Math.random().toString(36).slice(2, 8)}`;
 				// already toggles playback, so letting this handler also fire
 				// would double-toggle (net no-op).
 				if (floatingBtn && floatingBtn.contains(e.target)) return;
+				if (e.target && e.target.closest && e.target.closest('.cw-ra-here')) return;
 				e.preventDefault();
 				if (audio.paused) {
 					audio.play().catch(() => {});
@@ -972,6 +1032,54 @@ const playerId = `rad-${slug}-${Math.random().toString(36).slice(2, 8)}`;
 	}
 	.cw-ra-float[hidden] {
 		display: none;
+	}
+
+	/* "Play from here" (issue #73). Lives in the left margin of the block, so
+	   the text never moves. Hidden on narrow screens, where the margin is the
+	   16px page gutter. On a mouse it appears when the pointer is over the
+	   block; on a touch tablet it stays faintly visible. */
+	.cw-ra-here {
+		display: none;
+	}
+	@media (min-width: 50rem) {
+		.cw-ra-here-host {
+			position: relative;
+		}
+		.cw-ra-here {
+			display: grid;
+			place-items: center;
+			position: absolute;
+			left: -1.75rem;
+			top: 0.2em;
+			width: 1.375rem;
+			height: 1.375rem;
+			padding: 0;
+			margin: 0;
+			border: 1px solid var(--sl-color-gray-5, rgba(127, 127, 127, 0.35));
+			border-radius: 50%;
+			color: var(--clawdemy-blue, #1f6feb);
+			background: var(--sl-color-bg, #fff);
+			cursor: pointer;
+			opacity: 0;
+			transition: opacity 0.15s ease;
+		}
+		li.cw-ra-here-host > .cw-ra-here {
+			left: -3rem;
+		}
+		.cw-ra-here-host:hover > .cw-ra-here,
+		.cw-ra-here:hover {
+			opacity: 1;
+		}
+	}
+	@media (min-width: 50rem) and (hover: none) {
+		.cw-ra-here {
+			opacity: 0.45;
+		}
+	}
+	@media print {
+		.cw-ra-here {
+			display: none !important;
+		}
 	}
 	@media (prefers-reduced-motion: reduce) {
 		.cw-ra-float {
