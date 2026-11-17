@@ -16,7 +16,7 @@ import LessonStar from '../../../../../components/LessonStar.astro';
 <ReadAlongDim
   src="https://audio.clawdemy.org/lessons/how-text-is-generated-lesson.mp3"
   slug="how-text-is-generated"
-  cacheVersion="20260513"
+  cacheVersion="20261117"
   approxMinutes={15}
 />
 
@@ -28,11 +28,11 @@ This is **autoregressive generation**, and it is what every chat interface, code
 
 ## From transformer to text
 
-The architecture from the previous five lessons produces, for every input position, a `d_model`-dim vector at the top of the stack. For most positions we ignore this output (we already know those tokens; we don't need to predict them). But for the **last position**, the position right after the input ends, the model's output is what we use to predict what comes next.
+The architecture from the previous five lessons produces, for every input position, a vector (the size of the model's hidden dimension) at the top of the stack. For most positions we ignore this output (we already know those tokens; we don't need to predict them). But for the **last position**, the position right after the input ends, the model's output is what we use to predict what comes next.
 
-The last bit of architecture is one more linear layer that projects the last position's `d_model`-dim vector to `vocab_size` (typically 30,000 to 100,000). The output is called **logits**: a vector of unnormalized scores, one per token in the vocabulary. The score at position N in this vector is the model's preference for "the next token should be the Nth token in the vocabulary."
+The last bit of architecture is one more linear layer that projects the last position's hidden vector to one score for every token in the vocabulary (a vocabulary typically holds tens of thousands to a couple of hundred thousand tokens). The output is called **logits**: a vector of unnormalized scores, one per token in the vocabulary. The score at position N in this vector is the model's preference for "the next token should be the Nth token in the vocabulary."
 
-Logits are not yet probabilities. To turn them into probabilities, apply **softmax** (the same operation from the attention lesson, applied here across the vocabulary instead of across keys). Now you have a probability distribution: `vocab_size` numbers, all between 0 and 1, summing to 1.0. Each one is the model's predicted probability that this specific token comes next.
+Logits are not yet probabilities. To turn them into probabilities, apply **softmax** (the same operation from the attention lesson, applied here across the vocabulary instead of across keys). Now you have a probability distribution: one number per vocabulary token, all between 0 and 1, summing to 1.0. Each one is the model's predicted probability that this specific token comes next.
 
 The next step is to **pick** a token from that distribution. That picking step is where decoding strategies live, and it is where almost all of the API parameters you have ever set live.
 
@@ -43,7 +43,7 @@ The next step is to **pick** a token from that distribution. That picking step i
 Five steps, in order:
 
 1. **Forward pass.** Run the input tokens through every block of the transformer.
-2. **Logits.** The last position's output goes through the final linear projection to a `vocab_size`-dim vector of unnormalized scores.
+2. **Logits.** The last position's output goes through the final linear projection to a vector of unnormalized scores, one per vocabulary token.
 3. **Softmax.** Turn the scores into a probability distribution.
 4. **Sample.** Pick one token from the distribution. (Decoding strategy lives here.)
 5. **Append.** Add the new token to the input. Loop back to step 1.
@@ -68,23 +68,23 @@ Restrict to the top-k highest-probability tokens, then sample from those (after 
 
 ### Top-p (nucleus) sampling
 
-Restrict to the smallest set of tokens whose cumulative probability is at least p (typically 0.9 or 0.95), then sample from those. Adapts the candidate pool size to the distribution: when the model is confident (a peaked distribution), few candidates; when uncertain (a flat distribution), many candidates. It is the most common modern default.
+Restrict to the smallest set of tokens whose cumulative probability is at least p (typically 0.9 or 0.95), then sample from those. Adapts the candidate pool size to the distribution: when the model is confident (a peaked distribution), few candidates; when uncertain (a flat distribution), many candidates. It is a common choice.
 
 ### Temperature
 
-Before applying softmax, divide all logits by a temperature value `T`. Then softmax. `T = 1.0` is the default (no change). `T < 1.0` sharpens the distribution (the high-probability tokens become more dominant). `T > 1.0` flattens the distribution (low-probability tokens get a fairer shot). Most APIs treat `T = 0` as a shortcut for greedy (the formula is undefined at exactly zero, so the convention is "as `T` approaches zero, sampling collapses to argmax").
+Before applying softmax, divide all logits by a number called the temperature. Then apply softmax. A temperature of 1.0 is the default (no change). A temperature below 1.0 sharpens the distribution (the high-probability tokens become more dominant). A temperature above 1.0 flattens the distribution (low-probability tokens get a fairer shot). Most APIs treat a temperature of zero as a shortcut for greedy (the formula is undefined at exactly zero, so the convention is that as the temperature approaches zero, sampling collapses to always picking the top-scoring token).
 
-Combine: top-p with temperature is the most common modern setup. Temperature shapes the distribution; top-p restricts the candidate pool. Both at the same time gives you a tunable balance between predictability and variety.
+Combine: top-p with temperature is the most common modern setup, where the model allows it. Temperature shapes the distribution; top-p restricts the candidate pool. Both at the same time gives you a tunable balance between predictability and variety.
 
 ## Stop conditions
 
 Generation runs in a loop. Three things can stop it:
 
-- **Max tokens.** A hard limit. Common defaults are 2048 or 4096 tokens, but you can usually raise or lower this per call.
+- **Max tokens.** A hard limit. Defaults and ceilings vary by provider and model, and some APIs require you to set it on every call.
 - **End-of-sequence (EOS) token.** Every model is trained to emit a special EOS token when its response is "done." When the sample step picks EOS, generation stops cleanly.
-- **Custom stop sequences.** Many APIs let you specify strings (`"User:"`, `"</answer>"`, `"\n\n"`) that, when generated, halt the loop.
+- **Custom stop sequences.** Many APIs let you specify strings (for example, a speaker label, a closing tag, or a blank line) that, when generated, halt the loop.
 
-In practice: `max_tokens` always applies; the EOS token or a custom stop sequence ends the loop earlier if either one fires.
+In practice: the maximum-token limit always applies; the EOS token or a custom stop sequence ends the loop earlier if either one fires.
 
 ## KV caching
 
@@ -104,9 +104,9 @@ Modern serving stacks layer one more trick on top: **speculative decoding**. A s
 
 Three direct consequences when you use AI APIs or chat interfaces.
 
-- **Temperature, top-p, top-k are knobs you can turn.** Defaults vary by provider, but 0.7 is a common middle setting; lower for code, math, and structured output; higher for creative writing or brainstorming. Top-p of 0.9 or 0.95 is a common modern default. If your API call's output feels too rigid or too random, these are the first parameters to adjust.
+- **Temperature, top-p, top-k are knobs you can sometimes turn.** Many providers default to a temperature of 1.0, and some current models fix these settings and reject any change, so check your provider's documentation for the model you use. Where they are adjustable, lower values suit code, math, and structured output, and higher values suit creative writing or brainstorming. Top-p of 0.9 or 0.95 is a common choice. If your output feels too rigid or too random and your model allows it, these are the first parameters to adjust.
 - **Streaming is real, not cosmetic.** When you see tokens appear one at a time in a chat UI, that is the model genuinely producing one token per forward pass. The UI is not artificially delaying anything; the architecture is just sequential at inference. Streaming exists because the alternative (waiting for the whole response) would feel much worse.
-- **Cost scales with output length, not just input length.** Every output token is its own forward pass. APIs price input and output tokens separately, and output tokens are typically more expensive than input tokens (sometimes three to five times as much per token) because they require sequential compute. If you are optimizing API spend, shortening output via better prompting, smaller `max_tokens`, or sensible stop sequences is the highest-leverage move.
+- **Cost scales with output length, not just input length.** Every output token is its own forward pass. APIs price input and output tokens separately, and output tokens are typically more expensive than input tokens (often several times as much per token) because they require sequential compute. If you are optimizing API spend, shortening output via better prompting, a smaller maximum-token limit, or sensible stop sequences is the highest-leverage move.
 
 ## Common pitfalls
 
@@ -116,17 +116,17 @@ A few mistakes are common enough to be worth naming.
 
 **Confusing temperature with intelligence.** Higher temperature does not make the model "more creative" in any deep sense. It just samples from a flatter distribution. If a model is bad at a task at temperature 0.7, raising the temperature to 1.5 will make it bad in a more random way, not more competent.
 
-**Reaching for greedy on every "deterministic" task.** Greedy is fine for short structured output (a single label, a short JSON field). For longer multi-step problems (math, multi-line code, multi-paragraph reasoning), pure greedy often gets stuck in suboptimal local choices. Modern best practice for these tasks is low temperature plus top-p rather than pure greedy. The slight stochasticity helps the model escape bad local minima.
+**Reaching for greedy on every "deterministic" task.** Greedy is fine for short structured output (a single label, a short JSON field). For longer multi-step problems (math, multi-line code, multi-paragraph reasoning), pure greedy often gets stuck in suboptimal local choices. Modern best practice for these tasks, where the model allows it, is low temperature plus top-p rather than pure greedy. The slight stochasticity helps the model escape bad local minima.
 
-**Ignoring the EOS token.** When a model "rambles past where it should have stopped," it is usually because either it did not sample EOS at the right place, or `max_tokens` is set higher than needed. Setting a sensible `max_tokens` is a hygiene practice; thinking about stop sequences is a bigger lever for structured tasks.
+**Ignoring the EOS token.** When a model "rambles past where it should have stopped," it is usually because either it did not sample EOS at the right place, or the maximum-token limit is set higher than needed. Setting a sensible maximum-token limit is a hygiene practice; thinking about stop sequences is a bigger lever for structured tasks.
 
 **Mistaking streaming for processing time.** The first-token delay is real (initial prompt processing through the full prompt). The subsequent token-by-token stream is also real (one forward pass per token). What you see is actually how the model works, not a UI animation.
 
 ## What you should remember
 
-- **Generation is a loop.** Forward pass → logits → softmax → sample → append → repeat. Until a stop condition fires.
+- **Generation is a loop.** Forward pass, then logits, then softmax, then sample, then append, then repeat. Until a stop condition fires.
 - **Decoding strategies shape the sample step.** Greedy (always top), pure sampling (raw distribution), top-k (top N), top-p (nucleus). Temperature rescales the distribution before any of these.
-- **Most modern APIs default to top-p sampling with temperature near 0.7.** Lower temperature for structure; higher for creativity. Top-p around 0.9 is the common default.
+- **Defaults vary, and some current models do not let you change them.** Many APIs default to a temperature of 1.0. Where you can adjust, lower temperature for structure and higher for creativity; top-p around 0.9 is a common choice.
 - **KV caching makes generation much cheaper per token by reusing past K and V vectors instead of recomputing them.** Without it, generation would scale quadratically with output length. With it, the per-token cost still grows linearly with cache length (the new query attends over the whole cache), but the dominant constant factor of recomputation is eliminated. Linear, not quadratic; not constant.
 - **Output cost scales linearly with output length.** Every output token is its own forward pass; APIs price accordingly.
 
