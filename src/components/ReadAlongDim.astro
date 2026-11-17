@@ -214,12 +214,29 @@ const playerId = `rad-${slug}-${Math.random().toString(36).slice(2, 8)}`;
 			const res = await fetch(timingSrc);
 			if (!res.ok) throw new Error(`timing HTTP ${res.status}`);
 			const timing = await res.json();
-			if (Array.isArray(timing && timing.words)) words = timing.words;
+			// Keep only timing entries the DOM walker below can ever produce.
+			// The walker wraps a token only if it holds a letter or digit
+			// (HAS_ALNUM), but the narration extractor also emits bare symbol
+			// tokens, most often the "()." left behind when inline code such
+			// as (`trader.py`) is stripped from a sentence. Each one shifted
+			// every later DOM word onto the previous word's timing, so the
+			// highlight ran ahead of the voice from that point on. Measured
+			// 2026-11-17: 151 of 308 timing files carry at least one such
+			// token. Filtering with the walker's own test aligns both sides
+			// by construction and needs no re-render.
+			if (Array.isArray(timing && timing.words)) {
+				words = timing.words.filter(
+					(w) => w && typeof w.text === 'string' && /[A-Za-z0-9]/.test(w.text),
+				);
+			}
 		} catch (err) {
 			console.warn('[read-along-dim] no timing JSON; falling back to audio-only.', err);
 			return;
 		}
 		if (words.length === 0) return;
+		// Exposed for tests/readalong-alignment.spec.ts: the number of timing
+		// words the highlight actually maps onto DOM words.
+		root.dataset.raTimingWords = String(words.length);
 
 		// Find the markdown content container; walk siblings after the
 		// component. Wrap each visible word in a <span class="ra-word">
