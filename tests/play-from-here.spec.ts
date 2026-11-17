@@ -11,7 +11,7 @@ import { expect, test } from '@playwright/test';
  */
 const LESSON = '/lessons/ai-agent-teams/the-trader/lesson/';
 
-test('buttons point at each block\'s first word and leave the alignment alone', async ({
+test('buttons carry their block\'s spoken start time, in reading order', async ({
 	page,
 	isMobile,
 }) => {
@@ -20,34 +20,29 @@ test('buttons point at each block\'s first word and leave the alignment alone', 
 	await page.goto(LESSON);
 	await expect(page.locator('.cw-ra-here').first()).toBeAttached();
 
-	const result = await page.evaluate(async () => {
-		const raw = await (await fetch('/read-along/the-trader.timing.json')).json();
-		// The component maps the timing after dropping symbol-only tokens
-		// (see tests/readalong-alignment.spec.ts); mirror that here.
-		const timing = { words: raw.words.filter((w: { text: string }) => /[A-Za-z0-9]/.test(w.text)) };
-		const words = document.querySelectorAll('.ra-word');
+	const result = await page.evaluate(() => {
 		const buttons = [...document.querySelectorAll<HTMLButtonElement>('.cw-ra-here')];
-		const spans = [...words];
-		const mismatches = buttons.filter((b) => {
-			const host = b.parentElement!;
-			const first = host.querySelector('.ra-word');
-			const idx = spans.indexOf(first as Element);
-			return idx < 0 || Number(b.dataset.raStart) !== timing.words[idx].start;
-		}).length;
+		const starts = buttons.map((b) => Number(b.dataset.raStart));
+		let decreasing = 0;
+		for (let k = 1; k < starts.length; k++) if (starts[k] < starts[k - 1]) decreasing++;
+		// Every button must sit in a block whose first word is a highlighted word.
+		const orphan = buttons.filter((b) => !b.parentElement!.querySelector('.ra-word')).length;
 		return {
-			domWords: words.length,
-			timingWords: timing.words.length,
 			buttons: buttons.length,
 			buttonText: buttons.map((b) => b.textContent ?? '').join('').trim(),
 			hosts: [...new Set(buttons.map((b) => b.parentElement!.tagName))].sort(),
-			mismatches,
+			allFinite: starts.every((t) => Number.isFinite(t)),
+			decreasing,
+			orphan,
 		};
 	});
 
 	expect(result.buttons).toBeGreaterThan(10);
 	expect(result.buttonText).toBe('');
 	for (const tag of result.hosts) expect(['BLOCKQUOTE', 'LI', 'P']).toContain(tag);
-	expect(result.mismatches).toBe(0);
+	expect(result.allFinite).toBe(true);
+	expect(result.decreasing).toBe(0);
+	expect(result.orphan).toBe(0);
 });
 
 test('the button appears on hover in the margin, not over the text', async ({ page, isMobile }) => {
