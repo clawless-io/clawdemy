@@ -15,7 +15,7 @@ import LessonStar from '../../../../../components/LessonStar.astro';
 <ReadAlongDim
   src="https://audio.clawdemy.org/lessons/tools-other-agents-can-trust-lesson.mp3"
   slug="tools-other-agents-can-trust"
-  cacheVersion="20260707"
+  cacheVersion="20261117"
   approxMinutes={18}
 />
 
@@ -25,7 +25,7 @@ Nothing in that failure was the model's fault. The model did what models do: it 
 
 That is this lesson's territory. Lesson 3 taught you to make a model's answers honest with schemas. This lesson turns around and faces the other direction: the tools your agent calls, and how to build them so an agent can use them the way you meant. The track's spine runs straight through it. A tool's interface is where one agent's judgment meets another system's guarantees. The model brings the judgment. Your tool has to bring the guarantees, and it has to describe itself well enough that judgment has something to grip.
 
-Anthropic's engineers, after building tools for their own agents, open their public guidance with a sentence worth keeping: "Agents are only as effective as the tools we give them."
+Anthropic's engineers, after building tools for their own agents, close their public guidance with a summary worth keeping: "Effective tools are intentionally and clearly defined, use agent context judiciously, can be combined together in diverse workflows, and enable agents to intuitively solve real-world tasks."
 
 ## The description is the tool
 
@@ -73,6 +73,8 @@ The second most common tool-design failure is the do-everything tool. It usually
 A human reads the docs and copes. An agent has to guess which parameter combinations are valid, and the schema cannot help, because a single schema now has to permit every combination any action might need. You built a schema that cannot refuse to lie. Lesson 3 worked hard for that property; the do-everything tool throws it away.
 
 The fix is to split along jobs. Each purpose-specific tool gets its own contract: a search tool (`inventory_search_catalog`) that takes keywords and returns matching products, a stock checker (`inventory_check_stock`) that takes one SKU, a reservation tool (`inventory_reserve_stock`) that takes a SKU and a quantity and actually changes state. Now each schema can be strict, each description can be short and sharp, and each error can be specific.
+
+There is an honest trade-off here. Anthropic's current tool-definition guidance advises the opposite move for closely related operations: group them into one tool with an action parameter, because fewer, more capable tools leave the agent less to choose between. Grouping helps when the operations share the same inputs and the same risk, so the agent mostly faces a selection problem. Clawdemy's own rule of thumb, not Anthropic's, is that one-job tools help when the operations take different inputs or one of them changes state, so each contract can stay strict. Anthropic's own example groups related pull request actions (create, review and merge) into one tool, so treat the rule of thumb as a place to start, not a law. When in doubt, test both shapes against the same task and keep the one the agent gets right more often.
 
 One counterweight, so you do not over-rotate: the right unit is a job the agent performs, not an endpoint your backend happens to have. Anthropic's guidance points the same way from the other side: when an agent must always chain the same three little calls to get anything done, merge them into one tool that does the whole job. Splitting the overloaded tool and consolidating the fragmented ones are the same principle. One tool, one job, where "job" is defined by the work, not by your API's history.
 
@@ -126,12 +128,12 @@ In the Building with Claude track you consumed MCP: you connected existing serve
 
 An MCP server can expose three kinds of capability, and the official tutorial defines the first two crisply: resources are "File-like data that can be read by clients," and tools are "Functions that can be called by the LLM (with user approval)." The third, prompts, are pre-written templates a user can invoke. The design question this split hands you is worth pausing on: if the agent only ever needs to read something, such as the shop's current price list, expose it as a resource instead of building yet another tool. Tools are for acting; resources are for reading. Fewer tools, again.
 
-The official Python SDK makes the mechanics almost anticlimactic. You create a server object (`FastMCP`), and each tool is a typed function under a decorator (`@mcp.tool()`), whose docstring becomes the tool definition the model reads:
+The official Python SDK makes the mechanics almost anticlimactic. You create a server object (`MCPServer`), and each tool is a typed function under a decorator (`@mcp.tool()`), whose docstring becomes the tool definition the model reads:
 
 ```python
-from mcp.server.fastmcp import FastMCP
+from mcp.server import MCPServer
 
-mcp = FastMCP("inventory")
+mcp = MCPServer("inventory")
 
 @mcp.tool()
 async def inventory_check_stock(sku: str) -> str:
@@ -144,11 +146,11 @@ async def inventory_check_stock(sku: str) -> str:
     ...
 ```
 
-Read that docstring again. It is the description from earlier in this lesson, landing in its real home. Everything this lesson taught about purpose, inputs, boundaries, and sibling tools gets written right there, in the docstring and the type hints, because that is exactly the text the model will read when it decides whether to call your function. The full walkthrough, including running the server and connecting a client over standard input and output, is the build-server tutorial at modelcontextprotocol.io, and it is shorter than you expect.
+Read that docstring again. It is the description from earlier in this lesson, landing in its real home. Everything this lesson taught about purpose, inputs, boundaries, and sibling tools gets written right there, in the docstring and the type hints, because that is exactly the text the model will read when it decides whether to call your function. The full walkthrough, including running the server and connecting a client over standard input and output, is the build-server tutorial on the Model Context Protocol website, and it is shorter than you expect.
 
 ## Configuration that keeps secrets out of git
 
-A server your whole team should use has to be configured somewhere, and where matters. Claude Code gives MCP configuration three scopes. Local scope is the default: the server is available only to you, only in the current project. User scope is personal too, but follows you across all your projects. Project scope is the shared one: the configuration lives in a file at the project root (`.mcp.json`) that is designed to be checked into version control, so every teammate gets the same tools. Claude Code asks each person for approval before first using a project-scoped server, which is the right paranoia for configuration that arrives via a repository.
+A server your whole team should use has to be configured somewhere, and where matters. Claude Code gives MCP configuration three scopes. Local scope is the default: the server is available only to you, only in the current project. User scope is personal too, but follows you across all your projects. Project scope is the shared one: the configuration lives in a file at the project root (`.mcp.json`) that is designed to be checked into version control, so every teammate gets the same tools. In an interactive session, Claude Code asks each person for approval before first using a project-scoped server, which is the right paranoia for configuration that arrives via a repository. That prompt has a limit: in non-interactive runs that use the print flag, in Agent SDK sessions, and in cloud sessions outside a project's threads, Claude Code cannot show it and loads project-scoped servers without asking. This matters for lesson 7, agents in the pipeline, because agents that run in a pipeline are exactly those unattended sessions, so a server committed to the repository is trusted there with no human approval. One remedy is bare mode, the continuous integration setting that lesson teaches. Bare mode never reads the project's shared server file, so a project-scoped server does not run there, and you pass the servers you want on the command line instead.
 
 Checked into version control raises the obvious question: what about the supplier API key? This is what environment-variable expansion is for. The committed file references a variable by name, and each machine supplies its own value at load time:
 
@@ -166,7 +168,7 @@ Checked into version control raises the obvious question: what about the supplie
 }
 ```
 
-The expansion syntax supports a plain variable reference (`${VAR}`) and a fallback form with a default (`${VAR:-default}`), and it works in the command, arguments, environment, URL, and header fields of a server entry. The committed file names the secret; it never contains it. And if a required variable is missing with no default, Claude Code refuses to load the configuration rather than starting a half-configured server. That should sound familiar: it is lesson 3's refusal to paper over a gap with something plausible, enforced on configuration instead of output.
+The expansion syntax supports a plain variable reference (`${VAR}`) and a fallback form with a default (`${VAR:-default}`), and it works in the command, arguments, environment, URL, and header fields of a server entry. The committed file names the secret; it never contains it. And if a required variable is missing with no default, Claude Code still loads the configuration, reports a warning that names the missing variable, and passes the unexpanded text through as it is. That is close to the opposite of lesson 3's refusal to paper over a gap, so treat the warning as a real signal, and give each variable a default or check it yourself before you rely on a server.
 
 ## Why this matters when you use AI
 
@@ -178,7 +180,7 @@ The expansion syntax supports a plain variable reference (`${VAR}`) and a fallba
 
 **Writing descriptions for readers who can ask follow-ups.** Human documentation survives gaps because humans ask. A model cannot ask. Every piece of implicit context, formats, units, sibling tools, has to be made explicit, or it does not exist.
 
-**One tool with a mode switch.** A do-everything tool with an action parameter forces one schema to permit every combination, which means it can no longer refuse invalid ones. Split along jobs, one contract each.
+**One tool with a mode switch.** A do-everything tool with an action parameter forces one schema to permit every combination, which means it can no longer refuse invalid ones. Split along jobs when the actions need different inputs or carry different risk, one contract each; related actions that share inputs and risk can reasonably stay grouped.
 
 **Errors that only say something failed.** An agent cannot recover from "Error 500." Say whether retrying can help, what rule refused the request, and above all never dress an empty result as a failure or a failure as an empty result.
 
@@ -190,7 +192,7 @@ The expansion syntax supports a plain variable reference (`${VAR}`) and a fallba
 
 - To the model, the description is the tool. It reads the name, description, and schema, never your code. Write those for a reader who cannot ask questions.
 - A selection-worthy description states purpose, inputs, outputs, boundaries, and when to use the tool versus its named siblings.
-- One tool, one job, where jobs are defined by the agent's work, not your backend's endpoints. Split mode-switch tools; merge always-chained fragments.
+- One tool, one job, where jobs are defined by the agent's work, not your backend's endpoints. Split mode-switch tools when their actions need different inputs or carry different risk; merge always-chained fragments.
 - Errors are interface. Distinguish transient failures, business-rule refusals, and permission problems, and never confuse "failed" with "found nothing."
 - Give each agent only its role's tools. A tool never granted is a guarantee; an instruction not to use it is a request.
 - An MCP server exposes tools for acting and resources for reading. Project scope shares the configuration through version control; environment-variable expansion keeps the credentials out of it.
