@@ -56,10 +56,10 @@
  *
  * Per-word start times come from the existing per-MDX-word timing JSON
  * at `/read-along/<slug>.timing.json` (one entry per MDX prose word
- * in render order). DOM-word index N maps to timing.words[N] 1:1
- * because mdxToProse strips exactly the same subtrees the DOM walker
- * skips (verified by the 100% match rate on all 35 retro-rendered
- * lessons, commit ac43f5c).
+ * in render order). mdxToProse strips the same subtrees the DOM walker
+ * skips, but the two still tokenize differently in places, so page words
+ * are matched to timing words by text (alignTiming), not by index. See
+ * tests/readalong-alignment.spec.ts.
  *
  * Usage in MDX:
  *   <ReadAlongDim
@@ -209,17 +209,19 @@ const playerId = `rad-${slug}-${Math.random().toString(36).slice(2, 8)}`;
 
 		// Load per-word timing JSON. timing.words is a flat array of
 		// { word, start, end } objects in MDX render order.
+		let timingWords = [];
 		let words = [];
 		try {
 			const res = await fetch(timingSrc);
 			if (!res.ok) throw new Error(`timing HTTP ${res.status}`);
 			const timing = await res.json();
-			if (Array.isArray(timing && timing.words)) words = timing.words;
+			// Raw timing; aligned to the page words after the walk below.
+			if (Array.isArray(timing && timing.words)) timingWords = timing.words;
 		} catch (err) {
 			console.warn('[read-along-dim] no timing JSON; falling back to audio-only.', err);
 			return;
 		}
-		if (words.length === 0) return;
+		if (timingWords.length === 0) return;
 
 		// Find the markdown content container; walk siblings after the
 		// component. Wrap each visible word in a <span class="ra-word">
@@ -320,10 +322,130 @@ const playerId = `rad-${slug}-${Math.random().toString(36).slice(2, 8)}`;
 
 		if (wordSpans.length === 0) return;
 
-		// Belt-and-suspenders: if timing JSON and DOM word counts disagree,
-		// only operate on the prefix where they line up. Should be 0 drift
-		// on the 35 retro-rendered lessons; non-zero is a regression signal.
-		const N = Math.min(words.length, wordSpans.length);
+		// Map each page word to its spoken start time by TEXT, not by
+		// position. Position alone (page word N gets timing word N) breaks
+		// whenever the page and the narration tokenize differently: symbol
+		// tokens such as the "()." left where inline code is stripped, list
+		// numbers like "1." that are shown but not spoken, words split by
+		// inline formatting ("M" "-inverse"), "map/filter" spoken as one
+		// word, and text shown or spoken only on one side. One such spot
+		// shifted every later word, so the highlight ran ahead of the voice.
+		// Measured 2026-11-17 over all 308 narrated lessons: words getting
+		// their own spoken start rose from 62% (positional) to over 99%,
+		// with every already-aligned lesson mapped exactly as before.
+		function alignTiming(timing, dom) {
+			const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+			const T = [];
+			for (const w of timing) {
+				if (!w || typeof w.text !== 'string' || typeof w.start !== 'number') continue;
+				const k = norm(w.text);
+				if (k) T.push({ k, start: w.start });
+			}
+			const D = dom.map(norm);
+			const nD = D.length;
+			const nT = T.length;
+			const starts = new Array(nD).fill(null);
+			let matched = 0;
+			let i = 0;
+			let j = 0;
+			const WINDOW = 12;
+			const WIDE = 60;
+			const MAXJOIN = 4;
+			// After a wide search finds nothing, skip wide searches for a while so
+			// two unrelated texts cannot cost quadratic time.
+			let wideOffUntil = -1;
+			while (i < nD && j < nT) {
+				if (D[i] === T[j].k) {
+					starts[i] = T[j].start;
+					matched++;
+					i++;
+					j++;
+					continue;
+				}
+				// Page split one spoken word into several (e.g. "M" "-inverse").
+				let joined = false;
+				if (T[j].k.startsWith(D[i])) {
+					let acc = D[i];
+					for (let a = 1; a < MAXJOIN && i + a < nD; a++) {
+						acc += D[i + a];
+						if (acc === T[j].k) {
+							for (let m = 0; m <= a; m++) starts[i + m] = T[j].start;
+							matched += a + 1;
+							i += a + 1;
+							j++;
+							joined = true;
+							break;
+						}
+						if (!T[j].k.startsWith(acc)) break;
+					}
+				}
+				if (joined) continue;
+				// Narration split one page word into several (e.g. "map/filter").
+				if (D[i].startsWith(T[j].k)) {
+					let acc = T[j].k;
+					for (let b = 1; b < MAXJOIN && j + b < nT; b++) {
+						acc += T[j + b].k;
+						if (acc === D[i]) {
+							starts[i] = T[j].start;
+							matched++;
+							i++;
+							j += b + 1;
+							joined = true;
+							break;
+						}
+						if (!D[i].startsWith(acc)) break;
+					}
+				}
+				if (joined) continue;
+				// Resync: smallest total skip (a page words, b timing words) after
+				// which three consecutive words agree.
+				// Try a short reach first; only if nothing agrees, reach further
+				// (a whole unspoken or unshown sentence can be 15 to 40 words).
+				let best = null;
+				for (const W of [WINDOW, WIDE]) {
+				if (best) break;
+				if (W === WIDE && i < wideOffUntil) break;
+				for (let s = 1; s <= 2 * W && !best; s++) {
+					for (let a = 0; a <= s; a++) {
+						const b = s - a;
+						if (a > W || b > W) continue;
+						const ii = i + a;
+						const jj = j + b;
+						if (ii + 2 >= nD || jj + 2 >= nT) continue;
+						if (D[ii] === T[jj].k && D[ii + 1] === T[jj + 1].k && D[ii + 2] === T[jj + 2].k) {
+							best = [a, b];
+							break;
+						}
+					}
+				}
+				}
+				if (!best) {
+					wideOffUntil = i + WIDE;
+					// No anchor in reach: fall back to the old positional step here.
+					starts[i] = T[j].start;
+					i++;
+					j++;
+					continue;
+				}
+				// Unspoken page words (e.g. a list's "1.") dim with the next spoken word.
+				const nextStart = T[j + best[1]].start;
+				for (let m = 0; m < best[0]; m++) starts[i + m] = nextStart;
+				i += best[0];
+				j += best[1];
+			}
+			// Page words past the end of the narration never dim.
+			for (let k = i; k < nD; k++) if (starts[k] === null) starts[k] = Infinity;
+			// Non-decreasing, so the binary search stays valid.
+			for (let k = 1; k < nD; k++) if (starts[k] < starts[k - 1]) starts[k] = starts[k - 1];
+			return { starts, matched };
+		}
+
+		const aligned = alignTiming(timingWords, wordSpans.map((s) => s.textContent || ''));
+		words = aligned.starts.map((start) => ({ start }));
+		const N = wordSpans.length;
+		// Exposed for tests/readalong-alignment.spec.ts.
+		root.dataset.raMatched = String(aligned.matched);
+		root.dataset.raSpanned = String(aligned.starts.filter((t) => t !== Infinity).length);
 
 		// Build a deduplicated list of block elements in render order, plus
 		// a per-word index pointing into it. Used by paragraph mode (and by
