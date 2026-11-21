@@ -18,29 +18,24 @@ const PRACTICE = '/lessons/getting-started/ai-wont-replace-you/practice/';
 // A practice page that uses the interactive flashcard component.
 const FLASHCARDS = '/lessons/getting-started/api-keys-and-provider-oauth/practice/';
 // WebKit refuses screenshots taller than 32767 device pixels. Long lessons
-// on a phone (device scale 3) exceed that, so a too-tall page keeps only its
-// top 32000 device pixels.
+// on a phone (device scale 3) exceed that; those pages get a screenshot of
+// the visible screen instead of the full page.
 const MAX_SHOT_DEVICE_PX = 32000;
 
-async function shoot(page: Page, testInfo: TestInfo, name: string) {
+async function shoot(page: Page, testInfo: TestInfo, name: string, screenOnly = false) {
 	const file = `test-results/screenshots/${testInfo.project.name}/${name}.png`;
-	const { width, height, scale } = await page.evaluate(() => ({
-		width: document.documentElement.scrollWidth,
+	const { height, scale } = await page.evaluate(() => ({
 		height: document.documentElement.scrollHeight,
 		scale: window.devicePixelRatio || 1,
 	}));
 	const maxCssHeight = Math.floor(MAX_SHOT_DEVICE_PX / scale);
-	if (height <= maxCssHeight) {
+	if (!screenOnly && height <= maxCssHeight) {
 		await page.screenshot({ path: file, fullPage: true });
 		return;
 	}
-	// Too tall: WebKit checks the full page size even when clipped, so grow
-	// the viewport to the cap and take a plain screenshot of it instead.
-	const viewport = page.viewportSize() ?? { width, height: 800 };
-	await page.setViewportSize({ width: viewport.width, height: maxCssHeight });
-	await page.evaluate(() => window.scrollTo(0, 0));
+	// Too tall to capture whole: keep what the reader sees on screen at this
+	// step instead (the page top after loading, or the open search dialog).
 	await page.screenshot({ path: file });
-	await page.setViewportSize(viewport);
 }
 
 function collectPageErrors(page: Page): string[] {
@@ -170,5 +165,6 @@ test('search returns a result for a known word', async ({ page }, testInfo) => {
 	await expect(page.locator('dialog[open] .pagefind-ui__result').first()).toBeVisible({
 		timeout: 15_000,
 	});
-	await shoot(page, testInfo, '08-search');
+	// The search dialog sits over the screen; a full-page shot buries it.
+	await shoot(page, testInfo, '08-search', true);
 });
