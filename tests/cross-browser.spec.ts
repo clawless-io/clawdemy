@@ -15,15 +15,33 @@ import { expect, test, type Page, type TestInfo } from '@playwright/test';
 
 const LESSON = '/lessons/getting-started/ai-wont-replace-you/lesson/';
 const PRACTICE = '/lessons/getting-started/ai-wont-replace-you/practice/';
+// A practice page that uses the interactive flashcard component.
+const FLASHCARDS = '/lessons/getting-started/api-keys-and-provider-oauth/practice/';
+// WebKit refuses screenshots taller than 32767 px; long lessons on a phone
+// width exceed that, so every screenshot keeps at most the top 32000 px.
+const MAX_SHOT_HEIGHT = 32000;
 
 async function shoot(page: Page, testInfo: TestInfo, name: string) {
 	const file = `test-results/screenshots/${testInfo.project.name}/${name}.png`;
-	await page.screenshot({ path: file, fullPage: true });
+	const { width, height } = await page.evaluate(() => ({
+		width: document.documentElement.scrollWidth,
+		height: document.documentElement.scrollHeight,
+	}));
+	await page.screenshot({
+		path: file,
+		fullPage: true,
+		clip: { x: 0, y: 0, width, height: Math.min(height, MAX_SHOT_HEIGHT) },
+	});
 }
 
 function collectPageErrors(page: Page): string[] {
 	const errors: string[] = [];
-	page.on('pageerror', (err) => errors.push(err.message));
+	page.on('pageerror', (err) => {
+		// The cookieless visit counter only accepts reports from the production
+		// address; WebKit raises its refusal from localhost as a page error.
+		if (err.message.includes('cloudflareinsights.com')) return;
+		errors.push(err.message);
+	});
 	return errors;
 }
 
@@ -44,7 +62,9 @@ test('a narrated lesson page renders its title, body and navigation', async ({
 	const errors = collectPageErrors(page);
 	await page.goto(LESSON);
 	await expect(page.locator('main h1').first()).toBeVisible();
-	await expect(page.locator('main .sl-markdown-content p').first()).toBeVisible();
+	await expect(
+		page.locator('main .sl-markdown-content p').filter({ visible: true }).first(),
+	).toBeVisible();
 	if (isMobile) {
 		await expect(page.locator('starlight-menu-button button')).toBeVisible();
 	} else {
@@ -113,7 +133,7 @@ test('the read-along matches page words to the narration', async ({ page }, test
 });
 
 test('a flashcard reveals its answer on click', async ({ page }, testInfo) => {
-	await page.goto(PRACTICE);
+	await page.goto(FLASHCARDS);
 	const card = page.locator('details.flashcard').first();
 	const answer = card.locator('.flashcard-answer');
 	await card.scrollIntoViewIfNeeded();
