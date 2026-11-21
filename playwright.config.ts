@@ -6,8 +6,8 @@ import { defineConfig, devices } from '@playwright/test';
  * Tests run against `bun run preview` (the production build), not the dev
  * server, so we test what readers actually see.
  *
- * For Phase 1 we run Chromium only locally for speed; CI runs all three
- * engines + a mobile viewport. Add tests under `tests/`.
+ * Locally we run Chromium only for speed; CI runs one job per project:
+ * Chromium, Firefox, WebKit, an emulated Android phone and an emulated iPhone. Add tests under `tests/`.
  */
 export default defineConfig({
 	testDir: './tests',
@@ -33,6 +33,14 @@ export default defineConfig({
 					{ name: 'firefox', use: { ...devices['Desktop Firefox'] } },
 					{ name: 'webkit', use: { ...devices['Desktop Safari'] } },
 					{ name: 'mobile-chrome', use: { ...devices['Pixel 7'] } },
+					// The iPhone profile runs the cross-browser checks only. The older
+					// specs skip phone layouts by the 'mobile-chrome' name and were not
+					// written for a second phone project.
+					{
+						name: 'mobile-safari',
+						use: { ...devices['iPhone 15'] },
+						testMatch: /cross-browser\.spec\.ts/,
+					},
 				]
 			: []),
 	],

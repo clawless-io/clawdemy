@@ -1,0 +1,90 @@
+name: Cross-browser (macOS, hand-started)
+
+# Started by hand before a release (Actions tab, "Run workflow"). Two parts:
+#   1. The cross-browser checks (tests/cross-browser.spec.ts) in Playwright's
+#      WebKit on macOS, desktop and iPhone profile. macOS has the system media
+#      stack, so the audio check also asserts playback here (CW_ASSERT_PLAY).
+#   2. Three pages opened in Safari inside the iOS Simulator, one screenshot
+#      each, against the same local build.
+# Neither part is desktop Safari.app. Playwright drives its own WebKit build,
+# and the simulator is not a real phone.
+#
+# Every action is pinned to a full commit hash; the comment names the release.
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: cross-browser-macos-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    name: WebKit on macOS + iOS Simulator screenshots
+    runs-on: macos-15
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+
+      - name: Set up Node
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build site (includes Pagefind index)
+        run: bun run build
+
+      - name: Install Playwright WebKit
+        run: bunx playwright install webkit
+
+      - name: Run cross-browser checks in WebKit (desktop and iPhone profile)
+        env:
+          CW_ASSERT_PLAY: '1'
+        run: bunx playwright test tests/cross-browser.spec.ts --project=webkit --project=mobile-safari
+
+      - name: Screenshot three pages in the iOS Simulator
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p test-results/screenshots/ios-simulator
+          bun run preview > preview.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -sf -o /dev/null http://localhost:4321/ && break
+            sleep 1
+          done
+          curl -sf -o /dev/null http://localhost:4321/ || { cat preview.log; exit 1; }
+          UDID=$(xcrun simctl list devices available -j \
+            | python3 -c 'import json,re,sys; d=json.load(sys.stdin)["devices"]; v=lambda r: tuple(int(n) for n in re.findall(r"\d+", r.split("iOS")[-1])); print(next(x["udid"] for r in sorted((k for k in d if "iOS" in k), key=v, reverse=True) for x in d[r] if x["name"].startswith("iPhone")))')
+          xcrun simctl boot "$UDID" || true
+          xcrun simctl bootstatus "$UDID" -b
+          shot() {
+            xcrun simctl openurl "$UDID" "http://localhost:4321$1"
+            sleep 12
+            xcrun simctl io "$UDID" screenshot "test-results/screenshots/ios-simulator/$2.png"
+          }
+          shot / 01-home
+          shot /lessons/getting-started/ai-wont-replace-you/lesson/ 02-lesson
+          shot /tracks/ 07-tracks
+          xcrun simctl shutdown "$UDID"
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: screenshots-macos-${{ github.sha }}
+          path: test-results/screenshots/
+          retention-days: 14
+          if-no-files-found: warn
