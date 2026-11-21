@@ -12,6 +12,17 @@ on:
   pull_request:
     branches: [main, dev]
 
+permissions:
+  contents: read
+
+# A newer push to the same branch or pull request cancels the older run.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+# Every action is pinned to a full commit hash; the comment names the release.
+# A moving tag can be repointed to different code without any change here.
+
 # Runners are PINNED to ubuntu-24.04, not `ubuntu-latest`.
 #
 # On 2026-11-07 GitHub rolled the `ubuntu-latest` label from ubuntu-24.04
@@ -43,7 +54,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           # Full history on purpose. astro.config.mjs derives each lesson
           # artifact's sitemap lastmod from the last commit touching its .mdx.
@@ -57,12 +68,12 @@ jobs:
       # which Bun-run scripts shell out to. Astro requires Node >=22.12.
       # Version pinned in .nvmrc for one source of truth.
       - name: Set up Node
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version-file: .nvmrc
 
       - name: Install Bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: latest
 
@@ -146,7 +157,7 @@ jobs:
         run: bun run validate:sitemap-lastmod
 
       - name: Upload build artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: dist-${{ github.sha }}
           path: dist/
@@ -165,16 +176,16 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
       - name: Download build artifact
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: dist-${{ github.sha }}
           path: dist/
 
       - name: Run lychee
-        uses: lycheeverse/lychee-action@v2
+        uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
         with:
           # --root-dir is required so lychee can resolve root-relative links
           # (href="/", href="/mission/") in built HTML against the local dist
@@ -186,25 +197,43 @@ jobs:
             './dist/**/*.html'
           fail: true
 
+  # One job per browser project, so each engine installs only its own browser,
+  # fits the time-out, and uploads its own screenshots. The projects are
+  # defined in playwright.config.ts; tests/cross-browser.spec.ts saves a
+  # full-page screenshot per check, uploaded below for a person to look at.
   e2e:
-    name: Playwright e2e tests
+    name: Playwright e2e tests (${{ matrix.project }})
     runs-on: ubuntu-24.04
     needs: build-and-validate
-    timeout-minutes: 15
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - project: chromium
+            browser: chromium
+          - project: firefox
+            browser: firefox
+          - project: webkit
+            browser: webkit
+          - project: mobile-chrome
+            browser: chromium
+          - project: mobile-safari
+            browser: webkit
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
       # Node is required by `astro preview` (started by the Playwright config
       # before tests run). Astro requires Node >=22.12.
       - name: Set up Node
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version-file: .nvmrc
 
       - name: Install Bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: latest
 
@@ -212,23 +241,32 @@ jobs:
         run: bun install --frozen-lockfile
 
       # Reuse the artifact built by build-and-validate so astro preview has
-      # something to serve. Avoids rebuilding twice in CI.
+      # something to serve. Avoids rebuilding in every matrix job.
       - name: Download build artifact
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: dist-${{ github.sha }}
           path: dist/
 
-      - name: Install Playwright browsers
-        run: bun run test:e2e:install
+      - name: Install Playwright browser
+        run: bunx playwright install --with-deps ${{ matrix.browser }}
 
       - name: Run e2e tests
-        run: bun run test:e2e
+        run: bunx playwright test --project=${{ matrix.project }}
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: screenshots-${{ matrix.project }}-${{ github.sha }}
+          path: test-results/screenshots/
+          retention-days: 14
+          if-no-files-found: warn
 
       - name: Upload Playwright report on failure
         if: failure()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
-          name: playwright-report-${{ github.sha }}
+          name: playwright-report-${{ matrix.project }}-${{ github.sha }}
           path: playwright-report/
           retention-days: 7
