@@ -27,11 +27,17 @@ async function shoot(page: Page, testInfo: TestInfo, name: string) {
 		width: document.documentElement.scrollWidth,
 		height: document.documentElement.scrollHeight,
 	}));
-	await page.screenshot({
-		path: file,
-		fullPage: true,
-		clip: { x: 0, y: 0, width, height: Math.min(height, MAX_SHOT_HEIGHT) },
-	});
+	if (height <= MAX_SHOT_HEIGHT) {
+		await page.screenshot({ path: file, fullPage: true });
+		return;
+	}
+	// Too tall: WebKit checks the full page size even when clipped, so grow
+	// the viewport to the cap and take a plain screenshot of it instead.
+	const viewport = page.viewportSize() ?? { width, height: 800 };
+	await page.setViewportSize({ width: viewport.width, height: MAX_SHOT_HEIGHT });
+	await page.evaluate(() => window.scrollTo(0, 0));
+	await page.screenshot({ path: file });
+	await page.setViewportSize(viewport);
 }
 
 function collectPageErrors(page: Page): string[] {
@@ -68,7 +74,7 @@ test('a narrated lesson page renders its title, body and navigation', async ({
 	if (isMobile) {
 		await expect(page.locator('starlight-menu-button button')).toBeVisible();
 	} else {
-		await expect(page.locator('nav[aria-label="Main"]')).toBeVisible();
+		await expect(page.locator('#starlight__sidebar a[aria-current="page"]')).toBeVisible();
 	}
 	// No sideways scroll at any width.
 	const overflow = await page.evaluate(
