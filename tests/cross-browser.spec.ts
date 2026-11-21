@@ -17,24 +17,27 @@ const LESSON = '/lessons/getting-started/ai-wont-replace-you/lesson/';
 const PRACTICE = '/lessons/getting-started/ai-wont-replace-you/practice/';
 // A practice page that uses the interactive flashcard component.
 const FLASHCARDS = '/lessons/getting-started/api-keys-and-provider-oauth/practice/';
-// WebKit refuses screenshots taller than 32767 px; long lessons on a phone
-// width exceed that, so every screenshot keeps at most the top 32000 px.
-const MAX_SHOT_HEIGHT = 32000;
+// WebKit refuses screenshots taller than 32767 device pixels. Long lessons
+// on a phone (device scale 3) exceed that, so a too-tall page keeps only its
+// top 32000 device pixels.
+const MAX_SHOT_DEVICE_PX = 32000;
 
 async function shoot(page: Page, testInfo: TestInfo, name: string) {
 	const file = `test-results/screenshots/${testInfo.project.name}/${name}.png`;
-	const { width, height } = await page.evaluate(() => ({
+	const { width, height, scale } = await page.evaluate(() => ({
 		width: document.documentElement.scrollWidth,
 		height: document.documentElement.scrollHeight,
+		scale: window.devicePixelRatio || 1,
 	}));
-	if (height <= MAX_SHOT_HEIGHT) {
+	const maxCssHeight = Math.floor(MAX_SHOT_DEVICE_PX / scale);
+	if (height <= maxCssHeight) {
 		await page.screenshot({ path: file, fullPage: true });
 		return;
 	}
 	// Too tall: WebKit checks the full page size even when clipped, so grow
 	// the viewport to the cap and take a plain screenshot of it instead.
 	const viewport = page.viewportSize() ?? { width, height: 800 };
-	await page.setViewportSize({ width: viewport.width, height: MAX_SHOT_HEIGHT });
+	await page.setViewportSize({ width: viewport.width, height: maxCssHeight });
 	await page.evaluate(() => window.scrollTo(0, 0));
 	await page.screenshot({ path: file });
 	await page.setViewportSize(viewport);
