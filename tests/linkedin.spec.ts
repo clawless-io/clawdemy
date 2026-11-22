@@ -52,3 +52,32 @@ for (const path of SAMPLE_PATHS) {
 		expect(platformRequests).toEqual([]);
 	});
 }
+
+const X_HREF = 'https://x.com/LearnClawdemy';
+
+for (const path of SAMPLE_PATHS) {
+	test(`${path} renders X Follow anchor with correct attrs`, async ({ page }) => {
+		await page.goto(path);
+		const link = page.locator(`a[href="${X_HREF}"]`);
+		await expect(link).toHaveCount(1);
+		await expect(link).toHaveAttribute('target', '_blank');
+		const rel = (await link.getAttribute('rel')) || '';
+		expect(rel).toContain('noopener');
+		expect(rel).toContain('noreferrer');
+		const aria = (await link.getAttribute('aria-label')) || '';
+		expect(aria).toContain('on X');
+	});
+
+	test(`${path} loads no X platform scripts`, async ({ page }) => {
+		const xRequests: string[] = [];
+		page.on('request', (req) => {
+			const host = new URL(req.url()).hostname;
+			if (/(^|\.)(x|twitter)\.com$/.test(host) || host.endsWith('twimg.com')) {
+				xRequests.push(req.url());
+			}
+		});
+		await page.goto(path);
+		await page.waitForLoadState('networkidle');
+		expect(xRequests).toEqual([]);
+	});
+}
