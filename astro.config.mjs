@@ -851,6 +851,18 @@ export default defineConfig({
 									],
 								},
 								{
+									label: 'MCP: one plug, many AI apps',
+									collapsed: true,
+									items: [
+										{ label: 'Brief', slug: 'lessons/ai-foundations/how-mcp-connects-ai-to-tools/brief' },
+										{ label: 'Lesson', slug: 'lessons/ai-foundations/how-mcp-connects-ai-to-tools/lesson' },
+										{ label: 'Practice', slug: 'lessons/ai-foundations/how-mcp-connects-ai-to-tools/practice' },
+										{ label: 'Summary', slug: 'lessons/ai-foundations/how-mcp-connects-ai-to-tools/summary' },
+										{ label: 'Cheatsheet', slug: 'lessons/ai-foundations/how-mcp-connects-ai-to-tools/cheatsheet' },
+										{ label: 'References', slug: 'lessons/ai-foundations/how-mcp-connects-ai-to-tools/references' },
+									],
+								},
+								{
 									label: 'Agent loops: observe, plan, act',
 									collapsed: true,
 									items: [

@@ -14,21 +14,30 @@
  * Setup:
  *   1. Copy `.env.example` to `.env`.
  *   2. Add your ElevenLabs API key.
- *   3. Add your Cloudflare R2 credentials (account ID + access key + secret).
+ *   3. Add the Cloudflare R2 staging settings (account ID, staging bucket, key + secret).
  *   4. (Optional) Adjust the voice ID.
  *
  * Usage:
- *   bun run audio:generate <slug>                # render + upload to R2 (default)
- *   bun run audio:generate --all                 # every lesson, render + upload
+ *   bun run audio:generate <slug>                # render + upload to staging (default)
+ *   bun run audio:generate --all                 # every lesson, render + upload to staging
  *   bun run audio:generate --no-upload <slug>    # render locally only, skip R2
- *   bun run audio:generate --upload-only <slug>  # upload existing local MP3, no render
- *   bun run audio:generate --upload-only --all   # upload every existing local MP3
+ *   bun run audio:generate --upload-only <slug>  # upload existing local MP3 to staging, no render
+ *   bun run audio:generate --upload-only --all   # upload every existing local MP3 to staging
  *   bun run audio:generate --dry-run <slug>      # preview prose, no API call
  *   bun run audio:generate --list                # show available slugs
  *
- * The R2 upload step is idempotent: a HEAD on the public URL
- * (audio.clawdemy.org/lessons/<slug>-lesson.mp3) is checked first; if the
- * file is already there, the PUT is skipped.
+ * Uploads go to a PRIVATE staging bucket, never to the public one. A new
+ * recording therefore stays unpublished until its lesson is released. At
+ * release, scripts/promote-audio.ts copies the staged files server-side into
+ * the public bucket (clawdemy-audio, served at audio.clawdemy.org). Nothing
+ * in this file writes to the public bucket.
+ *
+ * Each render records the MD5 of its finished MP3 in the timing JSON
+ * (`audio_md5`), and each staged object carries the SHA-256 of the prose that
+ * produced it as object metadata. Together they bind text, audio and timings:
+ * an upload refuses an MP3 that does not match its timing JSON, and promotion
+ * refuses audio that does not match the committed text and timings. The upload
+ * is skipped only when staging already holds the same bytes for the same text.
  *
  * Lesson slugs are the directory names under
  *   src/content/docs/lessons/<track>/<slug>/
@@ -130,15 +139,24 @@ const AUDIO_OUT = 'public/audio';
 const TIMING_OUT = 'public/read-along';
 const BACKUP_DIR = 'public/audio/.backup';
 
-// Cloudflare R2 (S3-compatible) for syncing rendered MP3s to the
-// clawdemy-audio bucket served at audio.clawdemy.org.
+// Cloudflare R2 (S3-compatible). Renders upload to a private staging bucket;
+// scripts/promote-audio.ts copies them into the public bucket at release.
 // Env vars come from .env (gitignored); see .env.example for the shape.
+// There is deliberately no fallback to any other key or bucket: if a staging
+// variable is missing the upload fails, rather than landing somewhere public.
 const R2_ACCOUNT_ID = process.env.CLOUDFLARE_ACCOUNT_ID;
-const R2_ACCESS_KEY_ID = process.env.R2_ACCESS_KEY_ID;
-const R2_SECRET_ACCESS_KEY = process.env.R2_SECRET_ACCESS_KEY;
-const R2_BUCKET = 'clawdemy-audio';
-const R2_KEY_PREFIX = 'lessons/';
+const R2_STAGING_ACCESS_KEY_ID = process.env.R2_STAGING_ACCESS_KEY_ID;
+const R2_STAGING_SECRET_ACCESS_KEY = process.env.R2_STAGING_SECRET_ACCESS_KEY;
+export const R2_STAGING_BUCKET = process.env.R2_STAGING_BUCKET;
+export const R2_PUBLIC_BUCKET = 'clawdemy-audio';
+export const R2_KEY_PREFIX = 'lessons/';
 const R2_PUBLIC_BASE = 'https://audio.clawdemy.org/';
+export const META_PROSE_HASH = 'prose-sha256';
+
+/** MD5 hex of a file's bytes; equals the R2 ETag of a single-part upload. */
+export function md5Hex(bytes: Buffer): string {
+	return createHash('md5').update(bytes).digest('hex');
+}
 
 // ---------------------------------------------------------------------------
 // Cloudflare R2 sync
@@ -150,29 +168,37 @@ const R2_PUBLIC_BASE = 'https://audio.clawdemy.org/';
  * work in environments without R2 credentials configured (e.g., CI).
  */
 let r2ClientInstance: S3Client | null = null;
-function getR2Client(): S3Client {
+export function getR2Client(): S3Client {
 	if (r2ClientInstance) return r2ClientInstance;
-	if (!R2_ACCOUNT_ID || !R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY) {
+	if (
+		!R2_ACCOUNT_ID ||
+		!R2_STAGING_ACCESS_KEY_ID ||
+		!R2_STAGING_SECRET_ACCESS_KEY ||
+		!R2_STAGING_BUCKET
+	) {
 		throw new Error(
-			'R2 credentials missing. Set CLOUDFLARE_ACCOUNT_ID, R2_ACCESS_KEY_ID, ' +
-				'and R2_SECRET_ACCESS_KEY in .env (see .env.example), or pass --no-upload ' +
-				'to skip the R2 sync step.',
+			'R2 staging settings missing. Set CLOUDFLARE_ACCOUNT_ID, R2_STAGING_ACCESS_KEY_ID, ' +
+				'R2_STAGING_SECRET_ACCESS_KEY and R2_STAGING_BUCKET in .env (see .env.example), ' +
+				'or pass --no-upload to skip the R2 step.',
 		);
+	}
+	if (R2_STAGING_BUCKET === R2_PUBLIC_BUCKET) {
+		throw new Error('R2_STAGING_BUCKET must not be the public bucket.');
 	}
 	r2ClientInstance = new S3Client({
 		endpoint: `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
 		region: 'auto',
 		credentials: {
-			accessKeyId: R2_ACCESS_KEY_ID,
-			secretAccessKey: R2_SECRET_ACCESS_KEY,
+			accessKeyId: R2_STAGING_ACCESS_KEY_ID,
+			secretAccessKey: R2_STAGING_SECRET_ACCESS_KEY,
 		},
 	});
 	return r2ClientInstance;
 }
 
 /**
- * HEAD the object directly via the R2 S3 endpoint. Returns true iff the
- * bucket has a copy.
+ * HEAD the staged object directly via the R2 S3 endpoint. Returns its ETag
+ * and metadata, or null if staging has no copy.
  *
  * Why S3 and not the public custom-domain URL? Cloudflare's CDN caches
  * 404 responses on audio.clawdemy.org for ~4 hours. If we HEAD the public
@@ -181,43 +207,54 @@ function getR2Client(): S3Client {
  * goes straight to R2 with no CDN in front, so it's both the right
  * source of truth and side-effect-free.
  */
-async function isAlreadyUploaded(slug: string): Promise<boolean> {
+async function stagedObject(
+	slug: string,
+): Promise<{ etag: string; metadata: Record<string, string> } | null> {
 	const client = getR2Client();
 	const key = `${R2_KEY_PREFIX}${slug}-lesson.mp3`;
 	try {
-		await client.send(new HeadObjectCommand({ Bucket: R2_BUCKET, Key: key }));
-		return true;
+		const head = await client.send(new HeadObjectCommand({ Bucket: R2_STAGING_BUCKET, Key: key }));
+		return { etag: (head.ETag ?? '').replace(/"/g, ''), metadata: head.Metadata ?? {} };
 	} catch (err: any) {
 		// AWS SDK throws on 404; that's our signal the object is absent.
 		if (err?.name === 'NotFound' || err?.$metadata?.httpStatusCode === 404) {
-			return false;
+			return null;
 		}
 		throw err;
 	}
 }
 
 /**
- * Upload an MP3 to clawdemy-audio at lessons/<slug>-lesson.mp3 with
- * Content-Type audio/mpeg, then verify by HEAD-ing the same object via
- * the S3 endpoint. We avoid the public CF URL for verify too, both to
- * keep the verify side-effect-free and because R2's eventual consistency
- * on the S3 endpoint is faster than CF's revalidation against R2.
+ * Upload an MP3 to the staging bucket at lessons/<slug>-lesson.mp3 with
+ * Content-Type audio/mpeg and the prose hash as metadata, then
+ * verify by HEAD-ing the same object via the S3 endpoint.
  */
-async function uploadToR2(slug: string, body: Buffer): Promise<void> {
+async function uploadToR2(
+	slug: string,
+	body: Buffer,
+	metadata: Record<string, string>,
+): Promise<void> {
 	const client = getR2Client();
 	const key = `${R2_KEY_PREFIX}${slug}-lesson.mp3`;
 	await client.send(
 		new PutObjectCommand({
-			Bucket: R2_BUCKET,
+			Bucket: R2_STAGING_BUCKET,
 			Key: key,
 			Body: body,
 			ContentType: 'audio/mpeg',
+			Metadata: metadata,
 		}),
 	);
 	for (let attempt = 0; attempt < 5; attempt++) {
 		await new Promise((r) => setTimeout(r, 300 * (attempt + 1)));
 		try {
-			await client.send(new HeadObjectCommand({ Bucket: R2_BUCKET, Key: key }));
+			const head = await client.send(new HeadObjectCommand({ Bucket: R2_STAGING_BUCKET, Key: key }));
+			if (
+				head.Metadata?.[META_PROSE_HASH] !== metadata[META_PROSE_HASH] ||
+				(head.ETag ?? '').replace(/"/g, '') !== md5Hex(body)
+			) {
+				throw new Error(`Staged ${key} does not match the uploaded file (prose hash or ETag).`);
+			}
 			return;
 		} catch (err: any) {
 			if (err?.name === 'NotFound' || err?.$metadata?.httpStatusCode === 404) {
@@ -708,50 +745,73 @@ async function findLessons(): Promise<Lesson[]> {
 // ---------------------------------------------------------------------------
 
 /**
- * Upload the local MP3 for a slug to R2, idempotent by default: if the
- * R2 bucket already has a copy at the target key, skip. Used both by the
+ * Upload the local MP3 for a slug to the staging bucket. Used both by the
  * render path (after a fresh write) and by --upload-only mode.
  *
- * Pass `force: true` to overwrite an existing R2 object. Required when
- * the lesson body has been revised: a fresh render lands locally with a
- * new hash, but the R2 object at the same key still holds the old audio,
- * so listeners would keep hearing the prior version until manual purge.
+ * The upload is skipped only when staging already holds an object carrying
+ * the same prose hash as the local MP3's .hash file. Any other case (absent,
+ * older metadata, different text) uploads, so a revised lesson can never
+ * keep stale staged audio. `force: true` uploads regardless.
  */
 async function ensureUploadedToR2(
 	slug: string,
 	opts: { force?: boolean } = {},
 ): Promise<'uploaded' | 'already'> {
-	if (!opts.force && (await isAlreadyUploaded(slug))) {
-		console.log(`= R2      ${slug.padEnd(30)} already uploaded`);
-		return 'already';
-	}
 	const localPath = join(AUDIO_OUT, `${slug}-lesson.mp3`);
-	if (!existsSync(localPath)) {
+	const hashPath = join(AUDIO_OUT, `${slug}-lesson.hash`);
+	const timingPath = join(TIMING_OUT, `${slug}.timing.json`);
+	if (!existsSync(localPath) || !existsSync(hashPath) || !existsSync(timingPath)) {
 		throw new Error(
-			`Cannot upload ${slug}: no local MP3 at ${localPath}. Run audio:generate ` +
-				`without --upload-only first to render it, or remove --upload-only.`,
+			`Cannot upload ${slug}: need ${localPath}, ${hashPath} and ${timingPath}. ` +
+				`Run audio:generate without --upload-only first to render it.`,
 		);
 	}
 	const body = await readFile(localPath);
+	const audioMd5 = md5Hex(body);
+	const timing = JSON.parse(await readFile(timingPath, 'utf-8'));
+	if (timing.audio_md5 === undefined) {
+		// Rendered before fingerprints existed: that recording is already the
+		// published one, so there is nothing to stage. Re-render to stage it.
+		console.log(`= staging ${slug.padEnd(30)} skipped, timing JSON has no audio fingerprint (older render)`);
+		return 'already';
+	}
+	if (timing.audio_md5 !== audioMd5) {
+		throw new Error(
+			`Cannot upload ${slug}: ${localPath} is not the recording ${timingPath} was made for ` +
+				`(timing audio_md5 ${timing.audio_md5 ?? 'absent'}, local MP3 ${audioMd5}). ` +
+				`The local MP3 is from another render; render the lesson in this checkout.`,
+		);
+	}
+	const proseHash = (await readFile(hashPath, 'utf-8')).trim();
+	const staged = await stagedObject(slug);
+	if (
+		!opts.force &&
+		staged &&
+		staged.etag === audioMd5 &&
+		staged.metadata[META_PROSE_HASH] === proseHash
+	) {
+		console.log(`= staging ${slug.padEnd(30)} already staged for this text`);
+		return 'already';
+	}
 	const sizeMb = (body.length / 1024 / 1024).toFixed(2);
-	process.stdout.write(`> upload  ${slug.padEnd(30)} ${sizeMb} MB...`);
-	await uploadToR2(slug, body);
+	process.stdout.write(`> stage   ${slug.padEnd(30)} ${sizeMb} MB...`);
+	await uploadToR2(slug, body, { [META_PROSE_HASH]: proseHash });
 	console.log(' ok');
 	stageTimingJson(slug);
 	return 'uploaded';
 }
 
 /**
- * Stage the timing JSON the moment its audio reaches R2.
+ * Add the timing JSON to the git index the moment its audio is staged.
  *
- * WHY. R2 publishes to production immediately and is decoupled from git, so
- * the instant an upload succeeds production is serving audio whose word
- * timings exist only in this working tree. On 2026-10-31 three lessons were
- * uploaded and their regenerated timing JSON was never committed, leaving
- * production pairing new audio with old timings for hours
- * (agent-skills-and-claude-code: 2336 committed entries, 2420 spoken words).
- * Staging it here means the file is already in the index when the operator
- * commits, so forgetting it takes deliberate effort rather than none.
+ * WHY. The audio and its word timings must travel together. On 2026-10-31,
+ * before uploads went to staging, three lessons were uploaded and their
+ * regenerated timing JSON was never committed, leaving production pairing new
+ * audio with old timings for hours (agent-skills-and-claude-code: 2336
+ * committed entries, 2420 spoken words). Uploads are staged now, but
+ * scripts/promote-audio.ts refuses to publish audio whose timing JSON is not
+ * the committed one, so the file still has to be committed with its lesson.
+ * Adding it here means forgetting it takes deliberate effort rather than none.
  *
  * Best-effort on purpose: a failure here must never fail a paid render that
  * has already succeeded. It warns loudly instead, and
@@ -768,8 +828,8 @@ function stageTimingJson(slug: string): void {
 	}
 	console.warn(
 		`! WARNING  could not stage ${timingPath} (${(res.stderr || res.error?.message || '').trim()}).\n` +
-			`  R2 now serves the new audio for ${slug}. COMMIT THAT FILE, or the\n` +
-			`  read-along highlight will be out of sync on production until you do.`,
+			`  The new audio for ${slug} is staged. COMMIT THAT FILE with the lesson,\n` +
+			`  or the audio cannot be promoted at release.`,
 	);
 }
 
@@ -904,6 +964,7 @@ async function generateOne(
 	// (cheap, ensures Chrome's seek table is always correct regardless
 	// of chunk count).
 	await rewriteXingHeader(outMp3);
+	const audioMd5 = md5Hex(await readFile(outMp3));
 
 	// Compute match-rate sanity. Compares the count of ElevenLabs-aligned
 	// words to the count of words in the source prose (whitespace split,
@@ -925,6 +986,7 @@ async function generateOne(
 				schema_version: 2,
 				slug: lesson.slug,
 				audio_url: `${R2_PUBLIC_BASE}lessons/${lesson.slug}-lesson.mp3`,
+				audio_md5: audioMd5,
 				model_id: MODEL_ID,
 				generated_at: new Date().toISOString(),
 				stats: {
@@ -1008,18 +1070,18 @@ async function main() {
 		targets = [found];
 	} else {
 		console.error('Usage:');
-		console.error('  bun run audio:generate <slug>                  # render + upload');
-		console.error('  bun run audio:generate --all                    # every lesson, render + upload');
+		console.error('  bun run audio:generate <slug>                  # render + upload to staging');
+		console.error('  bun run audio:generate --all                    # every lesson, render + upload to staging');
 		console.error('  bun run audio:generate --no-upload <slug>       # render locally, skip R2');
-		console.error('  bun run audio:generate --upload-only <slug>     # upload existing local MP3, no render');
-		console.error('  bun run audio:generate --upload-only --all      # upload every existing local MP3');
+		console.error('  bun run audio:generate --upload-only <slug>     # upload existing local MP3 to staging');
+		console.error('  bun run audio:generate --upload-only --all      # upload every existing local MP3 to staging');
 		console.error('  bun run audio:generate --dry-run <slug>         # preview prose, no API call');
 		console.error('  bun run audio:generate --list                   # show available slugs');
 		process.exit(1);
 	}
 
 	if (uploadOnly) {
-		// Skip the render path entirely; just sync existing local MP3s to R2.
+		// Skip the render path entirely; just stage existing local MP3s.
 		// Dry-run is intentionally not supported here; the upload either happens or it doesn't.
 		let uploadedCount = 0;
 		let alreadyCount = 0;
@@ -1031,7 +1093,7 @@ async function main() {
 		if (targets.length > 1) {
 			console.log('---');
 			console.log(`total: ${targets.length} lesson(s)`);
-			console.log(`uploaded: ${uploadedCount}, already on R2: ${alreadyCount}`);
+			console.log(`staged: ${uploadedCount}, already staged: ${alreadyCount}`);
 		}
 		return;
 	}
