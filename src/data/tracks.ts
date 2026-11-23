@@ -165,7 +165,7 @@ export const TRACKS: Track[] = [
 		blurb: 'Attention, transformers, and how modern AI actually works.',
 		theme: 'transformers',
 		level: 'Foundations',
-		lessons: 34,
+		lessons: 35,
 		status: 'live',
 		href: '/lessons/ai-foundations/how-ai-reads-tokens/lesson/',
 		startHere: true,
