@@ -207,6 +207,15 @@ jobs:
     runs-on: ubuntu-24.04
     needs: build-and-validate
     timeout-minutes: 20
+    # Playwright's own image, pinned by digest. It ships every browser with
+    # the system packages they need. Installing those on the runner at run
+    # time meant about 126 MB from the runner's package mirror, which was
+    # often slow enough to use up the whole job limit before a test ran.
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:2f05f8a734509a7b3f26a912639488ee08f58a7b292d14d62271bcff9038768f
+      options: --user 1001
+    env:
+      PLAYWRIGHT_IMAGE_VERSION: '1.64.1'
     strategy:
       fail-fast: false
       matrix:
@@ -249,30 +258,17 @@ jobs:
           name: dist-${{ github.sha }}
           path: dist/
 
-      # The system packages a browser needs come from the runner's package
-      # mirror, and that download sometimes stalls without failing, which used
-      # to hold the job until its time-out. Tell apt to give up on a stalled
-      # connection and retry, and cap each whole attempt so a stall costs
-      # minutes, not the job. Three attempts of four minutes fit the job limit.
-      - name: Install Playwright browser
-        env:
-          BROWSER: ${{ matrix.browser }}
+      # The browsers and their system packages are already in the container
+      # image, so nothing is installed here. The image only works with the
+      # exact Playwright version it was built for; fail with a clear message if
+      # the package was upgraded and the image tag above was not.
+      - name: Check the container matches the Playwright version
         run: |
-          printf 'Acquire::Retries "5";\nAcquire::http::Timeout "20";\nAcquire::https::Timeout "20";\n' \
-            | sudo tee /etc/apt/apt.conf.d/80-ci-retries > /dev/null
-          for attempt in 1 2 3; do
-            if timeout --kill-after=15 240 bunx playwright install --with-deps "$BROWSER"; then
-              exit 0
-            fi
-            echo "::warning::browser install attempt $attempt did not finish; cleaning up and retrying"
-            # A stalled attempt can leave package tools running and holding the lock.
-            sudo pkill -9 -x apt-get || true
-            sudo pkill -9 -x dpkg || true
-            sudo dpkg --configure -a || true
-            sleep 10
-          done
-          echo "::error::browser install failed three times"
-          exit 1
+          want="$(bunx playwright --version | awk '{print $2}')"
+          if [ "$want" != "$PLAYWRIGHT_IMAGE_VERSION" ]; then
+            echo "::error::@playwright/test is $want but the container image is v$PLAYWRIGHT_IMAGE_VERSION. Update the image tag and digest in ci.yml."
+            exit 1
+          fi
 
       - name: Run e2e tests
         run: bunx playwright test --project=${{ matrix.project }}
