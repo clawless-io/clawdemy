@@ -206,7 +206,16 @@ jobs:
     name: Playwright e2e tests (${{ matrix.project }})
     runs-on: ubuntu-24.04
     needs: build-and-validate
-    timeout-minutes: 10
+    timeout-minutes: 20
+    # Playwright's own image, pinned by digest. It ships every browser with
+    # the system packages they need. Installing those on the runner at run
+    # time meant about 126 MB from the runner's package mirror, which was
+    # often slow enough to use up the whole job limit before a test ran.
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:2f05f8a734509a7b3f26a912639488ee08f58a7b292d14d62271bcff9038768f
+      options: --user 1001
+    env:
+      PLAYWRIGHT_IMAGE_VERSION: '1.64.1'
     strategy:
       fail-fast: false
       matrix:
@@ -233,10 +242,14 @@ jobs:
         with:
           node-version-file: .nvmrc
 
+      # The setup-bun action unpacks a zip, and the container image has no
+      # unzip. Install Bun from the npm registry instead, into the job's home
+      # directory (the container user cannot write to the global prefix).
       - name: Install Bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: latest
+        run: |
+          npm install --global --prefix "$HOME/.local" bun@latest
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/bun" --version
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -249,8 +262,17 @@ jobs:
           name: dist-${{ github.sha }}
           path: dist/
 
-      - name: Install Playwright browser
-        run: bunx playwright install --with-deps ${{ matrix.browser }}
+      # The browsers and their system packages are already in the container
+      # image, so nothing is installed here. The image only works with the
+      # exact Playwright version it was built for; fail with a clear message if
+      # the package was upgraded and the image tag above was not.
+      - name: Check the container matches the Playwright version
+        run: |
+          want="$(bunx playwright --version | awk '{print $2}')"
+          if [ "$want" != "$PLAYWRIGHT_IMAGE_VERSION" ]; then
+            echo "::error::@playwright/test is $want but the container image is v$PLAYWRIGHT_IMAGE_VERSION. Update the image tag and digest in ci.yml."
+            exit 1
+          fi
 
       - name: Run e2e tests
         run: bunx playwright test --project=${{ matrix.project }}
