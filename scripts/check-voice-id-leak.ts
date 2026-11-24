@@ -12,7 +12,7 @@
  *   - Custom PVC voice IDs are account-bound. They must NOT appear in:
  *       • lesson MDX
  *       • public READMEs
- *       • commit messages reachable from clawless-io/clawdemy (public)
+ *       • commit messages reachable from RBJGlobal/clawdemy (public)
  *
  *   They MAY appear in:
  *       • scripts/generate-audio.ts (fallback default for tracks not in
