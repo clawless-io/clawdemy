@@ -206,7 +206,7 @@ jobs:
     name: Playwright e2e tests (${{ matrix.project }})
     runs-on: ubuntu-24.04
     needs: build-and-validate
-    timeout-minutes: 10
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -249,8 +249,30 @@ jobs:
           name: dist-${{ github.sha }}
           path: dist/
 
+      # The system packages a browser needs come from the runner's package
+      # mirror, and that download sometimes stalls without failing, which used
+      # to hold the job until its time-out. Tell apt to give up on a stalled
+      # connection and retry, and cap each whole attempt so a stall costs
+      # minutes, not the job. Three attempts of four minutes fit the job limit.
       - name: Install Playwright browser
-        run: bunx playwright install --with-deps ${{ matrix.browser }}
+        env:
+          BROWSER: ${{ matrix.browser }}
+        run: |
+          printf 'Acquire::Retries "5";\nAcquire::http::Timeout "20";\nAcquire::https::Timeout "20";\n' \
+            | sudo tee /etc/apt/apt.conf.d/80-ci-retries > /dev/null
+          for attempt in 1 2 3; do
+            if timeout --kill-after=15 240 bunx playwright install --with-deps "$BROWSER"; then
+              exit 0
+            fi
+            echo "::warning::browser install attempt $attempt did not finish; cleaning up and retrying"
+            # A stalled attempt can leave package tools running and holding the lock.
+            sudo pkill -9 -x apt-get || true
+            sudo pkill -9 -x dpkg || true
+            sudo dpkg --configure -a || true
+            sleep 10
+          done
+          echo "::error::browser install failed three times"
+          exit 1
 
       - name: Run e2e tests
         run: bunx playwright test --project=${{ matrix.project }}
