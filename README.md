@@ -44,7 +44,7 @@ bun run test:e2e     # Playwright end-to-end tests (requires test:e2e:install on
 Two long-lived branches:
 
 - **`main`** is production. Cloudflare Pages deploys from this branch to [clawdemy.org](https://clawdemy.org). One commit on `main` equals one production release.
-- **`dev`** is the working branch. All in-progress changes land here first. Each push gets a Cloudflare Pages preview deploy at a `dev.<hash>.clawdemy.pages.dev` URL.
+- **`dev`** is the working branch. All in-progress changes land here first. Each push gets a Cloudflare Pages preview deploy at `dev.clawdemy-org.pages.dev`; previews require a sign-in.
 - **Feature branches** (e.g. `lessons/<lesson-slug>`) are optional for individual lessons or larger changes. Each gets its own preview URL. Merge to `dev` when ready.
 
 Releases are batched: when a meaningful set of changes has accumulated on `dev` (typically end of day or end of a sprint), merge `dev` → `main` to deploy. Avoids the noise of many production deploys per day, gives readers stable snapshots, and keeps production history clean for rollbacks.
