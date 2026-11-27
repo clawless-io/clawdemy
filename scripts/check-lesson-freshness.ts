@@ -159,8 +159,8 @@ if (AS_JSON) {
 					due: iso(r.dueDate!),
 					daysOverdue: r.daysOverdue,
 				})),
-				// Listed (not just counted) so the weekly freshness workflow can
-				// queue reviews BEFORE a lesson goes stale and shows the notice.
+				// Listed (not just counted) so a review can be
+				// queued BEFORE a lesson goes stale and shows the notice.
 				dueSoon: dueSoon.map((r) => ({
 					track: r.track,
 					slug: r.slug,
