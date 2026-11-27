@@ -19,8 +19,8 @@ import { expect, test } from '@playwright/test';
 // exercised. This was ai-wont-replace-you until its 2026-11-11 review made it
 // silent, and the wording assertion then skipped without failing; then llmops
 // until the 2026-11 narration batch reviewed it. When this
-// lesson is reviewed too, move the fixture to another overdue one (the weekly
-// "Lessons due for review" issue lists them) or this test skips again.
+// lesson is reviewed too, move the fixture to another overdue one (`bun run
+// validate:freshness` lists them) or this test skips again.
 const BRIEF_PATH = '/lessons/getting-started/memory-system-overview/brief/';
 
 /** This lesson's `last_reviewed`, as LessonFreshness formats it (UTC, en-US). */
