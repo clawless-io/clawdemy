@@ -81,3 +81,59 @@ for (const path of SAMPLE_PATHS) {
 		expect(xRequests).toEqual([]);
 	});
 }
+
+/**
+ * YouTube and Instagram follow links: same contract as the two above. Each
+ * is one plain anchor per page, opened in a new tab, with an aria-label that
+ * names the platform (the icons carry no visible text).
+ */
+const MORE_FOLLOW_LINKS = [
+	{ name: 'YouTube', href: 'https://www.youtube.com/@clawdemy' },
+	{ name: 'Instagram', href: 'https://www.instagram.com/learnclawdemy/' },
+];
+
+for (const path of SAMPLE_PATHS) {
+	for (const { name, href } of MORE_FOLLOW_LINKS) {
+		test(`${path} renders ${name} Follow anchor with correct attrs`, async ({ page }) => {
+			await page.goto(path);
+			const link = page.locator(`footer a[href="${href}"]`);
+			await expect(link).toHaveCount(1);
+			await expect(link).toHaveAttribute('target', '_blank');
+			const rel = (await link.getAttribute('rel')) || '';
+			expect(rel).toContain('noopener');
+			expect(rel).toContain('noreferrer');
+			const aria = (await link.getAttribute('aria-label')) || '';
+			expect(aria).toContain(`on ${name}`);
+		});
+	}
+
+	test(`${path} loads nothing from Instagram`, async ({ page }) => {
+		const requests: string[] = [];
+		page.on('request', (req) => {
+			const host = new URL(req.url()).hostname;
+			if (/(^|\.)(instagram|cdninstagram)\.com$/.test(host)) {
+				requests.push(req.url());
+			}
+		});
+		await page.goto(path);
+		await page.waitForLoadState('networkidle');
+		expect(requests).toEqual([]);
+	});
+}
+
+test('wide screen: follow icons, podcast badge and company line share one row', async ({
+	page,
+}) => {
+	await page.setViewportSize({ width: 1280, height: 800 });
+	await page.goto('/');
+	const centre = async (selector: string) => {
+		const box = await page.locator(selector).first().boundingBox();
+		if (!box) throw new Error(`${selector} has no box`);
+		return box.y + box.height / 2;
+	};
+	const follow = await centre('footer .cw-footer-follow');
+	const podcast = await centre('footer .cw-footer-podcast');
+	const parent = await centre('footer .cw-footer-parent');
+	expect(Math.abs(follow - podcast)).toBeLessThan(4);
+	expect(Math.abs(follow - parent)).toBeLessThan(4);
+});
