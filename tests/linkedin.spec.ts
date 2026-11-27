@@ -145,3 +145,22 @@ test('the two listening links sit together in the Listen group', async ({ page }
 	await expect(listen.locator('a[href^="https://podcasts.apple.com/"]')).toHaveCount(1);
 	await expect(listen.locator('a[href="/podcast/feed.xml"]')).toHaveCount(1);
 });
+
+test('home page: the date and the next link share one compact row', async ({ page }) => {
+	await page.setViewportSize({ width: 1280, height: 800 });
+	await page.goto('/');
+	const next = page.locator('footer .cw-footer-compact a[rel="next"]');
+	await expect(next).toHaveCount(1);
+	await expect(next).toHaveAttribute('href', '/mission/');
+	await expect(page.locator('footer .pagination-links')).toHaveCount(0);
+	const date = await page.locator('footer .cw-footer-compact time').boundingBox();
+	const link = await next.boundingBox();
+	if (!date || !link) throw new Error('compact row is missing a box');
+	expect(Math.abs(date.y + date.height / 2 - (link.y + link.height / 2))).toBeLessThan(6);
+});
+
+test('lesson pages keep the previous and next cards', async ({ page }) => {
+	await page.goto('/lessons/getting-started/ai-wont-replace-you/lesson/');
+	await expect(page.locator('footer .pagination-links')).toHaveCount(1);
+	await expect(page.locator('footer .cw-footer-compact')).toHaveCount(0);
+});
