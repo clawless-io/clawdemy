@@ -121,19 +121,27 @@ for (const path of SAMPLE_PATHS) {
 	});
 }
 
-test('wide screen: follow icons, podcast badge and company line share one row', async ({
+test('wide screen: the three link groups share one row above the policy links', async ({
 	page,
 }) => {
 	await page.setViewportSize({ width: 1280, height: 800 });
 	await page.goto('/');
-	const centre = async (selector: string) => {
+	const top = async (selector: string) => {
 		const box = await page.locator(selector).first().boundingBox();
 		if (!box) throw new Error(`${selector} has no box`);
-		return box.y + box.height / 2;
+		return box.y;
 	};
-	const follow = await centre('footer .cw-footer-follow');
-	const podcast = await centre('footer .cw-footer-podcast');
-	const parent = await centre('footer .cw-footer-parent');
-	expect(Math.abs(follow - podcast)).toBeLessThan(4);
-	expect(Math.abs(follow - parent)).toBeLessThan(4);
+	const about = await top('#cw-footer-about');
+	const listen = await top('#cw-footer-listen');
+	const follow = await top('#cw-footer-follow-heading');
+	expect(Math.abs(about - listen)).toBeLessThan(2);
+	expect(Math.abs(about - follow)).toBeLessThan(2);
+	expect(await top('footer .cw-footer-legal')).toBeGreaterThan(about + 40);
+});
+
+test('the two listening links sit together in the Listen group', async ({ page }) => {
+	await page.goto('/');
+	const listen = page.locator('footer nav[aria-labelledby="cw-footer-listen"]');
+	await expect(listen.locator('a[href^="https://podcasts.apple.com/"]')).toHaveCount(1);
+	await expect(listen.locator('a[href="/podcast/feed.xml"]')).toHaveCount(1);
 });
