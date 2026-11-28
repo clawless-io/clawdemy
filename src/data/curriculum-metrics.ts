@@ -247,6 +247,7 @@ function compute() {
 	const { bySlug, perTrack } = readLessonIndex();
 
 	const secondsByTrack = new Map<string, number>();
+	const secondsBySlug = new Map<string, number>();
 	const narratedByTrack = new Map<string, number>();
 	let totalSeconds = 0;
 	let narratedLessons = 0;
@@ -266,6 +267,7 @@ function compute() {
 		}
 
 		const seconds = durationOf(parsed, name);
+		secondsBySlug.set(lessonSlug, seconds);
 		totalSeconds += seconds;
 		narratedLessons += 1;
 		secondsByTrack.set(trackSlug, (secondsByTrack.get(trackSlug) ?? 0) + seconds);
@@ -318,6 +320,19 @@ function compute() {
 	const liveTracks = TRACKS.filter((t) => t.status === 'live');
 	const liveLessons = [...perTrack.values()].reduce((a, b) => a + b, 0);
 
+	// The homepage description and tagline type the lesson total by hand
+	// (frontmatter cannot import this module). Fail the build when a typed
+	// total no longer matches the lessons on disk, so the copy cannot drift.
+	const homeCopy = readFileSync(join(ROOT, 'src/content/docs/index.mdx'), 'utf8');
+	const typedTotals = [...homeCopy.matchAll(/\b(\d{3}) lessons\b/g)].map((m) => Number(m[1]));
+	const wrongTotals = typedTotals.filter((n) => n !== liveLessons);
+	if (wrongTotals.length > 0) {
+		throw new Error(
+			`[curriculum-metrics] src/content/docs/index.mdx says ${wrongTotals.join(', ')} lessons, ` +
+				`but ${liveLessons} lessons are on disk. Update the homepage copy.`,
+		);
+	}
+
 	const byTrack = new Map<string, TrackMetrics>();
 	for (const track of TRACKS) {
 		const seconds = secondsByTrack.get(track.slug) ?? 0;
@@ -344,6 +359,7 @@ function compute() {
 	const citations = readCitations(bySlug);
 
 	return {
+		secondsBySlug,
 		byTrack,
 		byTheme,
 		totals: {
@@ -381,6 +397,9 @@ export const CURRICULUM_METRICS = metrics.totals;
 
 /** Per-track metrics, keyed by track directory slug. */
 export const TRACK_METRICS = metrics.byTrack;
+
+/** Narration length in seconds, keyed by lesson slug (lessons with a timing file only). */
+export const LESSON_NARRATION_SECONDS = metrics.secondsBySlug;
 
 /** Per-theme rollups, keyed by ThemeKey, live tracks only. */
 export const THEME_METRICS = metrics.byTheme;
